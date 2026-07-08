@@ -21,7 +21,7 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 7777;
 const sessions = new Map();
 
 const DEFAULT_CONFIG = {
-  keys: { gemini: '', ark: '', fal: '', elevenlabs: '', openai: '' },
+  keys: { gemini: '', googleTranslate: '', ark: '', fal: '', elevenlabs: '', openai: '' },
   openaiModel: 'gpt-5-mini',
   paths: {
     generated: 'assets/generated',
@@ -249,6 +249,14 @@ async function runImageGeneration(req) {
   const history = await readJson('history.json', []);
   history.unshift(entry);
   await writeJson('history.json', history.slice(0, 1000));
+  if (entry.characterId) {
+    const links = await readJson('asset-links.json', []);
+    const existing = new Set(links.map((link) => link.key));
+    for (const key of outputs) {
+      if (!existing.has(key)) links.unshift({ key, characterId: entry.characterId, variantId: entry.characterVariantId, ts: Date.now() });
+    }
+    await writeJson('asset-links.json', links.slice(0, 10000));
+  }
   return entry;
 }
 
@@ -410,12 +418,13 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, history, pricing] = await Promise.all([
+      const [cfg, characters, prompts, history, pricing, assetLinks] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
         readJson('history.json', []),
-        getPricing()
+        getPricing(),
+        readJson('asset-links.json', [])
       ]);
       return send(res, 200, {
         config: publicConfig(cfg),
@@ -424,7 +433,8 @@ const server = http.createServer(async (req, res) => {
         characters,
         prompts,
         history: history.slice(0, 200),
-        pricing
+        pricing,
+        assetLinks
       });
     }
 
@@ -467,6 +477,29 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { generated, uploads, audio });
     }
 
+    if (p === '/api/asset-links' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const key = String(body.key || '');
+      if (!/^(generated|uploads)\//.test(key)) throw new Error('Solo se pueden asociar imágenes.');
+      await fs.access(await resolveAssetKey(key));
+      const characters = await readJson('characters.json', []);
+      const character = characters.find((c) => c.id === body.characterId);
+      if (!character) throw new Error('Personaje no encontrado.');
+      const variantId = body.variantId || null;
+      if (variantId && !(character.variants || []).some((v) => v.id === variantId)) throw new Error('Variante no encontrada.');
+      const links = await readJson('asset-links.json', []);
+      const next = [{ key, characterId: character.id, variantId, ts: Date.now() }, ...links.filter((link) => link.key !== key)];
+      await writeJson('asset-links.json', next.slice(0, 10000));
+      return send(res, 200, { links: next });
+    }
+    if (p === '/api/asset-links' && req.method === 'DELETE') {
+      const key = url.searchParams.get('key');
+      const links = await readJson('asset-links.json', []);
+      const next = links.filter((link) => link.key !== key);
+      await writeJson('asset-links.json', next);
+      return send(res, 200, { links: next });
+    }
+
     if (p === '/api/generate/image' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const entry = await runImageGeneration(body);
@@ -483,13 +516,13 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const cfg = await getConfig();
       const text = await translateText({
-        apiKey: cfg.keys.gemini,
+        apiKey: cfg.keys.googleTranslate,
         text: String(body.text || ''),
         target: body.target === 'es' ? 'es' : 'en'
       });
       const pricing = await getPricing();
       await recordCost({
-        type: 'translate', modelId: 'gemini-2.5-flash-lite', label: 'Traducción',
+        type: 'translate', modelId: 'google-translate-nmt', label: 'Google Translation',
         units: String(body.text || '').length, unitLabel: 'caracteres',
         cost: translatePrice(pricing, String(body.text || '').length)
       });
@@ -637,6 +670,8 @@ const server = http.createServer(async (req, res) => {
         });
       }
       const removed = new Set(allowed);
+      const links = await readJson('asset-links.json', []);
+      await writeJson('asset-links.json', links.filter((link) => !removed.has(link.key)));
       const history = await readJson('history.json', []);
       const cleaned = history.map((entry) => ({
         ...entry,
@@ -693,6 +728,9 @@ const server = http.createServer(async (req, res) => {
       }
       if (!isPhotos && req.method === 'DELETE') {
         ch.variants = ch.variants.filter((v) => v.id !== variantId);
+        const links = await readJson('asset-links.json', []);
+        await writeJson('asset-links.json', links.map((link) =>
+          link.characterId === id && link.variantId === variantId ? { ...link, variantId: null } : link));
         await writeJson('characters.json', characters);
         await fs.rm(path.join(DATA_DIR, 'characters', id, 'variants', variantId), { recursive: true, force: true }).catch(() => {});
         return send(res, 200, ch);
@@ -768,6 +806,8 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, characters[idx]);
       }
       if (!isPhotos && req.method === 'DELETE') {
+        const links = await readJson('asset-links.json', []);
+        await writeJson('asset-links.json', links.filter((link) => link.characterId !== id));
         characters.splice(idx, 1);
         await writeJson('characters.json', characters);
         await fs.rm(path.join(DATA_DIR, 'characters', id), { recursive: true, force: true }).catch(() => {});

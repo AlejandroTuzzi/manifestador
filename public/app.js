@@ -9,6 +9,7 @@ const state = {
   models: [],
   characters: [],
   prompts: [],
+  assetLinks: [],
   promptQuickCategory: '',
   promptQuickSearch: '',
   history: [],
@@ -543,6 +544,9 @@ async function generate() {
       });
     }
     state.history.unshift(entry);
+    if (entry.type === 'image' && entry.characterId) {
+      for (const key of entry.outputs) state.assetLinks.unshift({ key, characterId: entry.characterId, variantId: entry.characterVariantId || null, ts: entry.ts });
+    }
     showEntry(entry);
     renderHistory();
     const costTxt = entry.cost ? ` — $${entry.cost.toFixed(3)}` : '';
@@ -1108,6 +1112,7 @@ function openLightbox(key) {
   $('#lbImg').src = fileUrl(key);
   $('#lbActions').innerHTML = `
     <button class="mini-btn" id="lbRef">${IC('link')} Usar como referencia</button>
+    ${/^(generated|uploads)\//.test(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} Asociar a personaje</button>` : ''}
     ${key.startsWith('generated/') ? `<button class="mini-btn" id="lbCharacter">${IC('user')} Convertir en personaje</button>` : ''}
     <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} Descargar</a>`;
   $('#lbRef').addEventListener('click', () => {
@@ -1121,6 +1126,26 @@ function openLightbox(key) {
     $('#lightbox').hidden = true;
     openCharModal(null, key);
   });
+  $('#lbAssociate')?.addEventListener('click', () => associateAsset(key));
+}
+
+async function associateAsset(key) {
+  if (!state.characters.length) return toast('Primero creá un personaje', 'err');
+  const menu = state.characters.map((c, i) => `${i + 1}. ${c.name}`).join('\n');
+  const picked = Number(prompt(`Asociar a qué personaje?\n\n${menu}`, '1')) - 1;
+  const character = state.characters[picked];
+  if (!character) return;
+  const variants = character.variants || [];
+  let variantId = null;
+  if (variants.length) {
+    const options = ['0. Original', ...variants.map((v, i) => `${i + 1}. ${v.name}`)].join('\n');
+    const variantPick = Number(prompt(`Elegí original o variante:\n\n${options}`, '0'));
+    if (!Number.isInteger(variantPick) || variantPick < 0 || variantPick > variants.length) return;
+    variantId = variantPick ? variants[variantPick - 1].id : null;
+  }
+  const result = await api('/api/asset-links', { method: 'POST', body: { key, characterId: character.id, variantId } });
+  state.assetLinks = result.links;
+  toast(`Asset asociado a ${character.name}${variantId ? ' · ' + variants.find((v) => v.id === variantId).name : ' · Original'}`);
 }
 $('#lbClose').addEventListener('click', () => { $('#lightbox').hidden = true; });
 $('#lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox') $('#lightbox').hidden = true; });
@@ -1147,6 +1172,7 @@ function renderCharacters() {
       : `<div class="char-avatar ph">${IC('user', 'ic ic-lg')}</div>`;
     const minis = c.photos.slice(1, 5).map((p) => `<img src="${fileUrl(p)}" alt="">`).join('')
       + (c.photos.length > 5 ? `<div class="more">+${c.photos.length - 5}</div>` : '');
+    const linkedCount = state.assetLinks.filter((link) => link.characterId === c.id).length;
     card.innerHTML = `
       <div class="char-top">${avatar}<div>
         <div class="char-name">${esc(c.name)}</div>
@@ -1161,6 +1187,7 @@ function renderCharacters() {
         <button class="mini-btn" data-act="edit">${IC('edit')} Editar</button>
         <button class="mini-btn" data-act="variants">Variantes</button>
         <button class="mini-btn" data-act="gallery">${IC('eye')} Ver fotos</button>
+        <button class="mini-btn" data-act="assets">${IC('image')} Assets${linkedCount ? ` (${linkedCount})` : ''}</button>
         <button class="mini-btn danger" data-act="del" title="Eliminar">${IC('trash')}</button>
       </div>`;
     card.querySelectorAll('[data-act]').forEach((b) => {
@@ -1176,6 +1203,7 @@ function renderCharacters() {
         if (act === 'edit') openCharModal(c.id);
         if (act === 'variants') openCharModal(c.id);
         if (act === 'gallery') openCharacterGallery(c.id);
+        if (act === 'assets') openCharacterAssets(c.id);
         if (act === 'del') {
           if (!confirm(`¿Eliminar a ${c.name} y sus fotos?`)) return;
           await api(`/api/characters/${c.id}`, { method: 'DELETE' });
@@ -1205,6 +1233,33 @@ function openCharacterGallery(id) {
   $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) => {
     button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto));
   });
+  $('#characterGalleryModal').hidden = false;
+}
+
+function openCharacterAssets(id) {
+  const c = state.characters.find((x) => x.id === id);
+  if (!c) return;
+  $('#characterGalleryTitle').textContent = `${c.name} · Assets asociados`;
+  const groups = [
+    { id: null, name: 'Original' },
+    ...(c.variants || []).map((v) => ({ id: v.id, name: v.name }))
+  ];
+  const links = state.assetLinks.filter((link) => link.characterId === id);
+  $('#characterGalleryBody').innerHTML = groups.map((group) => {
+    const items = links.filter((link) => (link.variantId || null) === group.id);
+    return `<section class="character-gallery-group">
+      <div class="character-gallery-group-head"><h4>${esc(group.name)}</h4><span>${items.length} asset${items.length === 1 ? '' : 's'}</span></div>
+      <div class="character-gallery-grid linked-assets">${items.length ? items.map((link) => `
+        <div class="linked-asset"><button data-gallery-photo="${esc(link.key)}"><img src="${fileUrl(link.key)}" loading="lazy" alt=""></button><button class="linked-remove" data-unlink="${esc(link.key)}" title="Quitar asociación">×</button></div>`).join('') : '<div class="hint">Sin assets asociados.</div>'}</div>
+    </section>`;
+  }).join('');
+  $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) => button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto)));
+  $('#characterGalleryBody').querySelectorAll('[data-unlink]').forEach((button) => button.addEventListener('click', async () => {
+    const result = await api(`/api/asset-links?key=${encodeURIComponent(button.dataset.unlink)}`, { method: 'DELETE' });
+    state.assetLinks = result.links;
+    openCharacterAssets(id);
+    renderCharacters();
+  }));
   $('#characterGalleryModal').hidden = false;
 }
 
@@ -1526,6 +1581,7 @@ function fillConfigForm() {
   const f = $('#configForm');
   const c = state.config;
   f.key_gemini.value = c.keys.gemini || '';
+  f.key_googleTranslate.value = c.keys.googleTranslate || '';
   f.key_ark.value = c.keys.ark || '';
   f.key_fal.value = c.keys.fal || '';
   f.key_elevenlabs.value = c.keys.elevenlabs || '';
@@ -1582,6 +1638,7 @@ $('#configForm').addEventListener('submit', async (e) => {
       body: {
         keys: {
           gemini: f.key_gemini.value.trim(),
+          googleTranslate: f.key_googleTranslate.value.trim(),
           ark: f.key_ark.value.trim(),
           fal: f.key_fal.value.trim(),
           elevenlabs: f.key_elevenlabs.value.trim(),
@@ -1622,6 +1679,7 @@ async function init() {
     state.models = s.models;
     state.characters = s.characters;
     state.prompts = s.prompts;
+    state.assetLinks = s.assetLinks || [];
     state.history = s.history;
     state.pricing = s.pricing;
     state.modelId = s.models[0]?.id;
@@ -1654,3 +1712,4 @@ async function init() {
 }
 
 init();
+    const linkedCount = state.assetLinks.filter((link) => link.characterId === c.id).length;

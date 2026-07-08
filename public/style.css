@@ -571,6 +571,9 @@ audio { width: 100%; margin-top: 6px; }
 .character-gallery-grid button { border: 1px solid var(--border-soft); background: var(--panel); padding: 0; aspect-ratio: 1; overflow: hidden; cursor: zoom-in; }
 .character-gallery-grid button:hover { border-color: var(--pink); }
 .character-gallery-grid img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.linked-asset { position: relative; aspect-ratio: 1; }
+.linked-asset > button:first-child { width: 100%; height: 100%; }
+.linked-asset .linked-remove { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border: 1px solid rgba(251,113,133,.5); background: rgba(8,4,14,.85); color: #fda4af; cursor: pointer; }
 
 /* modal de personaje */
 .char-modal-body { display: flex; flex-direction: column; gap: 12px; }
