@@ -20,7 +20,12 @@ const PUBLIC_DIR = path.join(ROOT, 'public');
 const PORT = process.env.PORT ? Number(process.env.PORT) : 7777;
 const sessions = new Map();
 
+// Se agrega automáticamente (sin mostrarse en la caja) cuando alguna
+// referencia viene del Poser, para que el modelo la tome solo como pose.
+const DEFAULT_POSER_PROMPT = 'The attached 3D figure render is ONLY a reference for pose and framing. Exactly replicate the camera position, angle and framing, and the character\'s full body pose — torso, head, arms, hands and legs — precisely matching the reference. Do NOT copy the 3D model\'s appearance: ignore its clothing, colors, materials and anatomy style. The main character must keep their own clothing, facial features and morphology.';
+
 const DEFAULT_CONFIG = {
+  poserPrompt: DEFAULT_POSER_PROMPT,
   keys: { gemini: '', googleTranslate: '', ark: '', fal: '', elevenlabs: '', openai: '' },
   openaiModel: 'gpt-5-mini',
   paths: {
@@ -91,7 +96,7 @@ async function getPricing() {
 
 function publicConfig(cfg) {
   const { accessPasswordHash, ...safe } = cfg;
-  return { ...safe, accessProtected: Boolean(accessPasswordHash) };
+  return { ...safe, accessProtected: Boolean(accessPasswordHash), poserPromptDefault: DEFAULT_POSER_PROMPT };
 }
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
@@ -275,18 +280,25 @@ async function runImageGeneration(req) {
   const batch = Math.max(1, Math.min(4, Number(req.batch) || 1));
   const apiModel = model.provider === 'seedream' ? (cfg.seedreamModelId || model.apiModel) : model.apiModel;
 
+  // Si alguna referencia viene del Poser, se anexa el prompt de pose
+  // (invisible en la caja) para que la IA la use solo como pose/encuadre.
+  const hasPoserRef = refs.some((key) => String(key).startsWith('poser/'));
+  const sentPrompt = hasPoserRef && cfg.poserPrompt?.trim()
+    ? `${prompt}\n\n${cfg.poserPrompt.trim()}`
+    : prompt;
+
   const call = async () => {
     switch (model.provider) {
       case 'gemini':
         return generateGemini({
-          apiKey: cfg.keys.gemini, apiModel, prompt, refPaths,
+          apiKey: cfg.keys.gemini, apiModel, prompt: sentPrompt, refPaths,
           aspectRatio: req.aspectRatio, resolution: req.resolution,
           supportsSize: model.resolutions.length > 1
         });
       case 'seedream':
         return generateSeedream({
           apiKey: cfg.keys.ark, apiModel, endpoint: cfg.endpoints.ark,
-          prompt, refPaths, aspectRatio: req.aspectRatio, resolution: req.resolution
+          prompt: sentPrompt, refPaths, aspectRatio: req.aspectRatio, resolution: req.resolution
         });
       default:
         throw new Error(`Proveedor no implementado: ${model.provider}`);
@@ -535,6 +547,7 @@ const server = http.createServer(async (req, res) => {
         endpoints: { ...cfg.endpoints, ...(body.endpoints || {}) },
         seedreamModelId: body.seedreamModelId ?? cfg.seedreamModelId,
         openaiModel: body.openaiModel ?? cfg.openaiModel,
+        poserPrompt: body.poserPrompt !== undefined ? String(body.poserPrompt) : cfg.poserPrompt,
         customAudioTags: Array.isArray(body.customAudioTags)
           ? [...new Set(body.customAudioTags.map((tag) => String(tag).trim().replace(/^\[|\]$/g, '')).filter(Boolean))].slice(0, 100)
           : (cfg.customAudioTags || []),
@@ -900,6 +913,15 @@ const server = http.createServer(async (req, res) => {
         readJson('poser-aliases.json', {})
       ]);
       return send(res, 200, { models, poses, aliases, folder: cfg.paths.poser });
+    }
+    if (p === '/api/poser/captures' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const { buffer } = parseDataUrl(body.dataUrl);
+      const dir = path.join(DATA_DIR, 'poser', 'captures');
+      await fs.mkdir(dir, { recursive: true });
+      const name = `${ts()}-${sanitizeName(body.name).replace(/\.[^.]+$/, '')}.png`;
+      await fs.writeFile(path.join(dir, name), buffer);
+      return send(res, 200, { key: `poser/captures/${name}` });
     }
     if (p === '/api/poser/aliases' && req.method === 'PUT') {
       const body = await readJsonBody(req);

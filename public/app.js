@@ -1756,6 +1756,7 @@ function fillConfigForm() {
   f.path_audio.value = c.paths.audio || '';
   f.seedreamModelId.value = c.seedreamModelId || '';
   f.endpoint_ark.value = c.endpoints.ark || '';
+  f.poserPrompt.value = c.poserPrompt || '';
   renderConfigAudioTags();
   $('#accessStatus').textContent = c.accessProtected
     ? 'La aplicación está protegida. Escribí una nueva clave solo si querés cambiarla.'
@@ -1790,6 +1791,10 @@ $$('.test-btn').forEach((btn) => {
   });
 });
 
+$('#poserPromptDefaultBtn').addEventListener('click', () => {
+  $('#configForm').poserPrompt.value = state.config?.poserPromptDefault || '';
+});
+
 $('#configForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
@@ -1818,6 +1823,7 @@ $('#configForm').addEventListener('submit', async (e) => {
           ark: f.endpoint_ark.value.trim()
         },
         seedreamModelId: f.seedreamModelId.value.trim(),
+        poserPrompt: f.poserPrompt.value.trim(),
         accessPassword: f.accessPassword.value
       }
     });

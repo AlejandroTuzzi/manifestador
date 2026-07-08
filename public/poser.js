@@ -262,7 +262,8 @@ function buildModel(parsed) {
   if (hasBones) {
     const pts = new THREE.BufferGeometry();
     pts.setAttribute('position', new THREE.BufferAttribute(new Float32Array(P.boneObjs.length * 3), 3));
-    const ptsMat = new THREE.PointsMaterial({ color: 0x8b5cf6, size: P.modelSize * 0.014, depthTest: false, transparent: true, opacity: 0.9 });
+    pts.setAttribute('color', new THREE.BufferAttribute(new Float32Array(P.boneObjs.length * 3), 3));
+    const ptsMat = new THREE.PointsMaterial({ vertexColors: true, size: P.modelSize * 0.014, depthTest: false, transparent: true, opacity: 0.9 });
     P.bonePoints = new THREE.Points(pts, ptsMat);
     P.bonePoints.renderOrder = 998;
     P.bonePoints.frustumCulled = false;
@@ -316,6 +317,16 @@ function renderParts() {
   }));
 }
 
+function isBoneTouched(i) {
+  const bone = P.boneObjs[i];
+  return bone.rotation.x !== 0 || bone.rotation.y !== 0 || bone.rotation.z !== 0
+    || !bone.position.equals(P.restLocal[i]);
+}
+
+// violeta = hueso en reposo · ámbar = hueso modificado
+const DOT_REST = [0.545, 0.361, 0.965];
+const DOT_TOUCHED = [0.984, 0.749, 0.141];
+
 const tmpV = new THREE.Vector3();
 function updateBoneOverlay() {
   if (!P.bonePoints) return;
@@ -325,11 +336,15 @@ function updateBoneOverlay() {
   if (!show) { if (P.boneMarker) P.boneMarker.visible = false; return; }
   if (P.bonePoints.visible) {
     const arr = P.bonePoints.geometry.attributes.position.array;
+    const col = P.bonePoints.geometry.attributes.color.array;
     P.boneObjs.forEach((bone, i) => {
       bone.getWorldPosition(tmpV);
       arr[i * 3] = tmpV.x; arr[i * 3 + 1] = tmpV.y; arr[i * 3 + 2] = tmpV.z;
+      const c = isBoneTouched(i) ? DOT_TOUCHED : DOT_REST;
+      col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
     });
     P.bonePoints.geometry.attributes.position.needsUpdate = true;
+    P.bonePoints.geometry.attributes.color.needsUpdate = true;
   }
   if (P.selectedBone >= 0) {
     P.boneObjs[P.selectedBone].getWorldPosition(tmpV);
@@ -355,10 +370,9 @@ function renderBoneList() {
   const rows = P.boneObjs
     .map((bone, i) => ({ bone, i }))
     .filter(({ bone }) => !q || bone.name.toLowerCase().includes(q));
-  list.innerHTML = rows.map(({ bone, i }) => {
-    const touched = bone.rotation.x !== 0 || bone.rotation.y !== 0 || bone.rotation.z !== 0;
-    return `<button class="poser-bone${i === P.selectedBone ? ' active' : ''}" data-bone="${i}">${touched ? '● ' : ''}${B.esc(bone.name)}</button>`;
-  }).join('') || '<div class="hint" style="padding:8px">Ningún hueso coincide.</div>';
+  list.innerHTML = rows.map(({ bone, i }) =>
+    `<button class="poser-bone${i === P.selectedBone ? ' active' : ''}" data-bone="${i}">${isBoneTouched(i) ? '<span class="poser-touched">●</span> ' : ''}${B.esc(bone.name)}</button>`
+  ).join('') || '<div class="hint" style="padding:8px">Ningún hueso coincide.</div>';
   list.querySelectorAll('[data-bone]').forEach((btn) => btn.addEventListener('click', () => selectBone(Number(btn.dataset.bone))));
 }
 
@@ -395,6 +409,10 @@ for (const [axis, id] of [['x', '#poserRotX'], ['y', '#poserRotY'], ['z', '#pose
     e.target.nextElementSibling.textContent = `${e.target.value}°`;
   });
 }
+// al soltar el slider, refrescar el marcador ámbar de "hueso modificado"
+document.addEventListener('change', (e) => {
+  if (['poserRotX', 'poserRotY', 'poserRotZ'].includes(e.target.id)) renderBoneList();
+});
 
 // Etiquetas rápidas: alias por hueso ("Wrightneck" → "Control Cuello").
 // Al elegir una, se ocultan todos los puntos salvo el del hueso activo.
@@ -648,7 +666,7 @@ $('#poserCapture').addEventListener('click', async () => {
   P.grid.visible = wasGrid;
   $('#poserShowBones').checked = wasBones;
   try {
-    const { key } = await B.api('/api/upload', { method: 'POST', body: { name: `poser-${P.model.name}.png`, dataUrl } });
+    const { key } = await B.api('/api/poser/captures', { method: 'POST', body: { name: P.model.name, dataUrl } });
     B.addRef(key);
     B.goToCreate();
     B.toast('Captura agregada como referencia');

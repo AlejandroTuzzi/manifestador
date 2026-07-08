@@ -357,6 +357,10 @@
           <label>Audio generado <input type="text" name="path_audio"></label>
         </div>
         <p class="hint">Rutas relativas a la carpeta de la app o absolutas (ej: <code>D:\fotos\manifestador</code>).</p>
+        <h3>Prompt de pose (Poser)</h3>
+        <textarea name="poserPrompt" class="cfg-textarea" rows="4" spellcheck="false"></textarea>
+        <p class="hint">Se envía junto a tu prompt (sin mostrarse en la caja) cada vez que una referencia viene del Poser, para que la IA copie solo la pose y el encuadre. Dejalo vacío para desactivarlo. <button type="button" id="poserPromptDefaultBtn" class="mini-btn">Restaurar texto por defecto</button></p>
+
         <h3>Emociones y expresiones de audio</h3>
         <div class="audio-tags-manager">
           <p class="hint">Las expresiones nativas vienen con ElevenLabs. Las tuyas aparecen después y podés borrarlas con ×.</p>

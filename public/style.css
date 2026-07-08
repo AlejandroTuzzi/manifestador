@@ -880,3 +880,6 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .poser-parts { display: flex; flex-direction: column; gap: 3px; max-height: 170px; overflow-y: auto; }
 .poser-part { display: flex; gap: 7px; align-items: center; font-size: 12px; cursor: pointer; }
 .poser-part input { accent-color: var(--violet); }
+.poser-touched { color: #fbbf24; }
+.cfg-textarea { width: 100%; background: var(--panel-solid); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; font: inherit; font-size: 12px; resize: vertical; }
+.cfg-textarea:focus { border-color: var(--violet); outline: none; }
