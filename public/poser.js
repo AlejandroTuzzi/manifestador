@@ -23,6 +23,9 @@ const P = {
   root: null,           // Group con el modelo actual
   skeleton: null,
   selectedBone: -1,
+  soloDots: false,      // seleccionado por etiqueta: solo se ve el punto activo
+  aliases: {},          // { modelId: { nombreHueso: etiqueta } }
+  meshItems: [],        // meshes del modelo con su grupo de "parte/ropa"
   modelSize: 1,
   boneSearch: '',
   renderer: null, scene: null, camera: null, controls: null,
@@ -109,7 +112,8 @@ function disposeModel() {
   if (P.bonePoints) { P.scene.remove(P.bonePoints); P.bonePoints.geometry.dispose(); P.bonePoints.material.dispose(); P.bonePoints = null; }
   if (P.boneMarker) { P.scene.remove(P.boneMarker); P.boneMarker = null; }
   P.root = null; P.skeleton = null; P.boneObjs = []; P.restLocal = []; P.selectedBone = -1;
-  renderBoneList(); renderBoneControls();
+  P.meshItems = []; P.soloDots = false;
+  renderBoneList(); renderBoneControls(); renderParts(); renderAliasChips();
 }
 
 // DDS: DXT1/3/5 vía DDSLoader (comprimida, no admite flipY en GPU: se compensa
@@ -231,10 +235,12 @@ function buildModel(parsed) {
       mesh.frustumCulled = false;
       P.root.add(mesh);
       mesh.bind(P.skeleton, new THREE.Matrix4());
+      registerMeshItem(mesh, m.name);
     } else {
       const mesh = new THREE.Mesh(geo, mat);
       mesh.name = m.name;
       P.root.add(mesh);
+      registerMeshItem(mesh, m.name);
     }
   }
 
@@ -272,20 +278,59 @@ function buildModel(parsed) {
 
   renderBoneList();
   renderBoneControls();
+  renderParts();
+  renderAliasChips();
+}
+
+// Convención XNALara: los meshes "+Grupo.item" / "-Grupo.item" son partes
+// opcionales (ropa, accesorios); "+" arranca visible y "-" oculto.
+function registerMeshItem(mesh, rawName) {
+  const optional = /^[+-]/.test(rawName);
+  mesh.visible = !rawName.startsWith('-');
+  const group = optional ? (rawName.slice(1).split('.')[0] || rawName.slice(1)) : rawName;
+  P.meshItems.push({ mesh, optional, group });
+}
+
+function renderParts() {
+  const box = $('#poserPartsList');
+  if (!P.meshItems.length) {
+    box.innerHTML = '<div class="hint">Cargá un modelo para ver sus partes.</div>';
+    return;
+  }
+  const groups = new Map();
+  for (const item of P.meshItems) {
+    if (!groups.has(item.group)) groups.set(item.group, []);
+    groups.get(item.group).push(item);
+  }
+  const entries = [...groups.entries()].sort((a, b) => {
+    const optA = a[1][0].optional, optB = b[1][0].optional;
+    if (optA !== optB) return optA ? -1 : 1; // las opcionales (ropa) primero
+    return a[0].localeCompare(b[0]);
+  });
+  box.innerHTML = entries.map(([group, items], i) =>
+    `<label class="poser-part"><input type="checkbox" data-part="${i}" ${items.some((x) => x.mesh.visible) ? 'checked' : ''}> ${B.esc(group)}${items.length > 1 ? ` <span class="hint">(${items.length})</span>` : ''}</label>`
+  ).join('');
+  const lists = entries.map(([, items]) => items);
+  box.querySelectorAll('[data-part]').forEach((cb) => cb.addEventListener('change', () => {
+    for (const item of lists[Number(cb.dataset.part)]) item.mesh.visible = cb.checked;
+  }));
 }
 
 const tmpV = new THREE.Vector3();
 function updateBoneOverlay() {
   if (!P.bonePoints) return;
   const show = $('#poserShowBones').checked;
-  P.bonePoints.visible = show;
+  const solo = P.soloDots && P.selectedBone >= 0;
+  P.bonePoints.visible = show && !solo;
   if (!show) { if (P.boneMarker) P.boneMarker.visible = false; return; }
-  const arr = P.bonePoints.geometry.attributes.position.array;
-  P.boneObjs.forEach((bone, i) => {
-    bone.getWorldPosition(tmpV);
-    arr[i * 3] = tmpV.x; arr[i * 3 + 1] = tmpV.y; arr[i * 3 + 2] = tmpV.z;
-  });
-  P.bonePoints.geometry.attributes.position.needsUpdate = true;
+  if (P.bonePoints.visible) {
+    const arr = P.bonePoints.geometry.attributes.position.array;
+    P.boneObjs.forEach((bone, i) => {
+      bone.getWorldPosition(tmpV);
+      arr[i * 3] = tmpV.x; arr[i * 3 + 1] = tmpV.y; arr[i * 3 + 2] = tmpV.z;
+    });
+    P.bonePoints.geometry.attributes.position.needsUpdate = true;
+  }
   if (P.selectedBone >= 0) {
     P.boneObjs[P.selectedBone].getWorldPosition(tmpV);
     P.boneMarker.geometry.attributes.position.array.set([tmpV.x, tmpV.y, tmpV.z]);
@@ -317,10 +362,12 @@ function renderBoneList() {
   list.querySelectorAll('[data-bone]').forEach((btn) => btn.addEventListener('click', () => selectBone(Number(btn.dataset.bone))));
 }
 
-function selectBone(i) {
+function selectBone(i, solo = false) {
   P.selectedBone = i;
+  P.soloDots = solo;
   renderBoneList();
   renderBoneControls();
+  renderAliasChips();
   const active = $('#poserBoneList .poser-bone.active');
   if (active) active.scrollIntoView({ block: 'nearest' });
 }
@@ -331,6 +378,7 @@ function renderBoneControls() {
   box.hidden = !bone;
   if (!bone) return;
   $('#poserBoneName').textContent = bone.name;
+  $('#poserAliasInput').value = (P.aliases[P.model?.id] || {})[bone.name] || '';
   for (const [axis, id] of [['x', '#poserRotX'], ['y', '#poserRotY'], ['z', '#poserRotZ']]) {
     const input = $(id);
     input.value = Math.round(deg(bone.rotation[axis]));
@@ -346,6 +394,64 @@ for (const [axis, id] of [['x', '#poserRotX'], ['y', '#poserRotY'], ['z', '#pose
     bone.rotation[axis] = rad(Number(e.target.value));
     e.target.nextElementSibling.textContent = `${e.target.value}°`;
   });
+}
+
+// Etiquetas rápidas: alias por hueso ("Wrightneck" → "Control Cuello").
+// Al elegir una, se ocultan todos los puntos salvo el del hueso activo.
+function renderAliasChips() {
+  const box = $('#poserAliasChips');
+  const map = P.aliases[P.model?.id] || {};
+  const byName = new Map(P.boneObjs.map((bone, i) => [bone.name, i]));
+  const entries = Object.entries(map).filter(([bone]) => byName.has(bone));
+  box.hidden = !entries.length;
+  if (box.hidden) { box.innerHTML = ''; return; }
+  box.innerHTML = entries
+    .sort((a, b) => a[1].localeCompare(b[1]))
+    .map(([bone, label]) => `<button class="poser-chip${byName.get(bone) === P.selectedBone ? ' active' : ''}" data-alias-bone="${B.esc(bone)}" title="${B.esc(bone)}">${B.esc(label)}</button>`)
+    .join('');
+  box.querySelectorAll('[data-alias-bone]').forEach((chip) => chip.addEventListener('click', () => {
+    selectBone(byName.get(chip.dataset.aliasBone), true);
+  }));
+}
+
+$('#poserAliasSave').addEventListener('click', async () => {
+  const bone = P.boneObjs[P.selectedBone];
+  if (!bone || !P.model) return;
+  const label = $('#poserAliasInput').value.trim();
+  const { aliases } = await B.api('/api/poser/aliases', { method: 'PUT', body: { modelId: P.model.id, bone: bone.name, label } });
+  P.aliases = aliases;
+  renderAliasChips();
+  B.toast(label ? `Etiqueta "${label}" guardada` : 'Etiqueta borrada');
+});
+$('#poserAliasInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#poserAliasSave').click(); });
+
+$('#poserBoneWinClose').addEventListener('click', () => {
+  P.selectedBone = -1;
+  P.soloDots = false;
+  renderBoneList();
+  renderBoneControls();
+  renderAliasChips();
+});
+
+// la ventana de hueso se puede arrastrar desde su encabezado
+{
+  const win = $('#poserBoneCtl');
+  const head = $('#poserBoneWinHead');
+  let drag = null;
+  head.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    const r = win.getBoundingClientRect();
+    const wrap = $('#poserCanvasWrap').getBoundingClientRect();
+    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top, wrap };
+    head.setPointerCapture(e.pointerId);
+  });
+  head.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    win.style.left = `${Math.max(0, Math.min(e.clientX - drag.wrap.left - drag.dx, drag.wrap.width - 60))}px`;
+    win.style.top = `${Math.max(0, Math.min(e.clientY - drag.wrap.top - drag.dy, drag.wrap.height - 40))}px`;
+    win.style.right = 'auto';
+  });
+  head.addEventListener('pointerup', () => { drag = null; });
 }
 
 function resetPose() {
@@ -394,6 +500,7 @@ async function refreshPoser() {
   const data = await B.api('/api/poser');
   P.models = data.models;
   P.poses = data.poses;
+  P.aliases = data.aliases || {};
   $('#poserFolderHint').textContent = P.models.length
     ? ''
     : `Copiá cada modelo (su carpeta con el .xps/.mesh y las texturas) dentro de ${data.folder} y tocá "Releer carpeta".`;
@@ -475,6 +582,9 @@ $('#poserBoneSearch').addEventListener('input', (e) => {
   P.boneSearch = e.target.value;
   renderBoneList();
 });
+
+// re-tildar "ver puntos" también saca el modo "solo el activo"
+$('#poserShowBones').addEventListener('change', () => { P.soloDots = false; });
 
 $('#poserResetPose').addEventListener('click', resetPose);
 $('#poserBoneReset').addEventListener('click', () => {
@@ -563,6 +673,7 @@ $('#poserSaveScene').addEventListener('click', async () => {
     modelId: P.model.id, name, category,
     bones: getPoseData(),
     camera: { position: P.camera.position.toArray(), target: P.controls.target.toArray(), fov: P.camera.fov },
+    hidden: P.meshItems.filter((x) => !x.mesh.visible).map((x) => x.mesh.name),
     thumbDataUrl
   };
   const { poses } = await B.api('/api/poser/poses', { method: 'POST', body });
@@ -606,6 +717,11 @@ function renderSceneList() {
         await loadModel(model);
       }
       applyPoseData(pose.bones);
+      if (Array.isArray(pose.hidden)) {
+        const hiddenSet = new Set(pose.hidden);
+        for (const item of P.meshItems) item.mesh.visible = !hiddenSet.has(item.mesh.name);
+        renderParts();
+      }
       if (pose.camera) {
         P.camera.position.fromArray(pose.camera.position);
         P.controls.target.fromArray(pose.camera.target);

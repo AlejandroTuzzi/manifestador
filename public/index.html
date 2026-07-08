@@ -178,7 +178,23 @@
       </div>
 
       <div class="poser-layout">
-        <div id="poserCanvasWrap" class="poser-canvas"><canvas id="poserCanvas"></canvas></div>
+        <div id="poserCanvasWrap" class="poser-canvas">
+          <canvas id="poserCanvas"></canvas>
+          <div id="poserBoneCtl" class="poser-bone-win" hidden>
+            <div class="poser-bone-win-head" id="poserBoneWinHead">
+              <span id="poserBoneName"></span>
+              <button id="poserBoneWinClose" class="icon-btn" title="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button>
+            </div>
+            <div class="poser-slider"><label>X</label><input type="range" id="poserRotX" min="-180" max="180" step="1" value="0"><span class="poser-deg">0°</span></div>
+            <div class="poser-slider"><label>Y</label><input type="range" id="poserRotY" min="-180" max="180" step="1" value="0"><span class="poser-deg">0°</span></div>
+            <div class="poser-slider"><label>Z</label><input type="range" id="poserRotZ" min="-180" max="180" step="1" value="0"><span class="poser-deg">0°</span></div>
+            <div class="poser-row">
+              <input type="text" id="poserAliasInput" class="text-input" placeholder="Etiqueta (ej: Control Cuello)">
+              <button id="poserAliasSave" class="mini-btn" title="Guardar etiqueta para selección rápida"><svg class="ic"><use href="#i-save"/></svg></button>
+            </div>
+            <button id="poserBoneReset" class="mini-btn">Resetear hueso</button>
+          </div>
+        </div>
 
         <aside class="poser-side">
           <div class="poser-panel">
@@ -197,16 +213,15 @@
           </div>
 
           <div class="poser-panel">
+            <div class="panel-title">Partes y ropa</div>
+            <div id="poserPartsList" class="poser-parts"></div>
+          </div>
+
+          <div class="poser-panel">
             <div class="panel-title">Huesos <label class="poser-toggle"><input type="checkbox" id="poserShowBones" checked> ver puntos</label></div>
+            <div id="poserAliasChips" class="poser-chips" hidden></div>
             <input type="text" id="poserBoneSearch" class="text-input" placeholder="Buscar hueso…">
             <div id="poserBoneList" class="poser-bone-list"></div>
-            <div id="poserBoneCtl" class="poser-bone-ctl" hidden>
-              <div class="panel-title" id="poserBoneName"></div>
-              <div class="poser-slider"><label>X</label><input type="range" id="poserRotX" min="-180" max="180" step="1" value="0"><span class="poser-deg">0°</span></div>
-              <div class="poser-slider"><label>Y</label><input type="range" id="poserRotY" min="-180" max="180" step="1" value="0"><span class="poser-deg">0°</span></div>
-              <div class="poser-slider"><label>Z</label><input type="range" id="poserRotZ" min="-180" max="180" step="1" value="0"><span class="poser-deg">0°</span></div>
-              <button id="poserBoneReset" class="mini-btn">Resetear hueso</button>
-            </div>
             <div class="poser-row">
               <button id="poserResetPose" class="mini-btn">Resetear pose</button>
               <button id="poserImportPose" class="mini-btn">Importar .pose</button>

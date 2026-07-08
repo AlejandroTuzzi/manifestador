@@ -895,8 +895,25 @@ const server = http.createServer(async (req, res) => {
         models.push({ id: entry.name, name: entry.name, meshFile, files });
       }
       models.sort((a, b) => a.name.localeCompare(b.name));
-      const poses = await readJson('poser-poses.json', []);
-      return send(res, 200, { models, poses, folder: cfg.paths.poser });
+      const [poses, aliases] = await Promise.all([
+        readJson('poser-poses.json', []),
+        readJson('poser-aliases.json', {})
+      ]);
+      return send(res, 200, { models, poses, aliases, folder: cfg.paths.poser });
+    }
+    if (p === '/api/poser/aliases' && req.method === 'PUT') {
+      const body = await readJsonBody(req);
+      const modelId = String(body.modelId || '');
+      const bone = String(body.bone || '');
+      const label = String(body.label || '').trim().slice(0, 60);
+      if (!modelId || !bone) throw new Error('Faltan modelo o hueso.');
+      const aliases = await updateJson('poser-aliases.json', {}, (all) => {
+        const forModel = { ...(all[modelId] || {}) };
+        if (label) forModel[bone] = label;
+        else delete forModel[bone];
+        return { ...all, [modelId]: forModel };
+      });
+      return send(res, 200, { aliases });
     }
     if (p === '/api/poser/poses' && req.method === 'POST') {
       const body = await readJsonBody(req);
@@ -907,6 +924,7 @@ const server = http.createServer(async (req, res) => {
         category: String(body.category || '').trim() || 'General',
         bones: body.bones && typeof body.bones === 'object' ? body.bones : {},
         camera: body.camera && typeof body.camera === 'object' ? body.camera : null,
+        hidden: Array.isArray(body.hidden) ? body.hidden.slice(0, 500).map(String) : [],
         thumbKey: null,
         ts: Date.now()
       };
