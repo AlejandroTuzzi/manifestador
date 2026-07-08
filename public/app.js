@@ -572,6 +572,7 @@ async function runGenerationJob(job) {
     state.history.unshift(entry);
     if (entry.type === 'image' && entry.characterId) {
       for (const key of entry.outputs) state.assetLinks.unshift({ key, characterId: entry.characterId, variantId: entry.characterVariantId || null, ts: entry.ts });
+      renderCharacters();
     }
     showEntry(entry);
     renderHistory();
@@ -1186,6 +1187,7 @@ function openLightbox(key) {
 async function associateAsset(key) {
   if (!state.characters.length) return toast('Primero creá un personaje', 'err');
   state.pendingAssociationKey = key;
+  $('#lightbox').hidden = true;
   const select = $('#associateCharacter');
   select.innerHTML = state.characters.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
   const existing = state.assetLinks.find((link) => link.key === key);

@@ -210,6 +210,10 @@ async function runImageGeneration(req) {
   }
   const refPaths = [];
   for (const key of refs) refPaths.push(await resolveAssetKey(key));
+  const characterRefs = refs.map((key) => /^characters\/([^/]+)(?:\/variants\/([^/]+))?\//.exec(key)).filter(Boolean);
+  const inferredCharacter = characterRefs.length && characterRefs.every((match) => match[1] === characterRefs[0][1])
+    ? { characterId: characterRefs[0][1], variantId: characterRefs.every((match) => (match[2] || null) === (characterRefs[0][2] || null)) ? (characterRefs[0][2] || null) : null }
+    : null;
 
   const batch = Math.max(1, Math.min(4, Number(req.batch) || 1));
   const apiModel = model.provider === 'seedream' ? (cfg.seedreamModelId || model.apiModel) : model.apiModel;
@@ -266,8 +270,8 @@ async function runImageGeneration(req) {
     resolution: req.resolution || 'auto',
     batch,
     refs,
-    characterId: req.characterId || null,
-    characterVariantId: req.characterVariantId || null,
+    characterId: req.characterId || inferredCharacter?.characterId || null,
+    characterVariantId: req.characterVariantId || inferredCharacter?.variantId || null,
     outputs,
     errors,
     cost: Number(cost.toFixed(6))
