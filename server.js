@@ -126,10 +126,64 @@ async function recordAssetMetadata(entry) {
     for (const key of entry.outputs || []) metadata[key] = {
       prompt: entry.prompt || '', type: entry.type, modelId: entry.modelId,
       modelName: entry.modelName, characterId: entry.characterId || null,
-      characterVariantId: entry.characterVariantId || null, ts: entry.ts
+      characterVariantId: entry.characterVariantId || null, ts: entry.ts,
+      aspectRatio: entry.aspectRatio || null, resolution: entry.resolution || null,
+      batch: entry.batch || 1, refs: entry.refs || [], voiceId: entry.voiceId || null,
+      voiceName: entry.voiceName || null, cost: entry.cost || 0
     };
     return metadata;
   });
+}
+
+// ZIP mínimo y portable (entradas almacenadas, sin dependencias externas).
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+  return c >>> 0;
+});
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function createZip(entries) {
+  const locals = [], centrals = [];
+  let offset = 0;
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name.replace(/\\/g, '/'), 'utf8');
+    const data = Buffer.isBuffer(entry.data) ? entry.data : Buffer.from(entry.data);
+    const crc = crc32(data);
+    const local = Buffer.alloc(30 + name.length);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6);
+    local.writeUInt16LE(0, 8); local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(name.length, 26); name.copy(local, 30);
+    locals.push(local, data);
+    const central = Buffer.alloc(46 + name.length);
+    central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6); central.writeUInt16LE(0x0800, 8);
+    central.writeUInt16LE(0, 10); central.writeUInt32LE(crc, 16); central.writeUInt32LE(data.length, 20); central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(name.length, 28); central.writeUInt32LE(offset, 42); name.copy(central, 46);
+    centrals.push(central); offset += local.length + data.length;
+  }
+  const centralSize = centrals.reduce((sum, b) => sum + b.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralSize, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, ...centrals, end]);
+}
+function readStoredZip(buffer) {
+  const files = new Map(); let offset = 0;
+  while (offset + 30 <= buffer.length && buffer.readUInt32LE(offset) === 0x04034b50) {
+    const method = buffer.readUInt16LE(offset + 8); const size = buffer.readUInt32LE(offset + 18);
+    const nameLen = buffer.readUInt16LE(offset + 26); const extraLen = buffer.readUInt16LE(offset + 28);
+    if (method !== 0) throw new Error('El ZIP usa una compresión no compatible. Exportalo desde Manifestador.');
+    const name = buffer.subarray(offset + 30, offset + 30 + nameLen).toString('utf8').replace(/\\/g, '/');
+    if (name.includes('..') || name.startsWith('/')) throw new Error('Ruta insegura dentro del ZIP.');
+    const start = offset + 30 + nameLen + extraLen; const end = start + size;
+    if (end > buffer.length) throw new Error('ZIP incompleto.');
+    files.set(name, buffer.subarray(start, end)); offset = end;
+    if (files.size > 500) throw new Error('El ZIP contiene demasiados archivos.');
+  }
+  return files;
 }
 
 function monthKey(ts) {
@@ -505,10 +559,16 @@ const server = http.createServer(async (req, res) => {
       const metadata = { ...savedMetadata };
       let changed = false;
       for (const entry of history) for (const key of entry.outputs || []) {
-        if (!metadata[key]) {
-          metadata[key] = { prompt: entry.prompt || '', type: entry.type, modelId: entry.modelId, modelName: entry.modelName, characterId: entry.characterId || null, characterVariantId: entry.characterVariantId || null, ts: entry.ts };
-          changed = true;
-        }
+        const fromHistory = {
+          prompt: entry.prompt || '', type: entry.type, modelId: entry.modelId, modelName: entry.modelName,
+          characterId: entry.characterId || null, characterVariantId: entry.characterVariantId || null, ts: entry.ts,
+          aspectRatio: entry.aspectRatio || null, resolution: entry.resolution || null, batch: entry.batch || 1,
+          refs: entry.refs || [], voiceId: entry.voiceId || null, voiceName: entry.voiceName || null, cost: entry.cost || 0
+        };
+        const before = metadata[key] || {};
+        const enriched = { ...fromHistory, ...before };
+        if (Object.keys(fromHistory).some((field) => before[field] === undefined)) changed = true;
+        metadata[key] = enriched;
       }
       if (changed) await writeJson('asset-metadata.json', metadata);
       for (const item of [...generated, ...uploads, ...audio]) Object.assign(item, metadata[item.key] || {});
@@ -740,6 +800,71 @@ const server = http.createServer(async (req, res) => {
       characters.unshift(item);
       await writeJson('characters.json', characters);
       return send(res, 200, item);
+    }
+
+    if (p === '/api/characters/import' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const zipBuffer = Buffer.from(String(body.zipBase64 || ''), 'base64');
+      if (!zipBuffer.length || zipBuffer.length > 150 * 1024 * 1024) throw new Error('ZIP vacío o demasiado grande.');
+      const files = readStoredZip(zipBuffer);
+      const manifestBuffer = files.get('character.json');
+      if (!manifestBuffer) throw new Error('El ZIP no contiene character.json.');
+      const manifest = JSON.parse(manifestBuffer.toString('utf8'));
+      if (manifest.format !== 'manifestador-character' || !manifest.character) throw new Error('Este ZIP no es un personaje de Manifestador.');
+      const source = manifest.character;
+      const id = newId();
+      const characterDir = path.join(DATA_DIR, 'characters', id);
+      const item = {
+        id, name: String(source.name || 'Personaje importado'), description: String(source.description || ''),
+        voiceId: String(source.voiceId || ''), voiceName: String(source.voiceName || ''), photos: [], variants: [], ts: Date.now()
+      };
+      await fs.mkdir(characterDir, { recursive: true });
+      for (const [index, file] of (source.photos || []).entries()) {
+        const data = files.get(file); if (!data) continue;
+        const ext = path.extname(file).toLowerCase(); if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) continue;
+        const name = `import-original-${index + 1}${ext}`; await fs.writeFile(path.join(characterDir, name), data);
+        item.photos.push(`characters/${id}/${name}`);
+      }
+      for (const sourceVariant of source.variants || []) {
+        const variantId = newId();
+        const variant = { id: variantId, name: String(sourceVariant.name || 'Variante'), description: String(sourceVariant.description || ''), photos: [], ts: Date.now() };
+        const dir = path.join(characterDir, 'variants', variantId); await fs.mkdir(dir, { recursive: true });
+        for (const [index, file] of (sourceVariant.photos || []).entries()) {
+          const data = files.get(file); if (!data) continue;
+          const ext = path.extname(file).toLowerCase(); if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) continue;
+          const name = `import-${index + 1}${ext}`; await fs.writeFile(path.join(dir, name), data);
+          variant.photos.push(`characters/${id}/variants/${variantId}/${name}`);
+        }
+        item.variants.push(variant);
+      }
+      await updateJson('characters.json', [], (characters) => [item, ...characters]);
+      return send(res, 200, item);
+    }
+
+    const exportMatch = /^\/api\/characters\/([a-z0-9]+)\/export$/.exec(p);
+    if (exportMatch && req.method === 'GET') {
+      const characters = await readJson('characters.json', []);
+      const character = characters.find((c) => c.id === exportMatch[1]);
+      if (!character) return send(res, 404, { error: 'Personaje no encontrado' });
+      const entries = []; const photos = [];
+      for (const [index, key] of (character.photos || []).entries()) {
+        const ext = path.extname(key).toLowerCase(); const file = `original/${index + 1}${ext}`;
+        entries.push({ name: file, data: await fs.readFile(await resolveAssetKey(key)) }); photos.push(file);
+      }
+      const variants = [];
+      for (const [variantIndex, variant] of (character.variants || []).entries()) {
+        const variantPhotos = [];
+        for (const [index, key] of (variant.photos || []).entries()) {
+          const ext = path.extname(key).toLowerCase(); const file = `variants/${variantIndex + 1}/${index + 1}${ext}`;
+          entries.push({ name: file, data: await fs.readFile(await resolveAssetKey(key)) }); variantPhotos.push(file);
+        }
+        variants.push({ name: variant.name, description: variant.description || '', photos: variantPhotos });
+      }
+      const manifest = { format: 'manifestador-character', version: 1, exportedAt: Date.now(), character: { name: character.name, description: character.description || '', voiceId: character.voiceId || '', voiceName: character.voiceName || '', photos, variants } };
+      entries.unshift({ name: 'character.json', data: Buffer.from(JSON.stringify(manifest, null, 2), 'utf8') });
+      const zip = createZip(entries);
+      const filename = `${sanitizeName(character.name || 'personaje').replace(/\.[^.]+$/, '')}.manifestador.zip`;
+      return send(res, 200, zip, { mime: 'application/zip', extra: { 'Content-Disposition': `attachment; filename="${filename}"` } });
     }
 
     const variantMatch = /^\/api\/characters\/([a-z0-9]+)\/variants(?:\/([a-z0-9]+))?(\/photos)?$/.exec(p);

@@ -993,7 +993,7 @@ function renderAssetsGrid() {
     for (const a of group) {
       const card = document.createElement('div');
       card.className = `asset-card${state.selectedAssets.has(a.key) ? ' selected' : ''}`;
-      card.innerHTML = `<button class="asset-check" title="Seleccionar">${state.selectedAssets.has(a.key) ? '✓' : ''}</button>${a.prompt ? `<button class="asset-copy" title="Copiar prompt">${IC('copy')}</button>` : ''}<button class="asset-delete" title="Borrar">${IC('trash')}</button>`;
+      card.innerHTML = `<button class="asset-check" title="Seleccionar">${state.selectedAssets.has(a.key) ? '✓' : ''}</button><button class="asset-info" title="Información">${IC('info')}</button>${a.prompt ? `<button class="asset-copy" title="Copiar prompt">${IC('copy')}</button>` : ''}<button class="asset-delete" title="Borrar">${IC('trash')}</button>`;
       if (state.assetsZone === 'audio') {
         card.insertAdjacentHTML('beforeend', `<div class="audio-tile">${IC('play', 'ic ic-lg')}</div><div class="a-name">${esc(a.name)}</div>`);
         card.querySelector('.audio-tile').addEventListener('click', () => toggleAudioPlay(card, a.key));
@@ -1002,6 +1002,7 @@ function renderAssetsGrid() {
         card.querySelector('img').addEventListener('click', () => openLightbox(a.key));
       }
       card.querySelector('.asset-check').addEventListener('click', () => toggleAssetSelection(a.key));
+      card.querySelector('.asset-info').addEventListener('click', () => openAssetInfo(a));
       card.querySelector('.asset-copy')?.addEventListener('click', () => copyPrompt(a.prompt));
       card.querySelector('.asset-delete').addEventListener('click', () => deleteAssets([a.key]));
       sessionGrid.appendChild(card);
@@ -1164,6 +1165,7 @@ function openLightbox(key) {
   $('#lbImg').src = fileUrl(key);
   const info = assetInfo(key);
   $('#lbActions').innerHTML = `
+    ${info ? `<button class="mini-btn" id="lbInfo">${IC('info')} Información</button>` : ''}
     ${info?.prompt ? `<button class="mini-btn" id="lbCopyPrompt">${IC('copy')} Copiar prompt</button>` : ''}
     <button class="mini-btn" id="lbRef">${IC('link')} Usar como referencia</button>
     ${/^(generated|uploads)\//.test(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} Asociar a personaje</button>` : ''}
@@ -1177,12 +1179,35 @@ function openLightbox(key) {
     toast('Agregada como referencia');
   });
   $('#lbCopyPrompt')?.addEventListener('click', () => copyPrompt(info.prompt));
+  $('#lbInfo')?.addEventListener('click', () => openAssetInfo({ key, ...info }));
   $('#lbCharacter')?.addEventListener('click', () => {
     $('#lightbox').hidden = true;
     openCharModal(null, key);
   });
   $('#lbAssociate')?.addEventListener('click', () => associateAsset(key));
 }
+
+function openAssetInfo(asset) {
+  $('#lightbox').hidden = true;
+  const character = state.characters.find((c) => c.id === asset.characterId);
+  const variant = (character?.variants || []).find((v) => v.id === asset.characterVariantId);
+  const rows = [
+    ['Modelo', asset.modelName || asset.modelId || 'Sin información'],
+    ['Tipo', asset.type || (asset.key?.startsWith('audio/') ? 'audio' : 'imagen')],
+    ['Proporción', asset.aspectRatio || '—'], ['Resolución', asset.resolution || '—'],
+    ['Lote', asset.batch || 1], ['Referencias', (asset.refs || []).length],
+    ['Personaje', character ? `${character.name} · ${variant?.name || 'Original'}` : '—'],
+    ['Fecha', asset.ts ? fmtDate(asset.ts) : '—'], ['Costo estimado', asset.cost ? `$${Number(asset.cost).toFixed(4)}` : '—']
+  ];
+  $('#assetInfoBody').innerHTML = `
+    ${asset.key && !asset.key.startsWith('audio/') ? `<img class="asset-info-preview" src="${fileUrl(asset.key)}" alt="">` : ''}
+    <div class="asset-info-grid">${rows.map(([label, value]) => `<div><span>${label}</span><strong>${esc(value)}</strong></div>`).join('')}</div>
+    <div class="asset-info-prompt"><div><span>Prompt utilizado</span>${asset.prompt ? `<button class="mini-btn" id="assetInfoCopy">${IC('copy')} Copiar</button>` : ''}</div><pre>${esc(asset.prompt || 'No hay prompt guardado para este asset.')}</pre></div>`;
+  $('#assetInfoCopy')?.addEventListener('click', () => copyPrompt(asset.prompt));
+  $('#assetInfoModal').hidden = false;
+}
+$('#assetInfoClose').addEventListener('click', () => { $('#assetInfoModal').hidden = true; });
+$('#assetInfoModal').addEventListener('click', (e) => { if (e.target.id === 'assetInfoModal') $('#assetInfoModal').hidden = true; });
 
 async function associateAsset(key) {
   if (!state.characters.length) return toast('Primero creá un personaje', 'err');
@@ -1226,6 +1251,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     $('#lightbox').hidden = true; $('#pickerModal').hidden = true; $('#charModal').hidden = true;
     $('#characterGalleryModal').hidden = true; $('#variantEditorModal').hidden = true; $('#associateAssetModal').hidden = true;
+    $('#assetInfoModal').hidden = true;
   }
 });
 
@@ -1264,6 +1290,7 @@ function renderCharacters() {
         <button class="mini-btn" data-act="variants">Variantes</button>
         <button class="mini-btn" data-act="gallery">${IC('eye')} Ver fotos</button>
         <button class="mini-btn" data-act="assets">${IC('image')} Assets${linkedCount ? ` (${linkedCount})` : ''}</button>
+        <a class="mini-btn" href="/api/characters/${c.id}/export" download>${IC('download')} Exportar ZIP</a>
         <button class="mini-btn danger" data-act="del" title="Eliminar">${IC('trash')}</button>
       </div>`;
     card.querySelectorAll('[data-act]').forEach((b) => {
@@ -1345,6 +1372,17 @@ $('#characterGalleryModal').addEventListener('click', (e) => {
 });
 
 $('#btnNewChar').addEventListener('click', () => openCharModal(null));
+$('#btnImportCharacter').addEventListener('click', () => $('#characterImportInput').click());
+$('#characterImportInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (!file) return;
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    const created = await api('/api/characters/import', { method: 'POST', body: { zipBase64: dataUrl.split(',')[1] } });
+    state.characters.unshift(created); renderCharacters();
+    toast(`${created.name} importado con ${created.photos.length} fotos y ${created.variants.length} variantes`);
+  } catch (err) { toast(`No se pudo importar: ${err.message}`, 'err'); }
+});
 $('#charModalClose').addEventListener('click', () => {
   $('#charModal').hidden = true;
   state.editingCharId = null;
