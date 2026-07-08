@@ -644,7 +644,12 @@ function showEntry(entry, outputIdx = 0) {
           `<img src="${fileUrl(o)}" class="${i === outputIdx ? 'sel' : ''}" data-i="${i}" alt="">`).join('')}</div>`
       : '';
     bv.innerHTML = `
-      <div class="bv-media"><img id="bvMain" src="${fileUrl(key)}" alt=""></div>
+      <div class="bv-media bv-media-nav">
+        ${entry.outputs.length > 1 ? `<button class="bv-nav bv-prev" data-output-nav="-1" title="Anterior">${IC('left', 'ic ic-lg')}</button>` : ''}
+        <img id="bvMain" src="${fileUrl(key)}" alt="">
+        ${entry.outputs.length > 1 ? `<button class="bv-nav bv-next" data-output-nav="1" title="Siguiente">${IC('right', 'ic ic-lg')}</button>` : ''}
+      </div>
+      ${entry.outputs.length > 1 ? `<div class="bv-counter">${outputIdx + 1} / ${entry.outputs.length}</div>` : ''}
       ${thumbs}
       <div class="bv-meta">${esc(entry.modelName)} · ${entry.aspectRatio} · ${entry.resolution}${entry.batch > 1 ? ` · lote ×${entry.batch}` : ''} · ${fmtDate(entry.ts)}</div>
       <div class="bv-actions">
@@ -659,6 +664,10 @@ function showEntry(entry, outputIdx = 0) {
     $$('#bigView .bv-thumbs img').forEach((im) => {
       im.addEventListener('click', () => showEntry(entry, Number(im.dataset.i)));
     });
+    $$('#bigView [data-output-nav]').forEach((button) => button.addEventListener('click', () => {
+      const next = (outputIdx + Number(button.dataset.outputNav) + entry.outputs.length) % entry.outputs.length;
+      showEntry(entry, next);
+    }));
   }
   $$('#bigView [data-act]').forEach((b) => {
     b.addEventListener('click', () => {

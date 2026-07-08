@@ -396,6 +396,12 @@ h3 { font-size: 15px; }
   margin-bottom: 18px;
 }
 .bv-media { text-align: center; }
+.bv-media-nav { position: relative; display: flex; align-items: center; justify-content: center; }
+.bv-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; width: 42px; height: 58px; display: grid; place-items: center; border: 1px solid var(--border); background: rgba(12,7,18,.86); color: white; cursor: pointer; }
+.bv-nav:hover { border-color: var(--pink); color: var(--pink); }
+.bv-prev { left: 8px; }
+.bv-next { right: 8px; }
+.bv-counter { text-align: center; color: var(--muted); font-size: 11px; margin-top: 8px; }
 .bv-media img {
   max-width: 100%; max-height: 62vh;
   border-radius: 0; cursor: zoom-in;

@@ -585,16 +585,13 @@ const server = http.createServer(async (req, res) => {
       if (!character) throw new Error('Personaje no encontrado.');
       const variantId = body.variantId || null;
       if (variantId && !(character.variants || []).some((v) => v.id === variantId)) throw new Error('Variante no encontrada.');
-      const links = await readJson('asset-links.json', []);
-      const next = [{ key, characterId: character.id, variantId, ts: Date.now() }, ...links.filter((link) => link.key !== key)];
-      await writeJson('asset-links.json', next.slice(0, 10000));
+      const next = await updateJson('asset-links.json', [], (links) =>
+        [{ key, characterId: character.id, variantId, ts: Date.now() }, ...links.filter((link) => link.key !== key)].slice(0, 10000));
       return send(res, 200, { links: next });
     }
     if (p === '/api/asset-links' && req.method === 'DELETE') {
       const key = url.searchParams.get('key');
-      const links = await readJson('asset-links.json', []);
-      const next = links.filter((link) => link.key !== key);
-      await writeJson('asset-links.json', next);
+      const next = await updateJson('asset-links.json', [], (links) => links.filter((link) => link.key !== key));
       return send(res, 200, { links: next });
     }
 
