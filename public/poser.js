@@ -30,9 +30,7 @@ const P = {
   home: null            // posición inicial de cámara para "centrar"
 };
 
-// mismo criterio que sanitizeName() del server, para encontrar texturas subidas
-const sanitize = (name) => String(name || 'archivo').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80);
-const modelFileKey = (name) => `poser/models/${P.model.id}/${name}`;
+const modelFileKey = (name) => `poser-models/${P.model.id}/${name}`;
 const deg = (rad) => rad * 180 / Math.PI;
 const rad = (d) => d * Math.PI / 180;
 
@@ -152,7 +150,8 @@ async function loadDds(url) {
 }
 
 function assignTexture(mat, file) {
-  const found = (P.model.files || []).find((f) => f.name.toLowerCase() === sanitize(file).toLowerCase());
+  const wanted = String(file).toLowerCase();
+  const found = (P.model.files || []).find((f) => f.name.split('/').pop().toLowerCase() === wanted);
   if (!found) return;
   const url = B.fileUrl(modelFileKey(found.name));
   const apply = (tex) => {
@@ -395,10 +394,13 @@ async function refreshPoser() {
   const data = await B.api('/api/poser');
   P.models = data.models;
   P.poses = data.poses;
+  $('#poserFolderHint').textContent = P.models.length
+    ? ''
+    : `Copiá cada modelo (su carpeta con el .xps/.mesh y las texturas) dentro de ${data.folder} y tocá "Releer carpeta".`;
   const sel = $('#poserModelSelect');
   const prev = P.model?.id || localStorage.getItem('poserModelId') || '';
   sel.innerHTML = P.models.length
-    ? P.models.map((m) => `<option value="${m.id}">${B.esc(m.name)}</option>`).join('')
+    ? P.models.map((m) => `<option value="${B.esc(m.id)}">${B.esc(m.name)}</option>`).join('')
     : '<option value="">— sin modelos —</option>';
   const pick = P.models.find((m) => m.id === prev) || P.models[0] || null;
   if (pick) sel.value = pick.id;
@@ -428,42 +430,10 @@ $('#poserModelSelect').addEventListener('change', (e) => {
   if (model) loadModel(model);
 });
 
-$('#poserUploadBtn').addEventListener('click', () => $('#poserFolderInput').click());
-$('#poserFolderInput').addEventListener('change', async (e) => {
-  const files = [...e.target.files];
-  e.target.value = '';
-  if (!files.length) return;
-  const isMesh = (n) => /\.(mesh\.ascii|ascii|mesh|xps)$/i.test(n);
-  const isUseful = (n) => isMesh(n) || /\.(png|jpe?g|bmp|tga|dds|pose)$/i.test(n);
-  const meshFile = files.find((f) => isMesh(f.name));
-  if (!meshFile) return B.toast('La carpeta no tiene ningún .mesh, .xps ni .mesh.ascii', 'err');
-  const folder = (meshFile.webkitRelativePath || meshFile.name).split('/')[0];
-  const model = await B.api('/api/poser/models', { method: 'POST', body: { name: folder } });
-  const useful = files.filter((f) => isUseful(f.name));
-  let done = 0;
-  for (const f of useful) {
-    $('#poserStatus').textContent = `Subiendo ${++done}/${useful.length}: ${f.name}`;
-    try {
-      const dataUrl = await B.readFileAsDataUrl(f);
-      await B.api(`/api/poser/models/${model.id}/files`, { method: 'POST', body: { name: f.name, dataUrl } });
-    } catch (err) {
-      B.toast(`${f.name}: ${err.message}`, 'err');
-    }
-  }
-  $('#poserStatus').textContent = '';
-  localStorage.setItem('poserModelId', model.id);
-  P.model = null; // forzar recarga
+$('#poserRefreshModels').addEventListener('click', async () => {
+  P.model = null; // fuerza recargar el modelo seleccionado desde el disco
   await refreshPoser();
-  B.toast(`Modelo "${folder}" subido`);
-});
-
-$('#poserDeleteModel').addEventListener('click', async () => {
-  if (!P.model) return;
-  if (!confirm(`¿Borrar el modelo "${P.model.name}" y sus escenas?`)) return;
-  await B.api(`/api/poser/models/${P.model.id}`, { method: 'DELETE' });
-  disposeModel();
-  P.model = null;
-  await refreshPoser();
+  B.toast('Carpeta de modelos releída');
 });
 
 // ---------------------------------------------------------------------------
@@ -542,8 +512,20 @@ $('#poserExportPose').addEventListener('click', () => {
 
 function captureDataUrl() {
   P.renderer.render(P.scene, P.camera);
-  return P.renderer.domElement.toDataURL('image/png');
+  const src = P.renderer.domElement;
+  if (!$('#poserGray').checked) return src.toDataURL('image/png');
+  // en grises: la IA la toma como referencia de pose sin copiar colores/ropa
+  const c = document.createElement('canvas');
+  c.width = src.width;
+  c.height = src.height;
+  const ctx = c.getContext('2d');
+  ctx.filter = 'grayscale(1)';
+  ctx.drawImage(src, 0, 0);
+  return c.toDataURL('image/png');
 }
+
+$('#poserGray').addEventListener('change', (e) => localStorage.setItem('poserGray', e.target.checked ? '1' : ''));
+if (localStorage.getItem('poserGray')) $('#poserGray').checked = true;
 
 $('#poserCapture').addEventListener('click', async () => {
   if (!P.root) return B.toast('Cargá un modelo primero', 'err');

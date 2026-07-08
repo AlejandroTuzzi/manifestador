@@ -868,3 +868,4 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .poser-scene-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .poser-scene-actions { display: flex; gap: 4px; align-items: center; }
 @media (max-width: 1000px) { .poser-layout { grid-template-columns: 1fr; } .poser-canvas { height: 55vh; } .poser-side { max-height: none; } }
+.poser-capture-group { display: flex; align-items: center; gap: 10px; }

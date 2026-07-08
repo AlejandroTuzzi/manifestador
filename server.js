@@ -24,6 +24,7 @@ const DEFAULT_CONFIG = {
   keys: { gemini: '', googleTranslate: '', ark: '', fal: '', elevenlabs: '', openai: '' },
   openaiModel: 'gpt-5-mini',
   paths: {
+    poser: 'assets/poser',
     generated: 'assets/generated',
     uploads: 'assets/uploads',
     audio: 'assets/audio'
@@ -204,6 +205,7 @@ async function resolveAssetKey(key) {
   else if (zone === 'audio') baseDir = resolveDir(cfg.paths.audio);
   else if (zone === 'characters') baseDir = path.join(DATA_DIR, 'characters');
   else if (zone === 'poser') baseDir = path.join(DATA_DIR, 'poser');
+  else if (zone === 'poser-models') baseDir = resolveDir(cfg.paths.poser);
   else throw new Error(`Zona de asset desconocida: ${zone}`);
   const abs = path.join(baseDir, ...parts);
   const normBase = path.resolve(baseDir) + path.sep;
@@ -865,60 +867,36 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, zip, { mime: 'application/zip', extra: { 'Content-Disposition': `attachment; filename="${filename}"` } });
     }
 
-    // --- Poser: modelos XNALara/XPS y poses guardadas ---
+    // --- Poser: modelos XNALara/XPS (carpetas en assets/poser) y poses ---
     if (p === '/api/poser' && req.method === 'GET') {
-      const [models, poses] = await Promise.all([
-        readJson('poser-models.json', []),
-        readJson('poser-poses.json', [])
-      ]);
-      return send(res, 200, { models, poses });
-    }
-    if (p === '/api/poser/models' && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      const item = { id: newId(), name: String(body.name || '').trim() || 'Modelo', files: [], meshFile: null, ts: Date.now() };
-      await fs.mkdir(path.join(DATA_DIR, 'poser', 'models', item.id), { recursive: true });
-      await updateJson('poser-models.json', [], (models) => [item, ...models]);
-      return send(res, 200, item);
-    }
-    const poserFilesMatch = /^\/api\/poser\/models\/([a-z0-9]+)\/files$/.exec(p);
-    if (poserFilesMatch && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      const { buffer } = parseDataUrl(body.dataUrl);
-      const name = sanitizeName(body.name);
-      const ext = /\.mesh\.ascii$/i.test(name) ? '.mesh.ascii' : path.extname(name).toLowerCase();
-      const allowed = ['.mesh.ascii', '.ascii', '.mesh', '.xps', '.pose', '.png', '.jpg', '.jpeg', '.bmp', '.tga', '.dds'];
-      if (!allowed.includes(ext)) return send(res, 200, { skipped: name });
-      const dir = path.join(DATA_DIR, 'poser', 'models', poserFilesMatch[1]);
-      await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(path.join(dir, name), buffer);
-      const isMesh = ['.mesh.ascii', '.ascii', '.mesh', '.xps'].includes(ext);
-      const isAscii = ext.endsWith('.ascii');
-      let updated;
-      await updateJson('poser-models.json', [], (models) => models.map((m) => {
-        if (m.id !== poserFilesMatch[1]) return m;
-        // Si hay varios meshes, preferimos el .mesh.ascii (más compatible).
-        const preferNew = isMesh && (!m.meshFile || (isAscii && !/\.ascii$/i.test(m.meshFile)));
-        updated = {
-          ...m,
-          files: [...(m.files || []).filter((f) => f.name !== name), { name, size: buffer.length }],
-          meshFile: preferNew ? name : m.meshFile
+      const cfg = await getConfig();
+      const base = resolveDir(cfg.paths.poser);
+      await fs.mkdir(base, { recursive: true });
+      const models = [];
+      for (const entry of await fs.readdir(base, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const files = [];
+        const walk = async (rel) => {
+          for (const e of await fs.readdir(path.join(base, entry.name, rel), { withFileTypes: true })) {
+            if (files.length >= 500) return;
+            const relPath = rel ? `${rel}/${e.name}` : e.name;
+            if (e.isDirectory()) await walk(relPath);
+            else {
+              const st = await fs.stat(path.join(base, entry.name, relPath)).catch(() => null);
+              if (st) files.push({ name: relPath, size: st.size });
+            }
+          }
         };
-        return updated;
-      }));
-      if (!updated) return send(res, 404, { error: 'Modelo no encontrado' });
-      return send(res, 200, updated);
-    }
-    const poserModelMatch = /^\/api\/poser\/models\/([a-z0-9]+)$/.exec(p);
-    if (poserModelMatch && req.method === 'DELETE') {
-      const id = poserModelMatch[1];
-      const poses = await readJson('poser-poses.json', []);
-      for (const pose of poses.filter((x) => x.modelId === id)) {
-        await fs.unlink(path.join(DATA_DIR, 'poser', 'thumbs', `${pose.id}.png`)).catch(() => {});
+        await walk('').catch(() => {});
+        const meshes = files.filter((f) => /\.(mesh\.ascii|ascii|mesh|xps)$/i.test(f.name));
+        if (!meshes.length) continue;
+        // si hay varias mallas preferimos la .ascii, que es la más compatible
+        const meshFile = (meshes.find((f) => /\.ascii$/i.test(f.name)) || meshes[0]).name;
+        models.push({ id: entry.name, name: entry.name, meshFile, files });
       }
-      await updateJson('poser-poses.json', [], (all) => all.filter((x) => x.modelId !== id));
-      await updateJson('poser-models.json', [], (models) => models.filter((m) => m.id !== id));
-      await fs.rm(path.join(DATA_DIR, 'poser', 'models', id), { recursive: true, force: true }).catch(() => {});
-      return send(res, 200, { ok: true });
+      models.sort((a, b) => a.name.localeCompare(b.name));
+      const poses = await readJson('poser-poses.json', []);
+      return send(res, 200, { models, poses, folder: cfg.paths.poser });
     }
     if (p === '/api/poser/poses' && req.method === 'POST') {
       const body = await readJsonBody(req);

@@ -167,11 +167,14 @@
       <div class="poser-top">
         <div class="poser-models">
           <select id="poserModelSelect" class="select"></select>
-          <button id="poserUploadBtn" class="tool-btn" title="Subir la carpeta completa de un modelo XNALara/XPS (malla + texturas)"><svg class="ic"><use href="#i-plus"/></svg> Subir modelo</button>
-          <button id="poserDeleteModel" class="icon-btn" title="Borrar este modelo"><svg class="ic"><use href="#i-trash"/></svg></button>
+          <button id="poserRefreshModels" class="tool-btn" title="Volver a leer la carpeta de modelos"><svg class="ic"><use href="#i-refresh"/></svg> Releer carpeta</button>
           <span id="poserStatus" class="hint"></span>
+          <span id="poserFolderHint" class="hint"></span>
         </div>
-        <button id="poserCapture" class="generate-btn"><svg class="ic"><use href="#i-camera"/></svg> Capturar → Referencia</button>
+        <div class="poser-capture-group">
+          <label class="poser-toggle" title="Guarda la captura en blanco y negro para que la IA la tome solo como referencia de pose, sin copiar colores ni ropa"><input type="checkbox" id="poserGray"> en grises</label>
+          <button id="poserCapture" class="generate-btn"><svg class="ic"><use href="#i-camera"/></svg> Capturar → Referencia</button>
+        </div>
       </div>
 
       <div class="poser-layout">
@@ -223,7 +226,6 @@
           </div>
         </aside>
       </div>
-      <input type="file" id="poserFolderInput" webkitdirectory multiple hidden>
       <input type="file" id="poserPoseInput" accept=".pose,.txt" hidden>
     </section>
 
