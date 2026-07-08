@@ -114,6 +114,7 @@ $$('.nav-btn').forEach((btn) => {
     $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
     if (view === 'assets') refreshAssets();
     if (view === 'characters') renderCharacters();
+    if (view === 'poser') window.poserEnter?.();
     if (view === 'prompts') renderPromptLibrary();
     if (view === 'costs') loadCosts();
   });
@@ -900,7 +901,15 @@ async function setPickerTab(src) {
     return;
   }
 
-  if (src === 'characters') {
+  if (src === 'poses') {
+    const { poses } = await api('/api/poser');
+    const withThumb = poses.filter((x) => x.thumbKey);
+    body.innerHTML = withThumb.length
+      ? `<div class="picker-grid">${withThumb.map((x) =>
+          `<div class="pick" data-key="${esc(x.thumbKey)}"><img src="${fileUrl(x.thumbKey)}" loading="lazy" alt=""><div class="p-label">${esc(x.category || 'General')} · ${esc(x.name)}</div></div>`
+        ).join('')}</div>`
+      : '<div class="empty-note">Todavía no guardaste escenas en el Poser.</div>';
+  } else if (src === 'characters') {
     let html = '';
     for (const c of state.characters) {
       html += (c.photos || []).map((ph) =>
@@ -1867,4 +1876,12 @@ async function init() {
 }
 
 init();
-    const linkedCount = state.assetLinks.filter((link) => link.characterId === c.id).length;
+
+// ---------------------------------------------------------------------------
+// puente para el módulo Poser (poser.js, ES module)
+// ---------------------------------------------------------------------------
+
+window.manifestadorBridge = {
+  api, toast, esc, fileUrl, addRef, IC, readFileAsDataUrl, goToCreate,
+  getState: () => state
+};

@@ -203,6 +203,7 @@ async function resolveAssetKey(key) {
   else if (zone === 'uploads') baseDir = resolveDir(cfg.paths.uploads);
   else if (zone === 'audio') baseDir = resolveDir(cfg.paths.audio);
   else if (zone === 'characters') baseDir = path.join(DATA_DIR, 'characters');
+  else if (zone === 'poser') baseDir = path.join(DATA_DIR, 'poser');
   else throw new Error(`Zona de asset desconocida: ${zone}`);
   const abs = path.join(baseDir, ...parts);
   const normBase = path.resolve(baseDir) + path.sep;
@@ -862,6 +863,104 @@ const server = http.createServer(async (req, res) => {
       const zip = createZip(entries);
       const filename = `${sanitizeName(character.name || 'personaje').replace(/\.[^.]+$/, '')}.manifestador.zip`;
       return send(res, 200, zip, { mime: 'application/zip', extra: { 'Content-Disposition': `attachment; filename="${filename}"` } });
+    }
+
+    // --- Poser: modelos XNALara/XPS y poses guardadas ---
+    if (p === '/api/poser' && req.method === 'GET') {
+      const [models, poses] = await Promise.all([
+        readJson('poser-models.json', []),
+        readJson('poser-poses.json', [])
+      ]);
+      return send(res, 200, { models, poses });
+    }
+    if (p === '/api/poser/models' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const item = { id: newId(), name: String(body.name || '').trim() || 'Modelo', files: [], meshFile: null, ts: Date.now() };
+      await fs.mkdir(path.join(DATA_DIR, 'poser', 'models', item.id), { recursive: true });
+      await updateJson('poser-models.json', [], (models) => [item, ...models]);
+      return send(res, 200, item);
+    }
+    const poserFilesMatch = /^\/api\/poser\/models\/([a-z0-9]+)\/files$/.exec(p);
+    if (poserFilesMatch && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const { buffer } = parseDataUrl(body.dataUrl);
+      const name = sanitizeName(body.name);
+      const ext = /\.mesh\.ascii$/i.test(name) ? '.mesh.ascii' : path.extname(name).toLowerCase();
+      const allowed = ['.mesh.ascii', '.ascii', '.mesh', '.xps', '.pose', '.png', '.jpg', '.jpeg', '.bmp', '.tga', '.dds'];
+      if (!allowed.includes(ext)) return send(res, 200, { skipped: name });
+      const dir = path.join(DATA_DIR, 'poser', 'models', poserFilesMatch[1]);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, name), buffer);
+      const isMesh = ['.mesh.ascii', '.ascii', '.mesh', '.xps'].includes(ext);
+      const isAscii = ext.endsWith('.ascii');
+      let updated;
+      await updateJson('poser-models.json', [], (models) => models.map((m) => {
+        if (m.id !== poserFilesMatch[1]) return m;
+        // Si hay varios meshes, preferimos el .mesh.ascii (más compatible).
+        const preferNew = isMesh && (!m.meshFile || (isAscii && !/\.ascii$/i.test(m.meshFile)));
+        updated = {
+          ...m,
+          files: [...(m.files || []).filter((f) => f.name !== name), { name, size: buffer.length }],
+          meshFile: preferNew ? name : m.meshFile
+        };
+        return updated;
+      }));
+      if (!updated) return send(res, 404, { error: 'Modelo no encontrado' });
+      return send(res, 200, updated);
+    }
+    const poserModelMatch = /^\/api\/poser\/models\/([a-z0-9]+)$/.exec(p);
+    if (poserModelMatch && req.method === 'DELETE') {
+      const id = poserModelMatch[1];
+      const poses = await readJson('poser-poses.json', []);
+      for (const pose of poses.filter((x) => x.modelId === id)) {
+        await fs.unlink(path.join(DATA_DIR, 'poser', 'thumbs', `${pose.id}.png`)).catch(() => {});
+      }
+      await updateJson('poser-poses.json', [], (all) => all.filter((x) => x.modelId !== id));
+      await updateJson('poser-models.json', [], (models) => models.filter((m) => m.id !== id));
+      await fs.rm(path.join(DATA_DIR, 'poser', 'models', id), { recursive: true, force: true }).catch(() => {});
+      return send(res, 200, { ok: true });
+    }
+    if (p === '/api/poser/poses' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const item = {
+        id: newId(),
+        modelId: String(body.modelId || ''),
+        name: String(body.name || '').trim() || 'Pose',
+        category: String(body.category || '').trim() || 'General',
+        bones: body.bones && typeof body.bones === 'object' ? body.bones : {},
+        camera: body.camera && typeof body.camera === 'object' ? body.camera : null,
+        thumbKey: null,
+        ts: Date.now()
+      };
+      if (body.thumbDataUrl) {
+        const { buffer } = parseDataUrl(body.thumbDataUrl);
+        await fs.mkdir(path.join(DATA_DIR, 'poser', 'thumbs'), { recursive: true });
+        await fs.writeFile(path.join(DATA_DIR, 'poser', 'thumbs', `${item.id}.png`), buffer);
+        item.thumbKey = `poser/thumbs/${item.id}.png`;
+      }
+      const poses = await updateJson('poser-poses.json', [], (all) => [item, ...all].slice(0, 2000));
+      return send(res, 200, { pose: item, poses });
+    }
+    const poserPoseMatch = /^\/api\/poser\/poses\/([a-z0-9]+)$/.exec(p);
+    if (poserPoseMatch && req.method === 'PUT') {
+      const body = await readJsonBody(req);
+      let updated;
+      const poses = await updateJson('poser-poses.json', [], (all) => all.map((x) => {
+        if (x.id !== poserPoseMatch[1]) return x;
+        updated = {
+          ...x,
+          name: body.name !== undefined ? String(body.name).trim() || x.name : x.name,
+          category: body.category !== undefined ? String(body.category).trim() || 'General' : x.category
+        };
+        return updated;
+      }));
+      if (!updated) return send(res, 404, { error: 'Pose no encontrada' });
+      return send(res, 200, { pose: updated, poses });
+    }
+    if (poserPoseMatch && req.method === 'DELETE') {
+      const poses = await updateJson('poser-poses.json', [], (all) => all.filter((x) => x.id !== poserPoseMatch[1]));
+      await fs.unlink(path.join(DATA_DIR, 'poser', 'thumbs', `${poserPoseMatch[1]}.png`)).catch(() => {});
+      return send(res, 200, { poses });
     }
 
     const variantMatch = /^\/api\/characters\/([a-z0-9]+)\/variants(?:\/([a-z0-9]+))?(\/photos)?$/.exec(p);

@@ -38,6 +38,8 @@
     <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></symbol>
     <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
     <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol>
+    <symbol id="i-cube" viewBox="0 0 24 24"><path d="M21 16V8l-9-5-9 5v8l9 5 9-5z"/><path d="M3.3 7.3L12 12l8.7-4.7"/><path d="M12 22V12"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
     <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
   </defs>
 </svg>
@@ -50,6 +52,7 @@
       <button class="nav-btn active" data-view="create"><svg class="ic"><use href="#i-wand"/></svg> Crear</button>
       <button class="nav-btn" data-view="assets"><svg class="ic"><use href="#i-grid"/></svg> Assets</button>
       <button class="nav-btn" data-view="characters"><svg class="ic"><use href="#i-user"/></svg> Personajes</button>
+      <button class="nav-btn" data-view="poser"><svg class="ic"><use href="#i-cube"/></svg> Poser</button>
       <button class="nav-btn" data-view="prompts"><svg class="ic"><use href="#i-book"/></svg> Prompts</button>
       <button class="nav-btn" data-view="costs"><svg class="ic"><use href="#i-dollar"/></svg> Consumo</button>
       <button class="nav-btn" data-view="config"><svg class="ic"><use href="#i-gear"/></svg> Configuración</button>
@@ -157,6 +160,71 @@
         </div>
         <div id="historyList" class="history-list"></div>
       </div>
+    </section>
+
+    <!-- ==================== POSER ==================== -->
+    <section id="view-poser" class="view">
+      <div class="poser-top">
+        <div class="poser-models">
+          <select id="poserModelSelect" class="select"></select>
+          <button id="poserUploadBtn" class="tool-btn" title="Subir la carpeta completa de un modelo XNALara/XPS (malla + texturas)"><svg class="ic"><use href="#i-plus"/></svg> Subir modelo</button>
+          <button id="poserDeleteModel" class="icon-btn" title="Borrar este modelo"><svg class="ic"><use href="#i-trash"/></svg></button>
+          <span id="poserStatus" class="hint"></span>
+        </div>
+        <button id="poserCapture" class="generate-btn"><svg class="ic"><use href="#i-camera"/></svg> Capturar → Referencia</button>
+      </div>
+
+      <div class="poser-layout">
+        <div id="poserCanvasWrap" class="poser-canvas"><canvas id="poserCanvas"></canvas></div>
+
+        <aside class="poser-side">
+          <div class="poser-panel">
+            <div class="panel-title">Cámara</div>
+            <label class="poser-label">Lente <span id="poserFovLabel" class="hint"></span></label>
+            <input type="range" id="poserFov" min="10" max="120" step="1" value="45">
+            <div class="poser-row">
+              <button id="poserResetCam" class="mini-btn">Centrar cámara</button>
+              <select id="poserBg" class="select">
+                <option value="#17101f">Fondo oscuro</option>
+                <option value="#f2ecf7">Fondo claro</option>
+                <option value="#777777">Gris neutro</option>
+                <option value="#00b140">Chroma verde</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="poser-panel">
+            <div class="panel-title">Huesos <label class="poser-toggle"><input type="checkbox" id="poserShowBones" checked> ver puntos</label></div>
+            <input type="text" id="poserBoneSearch" class="text-input" placeholder="Buscar hueso…">
+            <div id="poserBoneList" class="poser-bone-list"></div>
+            <div id="poserBoneCtl" class="poser-bone-ctl" hidden>
+              <div class="panel-title" id="poserBoneName"></div>
+              <div class="poser-slider"><label>X</label><input type="range" id="poserRotX" min="-180" max="180" step="1" value="0"><span class="poser-deg">0°</span></div>
+              <div class="poser-slider"><label>Y</label><input type="range" id="poserRotY" min="-180" max="180" step="1" value="0"><span class="poser-deg">0°</span></div>
+              <div class="poser-slider"><label>Z</label><input type="range" id="poserRotZ" min="-180" max="180" step="1" value="0"><span class="poser-deg">0°</span></div>
+              <button id="poserBoneReset" class="mini-btn">Resetear hueso</button>
+            </div>
+            <div class="poser-row">
+              <button id="poserResetPose" class="mini-btn">Resetear pose</button>
+              <button id="poserImportPose" class="mini-btn">Importar .pose</button>
+              <button id="poserExportPose" class="mini-btn">Exportar .pose</button>
+            </div>
+          </div>
+
+          <div class="poser-panel">
+            <div class="panel-title">Escenas guardadas</div>
+            <div class="poser-row">
+              <input id="poserSceneName" class="text-input" placeholder="Nombre">
+              <input id="poserSceneCategory" class="text-input" placeholder="Categoría" list="poserCategories">
+              <datalist id="poserCategories"></datalist>
+              <button id="poserSaveScene" class="mini-btn"><svg class="ic"><use href="#i-save"/></svg> Guardar</button>
+            </div>
+            <div id="poserSceneList" class="poser-scene-list"></div>
+          </div>
+        </aside>
+      </div>
+      <input type="file" id="poserFolderInput" webkitdirectory multiple hidden>
+      <input type="file" id="poserPoseInput" accept=".pose,.txt" hidden>
     </section>
 
     <!-- ==================== PROMPTS ==================== -->
@@ -355,6 +423,7 @@
       <button class="tab" data-src="uploads">Subidas</button>
       <button class="tab" data-src="generated">Generadas</button>
       <button class="tab" data-src="characters">Personajes</button>
+      <button class="tab" data-src="poses">Poses</button>
     </div>
     <div id="pickerBody" class="picker-body"></div>
   </div>
@@ -399,3 +468,5 @@
 <input type="file" id="characterImportInput" accept=".zip,application/zip" hidden>
 
 <script src="app.js"></script>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+<script type="module" src="poser.js"></script>

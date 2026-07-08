@@ -1,6 +1,7 @@
 # Configuración y datos locales (incluyen credenciales y actividad)
 data/*.json
 data/characters/**
+data/poser/**
 !data/.gitkeep
 
 # Archivos generados o subidos
