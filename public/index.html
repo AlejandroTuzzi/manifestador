@@ -422,6 +422,30 @@
   </form>
 </div>
 
+<!-- Crear o editar prompt archivado -->
+<div id="promptEditorModal" class="modal" hidden>
+  <form id="promptEditorForm" class="modal-box form-modal-box prompt-editor-box">
+    <div class="modal-head">
+      <div><h3 id="promptEditorTitle">Guardar prompt</h3><p class="hint">Nombre, categoría y texto reutilizable</p></div>
+      <button type="button" class="icon-btn" id="promptEditorClose"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <label>Título<input id="promptEditorName" type="text" maxlength="120" placeholder="Ej: Retrato editorial" required></label>
+    <label>Categoría<input id="promptEditorCategory" type="text" maxlength="80" placeholder="General" list="promptEditorCategories"></label>
+    <datalist id="promptEditorCategories"></datalist>
+    <label>Tipo
+      <select id="promptEditorMode" class="select">
+        <option value="image">Imagen</option>
+        <option value="audio">Audio</option>
+      </select>
+    </label>
+    <label>Prompt<textarea id="promptEditorText" rows="8" placeholder="Texto del prompt…" required></textarea></label>
+    <div class="form-modal-actions">
+      <button type="button" class="mini-btn" id="promptEditorCancel">Cancelar</button>
+      <button type="submit" class="generate-btn small">Guardar prompt</button>
+    </div>
+  </form>
+</div>
+
 <div id="loginModal" class="modal login-modal" hidden>
   <form id="loginForm" class="modal-box login-box">
     <div class="login-mark"><img src="brand/manifestador-isologo.png" alt=""></div>

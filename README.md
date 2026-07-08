@@ -1,20 +1,26 @@
 # Manifestador ✨
 
-Herramienta **local** para generar imágenes y voz con las APIs de origen de cada modelo, sin pagar interfaces de terceros. Corre en tu máquina, las keys y los archivos quedan en tu disco.
+Herramienta local para generar imágenes, voz y referencias de pose con APIs de origen. Corre en tu máquina; las keys, archivos, historial y personajes quedan en tu disco.
 
 ## Cómo arrancar
 
-```
+```bash
 npm start
 ```
 
-y abrí **http://localhost:7777** (no requiere instalar dependencias, solo Node ≥ 20).
+Después abre `http://localhost:7777`.
 
-En Windows también podés ejecutar `Manifestador.bat`: inicia el servidor y abre la aplicación.
+En Windows también puedes ejecutar `Manifestador.bat`: inicia el servidor y abre la aplicación.
 
 ## Usarlo en varios ordenadores
 
-Cloná el repositorio en cada equipo y actualizalo con `git pull`. Las API keys, la clave de acceso, el historial y los assets no se sincronizan por Git por seguridad; se configuran y conservan localmente en cada ordenador.
+Clona el repositorio en cada equipo y actualízalo con:
+
+```bash
+git pull
+```
+
+Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clave de acceso, historial, personajes, capturas de Poser ni assets generados/subidos. Para mover personajes entre PCs usa el exportador/importador ZIP de la sección Personajes.
 
 ## Modelos integrados
 
@@ -24,30 +30,43 @@ Cloná el repositorio en cada equipo y actualizalo con `git pull`. Las API keys,
 | Nano Banana 2 | Google Gemini (`gemini-3.1-flash-image`) | 1K/2K/4K, hasta 14 referencias |
 | Nano Banana 2 Lite | Google Gemini (`gemini-3.1-flash-lite-image`) | rápido y barato, 1K |
 | Seedream 5.0 Lite | BytePlus ModelArk | el ID exacto del modelo se ajusta en Configuración |
-| Eleven v3 | ElevenLabs | TTS con [corchetes] de expresión |
+| Eleven v3 | ElevenLabs | TTS con expresiones entre corchetes |
 
-> Nota: "Seedance" es la línea de **video** de ByteDance; su modelo de imagen es **Seedream**, que es el integrado acá.
+`fal.ai` queda en Configuración para futuros modelos o integraciones, pero ahora mismo no hay un modelo activo que lo use.
 
-## API keys (Configuración → API Keys)
+## API keys
 
-- **Gemini**: https://aistudio.google.com/apikey — usada también por el traductor ES↔EN de la caja de prompts.
-- **BytePlus ModelArk (Ark)**: consola de BytePlus → ModelArk → API keys. Verificá en tu consola el ID exacto del modelo Seedream (p. ej. `seedream-5-0-lite-250xxx`) y pegalo en Configuración → Avanzado.
-- **fal.ai**: https://fal.ai/dashboard/keys
-- **ElevenLabs**: https://elevenlabs.io → perfil → API keys.
-- **OpenAI**: https://platform.openai.com/api-keys — solo se usa para el botón "Actualizar precios con OpenAI" (rastrea la web con `web_search` y ajusta las tarifas).
+- Gemini: para la familia Nano Banana.
+- Google Cloud Translation: para traducir prompts ES ↔ EN desde la caja.
+- BytePlus ModelArk: para Seedream.
+- fal.ai: reservado para futuros usos.
+- ElevenLabs: para voces.
+- OpenAI: solo para actualizar precios estimados con búsqueda web.
 
 ## Qué hace
 
-- **Crear**: caja de prompt con switch Imagen/Audio, traducción ES→EN / EN→ES en la propia caja, proporción/resolución/referencias según lo que tolere cada modelo, lotes de hasta ×4, estimación de costo junto al botón.
-- **Referencias**: subí imágenes (quedan en Assets y se reutilizan), o usá cualquier imagen generada, subida o foto de personaje.
-- **Historial**: regenerar (mismo envío exacto), editar envío (carga todo en la caja), usar un resultado como referencia.
-- **Prompts**: archivá los que uses seguido ("Guardar") y reutilizalos ("Prompts").
-- **Personajes**: nombre, descripción, fotos y voz de ElevenLabs. Al **anclar** uno, sus fotos entran como referencia en imágenes y su voz se usa en audio.
-- **Audio**: Eleven v3 con paleta de expresiones; los `[corchetes]` se pintan en rosa dentro de la caja para distinguirlos de la voz.
-- **Consumo**: cada generación registra su costo estimado; ves el mes actual, el total histórico, el desglose por herramienta y las últimas operaciones. Las tarifas se editan a mano o se actualizan con OpenAI. *Es una estimación, no la factura oficial.*
+- Crear imágenes con modelo, proporción, resolución, referencias y lotes.
+- Mantener una cola de generaciones: puedes seguir escribiendo mientras otras generaciones corren.
+- Pegar imágenes desde el portapapeles con Ctrl+V en la ventana Crear para añadirlas como referencias.
+- Generar audio con Eleven v3 y expresiones/emociones personalizadas.
+- Guardar prompts por categoría, reutilizarlos y administrarlos desde su propia sección.
+- Crear personajes con fotos, voz, variantes/outfits y assets asociados.
+- Exportar/importar personajes en ZIP para moverlos entre ordenadores.
+- Convertir una imagen generada en personaje.
+- Ver información de cada asset: prompt, modelo, configuración, proporción, resolución, lote, referencias, coste estimado y personaje asociado.
+- Navegar assets y lotes con flechas izquierda/derecha.
+- Usar Poser para cargar modelos XPS/XNALara, ajustar huesos, guardar poses y capturar referencias de pose.
+- Consultar consumo estimado por mes/modelo y editar tarifas.
 
 ## Dónde queda todo
 
-- `data/config.json` — keys y rutas (solo en tu máquina).
-- `data/history.json`, `data/prompts.json`, `data/characters.json`, `data/ledger.json`, `data/pricing.json`.
-- `assets/generated/`, `assets/uploads/`, `assets/audio/` — configurables desde la app (pueden ser rutas absolutas).
+- `data/config.json`: configuración local, keys y clave de acceso.
+- `data/history.json`: historial.
+- `data/prompts.json`: biblioteca de prompts.
+- `data/characters.json` y `data/characters/`: personajes y fotos.
+- `data/poser/`: capturas y miniaturas de poses.
+- `assets/generated/`: imágenes generadas.
+- `assets/uploads/`: imágenes subidas.
+- `assets/audio/`: audios generados.
+
+Estos datos están ignorados por Git para evitar subir claves o material privado.

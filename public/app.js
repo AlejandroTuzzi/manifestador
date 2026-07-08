@@ -31,6 +31,7 @@ const state = {
   editingCharId: null,
   pendingCharacterAsset: null,
   variantEditor: null,
+  promptEditor: null,
   pendingAssociationKey: null,
   lightboxKeys: [],
   lightboxIndex: 0,
@@ -792,16 +793,7 @@ $('#btnClearHistory').addEventListener('click', async () => {
 $('#btnSavePrompt').addEventListener('click', async () => {
   const text = promptBox.value.trim();
   if (!text) return toast('La caja está vacía', 'err');
-  const title = window.prompt('Nombre para este prompt:', text.slice(0, 40));
-  if (title === null) return;
-  const categories = [...new Set(state.prompts.map((p) => p.category || 'General'))];
-  const category = window.prompt(`Categoría (${categories.join(', ') || 'General'}):`, 'General');
-  if (category === null) return;
-  const item = await api('/api/prompts', { method: 'POST', body: { title, text, mode: state.mode, category } });
-  state.prompts.unshift(item);
-  renderPromptsPanel();
-  $('#promptsPanel').hidden = false;
-  toast('Prompt archivado');
+  openPromptEditor({ initialText: text, initialMode: state.mode, source: 'quick' });
 });
 
 $('#btnPrompts').addEventListener('click', () => {
@@ -962,6 +954,32 @@ async function uploadFiles(files, asRefs) {
   refreshAssets();
 }
 
+function isCreateViewActive() {
+  return $('#view-create')?.classList.contains('active');
+}
+
+document.addEventListener('paste', async (e) => {
+  if (!isCreateViewActive() || state.mode !== 'image') return;
+  if (!e.clipboardData?.items?.length) return;
+  const files = [...e.clipboardData.items]
+    .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    .map((item, index) => {
+      const file = item.getAsFile();
+      if (!file) return null;
+      const ext = (file.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      return new File([file], file.name || `clipboard-${Date.now()}-${index + 1}.${ext}`, { type: file.type });
+    })
+    .filter(Boolean);
+  if (!files.length) return;
+  e.preventDefault();
+  try {
+    await uploadFiles(files, true);
+    toast(`${files.length} imagen${files.length === 1 ? '' : 'es'} pegada${files.length === 1 ? '' : 's'} como referencia`);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+});
+
 // ---------------------------------------------------------------------------
 // assets
 // ---------------------------------------------------------------------------
@@ -1039,6 +1057,59 @@ function usePrompt(pr) {
   promptBox.focus();
 }
 
+function promptCategories() {
+  return [...new Set(state.prompts.map((p) => p.category || 'General'))].sort((a, b) => a.localeCompare(b));
+}
+
+function openPromptEditor({ prompt = null, initialText = '', initialMode = state.mode, source = 'library' } = {}) {
+  state.promptEditor = { id: prompt?.id || null, source };
+  $('#promptEditorTitle').textContent = prompt ? 'Editar prompt' : 'Nuevo prompt';
+  $('#promptEditorName').value = prompt?.title || (initialText ? initialText.slice(0, 60) : '');
+  $('#promptEditorCategory').value = prompt?.category || 'General';
+  $('#promptEditorMode').value = prompt?.mode || (initialMode === 'audio' ? 'audio' : 'image');
+  $('#promptEditorText').value = prompt?.text || initialText || '';
+  $('#promptEditorCategories').innerHTML = promptCategories().map((c) => `<option value="${esc(c)}">`).join('');
+  $('#promptEditorModal').hidden = false;
+  setTimeout(() => $('#promptEditorName').focus(), 0);
+}
+
+function closePromptEditor() {
+  $('#promptEditorModal').hidden = true;
+  state.promptEditor = null;
+}
+
+$('#promptEditorClose').addEventListener('click', closePromptEditor);
+$('#promptEditorCancel').addEventListener('click', closePromptEditor);
+$('#promptEditorModal').addEventListener('click', (e) => { if (e.target.id === 'promptEditorModal') closePromptEditor(); });
+$('#promptEditorForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const editor = state.promptEditor || {};
+  const body = {
+    title: $('#promptEditorName').value.trim(),
+    category: $('#promptEditorCategory').value.trim() || 'General',
+    mode: $('#promptEditorMode').value === 'audio' ? 'audio' : 'image',
+    text: $('#promptEditorText').value.trim()
+  };
+  if (!body.title || !body.text) return;
+  try {
+    if (editor.id) {
+      const updated = await api(`/api/prompts/${editor.id}`, { method: 'PUT', body });
+      state.prompts[state.prompts.findIndex((p) => p.id === editor.id)] = updated;
+      toast('Prompt actualizado');
+    } else {
+      const item = await api('/api/prompts', { method: 'POST', body });
+      state.prompts.unshift(item);
+      if (editor.source === 'quick') $('#promptsPanel').hidden = false;
+      toast('Prompt archivado');
+    }
+    closePromptEditor();
+    renderPromptLibrary();
+    renderPromptsPanel();
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+});
+
 function renderPromptLibrary() {
   const library = $('#promptLibrary');
   if (!library) return;
@@ -1059,14 +1130,7 @@ function renderPromptLibrary() {
   library.querySelectorAll('[data-prompt]').forEach((card) => {
     const pr = state.prompts.find((p) => p.id === card.dataset.prompt);
     card.querySelector('[data-pact="use"]').addEventListener('click', () => usePrompt(pr));
-    card.querySelector('[data-pact="edit"]').addEventListener('click', async () => {
-      const title = prompt('Título:', pr.title); if (title === null) return;
-      const category = prompt('Categoría:', pr.category || 'General'); if (category === null) return;
-      const text = prompt('Prompt:', pr.text); if (text === null) return;
-      const updated = await api(`/api/prompts/${pr.id}`, { method: 'PUT', body: { title, category, text, mode: pr.mode } });
-      state.prompts[state.prompts.findIndex((p) => p.id === pr.id)] = updated;
-      renderPromptLibrary(); renderPromptsPanel();
-    });
+    card.querySelector('[data-pact="edit"]').addEventListener('click', () => openPromptEditor({ prompt: pr }));
     card.querySelector('[data-pact="delete"]').addEventListener('click', async () => {
       if (!confirm(`¿Borrar “${pr.title}”?`)) return;
       await api(`/api/prompts/${pr.id}`, { method: 'DELETE' });
@@ -1078,14 +1142,7 @@ function renderPromptLibrary() {
 
 $('#promptSearch').addEventListener('input', renderPromptLibrary);
 $('#promptCategoryFilter').addEventListener('change', renderPromptLibrary);
-$('#btnNewPrompt').addEventListener('click', async () => {
-  const title = prompt('Título del prompt:'); if (!title) return;
-  const category = prompt('Categoría:', 'General'); if (category === null) return;
-  const text = prompt('Texto del prompt:'); if (!text) return;
-  const mode = confirm('Aceptar = imagen · Cancelar = audio') ? 'image' : 'audio';
-  const item = await api('/api/prompts', { method: 'POST', body: { title, category, text, mode } });
-  state.prompts.unshift(item); renderPromptLibrary(); renderPromptsPanel();
-});
+$('#btnNewPrompt').addEventListener('click', () => openPromptEditor({ initialMode: state.mode }));
 
 function groupAssetSessions(items) {
   const groups = [];
@@ -1287,6 +1344,7 @@ document.addEventListener('keydown', (e) => {
     $('#lightbox').hidden = true; $('#pickerModal').hidden = true; $('#charModal').hidden = true;
     $('#characterGalleryModal').hidden = true; $('#variantEditorModal').hidden = true; $('#associateAssetModal').hidden = true;
     $('#assetInfoModal').hidden = true;
+    $('#promptEditorModal').hidden = true; state.promptEditor = null;
   }
 });
 

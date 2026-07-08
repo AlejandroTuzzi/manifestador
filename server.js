@@ -74,15 +74,15 @@ async function updateJson(file, fallback, updater) {
 
 async function getConfig() {
   const cfg = await readJson('config.json', {});
+  const savedKeys = cfg.keys || {};
+  const savedEndpoints = cfg.endpoints || {};
   const merged = {
     ...DEFAULT_CONFIG,
     ...cfg,
-    keys: { ...DEFAULT_CONFIG.keys, ...(cfg.keys || {}) },
+    keys: Object.fromEntries(Object.keys(DEFAULT_CONFIG.keys).map((key) => [key, savedKeys[key] || ''])),
     paths: { ...DEFAULT_CONFIG.paths, ...(cfg.paths || {}) },
-    endpoints: { ...DEFAULT_CONFIG.endpoints, ...(cfg.endpoints || {}) }
+    endpoints: Object.fromEntries(Object.keys(DEFAULT_CONFIG.endpoints).map((key) => [key, savedEndpoints[key] || DEFAULT_CONFIG.endpoints[key]]))
   };
-  delete merged.keys.dashscope;
-  delete merged.endpoints.dashscope;
   return merged;
 }
 
