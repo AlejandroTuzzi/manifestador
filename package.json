@@ -1,0 +1,13 @@
+{
+  "name": "manifestador",
+  "version": "0.1.0",
+  "description": "Manifestador — generador local de imágenes y audio con APIs (Nano Banana, Seedream y ElevenLabs)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

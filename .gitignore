@@ -1,0 +1,20 @@
+# Configuración y datos locales (incluyen credenciales y actividad)
+data/*.json
+!data/.gitkeep
+
+# Archivos generados o subidos
+assets/**
+!assets/.gitkeep
+!assets/generated/.gitkeep
+!assets/uploads/.gitkeep
+!assets/audio/.gitkeep
+
+# Entorno local
+.env
+.env.*
+!.env.example
+node_modules/
+npm-debug.log*
+.DS_Store
+Thumbs.db
+

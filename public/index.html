@@ -1,0 +1,334 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manifestador</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f472b6' stroke-width='1.8'%3E%3Cpath d='M12 3 L14 10 L21 12 L14 14 L12 21 L10 14 L3 12 L10 10 Z'/%3E%3C/svg%3E">
+
+<!-- sprite de iconos de línea -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3 L14 10 L21 12 L14 14 L12 21 L10 14 L3 12 L10 10 Z"/></symbol>
+    <symbol id="i-wand" viewBox="0 0 24 24"><path d="M4 20 L14 10"/><path d="M16 4v4M14 6h4M20 12v4M18 14h4M8 3v3M6.5 4.5h3"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4M8 22h8"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/></symbol>
+    <symbol id="i-dollar" viewBox="0 0 24 24"><path d="M12 2v20"/><path d="M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M19.1 4.9l-2.2 2.2M7.1 16.9l-2.2 2.2"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.5 15"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M17 3a2.83 2.83 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 3h6v7l3 6H6l3-6V3z"/><path d="M12 16v6M7 3h10"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 3l14 9-14 9V3z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 4v16M15 4v16"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+  </defs>
+</svg>
+
+<div id="app">
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="logo-mark"><svg class="ic ic-lg"><use href="#i-spark"/></svg></div>
+      <div>
+        <div class="logo-title">Manifestador</div>
+        <div class="logo-sub">imagen · voz</div>
+      </div>
+    </div>
+
+    <nav>
+      <button class="nav-btn active" data-view="create"><svg class="ic"><use href="#i-wand"/></svg> Crear</button>
+      <button class="nav-btn" data-view="assets"><svg class="ic"><use href="#i-grid"/></svg> Assets</button>
+      <button class="nav-btn" data-view="characters"><svg class="ic"><use href="#i-user"/></svg> Personajes</button>
+      <button class="nav-btn" data-view="costs"><svg class="ic"><use href="#i-dollar"/></svg> Consumo</button>
+      <button class="nav-btn" data-view="config"><svg class="ic"><use href="#i-gear"/></svg> Configuración</button>
+    </nav>
+
+    <div id="pinnedCard" class="pinned-card" hidden>
+      <div class="pinned-head">
+        <span class="pinned-label">Personaje anclado</span>
+        <button id="unpinBtn" class="icon-btn" title="Desanclar"><svg class="ic"><use href="#i-x"/></svg></button>
+      </div>
+      <div id="pinnedInfo" class="pinned-info"></div>
+    </div>
+
+    <div class="sidebar-footer">local · sin nubes de más</div>
+  </aside>
+
+  <main>
+    <!-- ==================== CREAR ==================== -->
+    <section id="view-create" class="view active">
+      <div class="create-top">
+        <div class="mode-switch">
+          <button id="modeImage" class="mode-btn active"><svg class="ic"><use href="#i-image"/></svg> Imagen</button>
+          <button id="modeAudio" class="mode-btn"><svg class="ic"><use href="#i-mic"/></svg> Audio</button>
+        </div>
+        <div id="pinnedHint" class="pinned-hint" hidden></div>
+      </div>
+
+      <div class="prompt-card">
+        <div class="editor-wrap">
+          <div id="highlighter" class="highlighter" aria-hidden="true"></div>
+          <textarea id="promptBox" placeholder="Escribí lo que querés manifestar…" spellcheck="false"></textarea>
+        </div>
+
+        <div id="tagPalette" class="tag-palette" hidden></div>
+
+        <div class="prompt-tools">
+          <div class="tools-left">
+            <button id="btnToEn" class="tool-btn" title="Traducir el prompt al inglés">ES → EN</button>
+            <button id="btnToEs" class="tool-btn" title="Traducir el prompt al castellano">EN → ES</button>
+            <span class="tool-sep"></span>
+            <button id="btnSavePrompt" class="tool-btn" title="Archivar este prompt"><svg class="ic"><use href="#i-save"/></svg> Guardar</button>
+            <button id="btnPrompts" class="tool-btn" title="Prompts archivados"><svg class="ic"><use href="#i-book"/></svg> Prompts</button>
+          </div>
+          <div class="gen-side">
+            <span id="costEstimate" class="cost-estimate" title="Costo estimado de esta generación"></span>
+            <button id="btnGenerate" class="generate-btn"><svg class="ic"><use href="#i-spark"/></svg> Manifestar</button>
+          </div>
+        </div>
+
+        <div id="promptsPanel" class="prompts-panel" hidden></div>
+      </div>
+
+      <!-- Controles de imagen -->
+      <div id="imageControls" class="controls-card">
+        <div class="control-row">
+          <label>Modelo</label>
+          <div id="modelChips" class="chips"></div>
+        </div>
+        <div class="control-row">
+          <label>Proporción</label>
+          <div id="arChips" class="chips"></div>
+        </div>
+        <div class="control-row">
+          <label>Resolución</label>
+          <div id="resChips" class="chips"></div>
+        </div>
+        <div class="control-row">
+          <label>Lote</label>
+          <div id="batchChips" class="chips"></div>
+          <span class="hint">generaciones en paralelo</span>
+        </div>
+        <div class="control-row refs-row">
+          <label>Referencias <span id="refsCount" class="refs-count"></span></label>
+          <div id="refsStrip" class="refs-strip"></div>
+        </div>
+        <div id="modelNote" class="model-note"></div>
+      </div>
+
+      <!-- Controles de audio -->
+      <div id="audioControls" class="controls-card" hidden>
+        <div class="control-row">
+          <label>Voz</label>
+          <select id="voiceSelect" class="select"></select>
+          <button id="btnReloadVoices" class="tool-btn" title="Recargar voces de ElevenLabs"><svg class="ic"><use href="#i-refresh"/></svg></button>
+          <span id="voiceHint" class="hint"></span>
+        </div>
+        <div class="control-row">
+          <label>Modelo</label>
+          <span class="static-value">Eleven v3 — usá <b>[corchetes]</b> para expresiones: se pintan en la caja</span>
+        </div>
+      </div>
+
+      <!-- Resultados -->
+      <div class="results">
+        <div id="bigView" class="big-view" hidden></div>
+        <div class="history-head">
+          <h3>Historial</h3>
+          <button id="btnClearHistory" class="mini-btn danger"><svg class="ic"><use href="#i-trash"/></svg> Borrar todo</button>
+        </div>
+        <div id="historyList" class="history-list"></div>
+      </div>
+    </section>
+
+    <!-- ==================== ASSETS ==================== -->
+    <section id="view-assets" class="view">
+      <h2>Assets</h2>
+      <div class="tabs">
+        <button class="tab active" data-zone="generated">Generadas</button>
+        <button class="tab" data-zone="uploads">Subidas</button>
+        <button class="tab" data-zone="audio">Audio</button>
+      </div>
+      <div class="assets-toolbar">
+        <button id="btnUploadAsset" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> Subir imagen</button>
+        <button id="btnSelectVisible" class="tool-btn">Seleccionar visibles</button>
+        <button id="btnDeleteSelected" class="tool-btn danger" disabled><svg class="ic"><use href="#i-trash"/></svg> Borrar <span id="selectedCount">0</span></button>
+        <span id="assetsSummary" class="hint"></span>
+      </div>
+      <div class="asset-filters">
+        <div class="filter-presets">
+          <button class="mini-btn" data-range="all">Todo</button>
+          <button class="mini-btn" data-range="today">Hoy</button>
+          <button class="mini-btn" data-range="morning">Esta mañana</button>
+          <button class="mini-btn" data-range="afternoon">Esta tarde</button>
+        </div>
+        <label>Desde <input id="assetFrom" type="datetime-local"></label>
+        <label>Hasta <input id="assetTo" type="datetime-local"></label>
+        <button id="btnApplyAssetRange" class="mini-btn">Aplicar rango</button>
+      </div>
+      <div id="assetsGrid" class="assets-grid"></div>
+    </section>
+
+    <!-- ==================== PERSONAJES ==================== -->
+    <section id="view-characters" class="view">
+      <div class="chars-head">
+        <h2>Personajes</h2>
+        <button id="btnNewChar" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Nuevo personaje</button>
+      </div>
+      <div id="charsGrid" class="chars-grid"></div>
+    </section>
+
+    <!-- ==================== CONSUMO ==================== -->
+    <section id="view-costs" class="view">
+      <div class="chars-head">
+        <h2>Consumo</h2>
+        <button id="btnRefreshPricing" class="generate-btn small"><svg class="ic"><use href="#i-search"/></svg> Actualizar precios con OpenAI</button>
+      </div>
+      <div id="costsSummary" class="costs-summary"></div>
+      <div class="costs-grid">
+        <div class="costs-panel">
+          <h3>Este mes por herramienta</h3>
+          <div id="costsByModel"></div>
+        </div>
+        <div class="costs-panel">
+          <h3>Histórico mensual</h3>
+          <div id="costsByMonth"></div>
+        </div>
+      </div>
+      <div class="costs-panel">
+        <h3>Tarifas vigentes <span id="pricingUpdated" class="hint"></span></h3>
+        <div id="pricingTable"></div>
+        <button id="btnSavePricing" class="tool-btn" style="margin-top:10px"><svg class="ic"><use href="#i-save"/></svg> Guardar tarifas editadas</button>
+      </div>
+      <div class="costs-panel">
+        <h3>Últimas operaciones</h3>
+        <div id="costsLedger"></div>
+      </div>
+    </section>
+
+    <!-- ==================== CONFIG ==================== -->
+    <section id="view-config" class="view">
+      <h2>Configuración</h2>
+      <form id="configForm" class="config-form">
+        <h3>API Keys</h3>
+        <div class="cfg-grid">
+          <label>Gemini (Google AI Studio)
+            <span class="key-row"><input type="password" name="key_gemini" placeholder="AIza…"><button type="button" class="tool-btn test-btn" data-service="gemini">Probar</button></span>
+            <span class="test-result" data-result="gemini"></span>
+          </label>
+          <label>BytePlus ModelArk (Seedream)
+            <span class="key-row"><input type="password" name="key_ark" placeholder="key de Ark"><button type="button" class="tool-btn test-btn" data-service="ark">Probar</button></span>
+            <span class="test-result" data-result="ark"></span>
+          </label>
+          <label>fal.ai
+            <span class="key-row"><input type="password" name="key_fal" placeholder="fal-…"><button type="button" class="tool-btn test-btn" data-service="fal">Probar</button></span>
+            <span class="test-result" data-result="fal"></span>
+          </label>
+          <label>ElevenLabs
+            <span class="key-row"><input type="password" name="key_elevenlabs" placeholder="xi-…"><button type="button" class="tool-btn test-btn" data-service="elevenlabs">Probar</button></span>
+            <span class="test-result" data-result="elevenlabs"></span>
+          </label>
+          <label>OpenAI (actualiza precios)
+            <span class="key-row"><input type="password" name="key_openai" placeholder="sk-…"><button type="button" class="tool-btn test-btn" data-service="openai">Probar</button></span>
+            <span class="test-result" data-result="openai"></span>
+          </label>
+        </div>
+        <h3>Carpetas</h3>
+        <div class="cfg-grid">
+          <label>Imágenes generadas <input type="text" name="path_generated"></label>
+          <label>Imágenes subidas <input type="text" name="path_uploads"></label>
+          <label>Audio generado <input type="text" name="path_audio"></label>
+        </div>
+        <p class="hint">Rutas relativas a la carpeta de la app o absolutas (ej: <code>D:\fotos\manifestador</code>).</p>
+        <h3>Emociones y expresiones de audio</h3>
+        <div class="audio-tags-manager">
+          <p class="hint">Las expresiones nativas vienen con ElevenLabs. Las tuyas aparecen después y podés borrarlas con ×.</p>
+          <div id="configAudioTags" class="config-audio-tags"></div>
+          <div class="audio-tag-add">
+            <input id="newAudioTag" type="text" maxlength="60" placeholder="ej: con ternura">
+            <button id="btnAddAudioTag" type="button" class="tool-btn">Añadir expresión</button>
+          </div>
+        </div>
+        <h3>Acceso</h3>
+        <div class="cfg-grid">
+          <label>Nueva clave de acceso
+            <input type="password" name="accessPassword" minlength="6" autocomplete="new-password" placeholder="Dejar vacío para conservar la actual">
+          </label>
+          <label>Repetir nueva clave
+            <input type="password" name="accessPasswordConfirm" minlength="6" autocomplete="new-password">
+          </label>
+        </div>
+        <p id="accessStatus" class="hint"></p>
+        <h3>Avanzado</h3>
+        <div class="cfg-grid">
+          <label>ID de modelo Seedream <input type="text" name="seedreamModelId"></label>
+          <label>Endpoint Ark <input type="text" name="endpoint_ark"></label>
+          <label>Modelo de OpenAI (precios) <input type="text" name="openaiModel" placeholder="gpt-5-mini"></label>
+        </div>
+        <button type="submit" class="generate-btn">Guardar configuración</button>
+      </form>
+    </section>
+  </main>
+</div>
+
+<div id="loginModal" class="modal login-modal" hidden>
+  <form id="loginForm" class="modal-box login-box">
+    <div class="login-mark"><svg class="ic ic-lg"><use href="#i-spark"/></svg></div>
+    <h2>Manifestador</h2>
+    <p>Introduce tu clave de acceso</p>
+    <input id="loginPassword" type="password" autocomplete="current-password" autofocus required>
+    <button class="generate-btn" type="submit">Entrar</button>
+    <div id="loginError" class="test-result err"></div>
+  </form>
+</div>
+
+<!-- Selector de referencias -->
+<div id="pickerModal" class="modal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="pickerTitle">Elegir imagen de referencia</h3>
+      <button class="icon-btn" id="pickerClose"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="tabs" id="pickerTabs">
+      <button class="tab active" data-src="upload">Subir</button>
+      <button class="tab" data-src="uploads">Subidas</button>
+      <button class="tab" data-src="generated">Generadas</button>
+      <button class="tab" data-src="characters">Personajes</button>
+    </div>
+    <div id="pickerBody" class="picker-body"></div>
+  </div>
+</div>
+
+<!-- Visor grande -->
+<div id="lightbox" class="modal" hidden>
+  <div class="lightbox-box">
+    <button class="icon-btn lb-close" id="lbClose"><svg class="ic"><use href="#i-x"/></svg></button>
+    <img id="lbImg" alt="">
+    <div id="lbActions" class="lb-actions"></div>
+  </div>
+</div>
+
+<!-- Modal de personaje -->
+<div id="charModal" class="modal" hidden>
+  <div class="modal-head-wrap modal-box">
+    <div class="modal-head">
+      <h3 id="charModalTitle">Personaje</h3>
+      <button class="icon-btn" id="charModalClose"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div id="charModalBody" class="char-modal-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<input type="file" id="fileInput" accept="image/*" multiple hidden>
+
+<script src="app.js"></script>
