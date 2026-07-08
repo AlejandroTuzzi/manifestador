@@ -367,9 +367,14 @@ function renderBoneList() {
     return;
   }
   const q = P.boneSearch.toLowerCase();
+  const onlyTouched = $('#poserOnlyTouched').checked;
   const rows = P.boneObjs
     .map((bone, i) => ({ bone, i }))
-    .filter(({ bone }) => !q || bone.name.toLowerCase().includes(q));
+    .filter(({ bone, i }) => (!q || bone.name.toLowerCase().includes(q)) && (!onlyTouched || isBoneTouched(i)));
+  if (onlyTouched && !rows.length) {
+    list.innerHTML = '<div class="hint" style="padding:8px">Todavía no modificaste ningún hueso.</div>';
+    return;
+  }
   list.innerHTML = rows.map(({ bone, i }) =>
     `<button class="poser-bone${i === P.selectedBone ? ' active' : ''}" data-bone="${i}">${isBoneTouched(i) ? '<span class="poser-touched">●</span> ' : ''}${B.esc(bone.name)}</button>`
   ).join('') || '<div class="hint" style="padding:8px">Ningún hueso coincide.</div>';
@@ -603,6 +608,8 @@ $('#poserBoneSearch').addEventListener('input', (e) => {
 
 // re-tildar "ver puntos" también saca el modo "solo el activo"
 $('#poserShowBones').addEventListener('change', () => { P.soloDots = false; });
+
+$('#poserOnlyTouched').addEventListener('change', renderBoneList);
 
 $('#poserResetPose').addEventListener('click', resetPose);
 $('#poserBoneReset').addEventListener('click', () => {
