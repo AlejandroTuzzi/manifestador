@@ -146,6 +146,7 @@
 
       <!-- Resultados -->
       <div class="results">
+        <div id="generationQueue" class="generation-queue" hidden></div>
         <div id="bigView" class="big-view" hidden></div>
         <div class="history-head">
           <h3>Historial</h3>
@@ -297,6 +298,27 @@
       </form>
     </section>
   </main>
+</div>
+
+<!-- Crear o editar variante -->
+<div id="variantEditorModal" class="modal" hidden>
+  <form id="variantEditorForm" class="modal-box form-modal-box">
+    <div class="modal-head"><div><h3 id="variantEditorTitle">Nueva variante</h3><p class="hint">Definí el outfit o aspecto alternativo</p></div><button type="button" class="icon-btn" id="variantEditorClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <label>Nombre<input id="variantEditorName" type="text" maxlength="80" placeholder="Ej: Outfit de gala" required></label>
+    <label>Descripción<textarea id="variantEditorDescription" placeholder="Ropa, accesorios, peinado y detalles que distinguen esta variante"></textarea></label>
+    <div class="form-modal-actions"><button type="button" class="mini-btn" id="variantEditorCancel">Cancelar</button><button type="submit" class="generate-btn small">Guardar variante</button></div>
+  </form>
+</div>
+
+<!-- Asociar asset a personaje -->
+<div id="associateAssetModal" class="modal" hidden>
+  <form id="associateAssetForm" class="modal-box form-modal-box">
+    <div class="modal-head"><div><h3>Asociar asset</h3><p class="hint">Elegí el personaje y su versión</p></div><button type="button" class="icon-btn" id="associateAssetClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div id="associateAssetPreview" class="associate-preview"></div>
+    <label>Personaje<select id="associateCharacter" class="select" required></select></label>
+    <label>Original o variante<select id="associateVariant" class="select"></select></label>
+    <div class="form-modal-actions"><button type="button" class="mini-btn" id="associateAssetCancel">Cancelar</button><button type="submit" class="generate-btn small">Asociar</button></div>
+  </form>
 </div>
 
 <div id="loginModal" class="modal login-modal" hidden>

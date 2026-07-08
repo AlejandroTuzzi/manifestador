@@ -30,6 +30,10 @@ const state = {
   pickerTab: 'upload',
   editingCharId: null,
   pendingCharacterAsset: null,
+  variantEditor: null,
+  pendingAssociationKey: null,
+  generationJobs: [],
+  activeGenerations: 0,
   pinnedId: localStorage.getItem('pinnedCharacterId') || '',
   characterVariantId: localStorage.getItem('pinnedCharacterVariantId') || ''
 };
@@ -523,47 +527,48 @@ $('#unpinBtn').addEventListener('click', () => setPinned(''));
 // generación
 // ---------------------------------------------------------------------------
 
-async function generate() {
+function generate() {
   const prompt = promptBox.value.trim();
   if (!prompt) return toast('Escribí un prompt primero', 'err');
-  const btn = $('#btnGenerate');
-  btn.disabled = true;
+  const pc = pinnedChar();
+  const voiceId = state.voiceId || pc?.voiceId;
+  const voice = (state.voices || []).find((v) => v.id === voiceId);
+  const isImage = state.mode === 'image';
+  const model = currentModel();
+  const job = {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    status: 'queued', prompt, createdAt: Date.now(),
+    label: isImage ? `${model.name} · ${state.resolution} · ×${state.batch}` : `Eleven v3 · ${voice?.name || pc?.voiceName || 'voz'}`,
+    path: isImage ? '/api/generate/image' : '/api/generate/audio',
+    body: isImage ? {
+      modelId: state.modelId, prompt, aspectRatio: state.aspectRatio,
+      resolution: state.resolution, batch: state.batch,
+      refs: state.refs.map((r) => r.key), characterId: state.pinnedId || null,
+      characterVariantId: state.characterVariantId || null
+    } : { text: prompt, voiceId, voiceName: voice?.name || pc?.voiceName || '', characterId: state.pinnedId || null }
+  };
+  state.generationJobs.unshift(job);
+  renderGenerationQueue();
+  pumpGenerationQueue();
+  toast('Generación añadida a la cola');
+}
 
-  const bv = $('#bigView');
-  bv.hidden = false;
-  bv.innerHTML = `<div class="spinner"></div><div class="gen-status">Manifestando${state.mode === 'image' && state.batch > 1 ? ` ×${state.batch}` : ''}… puede tardar un rato largo en 2K/4K</div>`;
-  bv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+function pumpGenerationQueue() {
+  while (state.activeGenerations < 3) {
+    const job = [...state.generationJobs].reverse().find((item) => item.status === 'queued');
+    if (!job) break;
+    runGenerationJob(job);
+  }
+}
 
+async function runGenerationJob(job) {
+  job.status = 'running';
+  job.startedAt = Date.now();
+  state.activeGenerations += 1;
+  renderGenerationQueue();
   try {
-    let entry;
-    if (state.mode === 'image') {
-      entry = await api('/api/generate/image', {
-        method: 'POST',
-        body: {
-          modelId: state.modelId,
-          prompt,
-          aspectRatio: state.aspectRatio,
-          resolution: state.resolution,
-          batch: state.batch,
-          refs: state.refs.map((r) => r.key),
-          characterId: state.pinnedId || null,
-          characterVariantId: state.characterVariantId || null
-        }
-      });
-    } else {
-      const pc = pinnedChar();
-      const voiceId = state.voiceId || pc?.voiceId;
-      const voice = (state.voices || []).find((v) => v.id === voiceId);
-      entry = await api('/api/generate/audio', {
-        method: 'POST',
-        body: {
-          text: prompt,
-          voiceId,
-          voiceName: voice?.name || pc?.voiceName || '',
-          characterId: state.pinnedId || null
-        }
-      });
-    }
+    const entry = await api(job.path, { method: 'POST', body: job.body });
+    job.status = 'done'; job.entry = entry; job.finishedAt = Date.now();
     state.history.unshift(entry);
     if (entry.type === 'image' && entry.characterId) {
       for (const key of entry.outputs) state.assetLinks.unshift({ key, characterId: entry.characterId, variantId: entry.characterVariantId || null, ts: entry.ts });
@@ -574,11 +579,32 @@ async function generate() {
     if (entry.errors?.length) toast(`Listo, pero ${entry.errors.length} del lote fallaron: ${entry.errors[0]}`, 'err');
     else toast(`Manifestado${costTxt}`);
   } catch (e) {
-    bv.innerHTML = `<div class="gen-status" style="color:#fda4af;padding:18px 6px">${esc(e.message)}</div>`;
+    job.status = 'error'; job.error = e.message; job.finishedAt = Date.now();
     toast(e.message, 'err');
   } finally {
-    btn.disabled = false;
+    state.activeGenerations -= 1;
+    renderGenerationQueue();
+    pumpGenerationQueue();
   }
+}
+
+function renderGenerationQueue() {
+  const box = $('#generationQueue');
+  box.hidden = !state.generationJobs.length;
+  if (box.hidden) return;
+  const active = state.generationJobs.filter((j) => j.status === 'running').length;
+  const queued = state.generationJobs.filter((j) => j.status === 'queued').length;
+  box.innerHTML = `<div class="generation-queue-head"><span>Cola de generación</span><span>${active} activas · ${queued} esperando</span></div>`
+    + state.generationJobs.slice(0, 12).map((job) => `<div class="generation-job ${job.status}" data-job="${job.id}">
+      <div class="job-status">${job.status === 'queued' ? 'Ⅱ' : job.status === 'running' ? '●' : job.status === 'done' ? '✓' : '!'}</div>
+      <div class="job-main"><div class="job-title">${esc(job.label)}</div><div class="job-prompt ${job.status === 'error' ? 'job-error' : ''}">${esc(job.error || job.prompt)}</div></div>
+      <div class="job-actions">${job.entry ? '<button class="mini-btn" data-job-act="view">Ver</button>' : ''}${['done','error'].includes(job.status) ? '<button class="icon-btn" data-job-act="dismiss">×</button>' : ''}</div>
+    </div>`).join('');
+  box.querySelectorAll('[data-job]').forEach((row) => row.querySelectorAll('[data-job-act]').forEach((button) => button.addEventListener('click', () => {
+    const job = state.generationJobs.find((item) => item.id === row.dataset.job);
+    if (button.dataset.jobAct === 'view' && job?.entry) showEntry(job.entry);
+    if (button.dataset.jobAct === 'dismiss') { state.generationJobs = state.generationJobs.filter((item) => item.id !== row.dataset.job); renderGenerationQueue(); }
+  })));
 }
 
 $('#btnGenerate').addEventListener('click', generate);
@@ -1159,26 +1185,46 @@ function openLightbox(key) {
 
 async function associateAsset(key) {
   if (!state.characters.length) return toast('Primero creá un personaje', 'err');
-  const menu = state.characters.map((c, i) => `${i + 1}. ${c.name}`).join('\n');
-  const picked = Number(prompt(`Asociar a qué personaje?\n\n${menu}`, '1')) - 1;
-  const character = state.characters[picked];
-  if (!character) return;
-  const variants = character.variants || [];
-  let variantId = null;
-  if (variants.length) {
-    const options = ['0. Original', ...variants.map((v, i) => `${i + 1}. ${v.name}`)].join('\n');
-    const variantPick = Number(prompt(`Elegí original o variante:\n\n${options}`, '0'));
-    if (!Number.isInteger(variantPick) || variantPick < 0 || variantPick > variants.length) return;
-    variantId = variantPick ? variants[variantPick - 1].id : null;
-  }
-  const result = await api('/api/asset-links', { method: 'POST', body: { key, characterId: character.id, variantId } });
-  state.assetLinks = result.links;
-  toast(`Asset asociado a ${character.name}${variantId ? ' · ' + variants.find((v) => v.id === variantId).name : ' · Original'}`);
+  state.pendingAssociationKey = key;
+  const select = $('#associateCharacter');
+  select.innerHTML = state.characters.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const existing = state.assetLinks.find((link) => link.key === key);
+  if (existing && state.characters.some((c) => c.id === existing.characterId)) select.value = existing.characterId;
+  renderAssociationVariants(existing?.variantId || '');
+  $('#associateAssetPreview').innerHTML = `<img src="${fileUrl(key)}" alt=""><div><strong>${existing ? 'Reasignar asset' : 'Nuevo vínculo'}</strong><div class="hint">El archivo no se moverá ni duplicará.</div></div>`;
+  $('#associateAssetModal').hidden = false;
 }
+
+function renderAssociationVariants(selected = '') {
+  const character = state.characters.find((c) => c.id === $('#associateCharacter').value);
+  $('#associateVariant').innerHTML = '<option value="">Original</option>' + (character?.variants || []).map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('');
+  $('#associateVariant').value = selected;
+}
+
+$('#associateCharacter').addEventListener('change', () => renderAssociationVariants());
+$('#associateAssetForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const characterId = $('#associateCharacter').value;
+  const variantId = $('#associateVariant').value || null;
+  const result = await api('/api/asset-links', { method: 'POST', body: { key: state.pendingAssociationKey, characterId, variantId } });
+  state.assetLinks = result.links;
+  $('#associateAssetModal').hidden = true;
+  const character = state.characters.find((c) => c.id === characterId);
+  const variant = (character?.variants || []).find((v) => v.id === variantId);
+  toast(`Asset asociado a ${character.name} · ${variant?.name || 'Original'}`);
+  renderCharacters();
+});
+function closeAssociateAsset() { $('#associateAssetModal').hidden = true; state.pendingAssociationKey = null; }
+$('#associateAssetClose').addEventListener('click', closeAssociateAsset);
+$('#associateAssetCancel').addEventListener('click', closeAssociateAsset);
+$('#associateAssetModal').addEventListener('click', (e) => { if (e.target.id === 'associateAssetModal') closeAssociateAsset(); });
 $('#lbClose').addEventListener('click', () => { $('#lightbox').hidden = true; });
 $('#lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox') $('#lightbox').hidden = true; });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { $('#lightbox').hidden = true; $('#pickerModal').hidden = true; $('#charModal').hidden = true; $('#characterGalleryModal').hidden = true; }
+  if (e.key === 'Escape') {
+    $('#lightbox').hidden = true; $('#pickerModal').hidden = true; $('#charModal').hidden = true;
+    $('#characterGalleryModal').hidden = true; $('#variantEditorModal').hidden = true; $('#associateAssetModal').hidden = true;
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -1409,26 +1455,12 @@ function renderCharModal() {
     $('#fileInput').click();
   });
 
-  $('#chAddVariant')?.addEventListener('click', async () => {
-    const name = prompt('Nombre de la variante u outfit:', 'Outfit ' + ((c.variants || []).length + 1));
-    if (!name) return;
-    const description = prompt('Descripción opcional del outfit:', '') ?? '';
-    const updated = await api(`/api/characters/${id}/variants`, { method: 'POST', body: { name, description } });
-    state.characters[state.characters.findIndex((x) => x.id === id)] = updated;
-    renderCharModal(); renderCharacters(); renderCharacterVariantControl();
-  });
+  $('#chAddVariant')?.addEventListener('click', () => openVariantEditor(id));
 
   $$('#charModalBody .variant-item').forEach((item) => {
     const variantId = item.dataset.variant;
     const variant = (c.variants || []).find((v) => v.id === variantId);
-    item.querySelector('[data-vact="rename"]').addEventListener('click', async () => {
-      const name = prompt('Nombre de la variante:', variant.name);
-      if (!name) return;
-      const description = prompt('Descripción:', variant.description || '') ?? variant.description;
-      const updated = await api(`/api/characters/${id}/variants/${variantId}`, { method: 'PUT', body: { name, description } });
-      state.characters[state.characters.findIndex((x) => x.id === id)] = updated;
-      renderCharModal(); renderCharacters(); renderCharacterVariantControl();
-    });
+    item.querySelector('[data-vact="rename"]').addEventListener('click', () => openVariantEditor(id, variantId));
     item.querySelector('[data-vact="delete"]').addEventListener('click', async () => {
       if (!confirm(`¿Borrar la variante “${variant.name}” y sus fotos?`)) return;
       const updated = await api(`/api/characters/${id}/variants/${variantId}`, { method: 'DELETE' });
@@ -1469,6 +1501,35 @@ function renderCharModal() {
     });
   });
 }
+
+function openVariantEditor(characterId, variantId = null) {
+  const character = state.characters.find((c) => c.id === characterId);
+  const variant = (character?.variants || []).find((v) => v.id === variantId);
+  state.variantEditor = { characterId, variantId };
+  $('#variantEditorTitle').textContent = variant ? 'Editar variante' : 'Nueva variante';
+  $('#variantEditorName').value = variant?.name || '';
+  $('#variantEditorDescription').value = variant?.description || '';
+  $('#variantEditorModal').hidden = false;
+  setTimeout(() => $('#variantEditorName').focus(), 0);
+}
+
+function closeVariantEditor() { $('#variantEditorModal').hidden = true; state.variantEditor = null; }
+$('#variantEditorClose').addEventListener('click', closeVariantEditor);
+$('#variantEditorCancel').addEventListener('click', closeVariantEditor);
+$('#variantEditorModal').addEventListener('click', (e) => { if (e.target.id === 'variantEditorModal') closeVariantEditor(); });
+$('#variantEditorForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const { characterId, variantId } = state.variantEditor || {};
+  if (!characterId) return;
+  const body = { name: $('#variantEditorName').value.trim(), description: $('#variantEditorDescription').value.trim() };
+  if (!body.name) return;
+  const path = variantId ? `/api/characters/${characterId}/variants/${variantId}` : `/api/characters/${characterId}/variants`;
+  const updated = await api(path, { method: variantId ? 'PUT' : 'POST', body });
+  state.characters[state.characters.findIndex((x) => x.id === characterId)] = updated;
+  closeVariantEditor();
+  renderCharModal(); renderCharacters(); renderCharacterVariantControl();
+  toast(variantId ? 'Variante actualizada' : 'Variante creada');
+});
 
 // ---------------------------------------------------------------------------
 // consumo y precios

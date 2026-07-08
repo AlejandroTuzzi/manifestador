@@ -53,6 +53,19 @@ async function writeJson(file, value) {
   await fs.writeFile(path.join(DATA_DIR, file), JSON.stringify(value, null, 2), 'utf8');
 }
 
+const jsonLocks = new Map();
+async function updateJson(file, fallback, updater) {
+  const previous = jsonLocks.get(file) || Promise.resolve();
+  const task = previous.then(async () => {
+    const current = await readJson(file, fallback);
+    const next = await updater(current);
+    await writeJson(file, next);
+    return next;
+  });
+  jsonLocks.set(file, task.catch(() => {}));
+  return task;
+}
+
 async function getConfig() {
   const cfg = await readJson('config.json', {});
   const merged = {
@@ -100,22 +113,23 @@ function sessionToken(req) {
 
 // Registro de consumo: una línea por operación cobrada.
 async function recordCost(entry) {
-  const ledger = await readJson('ledger.json', []);
-  ledger.unshift({ ts: Date.now(), ...entry, cost: Number(entry.cost.toFixed(6)) });
-  await writeJson('ledger.json', ledger.slice(0, 20000));
-  return ledger[0];
+  let recorded;
+  await updateJson('ledger.json', [], (ledger) => {
+    recorded = { ts: Date.now(), ...entry, cost: Number(entry.cost.toFixed(6)) };
+    return [recorded, ...ledger].slice(0, 20000);
+  });
+  return recorded;
 }
 
 async function recordAssetMetadata(entry) {
-  const metadata = await readJson('asset-metadata.json', {});
-  for (const key of entry.outputs || []) {
-    metadata[key] = {
+  await updateJson('asset-metadata.json', {}, (metadata) => {
+    for (const key of entry.outputs || []) metadata[key] = {
       prompt: entry.prompt || '', type: entry.type, modelId: entry.modelId,
       modelName: entry.modelName, characterId: entry.characterId || null,
       characterVariantId: entry.characterVariantId || null, ts: entry.ts
     };
-  }
-  await writeJson('asset-metadata.json', metadata);
+    return metadata;
+  });
 }
 
 function monthKey(ts) {
@@ -258,17 +272,14 @@ async function runImageGeneration(req) {
     errors,
     cost: Number(cost.toFixed(6))
   };
-  const history = await readJson('history.json', []);
-  history.unshift(entry);
-  await writeJson('history.json', history.slice(0, 1000));
+  await updateJson('history.json', [], (history) => [entry, ...history].slice(0, 1000));
   await recordAssetMetadata(entry);
   if (entry.characterId) {
-    const links = await readJson('asset-links.json', []);
-    const existing = new Set(links.map((link) => link.key));
-    for (const key of outputs) {
-      if (!existing.has(key)) links.unshift({ key, characterId: entry.characterId, variantId: entry.characterVariantId, ts: Date.now() });
-    }
-    await writeJson('asset-links.json', links.slice(0, 10000));
+    await updateJson('asset-links.json', [], (links) => {
+      const existing = new Set(links.map((link) => link.key));
+      const additions = outputs.filter((key) => !existing.has(key)).map((key) => ({ key, characterId: entry.characterId, variantId: entry.characterVariantId, ts: Date.now() }));
+      return [...additions, ...links].slice(0, 10000);
+    });
   }
   return entry;
 }
@@ -308,9 +319,7 @@ async function runAudioGeneration(req) {
     errors: [],
     cost: Number(cost.toFixed(6))
   };
-  const history = await readJson('history.json', []);
-  history.unshift(entry);
-  await writeJson('history.json', history.slice(0, 1000));
+  await updateJson('history.json', [], (history) => [entry, ...history].slice(0, 1000));
   await recordAssetMetadata(entry);
   return entry;
 }

@@ -420,6 +420,21 @@ h3 { font-size: 15px; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .gen-status { text-align: center; color: var(--muted); font-size: 13px; padding-bottom: 18px; }
+.generation-queue { display: flex; flex-direction: column; gap: 7px; margin-bottom: 16px; }
+.generation-queue-head { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+.generation-job { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 10px; border: 1px solid var(--border-soft); background: var(--panel); padding: 9px 11px; }
+.generation-job.running { border-left: 3px solid var(--pink); }
+.generation-job.done { border-left: 3px solid #86efac; }
+.generation-job.error { border-left: 3px solid #fb7185; }
+.generation-job.queued { border-left: 3px solid var(--violet); }
+.job-status { width: 26px; color: var(--muted); text-align: center; }
+.generation-job.running .job-status { color: var(--pink); animation: pulse 1s ease-in-out infinite alternate; }
+@keyframes pulse { to { opacity: .35; } }
+.job-main { min-width: 0; }
+.job-title { font-size: 12px; font-weight: 700; }
+.job-prompt { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.job-error { color: #fda4af; }
+.job-actions { display: flex; gap: 5px; }
 
 .history-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .history-head h3 { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 1.4px; }
@@ -719,6 +734,14 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
   padding: 18px;
 }
 .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.form-modal-box { max-width: 520px; display: flex; flex-direction: column; gap: 14px; }
+.form-modal-box > label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.form-modal-box input, .form-modal-box textarea { width: 100%; background: rgba(10,5,18,.7); border: 1px solid var(--border); color: var(--text); padding: 11px 12px; font: inherit; }
+.form-modal-box textarea { min-height: 110px; resize: vertical; }
+.form-modal-box input:focus, .form-modal-box textarea:focus { outline: none; border-color: var(--violet); }
+.form-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.associate-preview { display: flex; align-items: center; gap: 12px; padding: 9px; border: 1px solid var(--border-soft); }
+.associate-preview img { width: 72px; height: 72px; object-fit: cover; }
 
 .icon-btn {
   width: 28px; height: 28px;
