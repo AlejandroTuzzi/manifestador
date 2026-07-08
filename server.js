@@ -106,6 +106,18 @@ async function recordCost(entry) {
   return ledger[0];
 }
 
+async function recordAssetMetadata(entry) {
+  const metadata = await readJson('asset-metadata.json', {});
+  for (const key of entry.outputs || []) {
+    metadata[key] = {
+      prompt: entry.prompt || '', type: entry.type, modelId: entry.modelId,
+      modelName: entry.modelName, characterId: entry.characterId || null,
+      characterVariantId: entry.characterVariantId || null, ts: entry.ts
+    };
+  }
+  await writeJson('asset-metadata.json', metadata);
+}
+
 function monthKey(ts) {
   const d = new Date(ts);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -249,6 +261,7 @@ async function runImageGeneration(req) {
   const history = await readJson('history.json', []);
   history.unshift(entry);
   await writeJson('history.json', history.slice(0, 1000));
+  await recordAssetMetadata(entry);
   if (entry.characterId) {
     const links = await readJson('asset-links.json', []);
     const existing = new Set(links.map((link) => link.key));
@@ -298,6 +311,7 @@ async function runAudioGeneration(req) {
   const history = await readJson('history.json', []);
   history.unshift(entry);
   await writeJson('history.json', history.slice(0, 1000));
+  await recordAssetMetadata(entry);
   return entry;
 }
 
@@ -471,9 +485,20 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/assets' && req.method === 'GET') {
-      const [generated, uploads, audio] = await Promise.all([
-        listZone('generated'), listZone('uploads'), listZone('audio')
+      const [generated, uploads, audio, savedMetadata, history] = await Promise.all([
+        listZone('generated'), listZone('uploads'), listZone('audio'),
+        readJson('asset-metadata.json', {}), readJson('history.json', [])
       ]);
+      const metadata = { ...savedMetadata };
+      let changed = false;
+      for (const entry of history) for (const key of entry.outputs || []) {
+        if (!metadata[key]) {
+          metadata[key] = { prompt: entry.prompt || '', type: entry.type, modelId: entry.modelId, modelName: entry.modelName, characterId: entry.characterId || null, characterVariantId: entry.characterVariantId || null, ts: entry.ts };
+          changed = true;
+        }
+      }
+      if (changed) await writeJson('asset-metadata.json', metadata);
+      for (const item of [...generated, ...uploads, ...audio]) Object.assign(item, metadata[item.key] || {});
       return send(res, 200, { generated, uploads, audio });
     }
 
@@ -670,6 +695,9 @@ const server = http.createServer(async (req, res) => {
         });
       }
       const removed = new Set(allowed);
+      const metadata = await readJson('asset-metadata.json', {});
+      for (const key of removed) delete metadata[key];
+      await writeJson('asset-metadata.json', metadata);
       const links = await readJson('asset-links.json', []);
       await writeJson('asset-links.json', links.filter((link) => !removed.has(link.key)));
       const history = await readJson('history.json', []);

@@ -197,6 +197,27 @@ function renderTagPalette() {
   });
 }
 
+async function copyPrompt(text) {
+  if (!text) return toast('Este asset no tiene un prompt guardado', 'err');
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = text; area.style.position = 'fixed'; area.style.opacity = '0';
+    document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove();
+  }
+  toast('Prompt copiado');
+}
+
+function assetInfo(key) {
+  for (const zone of Object.values(state.assets)) {
+    const found = zone.find((item) => item.key === key);
+    if (found) return found;
+  }
+  const entry = state.history.find((item) => (item.outputs || []).includes(key));
+  return entry ? { prompt: entry.prompt } : null;
+}
+
 function showLogin() {
   $('#loginModal').hidden = false;
   setTimeout(() => $('#loginPassword').focus(), 0);
@@ -582,6 +603,7 @@ function showEntry(entry, outputIdx = 0) {
       </div>
       <div class="bv-meta">${esc(entry.voiceName || 'voz')} · Eleven v3 · ${fmtDate(entry.ts)}</div>
       <div class="bv-actions">
+        <button class="mini-btn" data-act="copy">${IC('copy')} Copiar prompt</button>
         <button class="mini-btn" data-act="regen">${IC('refresh')} Regenerar</button>
         <button class="mini-btn" data-act="edit">${IC('edit')} Editar envío</button>
         <a class="mini-btn" href="${fileUrl(entry.outputs[0])}" download>${IC('download')} Descargar</a>
@@ -597,6 +619,7 @@ function showEntry(entry, outputIdx = 0) {
       ${thumbs}
       <div class="bv-meta">${esc(entry.modelName)} · ${entry.aspectRatio} · ${entry.resolution}${entry.batch > 1 ? ` · lote ×${entry.batch}` : ''} · ${fmtDate(entry.ts)}</div>
       <div class="bv-actions">
+        <button class="mini-btn" data-act="copy">${IC('copy')} Copiar prompt</button>
         <button class="mini-btn" data-act="ref">${IC('link')} Usar como referencia</button>
         <button class="mini-btn" data-act="character">${IC('user')} Convertir en personaje</button>
         <button class="mini-btn" data-act="regen">${IC('refresh')} Regenerar</button>
@@ -612,6 +635,7 @@ function showEntry(entry, outputIdx = 0) {
     b.addEventListener('click', () => {
       const act = b.dataset.act;
       if (act === 'regen') regenerate(entry);
+      if (act === 'copy') copyPrompt(entry.prompt);
       if (act === 'edit') editEntry(entry);
       if (act === 'ref') { addRef(entry.outputs[state.currentOutput]); toast('Agregada como referencia'); }
       if (act === 'character') openCharModal(null, entry.outputs[state.currentOutput]);
@@ -942,7 +966,7 @@ function renderAssetsGrid() {
     for (const a of group) {
       const card = document.createElement('div');
       card.className = `asset-card${state.selectedAssets.has(a.key) ? ' selected' : ''}`;
-      card.innerHTML = `<button class="asset-check" title="Seleccionar">${state.selectedAssets.has(a.key) ? '✓' : ''}</button><button class="asset-delete" title="Borrar">${IC('trash')}</button>`;
+      card.innerHTML = `<button class="asset-check" title="Seleccionar">${state.selectedAssets.has(a.key) ? '✓' : ''}</button>${a.prompt ? `<button class="asset-copy" title="Copiar prompt">${IC('copy')}</button>` : ''}<button class="asset-delete" title="Borrar">${IC('trash')}</button>`;
       if (state.assetsZone === 'audio') {
         card.insertAdjacentHTML('beforeend', `<div class="audio-tile">${IC('play', 'ic ic-lg')}</div><div class="a-name">${esc(a.name)}</div>`);
         card.querySelector('.audio-tile').addEventListener('click', () => toggleAudioPlay(card, a.key));
@@ -951,6 +975,7 @@ function renderAssetsGrid() {
         card.querySelector('img').addEventListener('click', () => openLightbox(a.key));
       }
       card.querySelector('.asset-check').addEventListener('click', () => toggleAssetSelection(a.key));
+      card.querySelector('.asset-copy')?.addEventListener('click', () => copyPrompt(a.prompt));
       card.querySelector('.asset-delete').addEventListener('click', () => deleteAssets([a.key]));
       sessionGrid.appendChild(card);
     }
@@ -1110,7 +1135,9 @@ function toggleAudioPlay(card, key) {
 function openLightbox(key) {
   $('#lightbox').hidden = false;
   $('#lbImg').src = fileUrl(key);
+  const info = assetInfo(key);
   $('#lbActions').innerHTML = `
+    ${info?.prompt ? `<button class="mini-btn" id="lbCopyPrompt">${IC('copy')} Copiar prompt</button>` : ''}
     <button class="mini-btn" id="lbRef">${IC('link')} Usar como referencia</button>
     ${/^(generated|uploads)\//.test(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} Asociar a personaje</button>` : ''}
     ${key.startsWith('generated/') ? `<button class="mini-btn" id="lbCharacter">${IC('user')} Convertir en personaje</button>` : ''}
@@ -1122,6 +1149,7 @@ function openLightbox(key) {
     setMode('image');
     toast('Agregada como referencia');
   });
+  $('#lbCopyPrompt')?.addEventListener('click', () => copyPrompt(info.prompt));
   $('#lbCharacter')?.addEventListener('click', () => {
     $('#lightbox').hidden = true;
     openCharModal(null, key);

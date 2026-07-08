@@ -507,10 +507,11 @@ audio { width: 100%; margin-top: 6px; }
 }
 .asset-card:hover { border-color: var(--pink); }
 .asset-card.selected { border-color: var(--pink); outline: 2px solid rgba(236,72,153,.35); outline-offset: -3px; }
-.asset-check, .asset-delete { position: absolute; z-index: 3; top: 7px; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.25); background: rgba(8,4,14,.82); color: white; cursor: pointer; }
+.asset-check, .asset-copy, .asset-delete { position: absolute; z-index: 3; top: 7px; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.25); background: rgba(8,4,14,.82); color: white; cursor: pointer; }
 .asset-check { left: 7px; font-size: 16px; }
+.asset-copy { right: 42px; color: #c4b5fd; opacity: 0; transition: opacity .12s; }
 .asset-delete { right: 7px; color: #fda4af; opacity: 0; transition: opacity .12s; }
-.asset-card:hover .asset-delete, .asset-card.selected .asset-delete { opacity: 1; }
+.asset-card:hover .asset-delete, .asset-card.selected .asset-delete, .asset-card:hover .asset-copy, .asset-card.selected .asset-copy { opacity: 1; }
 .asset-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .asset-card .audio-tile { height: 100%; display: grid; place-items: center; font-size: 34px; background: var(--grad-soft); }
 .asset-card .a-name {
