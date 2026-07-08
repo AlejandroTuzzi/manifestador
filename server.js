@@ -241,6 +241,7 @@ async function runImageGeneration(req) {
     batch,
     refs,
     characterId: req.characterId || null,
+    characterVariantId: req.characterVariantId || null,
     outputs,
     errors,
     cost: Number(cost.toFixed(6))
@@ -356,6 +357,8 @@ const STATIC_MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json',
   '.png': 'image/png',
   '.ico': 'image/x-icon'
 };
@@ -577,11 +580,28 @@ const server = http.createServer(async (req, res) => {
         title: String(body.title || '').trim() || 'Sin título',
         text: String(body.text || ''),
         mode: body.mode === 'audio' ? 'audio' : 'image',
+        category: String(body.category || '').trim() || 'General',
         ts: Date.now()
       };
       prompts.unshift(item);
       await writeJson('prompts.json', prompts);
       return send(res, 200, item);
+    }
+    if (p.startsWith('/api/prompts/') && req.method === 'PUT') {
+      const id = p.split('/').pop();
+      const body = await readJsonBody(req);
+      const prompts = await readJson('prompts.json', []);
+      const idx = prompts.findIndex((x) => x.id === id);
+      if (idx === -1) return send(res, 404, { error: 'Prompt no encontrado' });
+      prompts[idx] = {
+        ...prompts[idx],
+        title: body.title !== undefined ? String(body.title).trim() || 'Sin título' : prompts[idx].title,
+        text: body.text !== undefined ? String(body.text) : prompts[idx].text,
+        category: body.category !== undefined ? String(body.category).trim() || 'General' : (prompts[idx].category || 'General'),
+        mode: body.mode !== undefined ? (body.mode === 'audio' ? 'audio' : 'image') : prompts[idx].mode
+      };
+      await writeJson('prompts.json', prompts);
+      return send(res, 200, prompts[idx]);
     }
     if (p.startsWith('/api/prompts/') && req.method === 'DELETE') {
       const id = p.split('/').pop();
@@ -638,11 +658,63 @@ const server = http.createServer(async (req, res) => {
         voiceId: body.voiceId || '',
         voiceName: body.voiceName || '',
         photos: [],
+        variants: [],
         ts: Date.now()
       };
       characters.unshift(item);
       await writeJson('characters.json', characters);
       return send(res, 200, item);
+    }
+
+    const variantMatch = /^\/api\/characters\/([a-z0-9]+)\/variants(?:\/([a-z0-9]+))?(\/photos)?$/.exec(p);
+    if (variantMatch) {
+      const [, id, variantId, isPhotos] = variantMatch;
+      const characters = await readJson('characters.json', []);
+      const idx = characters.findIndex((c) => c.id === id);
+      if (idx === -1) return send(res, 404, { error: 'Personaje no encontrado' });
+      const ch = characters[idx];
+      ch.variants = ch.variants || [];
+
+      if (!variantId && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const variant = { id: newId(), name: String(body.name || '').trim() || 'Nueva variante', description: String(body.description || ''), photos: [], ts: Date.now() };
+        ch.variants.push(variant);
+        await writeJson('characters.json', characters);
+        return send(res, 200, ch);
+      }
+      const variant = ch.variants.find((v) => v.id === variantId);
+      if (!variant) return send(res, 404, { error: 'Variante no encontrada' });
+      if (!isPhotos && req.method === 'PUT') {
+        const body = await readJsonBody(req);
+        if (body.name !== undefined) variant.name = String(body.name).trim() || variant.name;
+        if (body.description !== undefined) variant.description = String(body.description);
+        await writeJson('characters.json', characters);
+        return send(res, 200, ch);
+      }
+      if (!isPhotos && req.method === 'DELETE') {
+        ch.variants = ch.variants.filter((v) => v.id !== variantId);
+        await writeJson('characters.json', characters);
+        await fs.rm(path.join(DATA_DIR, 'characters', id, 'variants', variantId), { recursive: true, force: true }).catch(() => {});
+        return send(res, 200, ch);
+      }
+      if (isPhotos && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const { mime, buffer } = parseDataUrl(body.dataUrl);
+        const dir = path.join(DATA_DIR, 'characters', id, 'variants', variantId);
+        await fs.mkdir(dir, { recursive: true });
+        const name = `${ts()}-${sanitizeName(body.name).replace(/\.[^.]+$/, '')}${extForMime(mime)}`;
+        await fs.writeFile(path.join(dir, name), buffer);
+        variant.photos.push(`characters/${id}/variants/${variantId}/${name}`);
+        await writeJson('characters.json', characters);
+        return send(res, 200, ch);
+      }
+      if (isPhotos && req.method === 'DELETE') {
+        const key = url.searchParams.get('key');
+        variant.photos = variant.photos.filter((k) => k !== key);
+        if (key) await fs.unlink(await resolveAssetKey(key)).catch(() => {});
+        await writeJson('characters.json', characters);
+        return send(res, 200, ch);
+      }
     }
 
     const charMatch = /^\/api\/characters\/([a-z0-9]+)(\/photos)?$/.exec(p);
@@ -689,7 +761,8 @@ const server = http.createServer(async (req, res) => {
           name: body.name !== undefined ? String(body.name).trim() : ch.name,
           description: body.description !== undefined ? String(body.description) : ch.description,
           voiceId: body.voiceId !== undefined ? body.voiceId : ch.voiceId,
-          voiceName: body.voiceName !== undefined ? body.voiceName : ch.voiceName
+          voiceName: body.voiceName !== undefined ? body.voiceName : ch.voiceName,
+          variants: ch.variants || []
         };
         await writeJson('characters.json', characters);
         return send(res, 200, characters[idx]);

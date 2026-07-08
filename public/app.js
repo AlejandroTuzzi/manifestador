@@ -9,6 +9,8 @@ const state = {
   models: [],
   characters: [],
   prompts: [],
+  promptQuickCategory: '',
+  promptQuickSearch: '',
   history: [],
   voices: null,          // null = aún no cargadas
   assets: { generated: [], uploads: [], audio: [] },
@@ -27,7 +29,8 @@ const state = {
   pickerTab: 'upload',
   editingCharId: null,
   pendingCharacterAsset: null,
-  pinnedId: localStorage.getItem('pinnedCharacterId') || ''
+  pinnedId: localStorage.getItem('pinnedCharacterId') || '',
+  characterVariantId: localStorage.getItem('pinnedCharacterVariantId') || ''
 };
 
 const AUDIO_TAGS = [
@@ -104,6 +107,7 @@ $$('.nav-btn').forEach((btn) => {
     $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
     if (view === 'assets') refreshAssets();
     if (view === 'characters') renderCharacters();
+    if (view === 'prompts') renderPromptLibrary();
     if (view === 'costs') loadCosts();
   });
 });
@@ -334,6 +338,7 @@ function renderImageControls() {
 
   $('#modelNote').textContent = m.notes || '';
   renderRefs();
+  renderCharacterVariantControl();
   updateEstimate();
 }
 
@@ -417,13 +422,12 @@ function setPinned(id) {
   // quitar refs del personaje anterior
   state.refs = state.refs.filter((r) => !r.fromChar);
   state.pinnedId = id || '';
+  state.characterVariantId = '';
   localStorage.setItem('pinnedCharacterId', state.pinnedId);
+  localStorage.setItem('pinnedCharacterVariantId', '');
   const pc = pinnedChar();
   if (pc) {
-    const m = currentModel();
-    for (const photo of pc.photos.slice(0, Math.max(0, m.maxRefs - state.refs.length))) {
-      state.refs.push({ key: photo, fromChar: true });
-    }
+    applyPinnedCharacterPhotos();
     if (pc.voiceId) state.voiceId = pc.voiceId;
     toast(`${pc.name} anclado`);
   }
@@ -432,7 +436,39 @@ function setPinned(id) {
   renderRefs();
   renderVoiceSelect();
   renderCharacters();
+  renderCharacterVariantControl();
 }
+
+function applyPinnedCharacterPhotos() {
+  state.refs = state.refs.filter((r) => !r.fromChar);
+  const pc = pinnedChar();
+  if (!pc) return;
+  const variant = (pc.variants || []).find((v) => v.id === state.characterVariantId);
+  const photos = variant?.photos?.length ? variant.photos : pc.photos;
+  const m = currentModel();
+  for (const photo of photos.slice(0, Math.max(0, m.maxRefs - state.refs.length))) {
+    state.refs.push({ key: photo, fromChar: true });
+  }
+}
+
+function renderCharacterVariantControl() {
+  const pc = pinnedChar();
+  const row = $('#characterVariantRow');
+  row.hidden = !pc || !(pc.variants || []).length;
+  if (row.hidden) return;
+  const select = $('#characterVariantSelect');
+  select.innerHTML = `<option value="">Original (${pc.photos.length} fotos)</option>`
+    + (pc.variants || []).map((v) => `<option value="${v.id}">${esc(v.name)} (${v.photos.length} fotos)</option>`).join('');
+  select.value = state.characterVariantId;
+}
+
+$('#characterVariantSelect').addEventListener('change', (e) => {
+  state.characterVariantId = e.target.value;
+  localStorage.setItem('pinnedCharacterVariantId', state.characterVariantId);
+  applyPinnedCharacterPhotos();
+  renderRefs();
+  renderPinnedHint();
+});
 
 function renderPinned() {
   const pc = pinnedChar();
@@ -453,8 +489,9 @@ function renderPinnedHint() {
   const hint = $('#pinnedHint');
   hint.hidden = !pc;
   if (!pc) return;
+  const variant = (pc.variants || []).find((v) => v.id === state.characterVariantId);
   hint.textContent = state.mode === 'image'
-    ? `${pc.name}: sus fotos van como referencia`
+    ? `${pc.name}${variant ? ` · ${variant.name}` : ' · Original'}: sus fotos van como referencia`
     : `${pc.name}: ${pc.voiceName ? 'habla con su voz (' + pc.voiceName + ')' : 'no tiene voz asignada'}`;
 }
 
@@ -487,7 +524,8 @@ async function generate() {
           resolution: state.resolution,
           batch: state.batch,
           refs: state.refs.map((r) => r.key),
-          characterId: state.pinnedId || null
+          characterId: state.pinnedId || null,
+          characterVariantId: state.characterVariantId || null
         }
       });
     } else {
@@ -689,7 +727,10 @@ $('#btnSavePrompt').addEventListener('click', async () => {
   if (!text) return toast('La caja está vacía', 'err');
   const title = window.prompt('Nombre para este prompt:', text.slice(0, 40));
   if (title === null) return;
-  const item = await api('/api/prompts', { method: 'POST', body: { title, text, mode: state.mode } });
+  const categories = [...new Set(state.prompts.map((p) => p.category || 'General'))];
+  const category = window.prompt(`Categoría (${categories.join(', ') || 'General'}):`, 'General');
+  if (category === null) return;
+  const item = await api('/api/prompts', { method: 'POST', body: { title, text, mode: state.mode, category } });
   state.prompts.unshift(item);
   renderPromptsPanel();
   $('#promptsPanel').hidden = false;
@@ -709,11 +750,36 @@ function renderPromptsPanel() {
     return;
   }
   panel.innerHTML = '';
-  for (const pr of state.prompts) {
+  const categories = [...new Set(state.prompts.map((p) => p.category || 'General'))].sort((a, b) => a.localeCompare(b));
+  const toolbar = document.createElement('div');
+  toolbar.className = 'prompts-quick-tools';
+  toolbar.innerHTML = `
+    <select class="select" id="quickPromptCategory"><option value="">Todas las categorías</option>${categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>
+    <input id="quickPromptSearch" type="search" placeholder="Buscar por título o contenido…" value="${esc(state.promptQuickSearch)}">
+    <span class="hint" id="quickPromptCount"></span>`;
+  panel.appendChild(toolbar);
+  const categorySelect = toolbar.querySelector('#quickPromptCategory');
+  categorySelect.value = state.promptQuickCategory;
+  categorySelect.addEventListener('change', () => { state.promptQuickCategory = categorySelect.value; renderPromptsPanel(); });
+  toolbar.querySelector('#quickPromptSearch').addEventListener('input', (e) => {
+    state.promptQuickSearch = e.target.value;
+    renderPromptsPanel();
+    const input = $('#quickPromptSearch'); input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+  });
+  const query = state.promptQuickSearch.trim().toLowerCase();
+  const filtered = state.prompts.filter((pr) =>
+    (!state.promptQuickCategory || (pr.category || 'General') === state.promptQuickCategory)
+    && (!query || `${pr.title} ${pr.text} ${pr.category || ''}`.toLowerCase().includes(query)));
+  toolbar.querySelector('#quickPromptCount').textContent = `${filtered.length} de ${state.prompts.length}`;
+  if (!filtered.length) {
+    panel.insertAdjacentHTML('beforeend', '<div class="empty-note" style="padding:14px 0">No hay prompts que coincidan con el filtro.</div>');
+    return;
+  }
+  for (const pr of filtered) {
     const d = document.createElement('div');
     d.className = 'prompt-item';
     d.innerHTML = `<span class="p-mode">${pr.mode === 'audio' ? IC('mic') : IC('image')}</span>
-      <span class="p-title">${esc(pr.title)}</span>
+      <span class="p-title">${esc(pr.category || 'General')} · ${esc(pr.title)}</span>
       <span class="p-text">${esc(pr.text)}</span>
       <button class="icon-btn" title="Eliminar">${IC('x')}</button>`;
     d.addEventListener('click', (e) => {
@@ -771,10 +837,14 @@ async function setPickerTab(src) {
   if (src === 'characters') {
     let html = '';
     for (const c of state.characters) {
-      if (!c.photos.length) continue;
-      html += c.photos.map((ph) =>
-        `<div class="pick" data-key="${esc(ph)}"><img src="${fileUrl(ph)}" loading="lazy" alt=""><div class="p-label">${esc(c.name)}</div></div>`
+      html += (c.photos || []).map((ph) =>
+        `<div class="pick" data-key="${esc(ph)}"><img src="${fileUrl(ph)}" loading="lazy" alt=""><div class="p-label">${esc(c.name)} · Original</div></div>`
       ).join('');
+      for (const variant of (c.variants || [])) {
+        html += (variant.photos || []).map((ph) =>
+          `<div class="pick" data-key="${esc(ph)}"><img src="${fileUrl(ph)}" loading="lazy" alt=""><div class="p-label">${esc(c.name)} · ${esc(variant.name)}</div></div>`
+        ).join('');
+      }
     }
     body.innerHTML = html
       ? `<div class="picker-grid">${html}</div>`
@@ -883,6 +953,62 @@ function renderAssetsGrid() {
     grid.appendChild(section);
   }
 }
+
+function usePrompt(pr) {
+  promptBox.value = pr.text;
+  setMode(pr.mode === 'audio' ? 'audio' : 'image');
+  renderHighlight();
+  goToCreate();
+  promptBox.focus();
+}
+
+function renderPromptLibrary() {
+  const library = $('#promptLibrary');
+  if (!library) return;
+  const categories = [...new Set(state.prompts.map((p) => p.category || 'General'))].sort((a, b) => a.localeCompare(b));
+  const filter = $('#promptCategoryFilter');
+  const selected = filter.value;
+  filter.innerHTML = '<option value="">Todas las categorías</option>' + categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  filter.value = selected;
+  const query = $('#promptSearch').value.trim().toLowerCase();
+  const items = state.prompts.filter((p) => (!filter.value || (p.category || 'General') === filter.value)
+    && (!query || `${p.title} ${p.text} ${p.category || ''}`.toLowerCase().includes(query)));
+  library.innerHTML = items.length ? items.map((pr) => `
+    <article class="prompt-library-card" data-prompt="${pr.id}">
+      <div class="prompt-library-head"><div><span class="prompt-category">${esc(pr.category || 'General')}</span><h3>${esc(pr.title)}</h3></div><span>${pr.mode === 'audio' ? IC('mic') : IC('image')}</span></div>
+      <div class="prompt-library-text">${esc(pr.text)}</div>
+      <div class="prompt-library-actions"><button class="mini-btn" data-pact="use">Usar</button><button class="mini-btn" data-pact="edit">${IC('edit')} Editar</button><button class="mini-btn danger" data-pact="delete">${IC('trash')}</button></div>
+    </article>`).join('') : '<div class="empty-note">No hay prompts que coincidan.</div>';
+  library.querySelectorAll('[data-prompt]').forEach((card) => {
+    const pr = state.prompts.find((p) => p.id === card.dataset.prompt);
+    card.querySelector('[data-pact="use"]').addEventListener('click', () => usePrompt(pr));
+    card.querySelector('[data-pact="edit"]').addEventListener('click', async () => {
+      const title = prompt('Título:', pr.title); if (title === null) return;
+      const category = prompt('Categoría:', pr.category || 'General'); if (category === null) return;
+      const text = prompt('Prompt:', pr.text); if (text === null) return;
+      const updated = await api(`/api/prompts/${pr.id}`, { method: 'PUT', body: { title, category, text, mode: pr.mode } });
+      state.prompts[state.prompts.findIndex((p) => p.id === pr.id)] = updated;
+      renderPromptLibrary(); renderPromptsPanel();
+    });
+    card.querySelector('[data-pact="delete"]').addEventListener('click', async () => {
+      if (!confirm(`¿Borrar “${pr.title}”?`)) return;
+      await api(`/api/prompts/${pr.id}`, { method: 'DELETE' });
+      state.prompts = state.prompts.filter((p) => p.id !== pr.id);
+      renderPromptLibrary(); renderPromptsPanel();
+    });
+  });
+}
+
+$('#promptSearch').addEventListener('input', renderPromptLibrary);
+$('#promptCategoryFilter').addEventListener('change', renderPromptLibrary);
+$('#btnNewPrompt').addEventListener('click', async () => {
+  const title = prompt('Título del prompt:'); if (!title) return;
+  const category = prompt('Categoría:', 'General'); if (category === null) return;
+  const text = prompt('Texto del prompt:'); if (!text) return;
+  const mode = confirm('Aceptar = imagen · Cancelar = audio') ? 'image' : 'audio';
+  const item = await api('/api/prompts', { method: 'POST', body: { title, category, text, mode } });
+  state.prompts.unshift(item); renderPromptLibrary(); renderPromptsPanel();
+});
 
 function groupAssetSessions(items) {
   const groups = [];
@@ -999,7 +1125,7 @@ function openLightbox(key) {
 $('#lbClose').addEventListener('click', () => { $('#lightbox').hidden = true; });
 $('#lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox') $('#lightbox').hidden = true; });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { $('#lightbox').hidden = true; $('#pickerModal').hidden = true; $('#charModal').hidden = true; }
+  if (e.key === 'Escape') { $('#lightbox').hidden = true; $('#pickerModal').hidden = true; $('#charModal').hidden = true; $('#characterGalleryModal').hidden = true; }
 });
 
 // ---------------------------------------------------------------------------
@@ -1027,11 +1153,14 @@ function renderCharacters() {
         <div class="char-voice">${c.voiceName ? IC('mic') + ' ' + esc(c.voiceName) : '<span style="color:#6f5f8d">sin voz</span>'}</div>
       </div></div>
       <div class="char-desc">${esc(c.description || '')}</div>
+      ${(c.variants || []).length ? `<div class="hint" style="margin-bottom:8px">${(c.variants || []).length} variante${c.variants.length === 1 ? '' : 's'} de outfit</div>` : ''}
       <div class="char-photos-mini">${minis}</div>
       <div class="char-actions">
         <button class="mini-btn" data-act="pin">${IC('pin')} ${c.id === state.pinnedId ? 'Anclado' : 'Anclar'}</button>
         <button class="mini-btn" data-act="use">${IC('link')} Usar fotos</button>
         <button class="mini-btn" data-act="edit">${IC('edit')} Editar</button>
+        <button class="mini-btn" data-act="variants">Variantes</button>
+        <button class="mini-btn" data-act="gallery">${IC('eye')} Ver fotos</button>
         <button class="mini-btn danger" data-act="del" title="Eliminar">${IC('trash')}</button>
       </div>`;
     card.querySelectorAll('[data-act]').forEach((b) => {
@@ -1045,6 +1174,8 @@ function renderCharacters() {
           toast(`Fotos de ${c.name} agregadas como referencia`);
         }
         if (act === 'edit') openCharModal(c.id);
+        if (act === 'variants') openCharModal(c.id);
+        if (act === 'gallery') openCharacterGallery(c.id);
         if (act === 'del') {
           if (!confirm(`¿Eliminar a ${c.name} y sus fotos?`)) return;
           await api(`/api/characters/${c.id}`, { method: 'DELETE' });
@@ -1057,6 +1188,30 @@ function renderCharacters() {
     grid.appendChild(card);
   }
 }
+
+function openCharacterGallery(id) {
+  const c = state.characters.find((x) => x.id === id);
+  if (!c) return;
+  $('#characterGalleryTitle').textContent = c.name;
+  const groups = [{ name: 'Original', description: c.description || '', photos: c.photos || [] }, ...(c.variants || [])];
+  $('#characterGalleryBody').innerHTML = groups.map((group) => `
+    <section class="character-gallery-group">
+      <div class="character-gallery-group-head"><h4>${esc(group.name)}</h4><span>${group.photos.length} foto${group.photos.length === 1 ? '' : 's'}</span></div>
+      ${group.description ? `<p>${esc(group.description)}</p>` : ''}
+      <div class="character-gallery-grid">${group.photos.length
+        ? group.photos.map((photo) => `<button data-gallery-photo="${esc(photo)}"><img src="${fileUrl(photo)}" loading="lazy" alt=""></button>`).join('')
+        : '<div class="hint">Esta variante todavía no tiene fotos.</div>'}</div>
+    </section>`).join('');
+  $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) => {
+    button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto));
+  });
+  $('#characterGalleryModal').hidden = false;
+}
+
+$('#characterGalleryClose').addEventListener('click', () => { $('#characterGalleryModal').hidden = true; });
+$('#characterGalleryModal').addEventListener('click', (e) => {
+  if (e.target.id === 'characterGalleryModal') $('#characterGalleryModal').hidden = true;
+});
 
 $('#btnNewChar').addEventListener('click', () => openCharModal(null));
 $('#charModalClose').addEventListener('click', () => {
@@ -1096,7 +1251,20 @@ function renderCharModal() {
         ${c.photos.map((p) => `<div class="ref-thumb"><img src="${fileUrl(p)}" alt=""><button class="rm" data-key="${esc(p)}">×</button></div>`).join('')}
         <button class="ref-add" id="chAddPhoto">+</button>
       </div>
-    </div>` : '<p class="hint">Guardá el personaje primero y después subile fotos.</p>'}
+    </div>
+    <div class="variant-manager">
+      <div class="variant-manager-head"><label>Variantes / outfits (${(c.variants || []).length})</label><button type="button" class="mini-btn" id="chAddVariant">${IC('plus')} Nueva variante</button></div>
+      <div class="variant-list">${(c.variants || []).map((v) => `
+        <div class="variant-item" data-variant="${v.id}">
+          <div class="variant-item-head"><strong>${esc(v.name)}</strong><div>
+            <button type="button" class="mini-btn" data-vact="rename">Editar</button>
+            <button type="button" class="mini-btn" data-vact="photo">${IC('plus')} Fotos</button>
+            <button type="button" class="mini-btn danger" data-vact="delete">${IC('trash')}</button>
+          </div></div>
+          ${v.description ? `<div class="hint">${esc(v.description)}</div>` : ''}
+          <div class="variant-photos">${v.photos.map((p) => `<span class="ref-thumb"><img src="${fileUrl(p)}" alt=""><button class="rm" data-vphoto="${esc(p)}">×</button></span>`).join('') || '<span class="hint">Sin fotos todavía</span>'}</div>
+        </div>`).join('')}</div>
+    </div>` : '<p class="hint">Guardá el personaje primero y después subile fotos y variantes.</p>'}
     <button class="generate-btn small" id="chSave">${id ? 'Guardar cambios' : 'Crear personaje'}</button>`;
 
   $('#chSave').addEventListener('click', async () => {
@@ -1156,6 +1324,55 @@ function renderCharModal() {
       renderPinned();
     };
     $('#fileInput').click();
+  });
+
+  $('#chAddVariant')?.addEventListener('click', async () => {
+    const name = prompt('Nombre de la variante u outfit:', 'Outfit ' + ((c.variants || []).length + 1));
+    if (!name) return;
+    const description = prompt('Descripción opcional del outfit:', '') ?? '';
+    const updated = await api(`/api/characters/${id}/variants`, { method: 'POST', body: { name, description } });
+    state.characters[state.characters.findIndex((x) => x.id === id)] = updated;
+    renderCharModal(); renderCharacters(); renderCharacterVariantControl();
+  });
+
+  $$('#charModalBody .variant-item').forEach((item) => {
+    const variantId = item.dataset.variant;
+    const variant = (c.variants || []).find((v) => v.id === variantId);
+    item.querySelector('[data-vact="rename"]').addEventListener('click', async () => {
+      const name = prompt('Nombre de la variante:', variant.name);
+      if (!name) return;
+      const description = prompt('Descripción:', variant.description || '') ?? variant.description;
+      const updated = await api(`/api/characters/${id}/variants/${variantId}`, { method: 'PUT', body: { name, description } });
+      state.characters[state.characters.findIndex((x) => x.id === id)] = updated;
+      renderCharModal(); renderCharacters(); renderCharacterVariantControl();
+    });
+    item.querySelector('[data-vact="delete"]').addEventListener('click', async () => {
+      if (!confirm(`¿Borrar la variante “${variant.name}” y sus fotos?`)) return;
+      const updated = await api(`/api/characters/${id}/variants/${variantId}`, { method: 'DELETE' });
+      state.characters[state.characters.findIndex((x) => x.id === id)] = updated;
+      if (state.characterVariantId === variantId) { state.characterVariantId = ''; applyPinnedCharacterPhotos(); }
+      renderCharModal(); renderCharacters(); renderCharacterVariantControl(); renderRefs();
+    });
+    item.querySelector('[data-vact="photo"]').addEventListener('click', () => {
+      $('#fileInput').onchange = async (e) => {
+        const files = [...e.target.files]; e.target.value = '';
+        let updated;
+        for (const f of files) {
+          const dataUrl = await readFileAsDataUrl(f);
+          updated = await api(`/api/characters/${id}/variants/${variantId}/photos`, { method: 'POST', body: { name: f.name, dataUrl } });
+        }
+        if (updated) state.characters[state.characters.findIndex((x) => x.id === id)] = updated;
+        if (state.pinnedId === id && state.characterVariantId === variantId) { applyPinnedCharacterPhotos(); renderRefs(); }
+        renderCharModal(); renderCharacters(); renderCharacterVariantControl();
+      };
+      $('#fileInput').click();
+    });
+    item.querySelectorAll('[data-vphoto]').forEach((button) => button.addEventListener('click', async () => {
+      const updated = await api(`/api/characters/${id}/variants/${variantId}/photos?key=${encodeURIComponent(button.dataset.vphoto)}`, { method: 'DELETE' });
+      state.characters[state.characters.findIndex((x) => x.id === id)] = updated;
+      if (state.pinnedId === id && state.characterVariantId === variantId) { applyPinnedCharacterPhotos(); renderRefs(); }
+      renderCharModal(); renderCharacters(); renderCharacterVariantControl();
+    }));
   });
 
   $$('#chPhotos .rm').forEach((b) => {
@@ -1413,6 +1630,12 @@ async function init() {
     return;
   }
   renderImageControls();
+  if (state.pinnedId && pinnedChar()) {
+    if (!(pinnedChar().variants || []).some((v) => v.id === state.characterVariantId)) state.characterVariantId = '';
+    applyPinnedCharacterPhotos();
+    renderRefs();
+    renderCharacterVariantControl();
+  }
   renderTagPalette();
   renderHistory();
   renderCharacters();
@@ -1422,10 +1645,10 @@ async function init() {
   setMode('image');
   if (state.pinnedId && !pinnedChar()) setPinned('');
 
-  // deep-links: #audio, #assets, #characters, #costs, #config
+  // deep-links: #audio, #assets, #characters, #prompts, #costs, #config
   const h = location.hash.slice(1);
   if (h === 'audio') setMode('audio');
-  else if (['assets', 'characters', 'costs', 'config'].includes(h)) {
+  else if (['assets', 'characters', 'prompts', 'costs', 'config'].includes(h)) {
     $(`.nav-btn[data-view="${h}"]`)?.click();
   }
 }

@@ -2,7 +2,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Manifestador</title>
 <link rel="stylesheet" href="style.css">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f472b6' stroke-width='1.8'%3E%3Cpath d='M12 3 L14 10 L21 12 L14 14 L12 21 L10 14 L3 12 L10 10 Z'/%3E%3C/svg%3E">
+<link rel="icon" href="brand/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="brand/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="brand/favicon-16x16.png">
+<link rel="apple-touch-icon" href="brand/apple-touch-icon.png">
+<link rel="manifest" href="brand/site.webmanifest">
 
 <!-- sprite de iconos de línea -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -36,18 +40,13 @@
 
 <div id="app">
   <aside class="sidebar">
-    <div class="logo">
-      <div class="logo-mark"><svg class="ic ic-lg"><use href="#i-spark"/></svg></div>
-      <div>
-        <div class="logo-title">Manifestador</div>
-        <div class="logo-sub">imagen · voz</div>
-      </div>
-    </div>
+    <div class="logo"><img src="brand/manifestador-logo.png" alt="Manifestador"></div>
 
     <nav>
       <button class="nav-btn active" data-view="create"><svg class="ic"><use href="#i-wand"/></svg> Crear</button>
       <button class="nav-btn" data-view="assets"><svg class="ic"><use href="#i-grid"/></svg> Assets</button>
       <button class="nav-btn" data-view="characters"><svg class="ic"><use href="#i-user"/></svg> Personajes</button>
+      <button class="nav-btn" data-view="prompts"><svg class="ic"><use href="#i-book"/></svg> Prompts</button>
       <button class="nav-btn" data-view="costs"><svg class="ic"><use href="#i-dollar"/></svg> Consumo</button>
       <button class="nav-btn" data-view="config"><svg class="ic"><use href="#i-gear"/></svg> Configuración</button>
     </nav>
@@ -122,6 +121,11 @@
           <label>Referencias <span id="refsCount" class="refs-count"></span></label>
           <div id="refsStrip" class="refs-strip"></div>
         </div>
+        <div id="characterVariantRow" class="control-row" hidden>
+          <label>Personaje</label>
+          <select id="characterVariantSelect" class="select"></select>
+          <span class="hint">Elegí el original o un outfit variante</span>
+        </div>
         <div id="modelNote" class="model-note"></div>
       </div>
 
@@ -148,6 +152,16 @@
         </div>
         <div id="historyList" class="history-list"></div>
       </div>
+    </section>
+
+    <!-- ==================== PROMPTS ==================== -->
+    <section id="view-prompts" class="view">
+      <div class="chars-head"><h2>Prompts</h2><button id="btnNewPrompt" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Nuevo prompt</button></div>
+      <div class="prompt-library-tools">
+        <input id="promptSearch" type="search" placeholder="Buscar prompts…">
+        <select id="promptCategoryFilter" class="select"><option value="">Todas las categorías</option></select>
+      </div>
+      <div id="promptLibrary" class="prompt-library"></div>
     </section>
 
     <!-- ==================== ASSETS ==================== -->
@@ -282,7 +296,7 @@
 
 <div id="loginModal" class="modal login-modal" hidden>
   <form id="loginForm" class="modal-box login-box">
-    <div class="login-mark"><svg class="ic ic-lg"><use href="#i-spark"/></svg></div>
+    <div class="login-mark"><img src="brand/manifestador-isologo.png" alt=""></div>
     <h2>Manifestador</h2>
     <p>Introduce tu clave de acceso</p>
     <input id="loginPassword" type="password" autocomplete="current-password" autofocus required>
@@ -305,6 +319,17 @@
       <button class="tab" data-src="characters">Personajes</button>
     </div>
     <div id="pickerBody" class="picker-body"></div>
+  </div>
+</div>
+
+<!-- Galería de personaje y variantes -->
+<div id="characterGalleryModal" class="modal" hidden>
+  <div class="modal-box character-gallery-box">
+    <div class="modal-head">
+      <div><h3 id="characterGalleryTitle">Fotos del personaje</h3><p class="hint">Original y variantes</p></div>
+      <button class="icon-btn" id="characterGalleryClose"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div id="characterGalleryBody" class="character-gallery-body"></div>
   </div>
 </div>
 

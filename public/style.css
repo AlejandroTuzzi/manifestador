@@ -31,6 +31,7 @@
 .ic-lg { width: 20px; height: 20px; }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+select { color-scheme: dark; accent-color: var(--pink-strong); }
 
 [hidden] { display: none !important; }
 
@@ -69,7 +70,8 @@ body {
   height: 100vh;
 }
 
-.logo { display: flex; align-items: center; gap: 10px; padding: 4px 8px; }
+.logo { display: flex; align-items: center; padding: 4px 6px; }
+.logo img { display: block; width: 100%; height: auto; max-height: 58px; object-fit: contain; object-position: left center; }
 .logo-mark {
   width: 42px; height: 42px;
   display: grid; place-items: center;
@@ -279,6 +281,17 @@ h3 { font-size: 15px; }
 .prompt-item .p-title { font-size: 13px; font-weight: 700; white-space: nowrap; }
 .prompt-item .p-text { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .prompt-item .p-mode { font-size: 11px; }
+.prompt-library-tools { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0 18px; }
+.prompt-library-tools input { flex: 1; min-width: 230px; background: rgba(10,5,18,.65); border: 1px solid var(--border); color: var(--text); padding: 10px 12px; font: inherit; }
+.prompt-library { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.prompt-library-card { background: var(--panel); border: 1px solid var(--border-soft); padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+.prompt-library-card:hover { border-color: var(--border); }
+.prompt-library-head { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
+.prompt-library-head > div { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; }
+.prompt-library-card h3 { font-size: 14px; }
+.prompt-category { color: var(--pink); border: 1px solid rgba(236,72,153,.3); padding: 3px 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .7px; }
+.prompt-library-text { color: var(--muted); font-size: 12px; line-height: 1.5; white-space: pre-wrap; max-height: 110px; overflow: hidden; }
+.prompt-library-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
 
 /* ---------- controles ---------- */
 .controls-card {
@@ -354,8 +367,23 @@ h3 { font-size: 15px; }
   padding: 9px 12px; border-radius: 0;
   font-size: 13.5px; min-width: 240px;
   outline: none;
+  color-scheme: dark;
+  accent-color: var(--pink-strong);
 }
 .select:focus { border-color: var(--violet); }
+.select option, select option {
+  background: var(--panel-solid);
+  color: var(--text);
+  padding: 8px;
+}
+.select option:checked, select option:checked {
+  background: var(--pink-strong) linear-gradient(0deg, var(--pink-strong), var(--pink-strong));
+  color: white;
+}
+.select option:hover, select option:hover {
+  background: var(--violet-strong);
+  color: white;
+}
 
 /* ---------- resultados ---------- */
 .results { margin-top: 22px; }
@@ -460,6 +488,9 @@ audio { width: 100%; margin-top: 6px; }
 .assets-grid {
   display: flex; flex-direction: column; gap: 24px;
 }
+.prompts-quick-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; position: sticky; top: 0; z-index: 2; background: var(--panel-solid); padding: 4px 0 10px; }
+.prompts-quick-tools .select { min-width: 190px; padding: 7px 9px; }
+.prompts-quick-tools input { flex: 1; min-width: 210px; background: rgba(10,5,18,.65); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; font: inherit; }
 .asset-session { min-width: 0; }
 .asset-session-head { display: flex; align-items: end; justify-content: space-between; gap: 12px; padding: 0 2px 9px; border-bottom: 1px solid var(--border-soft); margin-bottom: 10px; }
 .asset-session-head h3 { font-size: 14px; text-transform: capitalize; color: #d9ccef; }
@@ -522,6 +553,24 @@ audio { width: 100%; margin-top: 6px; }
 .char-photos-mini .more { width: 34px; height: 34px; border-radius: 0; display: grid; place-items: center;
   background: rgba(139, 92, 246, 0.15); font-size: 10px; color: var(--muted); }
 .char-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.variant-manager { border-top: 1px solid var(--border-soft); padding-top: 12px; }
+.variant-manager-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; }
+.variant-list { display: flex; flex-direction: column; gap: 8px; }
+.variant-item { border: 1px solid var(--border-soft); padding: 9px; }
+.variant-item-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.variant-photos { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; }
+.variant-photos img { width: 48px; height: 48px; object-fit: cover; }
+.character-gallery-box { max-width: 900px; }
+.character-gallery-body { display: flex; flex-direction: column; gap: 22px; }
+.character-gallery-group { border-top: 1px solid var(--border-soft); padding-top: 14px; }
+.character-gallery-group-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 5px; }
+.character-gallery-group-head h4 { color: #f9a8d4; font-size: 15px; }
+.character-gallery-group-head span { color: var(--muted); font-size: 11px; }
+.character-gallery-group > p { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+.character-gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 9px; }
+.character-gallery-grid button { border: 1px solid var(--border-soft); background: var(--panel); padding: 0; aspect-ratio: 1; overflow: hidden; cursor: zoom-in; }
+.character-gallery-grid button:hover { border-color: var(--pink); }
+.character-gallery-grid img { width: 100%; height: 100%; display: block; object-fit: cover; }
 
 /* modal de personaje */
 .char-modal-body { display: flex; flex-direction: column; gap: 12px; }
@@ -656,7 +705,7 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .login-box p { color: var(--muted); }
 .login-box input { width: 100%; background: rgba(10,5,18,.7); border: 1px solid var(--border); color: var(--text); padding: 12px; font: inherit; }
 .login-box .generate-btn { align-self: stretch; }
-.login-mark { color: var(--pink); }
+.login-mark img { width: 72px; height: 72px; object-fit: contain; }
 .modal-box {
   width: 100%; max-width: 640px; max-height: 86vh;
   overflow-y: auto;

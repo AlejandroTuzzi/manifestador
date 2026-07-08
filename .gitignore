@@ -1,5 +1,6 @@
 # Configuración y datos locales (incluyen credenciales y actividad)
 data/*.json
+data/characters/**
 !data/.gitkeep
 
 # Archivos generados o subidos
@@ -17,4 +18,3 @@ node_modules/
 npm-debug.log*
 .DS_Store
 Thumbs.db
-
