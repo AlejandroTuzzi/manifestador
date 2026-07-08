@@ -32,6 +32,8 @@ const state = {
   pendingCharacterAsset: null,
   variantEditor: null,
   pendingAssociationKey: null,
+  lightboxKeys: [],
+  lightboxIndex: 0,
   generationJobs: [],
   activeGenerations: 0,
   pinnedId: localStorage.getItem('pinnedCharacterId') || '',
@@ -381,7 +383,7 @@ function renderRefs() {
       state.refs.splice(i, 1);
       renderRefs();
     });
-    d.querySelector('img').addEventListener('click', () => openLightbox(r.key));
+    d.querySelector('img').addEventListener('click', () => openLightbox(r.key, state.refs.map((ref) => ref.key)));
     strip.appendChild(d);
   });
   if (state.refs.length < m.maxRefs) {
@@ -653,7 +655,7 @@ function showEntry(entry, outputIdx = 0) {
         <button class="mini-btn" data-act="edit">${IC('edit')} Editar envío</button>
         <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} Descargar</a>
       </div>`;
-    $('#bvMain').addEventListener('click', () => openLightbox(key));
+    $('#bvMain').addEventListener('click', () => openLightbox(key, entry.outputs));
     $$('#bigView .bv-thumbs img').forEach((im) => {
       im.addEventListener('click', () => showEntry(entry, Number(im.dataset.i)));
     });
@@ -999,7 +1001,7 @@ function renderAssetsGrid() {
         card.querySelector('.audio-tile').addEventListener('click', () => toggleAudioPlay(card, a.key));
       } else {
         card.insertAdjacentHTML('beforeend', `<img src="${fileUrl(a.key)}" loading="lazy" alt=""><div class="a-name">${esc(a.name)}</div>`);
-        card.querySelector('img').addEventListener('click', () => openLightbox(a.key));
+        card.querySelector('img').addEventListener('click', () => openLightbox(a.key, items.map((item) => item.key)));
       }
       card.querySelector('.asset-check').addEventListener('click', () => toggleAssetSelection(a.key));
       card.querySelector('.asset-info').addEventListener('click', () => openAssetInfo(a));
@@ -1160,10 +1162,15 @@ function toggleAudioPlay(card, key) {
 // lightbox
 // ---------------------------------------------------------------------------
 
-function openLightbox(key) {
+function openLightbox(key, keys = null) {
+  state.lightboxKeys = keys?.length ? [...new Set(keys)] : [key];
+  state.lightboxIndex = Math.max(0, state.lightboxKeys.indexOf(key));
   $('#lightbox').hidden = false;
   $('#lbImg').src = fileUrl(key);
   const info = assetInfo(key);
+  const multiple = state.lightboxKeys.length > 1;
+  $('#lbPrev').hidden = !multiple; $('#lbNext').hidden = !multiple; $('#lbCounter').hidden = !multiple;
+  $('#lbCounter').textContent = multiple ? `${state.lightboxIndex + 1} / ${state.lightboxKeys.length}` : '';
   $('#lbActions').innerHTML = `
     ${info ? `<button class="mini-btn" id="lbInfo">${IC('info')} Información</button>` : ''}
     ${info?.prompt ? `<button class="mini-btn" id="lbCopyPrompt">${IC('copy')} Copiar prompt</button>` : ''}
@@ -1186,6 +1193,14 @@ function openLightbox(key) {
   });
   $('#lbAssociate')?.addEventListener('click', () => associateAsset(key));
 }
+
+function navigateLightbox(delta) {
+  if (state.lightboxKeys.length < 2) return;
+  state.lightboxIndex = (state.lightboxIndex + delta + state.lightboxKeys.length) % state.lightboxKeys.length;
+  openLightbox(state.lightboxKeys[state.lightboxIndex], state.lightboxKeys);
+}
+$('#lbPrev').addEventListener('click', () => navigateLightbox(-1));
+$('#lbNext').addEventListener('click', () => navigateLightbox(1));
 
 function openAssetInfo(asset) {
   $('#lightbox').hidden = true;
@@ -1248,6 +1263,8 @@ $('#associateAssetModal').addEventListener('click', (e) => { if (e.target.id ===
 $('#lbClose').addEventListener('click', () => { $('#lightbox').hidden = true; });
 $('#lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox') $('#lightbox').hidden = true; });
 document.addEventListener('keydown', (e) => {
+  if (!$('#lightbox').hidden && e.key === 'ArrowLeft') { e.preventDefault(); navigateLightbox(-1); return; }
+  if (!$('#lightbox').hidden && e.key === 'ArrowRight') { e.preventDefault(); navigateLightbox(1); return; }
   if (e.key === 'Escape') {
     $('#lightbox').hidden = true; $('#pickerModal').hidden = true; $('#charModal').hidden = true;
     $('#characterGalleryModal').hidden = true; $('#variantEditorModal').hidden = true; $('#associateAssetModal').hidden = true;
@@ -1334,7 +1351,7 @@ function openCharacterGallery(id) {
         : '<div class="hint">Esta variante todavía no tiene fotos.</div>'}</div>
     </section>`).join('');
   $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) => {
-    button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto));
+    button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto, groups.flatMap((group) => group.photos || [])));
   });
   $('#characterGalleryModal').hidden = false;
 }
@@ -1356,7 +1373,7 @@ function openCharacterAssets(id) {
         <div class="linked-asset"><button data-gallery-photo="${esc(link.key)}"><img src="${fileUrl(link.key)}" loading="lazy" alt=""></button><button class="linked-remove" data-unlink="${esc(link.key)}" title="Quitar asociación">×</button></div>`).join('') : '<div class="hint">Sin assets asociados.</div>'}</div>
     </section>`;
   }).join('');
-  $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) => button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto)));
+  $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) => button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto, links.map((link) => link.key))));
   $('#characterGalleryBody').querySelectorAll('[data-unlink]').forEach((button) => button.addEventListener('click', async () => {
     const result = await api(`/api/asset-links?key=${encodeURIComponent(button.dataset.unlink)}`, { method: 'DELETE' });
     state.assetLinks = result.links;

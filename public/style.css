@@ -797,7 +797,13 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .lightbox-box { position: relative; max-width: 92vw; max-height: 92vh; text-align: center; }
 .lightbox-box img { max-width: 92vw; max-height: 82vh; border-radius: 0; box-shadow: var(--shadow); }
 .lb-close { position: absolute; top: -14px; right: -14px; background: var(--panel-solid); z-index: 2; }
+.lb-nav { position: fixed; top: 50%; transform: translateY(-50%); z-index: 3; width: 48px; height: 64px; display: grid; place-items: center; border: 1px solid var(--border); background: rgba(12,7,18,.86); color: white; cursor: pointer; }
+.lb-nav:hover { border-color: var(--pink); background: var(--panel-solid); color: var(--pink); }
+.lb-prev { left: 24px; }
+.lb-next { right: 24px; }
+.lb-counter { color: var(--muted); font-size: 11px; margin-top: 8px; }
 .lb-actions { display: flex; gap: 8px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+@media (max-width: 700px) { .lb-nav { width: 38px; height: 52px; } .lb-prev { left: 6px; } .lb-next { right: 6px; } }
 
 /* ---------- toast ---------- */
 .toast {
