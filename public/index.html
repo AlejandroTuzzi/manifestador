@@ -40,6 +40,7 @@
     <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol>
     <symbol id="i-cube" viewBox="0 0 24 24"><path d="M21 16V8l-9-5-9 5v8l9 5 9-5z"/><path d="M3.3 7.3L12 12l8.7-4.7"/><path d="M12 22V12"/></symbol>
     <symbol id="i-camera" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/><path d="M15 5l4 4"/></symbol>
     <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
   </defs>
 </svg>
@@ -358,6 +359,12 @@
           <label>Audio generado <input type="text" name="path_audio"></label>
         </div>
         <p class="hint">Rutas relativas a la carpeta de la app o absolutas (ej: <code>D:\fotos\manifestador</code>).</p>
+        <h3>Photoshop</h3>
+        <div class="cfg-grid">
+          <label>Ruta de Photoshop.exe <input type="text" name="photoshopPath" placeholder="C:\Program Files\Adobe\Adobe Photoshop 2025\Photoshop.exe"></label>
+        </div>
+        <p class="hint"><button type="button" id="psDetectBtn" class="mini-btn">Detectar automáticamente</button> Busca tu instalación (registro de Windows y carpetas de Adobe) y la vincula. Si no la encuentra, pegá la ruta a mano.</p>
+
         <h3>Prompt de pose (Poser)</h3>
         <textarea name="poserPrompt" class="cfg-textarea" rows="4" spellcheck="false"></textarea>
         <p class="hint">Se envía junto a tu prompt (sin mostrarse en la caja) cada vez que una referencia viene del Poser, para que la IA copie solo la pose y el encuadre. Dejalo vacío para desactivarlo. <button type="button" id="poserPromptDefaultBtn" class="mini-btn">Restaurar texto por defecto</button></p>

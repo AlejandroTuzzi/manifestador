@@ -6,6 +6,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { spawn, execFile } from 'node:child_process';
 
 import { IMAGE_MODELS, AUDIO_MODEL, getImageModel } from './lib/models.js';
 import {
@@ -26,6 +27,7 @@ const DEFAULT_POSER_PROMPT = 'The attached 3D figure render is ONLY a reference 
 
 const DEFAULT_CONFIG = {
   poserPrompt: DEFAULT_POSER_PROMPT,
+  photoshopPath: '',
   keys: { gemini: '', googleTranslate: '', ark: '', fal: '', elevenlabs: '', openai: '' },
   openaiModel: 'gpt-5-mini',
   paths: {
@@ -253,6 +255,39 @@ function parseDataUrl(dataUrl) {
 
 function sanitizeName(name) {
   return String(name || 'archivo').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80);
+}
+
+// ---------------------------------------------------------------------------
+// Photoshop: detección de la instalación y apertura de archivos
+// ---------------------------------------------------------------------------
+
+async function detectPhotoshop() {
+  // 1) el registro de Windows (App Paths lo escribe el instalador de Adobe)
+  try {
+    const out = await new Promise((resolve, reject) => {
+      execFile('reg', ['query', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\Photoshop.exe', '/ve'],
+        { windowsHide: true }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+    });
+    const m = /REG_SZ\s+(.+\.exe)/i.exec(out);
+    if (m) {
+      const exe = m[1].trim();
+      await fs.access(exe);
+      return exe;
+    }
+  } catch {}
+  // 2) las carpetas típicas de instalación; gana la versión más nueva
+  const roots = [...new Set([process.env.ProgramW6432, process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean))];
+  const found = [];
+  for (const root of roots) {
+    const adobe = path.join(root, 'Adobe');
+    for (const dir of await fs.readdir(adobe).catch(() => [])) {
+      if (!/photoshop/i.test(dir)) continue;
+      const exe = path.join(adobe, dir, 'Photoshop.exe');
+      try { await fs.access(exe); found.push(exe); } catch {}
+    }
+  }
+  found.sort();
+  return found.pop() || null;
 }
 
 // ---------------------------------------------------------------------------
@@ -548,6 +583,7 @@ const server = http.createServer(async (req, res) => {
         seedreamModelId: body.seedreamModelId ?? cfg.seedreamModelId,
         openaiModel: body.openaiModel ?? cfg.openaiModel,
         poserPrompt: body.poserPrompt !== undefined ? String(body.poserPrompt) : cfg.poserPrompt,
+        photoshopPath: body.photoshopPath !== undefined ? String(body.photoshopPath).trim() : cfg.photoshopPath,
         customAudioTags: Array.isArray(body.customAudioTags)
           ? [...new Set(body.customAudioTags.map((tag) => String(tag).trim().replace(/^\[|\]$/g, '')).filter(Boolean))].slice(0, 100)
           : (cfg.customAudioTags || []),
@@ -914,6 +950,37 @@ const server = http.createServer(async (req, res) => {
       ]);
       return send(res, 200, { models, poses, aliases, folder: cfg.paths.poser });
     }
+    // --- Photoshop ---
+    if (p === '/api/photoshop/detect' && req.method === 'POST') {
+      const exe = await detectPhotoshop();
+      if (!exe) return send(res, 404, { error: 'No encontré Photoshop instalado. Cargá la ruta a mano.' });
+      const cfg = await getConfig();
+      await writeJson('config.json', { ...cfg, photoshopPath: exe });
+      return send(res, 200, { path: exe });
+    }
+    if (p === '/api/photoshop/open' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const cfg = await getConfig();
+      if (!cfg.photoshopPath) return send(res, 400, { error: 'Configurá la ruta de Photoshop en Configuración (o usá "Detectar").' });
+      const exeOk = await fs.access(cfg.photoshopPath).then(() => true, () => false);
+      if (!exeOk) return send(res, 400, { error: 'No encuentro Photoshop en la ruta configurada. Revisala en Configuración.' });
+      const abs = await resolveAssetKey(String(body.key || ''));
+      await fs.access(abs);
+      spawn(cfg.photoshopPath, [abs], { detached: true, stdio: 'ignore' }).unref();
+      const st = await fs.stat(abs);
+      return send(res, 200, { ok: true, mtime: st.mtimeMs });
+    }
+    if (p === '/api/assets/mtimes' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const keys = Array.isArray(body.keys) ? body.keys.slice(0, 50) : [];
+      const out = {};
+      for (const key of keys) {
+        try { out[key] = (await fs.stat(await resolveAssetKey(String(key)))).mtimeMs; }
+        catch { out[key] = null; }
+      }
+      return send(res, 200, out);
+    }
+
     if (p === '/api/poser/captures' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const { buffer } = parseDataUrl(body.dataUrl);

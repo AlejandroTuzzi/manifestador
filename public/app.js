@@ -1234,6 +1234,50 @@ function toggleAudioPlay(card, key) {
 }
 
 // ---------------------------------------------------------------------------
+// Photoshop: vigilancia de archivos abiertos afuera. Cuando el archivo cambia
+// en disco (guardaste en Photoshop), se refrescan las <img> sin recargar.
+const psWatch = new Map(); // key -> { mtime, since }
+let psWatchTimer = null;
+
+function watchPhotoshopFile(key, mtime) {
+  psWatch.set(key, { mtime, since: Date.now() });
+  if (!psWatchTimer) psWatchTimer = setInterval(pollPhotoshopFiles, 3000);
+}
+
+async function pollPhotoshopFiles() {
+  for (const [key, w] of psWatch) {
+    if (Date.now() - w.since > 4 * 60 * 60 * 1000) psWatch.delete(key); // 4 h y soltamos
+  }
+  if (!psWatch.size) {
+    clearInterval(psWatchTimer);
+    psWatchTimer = null;
+    return;
+  }
+  let mtimes;
+  try {
+    mtimes = await api('/api/assets/mtimes', { method: 'POST', body: { keys: [...psWatch.keys()] } });
+  } catch {
+    return; // reintentamos en el próximo tick
+  }
+  for (const [key, w] of psWatch) {
+    const current = mtimes[key];
+    if (current === null) { psWatch.delete(key); continue; }
+    if (current && current !== w.mtime) {
+      w.mtime = current;
+      refreshAssetImages(key);
+      toast('Imagen actualizada desde Photoshop');
+    }
+  }
+}
+
+function refreshAssetImages(key) {
+  const base = fileUrl(key);
+  $$('img').forEach((img) => {
+    const src = img.getAttribute('src') || '';
+    if (src === base || src.startsWith(`${base}?`)) img.src = `${base}?v=${Date.now()}`;
+  });
+}
+
 // lightbox
 // ---------------------------------------------------------------------------
 
@@ -1252,7 +1296,17 @@ function openLightbox(key, keys = null) {
     <button class="mini-btn" id="lbRef">${IC('link')} Usar como referencia</button>
     ${/^(generated|uploads)\//.test(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} Asociar a personaje</button>` : ''}
     ${key.startsWith('generated/') ? `<button class="mini-btn" id="lbCharacter">${IC('user')} Convertir en personaje</button>` : ''}
+    <button class="mini-btn" id="lbPhotoshop">${IC('pen')} Abrir en Photoshop</button>
     <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} Descargar</a>`;
+  $('#lbPhotoshop').addEventListener('click', async () => {
+    try {
+      const r = await api('/api/photoshop/open', { method: 'POST', body: { key } });
+      watchPhotoshopFile(key, r.mtime);
+      toast('Abriendo en Photoshop… al guardar allá, acá se actualiza sola');
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  });
   $('#lbRef').addEventListener('click', () => {
     addRef(key);
     $('#lightbox').hidden = true;
@@ -1815,6 +1869,7 @@ function fillConfigForm() {
   f.seedreamModelId.value = c.seedreamModelId || '';
   f.endpoint_ark.value = c.endpoints.ark || '';
   f.poserPrompt.value = c.poserPrompt || '';
+  f.photoshopPath.value = c.photoshopPath || '';
   renderConfigAudioTags();
   $('#accessStatus').textContent = c.accessProtected
     ? 'La aplicación está protegida. Escribí una nueva clave solo si querés cambiarla.'
@@ -1847,6 +1902,23 @@ $$('.test-btn').forEach((btn) => {
       btn.disabled = false;
     }
   });
+});
+
+$('#psDetectBtn').addEventListener('click', async () => {
+  const btn = $('#psDetectBtn');
+  btn.disabled = true;
+  btn.textContent = 'Buscando…';
+  try {
+    const r = await api('/api/photoshop/detect', { method: 'POST' });
+    $('#configForm').photoshopPath.value = r.path;
+    if (state.config) state.config.photoshopPath = r.path;
+    toast('Photoshop detectado y vinculado');
+  } catch (e) {
+    toast(e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Detectar automáticamente';
+  }
 });
 
 $('#poserPromptDefaultBtn').addEventListener('click', () => {
@@ -1882,6 +1954,7 @@ $('#configForm').addEventListener('submit', async (e) => {
         },
         seedreamModelId: f.seedreamModelId.value.trim(),
         poserPrompt: f.poserPrompt.value.trim(),
+        photoshopPath: f.photoshopPath.value.trim(),
         accessPassword: f.accessPassword.value
       }
     });
