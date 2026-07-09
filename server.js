@@ -8,12 +8,12 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFile } from 'node:child_process';
 
-import { IMAGE_MODELS, AUDIO_MODEL, getImageModel } from './lib/models.js';
+import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODEL, getImageModel, getVideoModel } from './lib/models.js';
 import {
-  generateGemini, generateSeedream,
+  generateGemini, generateSeedream, generateSeedanceVideo,
   listVoices, generateSpeech, translateText, searchUpdatedPricing, testService
 } from './lib/providers.js';
-import { mergePricing, imagePrice, audioPrice, translatePrice } from './lib/pricing.js';
+import { mergePricing, imagePrice, videoPrice, audioPrice, translatePrice } from './lib/pricing.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(ROOT, 'data');
@@ -32,6 +32,7 @@ const DEFAULT_CONFIG = {
   openaiModel: 'gpt-5-mini',
   paths: {
     poser: 'assets/poser',
+    video: 'assets/video',
     generated: 'assets/generated',
     uploads: 'assets/uploads',
     audio: 'assets/audio'
@@ -40,6 +41,8 @@ const DEFAULT_CONFIG = {
     ark: 'https://ark.ap-southeast.bytepluses.com/api/v3'
   },
   seedreamModelId: 'seedream-5-0-lite',
+  seedanceModelId: '',
+  seedanceMiniModelId: '',
   customAudioTags: [],
   accessPasswordHash: ''
 };
@@ -210,6 +213,7 @@ async function resolveAssetKey(key) {
   if (zone === 'generated') baseDir = resolveDir(cfg.paths.generated);
   else if (zone === 'uploads') baseDir = resolveDir(cfg.paths.uploads);
   else if (zone === 'audio') baseDir = resolveDir(cfg.paths.audio);
+  else if (zone === 'video') baseDir = resolveDir(cfg.paths.video);
   else if (zone === 'characters') baseDir = path.join(DATA_DIR, 'characters');
   else if (zone === 'poser') baseDir = path.join(DATA_DIR, 'poser');
   else if (zone === 'poser-models') baseDir = resolveDir(cfg.paths.poser);
@@ -239,6 +243,7 @@ async function saveBuffer(zone, name, buffer) {
   const cfg = await getConfig();
   const dir = zone === 'audio' ? resolveDir(cfg.paths.audio)
     : zone === 'uploads' ? resolveDir(cfg.paths.uploads)
+    : zone === 'video' ? resolveDir(cfg.paths.video)
     : resolveDir(cfg.paths.generated);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, name), buffer);
@@ -392,6 +397,68 @@ async function runImageGeneration(req) {
   return entry;
 }
 
+async function runVideoGeneration(req) {
+  const cfg = await getConfig();
+  const model = getVideoModel(req.modelId);
+  if (!model) throw new Error(`Modelo de video desconocido: ${req.modelId}`);
+  const prompt = String(req.prompt || '').trim();
+  if (!prompt) throw new Error('El prompt está vacío.');
+
+  const refs = Array.isArray(req.refs) ? req.refs.slice(0, model.maxRefs) : [];
+  const refPaths = [];
+  for (const key of refs) refPaths.push(await resolveAssetKey(key));
+
+  const aspectRatio = model.aspectRatios.includes(req.aspectRatio) ? req.aspectRatio : model.aspectRatios[0];
+  const resolution = model.resolutions.includes(req.resolution) ? req.resolution : model.resolutions[0];
+  const duration = model.durations.includes(Number(req.duration)) ? Number(req.duration) : model.durations[0];
+  const audio = model.audio ? Boolean(req.audio) : null;
+
+  const hasPoserRef = refs.some((key) => String(key).startsWith('poser/'));
+  const sentPrompt = hasPoserRef && cfg.poserPrompt?.trim()
+    ? `${prompt}\n\n${cfg.poserPrompt.trim()}`
+    : prompt;
+
+  const apiModel = model.id === 'seedance-2'
+    ? (cfg.seedanceModelId || model.apiModel)
+    : (cfg.seedanceMiniModelId || model.apiModel);
+
+  const video = await generateSeedanceVideo({
+    apiKey: cfg.keys.ark, apiModel, endpoint: cfg.endpoints.ark,
+    prompt: sentPrompt, refPaths, aspectRatio, resolution, duration, audio
+  });
+
+  const name = `${ts()}-${model.id}-${newId()}.mp4`;
+  const key = await saveBuffer('video', name, video.buffer);
+
+  const pricing = await getPricing();
+  const cost = videoPrice(pricing, model.id, resolution) * duration;
+  await recordCost({
+    type: 'video', modelId: model.id, label: model.name,
+    units: duration, unitLabel: 'segundo(s)', cost
+  });
+
+  const entry = {
+    id: newId(),
+    ts: Date.now(),
+    type: 'video',
+    modelId: model.id,
+    modelName: model.name,
+    prompt,
+    aspectRatio,
+    resolution,
+    duration,
+    audio: Boolean(audio),
+    refs,
+    characterId: req.characterId || null,
+    outputs: [key],
+    errors: [],
+    cost: Number(cost.toFixed(6))
+  };
+  await updateJson('history.json', [], (history) => [entry, ...history].slice(0, 1000));
+  await recordAssetMetadata(entry);
+  return entry;
+}
+
 async function runAudioGeneration(req) {
   const cfg = await getConfig();
   const text = String(req.text || '').trim();
@@ -440,6 +507,7 @@ async function listZone(zone) {
   const cfg = await getConfig();
   const dir = zone === 'audio' ? resolveDir(cfg.paths.audio)
     : zone === 'uploads' ? resolveDir(cfg.paths.uploads)
+    : zone === 'video' ? resolveDir(cfg.paths.video)
     : resolveDir(cfg.paths.generated);
   let entries = [];
   try {
@@ -542,7 +610,8 @@ const server = http.createServer(async (req, res) => {
       const buf = await fs.readFile(abs).catch(() => null);
       if (!buf) return send(res, 404, { error: 'No encontrado' });
       const mime = STATIC_MIME[path.extname(abs).toLowerCase()]
-        || (abs.endsWith('.mp3') ? 'audio/mpeg' : abs.endsWith('.jpg') || abs.endsWith('.jpeg') ? 'image/jpeg'
+        || (abs.endsWith('.mp3') ? 'audio/mpeg' : abs.endsWith('.mp4') ? 'video/mp4'
+        : abs.endsWith('.webm') ? 'video/webm' : abs.endsWith('.jpg') || abs.endsWith('.jpeg') ? 'image/jpeg'
         : abs.endsWith('.webp') ? 'image/webp' : 'image/png');
       return send(res, 200, buf, { mime });
     }
@@ -560,6 +629,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, {
         config: publicConfig(cfg),
         models: IMAGE_MODELS,
+        videoModels: VIDEO_MODELS,
         audioModel: AUDIO_MODEL,
         characters,
         prompts,
@@ -581,6 +651,8 @@ const server = http.createServer(async (req, res) => {
         paths: { ...cfg.paths, ...(body.paths || {}) },
         endpoints: { ...cfg.endpoints, ...(body.endpoints || {}) },
         seedreamModelId: body.seedreamModelId ?? cfg.seedreamModelId,
+        seedanceModelId: body.seedanceModelId ?? cfg.seedanceModelId,
+        seedanceMiniModelId: body.seedanceMiniModelId ?? cfg.seedanceMiniModelId,
         openaiModel: body.openaiModel ?? cfg.openaiModel,
         poserPrompt: body.poserPrompt !== undefined ? String(body.poserPrompt) : cfg.poserPrompt,
         photoshopPath: body.photoshopPath !== undefined ? String(body.photoshopPath).trim() : cfg.photoshopPath,
@@ -604,8 +676,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/assets' && req.method === 'GET') {
-      const [generated, uploads, audio, savedMetadata, history] = await Promise.all([
-        listZone('generated'), listZone('uploads'), listZone('audio'),
+      const [generated, uploads, audio, video, savedMetadata, history] = await Promise.all([
+        listZone('generated'), listZone('uploads'), listZone('audio'), listZone('video'),
         readJson('asset-metadata.json', {}), readJson('history.json', [])
       ]);
       const metadata = { ...savedMetadata };
@@ -623,8 +695,8 @@ const server = http.createServer(async (req, res) => {
         metadata[key] = enriched;
       }
       if (changed) await writeJson('asset-metadata.json', metadata);
-      for (const item of [...generated, ...uploads, ...audio]) Object.assign(item, metadata[item.key] || {});
-      return send(res, 200, { generated, uploads, audio });
+      for (const item of [...generated, ...uploads, ...audio, ...video]) Object.assign(item, metadata[item.key] || {});
+      return send(res, 200, { generated, uploads, audio, video });
     }
 
     if (p === '/api/asset-links' && req.method === 'POST') {
@@ -650,6 +722,12 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/generate/image' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const entry = await runImageGeneration(body);
+      return send(res, 200, entry);
+    }
+
+    if (p === '/api/generate/video' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const entry = await runVideoGeneration(body);
       return send(res, 200, entry);
     }
 
@@ -809,7 +887,7 @@ const server = http.createServer(async (req, res) => {
       const keys = [...new Set(Array.isArray(body.keys) ? body.keys.map(String) : [])];
       if (!keys.length) throw new Error('No se seleccionaron assets.');
       if (keys.length > 5000) throw new Error('Demasiados assets en una sola operación.');
-      const allowed = keys.filter((key) => /^(generated|uploads|audio)\//.test(key));
+      const allowed = keys.filter((key) => /^(generated|uploads|audio|video)\//.test(key));
       if (allowed.length !== keys.length) throw new Error('La selección contiene assets no eliminables.');
       for (const key of allowed) {
         await fs.unlink(await resolveAssetKey(key)).catch((err) => {
@@ -1179,6 +1257,11 @@ const server = http.createServer(async (req, res) => {
     return send(res, 500, { error: err.message || String(err) });
   }
 });
+
+// La generación de video mantiene el request abierto varios minutos:
+// el timeout por defecto de Node (5 min) lo cortaría a mitad de camino.
+server.requestTimeout = 30 * 60 * 1000;
+server.headersTimeout = 31 * 60 * 1000;
 
 server.listen(PORT, () => {
   console.log('');

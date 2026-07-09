@@ -893,3 +893,10 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .poser-touched { color: #fbbf24; }
 .cfg-textarea { width: 100%; background: var(--panel-solid); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; font: inherit; font-size: 12px; resize: vertical; }
 .cfg-textarea:focus { border-color: var(--violet); outline: none; }
+
+/* ---------- video ---------- */
+.bv-media video { max-width: 100%; max-height: 62vh; background: #000; }
+.hist-thumbs video { width: 54px; height: 54px; object-fit: cover; cursor: pointer; background: #000; }
+.hist-thumbs video:hover { outline: 1.5px solid var(--pink); }
+.asset-card video { width: 100%; height: 100%; object-fit: cover; display: block; cursor: pointer; background: #000; }
+.lightbox-box video { max-width: 92vw; max-height: 82vh; box-shadow: var(--shadow); background: #000; }

@@ -41,6 +41,7 @@
     <symbol id="i-cube" viewBox="0 0 24 24"><path d="M21 16V8l-9-5-9 5v8l9 5 9-5z"/><path d="M3.3 7.3L12 12l8.7-4.7"/><path d="M12 22V12"/></symbol>
     <symbol id="i-camera" viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
     <symbol id="i-pen" viewBox="0 0 24 24"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/><path d="M15 5l4 4"/></symbol>
+    <symbol id="i-film" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 7h5M17 17h5"/></symbol>
     <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
   </defs>
 </svg>
@@ -76,6 +77,7 @@
       <div class="create-top">
         <div class="mode-switch">
           <button id="modeImage" class="mode-btn active"><svg class="ic"><use href="#i-image"/></svg> Imagen</button>
+          <button id="modeVideo" class="mode-btn"><svg class="ic"><use href="#i-film"/></svg> Video</button>
           <button id="modeAudio" class="mode-btn"><svg class="ic"><use href="#i-mic"/></svg> Audio</button>
         </div>
         <div id="pinnedHint" class="pinned-hint" hidden></div>
@@ -135,6 +137,37 @@
           <span class="hint">Elegí el original o un outfit variante</span>
         </div>
         <div id="modelNote" class="model-note"></div>
+      </div>
+
+      <!-- Controles de video -->
+      <div id="videoControls" class="controls-card" hidden>
+        <div class="control-row">
+          <label>Modelo</label>
+          <div id="videoModelChips" class="chips"></div>
+        </div>
+        <div class="control-row">
+          <label>Proporción</label>
+          <div id="videoArChips" class="chips"></div>
+        </div>
+        <div class="control-row">
+          <label>Resolución</label>
+          <div id="videoResChips" class="chips"></div>
+        </div>
+        <div class="control-row">
+          <label>Duración</label>
+          <div id="videoDurChips" class="chips"></div>
+          <span class="hint">segundos — el costo escala con la duración</span>
+        </div>
+        <div class="control-row" id="videoAudioRow">
+          <label>Audio</label>
+          <label class="poser-toggle"><input type="checkbox" id="videoAudio"> generar audio (voces, ambiente, efectos)</label>
+        </div>
+        <div class="control-row refs-row">
+          <label>Fotogramas <span id="videoRefsCount" class="refs-count"></span></label>
+          <div id="videoRefsStrip" class="refs-strip"></div>
+          <span class="hint">1ª imagen = fotograma inicial · 2ª = final</span>
+        </div>
+        <div id="videoModelNote" class="model-note"></div>
       </div>
 
       <!-- Controles de audio -->
@@ -262,6 +295,7 @@
       <div class="tabs">
         <button class="tab active" data-zone="generated">Generadas</button>
         <button class="tab" data-zone="uploads">Subidas</button>
+        <button class="tab" data-zone="video">Videos</button>
         <button class="tab" data-zone="audio">Audio</button>
       </div>
       <div class="assets-toolbar">
@@ -357,6 +391,7 @@
           <label>Imágenes generadas <input type="text" name="path_generated"></label>
           <label>Imágenes subidas <input type="text" name="path_uploads"></label>
           <label>Audio generado <input type="text" name="path_audio"></label>
+          <label>Videos generados <input type="text" name="path_video"></label>
         </div>
         <p class="hint">Rutas relativas a la carpeta de la app o absolutas (ej: <code>D:\fotos\manifestador</code>).</p>
         <h3>Photoshop</h3>
@@ -391,6 +426,8 @@
         <h3>Avanzado</h3>
         <div class="cfg-grid">
           <label>ID de modelo Seedream <input type="text" name="seedreamModelId"></label>
+          <label>ID de modelo Seedance 2.0 <input type="text" name="seedanceModelId" placeholder="dreamina-seedance-2-0"></label>
+          <label>ID de modelo Seedance 2.0 Mini <input type="text" name="seedanceMiniModelId" placeholder="dreamina-seedance-2-0-mini-260615"></label>
           <label>Endpoint Ark <input type="text" name="endpoint_ark"></label>
           <label>Modelo de OpenAI (precios) <input type="text" name="openaiModel" placeholder="gpt-5-mini"></label>
         </div>
@@ -442,6 +479,7 @@
     <label>Tipo
       <select id="promptEditorMode" class="select">
         <option value="image">Imagen</option>
+        <option value="video">Video</option>
         <option value="audio">Audio</option>
       </select>
     </label>
@@ -499,6 +537,7 @@
     <button class="icon-btn lb-close" id="lbClose"><svg class="ic"><use href="#i-x"/></svg></button>
     <button class="lb-nav lb-prev" id="lbPrev" title="Anterior"><svg class="ic ic-lg"><use href="#i-left"/></svg></button>
     <img id="lbImg" alt="">
+    <video id="lbVideo" controls loop hidden></video>
     <button class="lb-nav lb-next" id="lbNext" title="Siguiente"><svg class="ic ic-lg"><use href="#i-right"/></svg></button>
     <div id="lbCounter" class="lb-counter"></div>
     <div id="lbActions" class="lb-actions"></div>

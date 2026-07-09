@@ -14,12 +14,14 @@ const state = {
   promptQuickSearch: '',
   history: [],
   voices: null,          // null = aún no cargadas
-  assets: { generated: [], uploads: [], audio: [] },
+  assets: { generated: [], uploads: [], audio: [], video: [] },
   mode: 'image',
   modelId: null,
   aspectRatio: '1:1',
   resolution: '1K',
   batch: 1,
+  videoModels: [],
+  video: { modelId: null, aspectRatio: '16:9', resolution: '720p', duration: 5, audio: false },
   refs: [],              // [{ key, fromChar }]
   voiceId: '',
   currentEntry: null,
@@ -91,6 +93,15 @@ function currentModel() {
   return state.models.find((m) => m.id === state.modelId) || state.models[0];
 }
 
+function currentVideoModel() {
+  return state.videoModels.find((m) => m.id === state.video.modelId) || state.videoModels[0];
+}
+
+// el modelo cuyo límite de referencias aplica según el modo activo
+function activeRefModel() {
+  return state.mode === 'video' ? currentVideoModel() : currentModel();
+}
+
 function pinnedChar() {
   return state.characters.find((c) => c.id === state.pinnedId) || null;
 }
@@ -133,22 +144,29 @@ function goToCreate() {
 function setMode(mode) {
   state.mode = mode;
   $('#modeImage').classList.toggle('active', mode === 'image');
+  $('#modeVideo').classList.toggle('active', mode === 'video');
   $('#modeAudio').classList.toggle('active', mode === 'audio');
   $('#imageControls').hidden = mode !== 'image';
+  $('#videoControls').hidden = mode !== 'video';
   $('#audioControls').hidden = mode !== 'audio';
   $('#tagPalette').hidden = mode !== 'audio';
   $('.editor-wrap').classList.toggle('tags-on', mode === 'audio');
   $('#promptBox').placeholder = mode === 'audio'
     ? 'Escribí el texto a locutar… usá [risas] o [whispers] para expresiones'
+    : mode === 'video'
+    ? 'Describí la escena en movimiento: acción, cámara, ambiente…'
     : 'Escribí lo que querés manifestar…';
-  $('#btnGenerate').innerHTML = mode === 'audio' ? `${IC('mic')} Dar voz` : `${IC('spark')} Manifestar`;
+  $('#btnGenerate').innerHTML = mode === 'audio' ? `${IC('mic')} Dar voz` : mode === 'video' ? `${IC('film')} Manifestar video` : `${IC('spark')} Manifestar`;
   if (mode === 'audio' && state.voices === null) loadVoices(false);
+  if (mode === 'video') renderVideoControls();
+  if (mode === 'image') renderRefs();
   renderHighlight();
   renderPinnedHint();
   updateEstimate();
 }
 
 $('#modeImage').addEventListener('click', () => setMode('image'));
+$('#modeVideo').addEventListener('click', () => setMode('video'));
 $('#modeAudio').addEventListener('click', () => setMode('audio'));
 
 // ---------------------------------------------------------------------------
@@ -372,11 +390,42 @@ function renderImageControls() {
   updateEstimate();
 }
 
+function renderVideoControls() {
+  const m = currentVideoModel();
+  if (!m) return;
+  state.video.modelId = m.id;
+  if (!m.aspectRatios.includes(state.video.aspectRatio)) state.video.aspectRatio = m.aspectRatios[0];
+  if (!m.resolutions.includes(state.video.resolution)) state.video.resolution = m.resolutions[0];
+  if (!m.durations.includes(state.video.duration)) state.video.duration = m.durations[0];
+  if (state.refs.length > m.maxRefs) state.refs = state.refs.slice(0, m.maxRefs);
+
+  chipRow($('#videoModelChips'), state.videoModels.map((x) => x.id), m.id,
+    (id) => { state.video.modelId = id; renderVideoControls(); },
+    (id) => state.videoModels.find((x) => x.id === id).name);
+  chipRow($('#videoArChips'), m.aspectRatios, state.video.aspectRatio,
+    (v) => { state.video.aspectRatio = v; renderVideoControls(); });
+  chipRow($('#videoResChips'), m.resolutions, state.video.resolution,
+    (v) => { state.video.resolution = v; renderVideoControls(); });
+  chipRow($('#videoDurChips'), m.durations, state.video.duration,
+    (v) => { state.video.duration = v; renderVideoControls(); },
+    (v) => `${v}s`);
+
+  $('#videoAudioRow').hidden = !m.audio;
+  $('#videoAudio').checked = m.audio && state.video.audio;
+  $('#videoModelNote').textContent = m.notes || '';
+  renderRefs();
+  updateEstimate();
+}
+
+$('#videoAudio').addEventListener('change', (e) => { state.video.audio = e.target.checked; });
+
 function renderRefs() {
-  const m = currentModel();
-  const strip = $('#refsStrip');
+  const isVideo = state.mode === 'video';
+  const m = activeRefModel();
+  if (!m) return;
+  const strip = $(isVideo ? '#videoRefsStrip' : '#refsStrip');
   strip.innerHTML = '';
-  $('#refsCount').textContent = `${state.refs.length}/${m.maxRefs}`;
+  $(isVideo ? '#videoRefsCount' : '#refsCount').textContent = `${state.refs.length}/${m.maxRefs}`;
   state.refs.forEach((r, i) => {
     const d = document.createElement('div');
     d.className = 'ref-thumb' + (r.fromChar ? ' from-char' : '');
@@ -399,7 +448,7 @@ function renderRefs() {
 }
 
 function addRef(key, fromChar = false) {
-  const m = currentModel();
+  const m = activeRefModel();
   if (state.refs.some((r) => r.key === key)) return;
   if (state.refs.length >= m.maxRefs) {
     return toast(`${m.name} admite hasta ${m.maxRefs} referencia(s)`, 'err');
@@ -475,7 +524,7 @@ function applyPinnedCharacterPhotos() {
   if (!pc) return;
   const variant = (pc.variants || []).find((v) => v.id === state.characterVariantId);
   const photos = variant?.photos?.length ? variant.photos : pc.photos;
-  const m = currentModel();
+  const m = activeRefModel();
   for (const photo of photos.slice(0, Math.max(0, m.maxRefs - state.refs.length))) {
     state.refs.push({ key: photo, fromChar: true });
   }
@@ -538,17 +587,26 @@ function generate() {
   const voiceId = state.voiceId || pc?.voiceId;
   const voice = (state.voices || []).find((v) => v.id === voiceId);
   const isImage = state.mode === 'image';
-  const model = currentModel();
+  const isVideo = state.mode === 'video';
+  const model = isVideo ? currentVideoModel() : currentModel();
   const job = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     status: 'queued', prompt, createdAt: Date.now(),
-    label: isImage ? `${model.name} · ${state.resolution} · ×${state.batch}` : `Eleven v3 · ${voice?.name || pc?.voiceName || 'voz'}`,
-    path: isImage ? '/api/generate/image' : '/api/generate/audio',
+    label: isImage ? `${model.name} · ${state.resolution} · ×${state.batch}`
+      : isVideo ? `${model.name} · ${state.video.resolution} · ${state.video.duration}s`
+      : `Eleven v3 · ${voice?.name || pc?.voiceName || 'voz'}`,
+    path: isImage ? '/api/generate/image' : isVideo ? '/api/generate/video' : '/api/generate/audio',
     body: isImage ? {
       modelId: state.modelId, prompt, aspectRatio: state.aspectRatio,
       resolution: state.resolution, batch: state.batch,
       refs: state.refs.map((r) => r.key), characterId: state.pinnedId || null,
       characterVariantId: state.characterVariantId || null
+    } : isVideo ? {
+      modelId: state.video.modelId, prompt,
+      aspectRatio: state.video.aspectRatio, resolution: state.video.resolution,
+      duration: state.video.duration, audio: state.video.audio,
+      refs: state.refs.slice(0, model.maxRefs).map((r) => r.key),
+      characterId: state.pinnedId || null
     } : { text: prompt, voiceId, voiceName: voice?.name || pc?.voiceName || '', characterId: state.pinnedId || null }
   };
   state.generationJobs.unshift(job);
@@ -639,6 +697,17 @@ function showEntry(entry, outputIdx = 0) {
         <button class="mini-btn" data-act="edit">${IC('edit')} Editar envío</button>
         <a class="mini-btn" href="${fileUrl(entry.outputs[0])}" download>${IC('download')} Descargar</a>
       </div>`;
+  } else if (entry.type === 'video') {
+    const key = entry.outputs[0];
+    bv.innerHTML = `
+      <div class="bv-media"><video controls autoplay loop src="${fileUrl(key)}"></video></div>
+      <div class="bv-meta">${esc(entry.modelName)} · ${entry.aspectRatio} · ${entry.resolution} · ${entry.duration}s${entry.audio ? ' · con audio' : ''} · ${fmtDate(entry.ts)}</div>
+      <div class="bv-actions">
+        <button class="mini-btn" data-act="copy">${IC('copy')} Copiar prompt</button>
+        <button class="mini-btn" data-act="regen">${IC('refresh')} Regenerar</button>
+        <button class="mini-btn" data-act="edit">${IC('edit')} Editar envío</button>
+        <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} Descargar</a>
+      </div>`;
   } else {
     const key = entry.outputs[outputIdx] || entry.outputs[0];
     const thumbs = entry.outputs.length > 1
@@ -694,6 +763,15 @@ async function regenerate(entry) {
       state.voiceId = entry.voiceId;
       $('#voiceSelect').value = entry.voiceId;
     }
+  } else if (entry.type === 'video') {
+    setMode('video');
+    state.video.modelId = entry.modelId;
+    state.video.aspectRatio = entry.aspectRatio;
+    state.video.resolution = entry.resolution;
+    state.video.duration = entry.duration || 5;
+    state.video.audio = Boolean(entry.audio);
+    state.refs = (entry.refs || []).map((k) => ({ key: k, fromChar: false }));
+    renderVideoControls();
   } else {
     setMode('image');
     state.modelId = entry.modelId;
@@ -712,6 +790,15 @@ function editEntry(entry) {
   if (entry.type === 'audio') {
     setMode('audio');
     if (entry.voiceId) { state.voiceId = entry.voiceId; renderVoiceSelect(); $('#voiceSelect').value = entry.voiceId; }
+  } else if (entry.type === 'video') {
+    setMode('video');
+    state.video.modelId = entry.modelId;
+    state.video.aspectRatio = entry.aspectRatio;
+    state.video.resolution = entry.resolution;
+    state.video.duration = entry.duration || 5;
+    state.video.audio = Boolean(entry.audio);
+    state.refs = (entry.refs || []).map((k) => ({ key: k, fromChar: false }));
+    renderVideoControls();
   } else {
     setMode('image');
     state.modelId = entry.modelId;
@@ -739,12 +826,14 @@ function renderHistory() {
     item.className = 'hist-item';
     const thumbs = entry.type === 'audio'
       ? `<div class="hist-audio-icon">${IC('mic', 'ic ic-lg')}</div>`
+      : entry.type === 'video'
+      ? entry.outputs.slice(0, 4).map((o, i) => `<video src="${fileUrl(o)}" data-i="${i}" preload="metadata" muted></video>`).join('')
       : entry.outputs.slice(0, 4).map((o, i) => `<img src="${fileUrl(o)}" data-i="${i}" alt="" loading="lazy">`).join('');
     item.innerHTML = `
       <div class="hist-thumbs">${thumbs}</div>
       <div class="hist-body">
         <div class="hist-prompt">${esc(entry.prompt)}</div>
-        <div class="hist-meta">${esc(entry.modelName)}${entry.type === 'audio' ? ` · ${esc(entry.voiceName || '')}` : ` · ${entry.aspectRatio} · ${entry.resolution}${entry.batch > 1 ? ' · ×' + entry.batch : ''}`} · ${fmtDate(entry.ts)}${entry.errors?.length ? ` · <span class="err">${entry.errors.length} error(es) en el lote</span>` : ''}</div>
+        <div class="hist-meta">${esc(entry.modelName)}${entry.type === 'audio' ? ` · ${esc(entry.voiceName || '')}` : entry.type === 'video' ? ` · ${entry.aspectRatio} · ${entry.resolution} · ${entry.duration}s` : ` · ${entry.aspectRatio} · ${entry.resolution}${entry.batch > 1 ? ' · ×' + entry.batch : ''}`} · ${fmtDate(entry.ts)}${entry.errors?.length ? ` · <span class="err">${entry.errors.length} error(es) en el lote</span>` : ''}</div>
       </div>
       <div class="hist-actions">
         <button class="mini-btn" data-act="view">${IC('eye')} Ver</button>
@@ -753,7 +842,7 @@ function renderHistory() {
         ${entry.type === 'image' ? `<button class="mini-btn" data-act="ref" title="Usar como referencia">${IC('link')}</button>` : ''}
         <button class="mini-btn danger" data-act="del" title="Borrar">${IC('trash')}</button>
       </div>`;
-    item.querySelectorAll('.hist-thumbs img').forEach((im) => {
+    item.querySelectorAll('.hist-thumbs img, .hist-thumbs video').forEach((im) => {
       im.addEventListener('click', () => showEntry(entry, Number(im.dataset.i)));
     });
     item.querySelector('.hist-audio-icon')?.addEventListener('click', () => showEntry(entry));
@@ -959,7 +1048,7 @@ function isCreateViewActive() {
 }
 
 document.addEventListener('paste', async (e) => {
-  if (!isCreateViewActive() || state.mode !== 'image') return;
+  if (!isCreateViewActive() || !['image', 'video'].includes(state.mode)) return;
   if (!e.clipboardData?.items?.length) return;
   const files = [...e.clipboardData.items]
     .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
@@ -1035,6 +1124,9 @@ function renderAssetsGrid() {
       if (state.assetsZone === 'audio') {
         card.insertAdjacentHTML('beforeend', `<div class="audio-tile">${IC('play', 'ic ic-lg')}</div><div class="a-name">${esc(a.name)}</div>`);
         card.querySelector('.audio-tile').addEventListener('click', () => toggleAudioPlay(card, a.key));
+      } else if (state.assetsZone === 'video') {
+        card.insertAdjacentHTML('beforeend', `<video src="${fileUrl(a.key)}" preload="metadata" muted></video><div class="a-name">${esc(a.name)}</div>`);
+        card.querySelector('video').addEventListener('click', () => openLightbox(a.key, items.map((item) => item.key)));
       } else {
         card.insertAdjacentHTML('beforeend', `<img src="${fileUrl(a.key)}" loading="lazy" alt=""><div class="a-name">${esc(a.name)}</div>`);
         card.querySelector('img').addEventListener('click', () => openLightbox(a.key, items.map((item) => item.key)));
@@ -1051,7 +1143,7 @@ function renderAssetsGrid() {
 
 function usePrompt(pr) {
   promptBox.value = pr.text;
-  setMode(pr.mode === 'audio' ? 'audio' : 'image');
+  setMode(['audio', 'video'].includes(pr.mode) ? pr.mode : 'image');
   renderHighlight();
   goToCreate();
   promptBox.focus();
@@ -1087,7 +1179,7 @@ $('#promptEditorForm').addEventListener('submit', async (e) => {
   const body = {
     title: $('#promptEditorName').value.trim(),
     category: $('#promptEditorCategory').value.trim() || 'General',
-    mode: $('#promptEditorMode').value === 'audio' ? 'audio' : 'image',
+    mode: ['audio', 'video'].includes($('#promptEditorMode').value) ? $('#promptEditorMode').value : 'image',
     text: $('#promptEditorText').value.trim()
   };
   if (!body.title || !body.text) return;
@@ -1281,11 +1373,33 @@ function refreshAssetImages(key) {
 // lightbox
 // ---------------------------------------------------------------------------
 
+function isVideoKey(key) {
+  return String(key).startsWith('video/') || /\.(mp4|webm)$/i.test(String(key));
+}
+
+function closeLightbox() {
+  document.querySelector('#lightbox').hidden = true;
+  const v = $('#lbVideo');
+  v.pause();
+  v.removeAttribute('src');
+}
+
 function openLightbox(key, keys = null) {
   state.lightboxKeys = keys?.length ? [...new Set(keys)] : [key];
   state.lightboxIndex = Math.max(0, state.lightboxKeys.indexOf(key));
   $('#lightbox').hidden = false;
-  $('#lbImg').src = fileUrl(key);
+  const isVideo = isVideoKey(key);
+  $('#lbImg').hidden = isVideo;
+  $('#lbVideo').hidden = !isVideo;
+  if (isVideo) {
+    $('#lbImg').removeAttribute('src');
+    $('#lbVideo').src = fileUrl(key);
+    $('#lbVideo').play().catch(() => {});
+  } else {
+    $('#lbVideo').pause();
+    $('#lbVideo').removeAttribute('src');
+    $('#lbImg').src = fileUrl(key);
+  }
   const info = assetInfo(key);
   const multiple = state.lightboxKeys.length > 1;
   $('#lbPrev').hidden = !multiple; $('#lbNext').hidden = !multiple; $('#lbCounter').hidden = !multiple;
@@ -1293,12 +1407,12 @@ function openLightbox(key, keys = null) {
   $('#lbActions').innerHTML = `
     ${info ? `<button class="mini-btn" id="lbInfo">${IC('info')} Información</button>` : ''}
     ${info?.prompt ? `<button class="mini-btn" id="lbCopyPrompt">${IC('copy')} Copiar prompt</button>` : ''}
-    <button class="mini-btn" id="lbRef">${IC('link')} Usar como referencia</button>
-    ${/^(generated|uploads)\//.test(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} Asociar a personaje</button>` : ''}
-    ${key.startsWith('generated/') ? `<button class="mini-btn" id="lbCharacter">${IC('user')} Convertir en personaje</button>` : ''}
-    <button class="mini-btn" id="lbPhotoshop">${IC('pen')} Abrir en Photoshop</button>
+    ${!isVideo ? `<button class="mini-btn" id="lbRef">${IC('link')} Usar como referencia</button>` : ''}
+    ${!isVideo && /^(generated|uploads)\//.test(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} Asociar a personaje</button>` : ''}
+    ${!isVideo && key.startsWith('generated/') ? `<button class="mini-btn" id="lbCharacter">${IC('user')} Convertir en personaje</button>` : ''}
+    ${!isVideo ? `<button class="mini-btn" id="lbPhotoshop">${IC('pen')} Abrir en Photoshop</button>` : ''}
     <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} Descargar</a>`;
-  $('#lbPhotoshop').addEventListener('click', async () => {
+  $('#lbPhotoshop')?.addEventListener('click', async () => {
     try {
       const r = await api('/api/photoshop/open', { method: 'POST', body: { key } });
       watchPhotoshopFile(key, r.mtime);
@@ -1307,17 +1421,17 @@ function openLightbox(key, keys = null) {
       toast(e.message, 'err');
     }
   });
-  $('#lbRef').addEventListener('click', () => {
+  $('#lbRef')?.addEventListener('click', () => {
     addRef(key);
-    $('#lightbox').hidden = true;
+    closeLightbox();
     goToCreate();
-    setMode('image');
+    if (state.mode === 'audio') setMode('image');
     toast('Agregada como referencia');
   });
   $('#lbCopyPrompt')?.addEventListener('click', () => copyPrompt(info.prompt));
   $('#lbInfo')?.addEventListener('click', () => openAssetInfo({ key, ...info }));
   $('#lbCharacter')?.addEventListener('click', () => {
-    $('#lightbox').hidden = true;
+    closeLightbox();
     openCharModal(null, key);
   });
   $('#lbAssociate')?.addEventListener('click', () => associateAsset(key));
@@ -1332,7 +1446,7 @@ $('#lbPrev').addEventListener('click', () => navigateLightbox(-1));
 $('#lbNext').addEventListener('click', () => navigateLightbox(1));
 
 function openAssetInfo(asset) {
-  $('#lightbox').hidden = true;
+  closeLightbox();
   const character = state.characters.find((c) => c.id === asset.characterId);
   const variant = (character?.variants || []).find((v) => v.id === asset.characterVariantId);
   const rows = [
@@ -1356,7 +1470,7 @@ $('#assetInfoModal').addEventListener('click', (e) => { if (e.target.id === 'ass
 async function associateAsset(key) {
   if (!state.characters.length) return toast('Primero creá un personaje', 'err');
   state.pendingAssociationKey = key;
-  $('#lightbox').hidden = true;
+  closeLightbox();
   const select = $('#associateCharacter');
   select.innerHTML = state.characters.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
   const existing = state.assetLinks.find((link) => link.key === key);
@@ -1389,13 +1503,13 @@ function closeAssociateAsset() { $('#associateAssetModal').hidden = true; state.
 $('#associateAssetClose').addEventListener('click', closeAssociateAsset);
 $('#associateAssetCancel').addEventListener('click', closeAssociateAsset);
 $('#associateAssetModal').addEventListener('click', (e) => { if (e.target.id === 'associateAssetModal') closeAssociateAsset(); });
-$('#lbClose').addEventListener('click', () => { $('#lightbox').hidden = true; });
-$('#lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox') $('#lightbox').hidden = true; });
+$('#lbClose').addEventListener('click', () => { closeLightbox(); });
+$('#lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox') closeLightbox(); });
 document.addEventListener('keydown', (e) => {
   if (!$('#lightbox').hidden && e.key === 'ArrowLeft') { e.preventDefault(); navigateLightbox(-1); return; }
   if (!$('#lightbox').hidden && e.key === 'ArrowRight') { e.preventDefault(); navigateLightbox(1); return; }
   if (e.key === 'Escape') {
-    $('#lightbox').hidden = true; $('#pickerModal').hidden = true; $('#charModal').hidden = true;
+    closeLightbox(); $('#pickerModal').hidden = true; $('#charModal').hidden = true;
     $('#characterGalleryModal').hidden = true; $('#variantEditorModal').hidden = true; $('#associateAssetModal').hidden = true;
     $('#assetInfoModal').hidden = true;
     $('#promptEditorModal').hidden = true; state.promptEditor = null;
@@ -1733,6 +1847,11 @@ function updateEstimate() {
   if (state.mode === 'image') {
     const p = imgPrice(state.modelId, state.resolution) * state.batch;
     el.textContent = p ? `≈ $${p.toFixed(3)}` : '';
+  } else if (state.mode === 'video') {
+    const t = state.pricing.video?.[state.video.modelId] || {};
+    const perSec = t[state.video.resolution] ?? Object.values(t)[0] ?? 0;
+    const p = perSec * state.video.duration;
+    el.textContent = p ? `≈ $${p.toFixed(3)} (${state.video.duration}s)` : '';
   } else {
     const per1k = state.pricing.audio?.['eleven-v3']?.per1kChars ?? 0;
     const chars = promptBox.value.length;
@@ -1797,6 +1916,13 @@ async function loadCosts() {
         `<label class="pr-unit">${res} <input type="number" step="0.001" min="0" data-model="${esc(modelId)}" data-res="${esc(res)}" value="${val}"></label>`
       ).join('') + `<span class="pr-unit">USD/imagen</span></div>`;
   }
+  for (const [modelId, table] of Object.entries(data.pricing.video || {})) {
+    const name = state.videoModels.find((x) => x.id === modelId)?.name || modelId;
+    rows += `<div class="pricing-row"><span class="pr-name">${esc(name)}</span>` +
+      Object.entries(table).map(([res, val]) =>
+        `<label class="pr-unit">${res} <input type="number" step="0.001" min="0" data-vmodel="${esc(modelId)}" data-res="${esc(res)}" value="${val}"></label>`
+      ).join('') + `<span class="pr-unit">USD/segundo</span></div>`;
+  }
   rows += `<div class="pricing-row"><span class="pr-name">Eleven v3</span>
     <label class="pr-unit">1k car. <input type="number" step="0.001" min="0" data-audio="per1kChars" value="${data.pricing.audio['eleven-v3'].per1kChars}"></label>
     <span class="pr-unit">USD/1000 caracteres</span></div>`;
@@ -1804,7 +1930,7 @@ async function loadCosts() {
 
   $('#costsLedger').innerHTML = data.recent.length
     ? data.recent.slice(0, 40).map((e) => `<div class="cost-row">
-        <span class="cr-label">${e.type === 'image' ? IC('image') : e.type === 'audio' ? IC('mic') : IC('globe')} ${esc(e.label || e.modelId)}
+        <span class="cr-label">${e.type === 'image' ? IC('image') : e.type === 'video' ? IC('film') : e.type === 'audio' ? IC('mic') : IC('globe')} ${esc(e.label || e.modelId)}
           <span class="cr-sub">${e.units} ${esc(e.unitLabel || '')} · ${fmtDate(e.ts)}</span></span>
         <span class="cr-value">${fmtUsd(e.cost)}</span></div>`).join('')
     : '<div class="empty-note" style="padding:8px 0">Todavía no generaste nada.</div>';
@@ -1835,11 +1961,17 @@ $('#btnSavePricing').addEventListener('click', async () => {
     image[m] = image[m] || {};
     image[m][inp.dataset.res] = Number(inp.value) || 0;
   });
+  const video = {};
+  $$('#pricingTable input[data-vmodel]').forEach((inp) => {
+    const m = inp.dataset.vmodel;
+    video[m] = video[m] || {};
+    video[m][inp.dataset.res] = Number(inp.value) || 0;
+  });
   const per1k = Number($('#pricingTable input[data-audio]')?.value) || 0;
   try {
     state.pricing = await api('/api/pricing', {
       method: 'PUT',
-      body: { image, audio: { 'eleven-v3': { per1kChars: per1k } } }
+      body: { image, video, audio: { 'eleven-v3': { per1kChars: per1k } } }
     });
     updateEstimate();
     toast('Tarifas guardadas');
@@ -1866,7 +1998,10 @@ function fillConfigForm() {
   f.path_generated.value = c.paths.generated || '';
   f.path_uploads.value = c.paths.uploads || '';
   f.path_audio.value = c.paths.audio || '';
+  f.path_video.value = c.paths.video || '';
   f.seedreamModelId.value = c.seedreamModelId || '';
+  f.seedanceModelId.value = c.seedanceModelId || '';
+  f.seedanceMiniModelId.value = c.seedanceMiniModelId || '';
   f.endpoint_ark.value = c.endpoints.ark || '';
   f.poserPrompt.value = c.poserPrompt || '';
   f.photoshopPath.value = c.photoshopPath || '';
@@ -1947,12 +2082,15 @@ $('#configForm').addEventListener('submit', async (e) => {
         paths: {
           generated: f.path_generated.value.trim(),
           uploads: f.path_uploads.value.trim(),
-          audio: f.path_audio.value.trim()
+          audio: f.path_audio.value.trim(),
+          video: f.path_video.value.trim()
         },
         endpoints: {
           ark: f.endpoint_ark.value.trim()
         },
         seedreamModelId: f.seedreamModelId.value.trim(),
+        seedanceModelId: f.seedanceModelId.value.trim(),
+        seedanceMiniModelId: f.seedanceMiniModelId.value.trim(),
         poserPrompt: f.poserPrompt.value.trim(),
         photoshopPath: f.photoshopPath.value.trim(),
         accessPassword: f.accessPassword.value
@@ -1978,6 +2116,7 @@ async function init() {
     const s = await api('/api/state');
     state.config = s.config;
     state.models = s.models;
+    state.videoModels = s.videoModels || [];
     state.characters = s.characters;
     state.prompts = s.prompts;
     state.assetLinks = s.assetLinks || [];
