@@ -404,7 +404,9 @@ async function runVideoGeneration(req) {
   const prompt = String(req.prompt || '').trim();
   if (!prompt) throw new Error('El prompt está vacío.');
 
-  const refs = Array.isArray(req.refs) ? req.refs.slice(0, model.maxRefs) : [];
+  const mode = req.mode === 'frames' ? 'frames' : 'reference';
+  const refLimit = model.refLimits?.[mode] ?? model.maxRefs;
+  const refs = Array.isArray(req.refs) ? req.refs.slice(0, refLimit) : [];
   const refPaths = [];
   for (const key of refs) refPaths.push(await resolveAssetKey(key));
 
@@ -424,7 +426,7 @@ async function runVideoGeneration(req) {
 
   const video = await generateSeedanceVideo({
     apiKey: cfg.keys.ark, apiModel, endpoint: cfg.endpoints.ark,
-    prompt: sentPrompt, refPaths, aspectRatio, resolution, duration, audio
+    prompt: sentPrompt, refPaths, mode, aspectRatio, resolution, duration, audio
   });
 
   const name = `${ts()}-${model.id}-${newId()}.mp4`;
@@ -444,6 +446,7 @@ async function runVideoGeneration(req) {
     modelId: model.id,
     modelName: model.name,
     prompt,
+    mode,
     aspectRatio,
     resolution,
     duration,

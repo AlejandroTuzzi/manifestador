@@ -21,7 +21,7 @@ const state = {
   resolution: '1K',
   batch: 1,
   videoModels: [],
-  video: { modelId: null, aspectRatio: '16:9', resolution: '720p', duration: 5, audio: false },
+  video: { modelId: null, mode: 'reference', aspectRatio: '16:9', resolution: '720p', duration: 5, audio: false },
   refs: [],              // [{ key, fromChar }]
   voiceId: '',
   currentEntry: null,
@@ -102,6 +102,13 @@ function activeRefModel() {
   return state.mode === 'video' ? currentVideoModel() : currentModel();
 }
 
+function activeRefLimit() {
+  const m = activeRefModel();
+  if (!m) return 0;
+  if (state.mode === 'video') return m.refLimits?.[state.video.mode] ?? m.maxRefs;
+  return m.maxRefs;
+}
+
 function pinnedChar() {
   return state.characters.find((c) => c.id === state.pinnedId) || null;
 }
@@ -150,7 +157,7 @@ function setMode(mode) {
   $('#videoControls').hidden = mode !== 'video';
   $('#audioControls').hidden = mode !== 'audio';
   $('#tagPalette').hidden = mode !== 'audio';
-  $('.editor-wrap').classList.toggle('tags-on', mode === 'audio');
+  $('.editor-wrap').classList.toggle('tags-on', mode === 'audio' || mode === 'video');
   $('#promptBox').placeholder = mode === 'audio'
     ? 'Escribí el texto a locutar… usá [risas] o [whispers] para expresiones'
     : mode === 'video'
@@ -177,10 +184,14 @@ const promptBox = $('#promptBox');
 const highlighter = $('#highlighter');
 
 function renderHighlight() {
-  if (state.mode !== 'audio') return;
   const text = promptBox.value;
-  const html = esc(text).replace(/\[([^\]\n]{1,60})\]/g, '<span class="tag">[$1]</span>');
-  highlighter.innerHTML = html + '\n';
+  if (state.mode === 'audio') {
+    highlighter.innerHTML = esc(text).replace(/\[([^\]\n]{1,60})\]/g, '<span class="tag">[$1]</span>') + '\n';
+  } else if (state.mode === 'video' && state.video.mode === 'reference') {
+    highlighter.innerHTML = esc(text).replace(/@image\d+/gi, '<span class="tag">$&</span>') + '\n';
+  } else {
+    return;
+  }
   highlighter.scrollTop = promptBox.scrollTop;
 }
 
@@ -397,11 +408,17 @@ function renderVideoControls() {
   if (!m.aspectRatios.includes(state.video.aspectRatio)) state.video.aspectRatio = m.aspectRatios[0];
   if (!m.resolutions.includes(state.video.resolution)) state.video.resolution = m.resolutions[0];
   if (!m.durations.includes(state.video.duration)) state.video.duration = m.durations[0];
-  if (state.refs.length > m.maxRefs) state.refs = state.refs.slice(0, m.maxRefs);
+  if (state.refs.length > activeRefLimit()) state.refs = state.refs.slice(0, activeRefLimit());
 
   chipRow($('#videoModelChips'), state.videoModels.map((x) => x.id), m.id,
     (id) => { state.video.modelId = id; renderVideoControls(); },
     (id) => state.videoModels.find((x) => x.id === id).name);
+  chipRow($('#videoModeChips'), ['reference', 'frames'], state.video.mode,
+    (v) => { state.video.mode = v; renderVideoControls(); },
+    (v) => (v === 'reference' ? 'Referencias (@)' : 'Inicio → Fin'));
+  $('#videoRefsHint').textContent = state.video.mode === 'reference'
+    ? 'mencionalas en el prompt con @image1, @image2… (botón @ en cada miniatura)'
+    : '1ª imagen = fotograma inicial · 2ª = final';
   chipRow($('#videoArChips'), m.aspectRatios, state.video.aspectRatio,
     (v) => { state.video.aspectRatio = v; renderVideoControls(); });
   chipRow($('#videoResChips'), m.resolutions, state.video.resolution,
@@ -423,21 +440,28 @@ function renderRefs() {
   const isVideo = state.mode === 'video';
   const m = activeRefModel();
   if (!m) return;
+  const maxRefs = activeRefLimit();
   const strip = $(isVideo ? '#videoRefsStrip' : '#refsStrip');
   strip.innerHTML = '';
-  $(isVideo ? '#videoRefsCount' : '#refsCount').textContent = `${state.refs.length}/${m.maxRefs}`;
+  $(isVideo ? '#videoRefsCount' : '#refsCount').textContent = `${state.refs.length}/${maxRefs}`;
+  const refMode = isVideo ? state.video.mode : null;
   state.refs.forEach((r, i) => {
     const d = document.createElement('div');
     d.className = 'ref-thumb' + (r.fromChar ? ' from-char' : '');
-    d.innerHTML = `<img src="${fileUrl(r.key)}" alt=""><button class="rm" title="Quitar">×</button>`;
+    const badge = refMode === 'reference' ? `<button class="ref-at" title="Insertar @image${i + 1} en el prompt">@${i + 1}</button>`
+      : refMode === 'frames' ? `<span class="ref-badge">${i === 0 ? 'inicio' : 'fin'}</span>`
+      : '';
+    d.innerHTML = `<img src="${fileUrl(r.key)}" alt="">${badge}<button class="rm" title="Quitar">×</button>`;
     d.querySelector('.rm').addEventListener('click', () => {
       state.refs.splice(i, 1);
       renderRefs();
+      renderHighlight();
     });
+    d.querySelector('.ref-at')?.addEventListener('click', () => insertAtCursor(`@image${i + 1} `));
     d.querySelector('img').addEventListener('click', () => openLightbox(r.key, state.refs.map((ref) => ref.key)));
     strip.appendChild(d);
   });
-  if (state.refs.length < m.maxRefs) {
+  if (state.refs.length < maxRefs) {
     const add = document.createElement('button');
     add.className = 'ref-add';
     add.textContent = '+';
@@ -449,9 +473,10 @@ function renderRefs() {
 
 function addRef(key, fromChar = false) {
   const m = activeRefModel();
+  const maxRefs = activeRefLimit();
   if (state.refs.some((r) => r.key === key)) return;
-  if (state.refs.length >= m.maxRefs) {
-    return toast(`${m.name} admite hasta ${m.maxRefs} referencia(s)`, 'err');
+  if (state.refs.length >= maxRefs) {
+    return toast(`${m.name} admite hasta ${maxRefs} referencia(s) en este modo`, 'err');
   }
   state.refs.push({ key, fromChar });
   renderRefs();
@@ -524,8 +549,7 @@ function applyPinnedCharacterPhotos() {
   if (!pc) return;
   const variant = (pc.variants || []).find((v) => v.id === state.characterVariantId);
   const photos = variant?.photos?.length ? variant.photos : pc.photos;
-  const m = activeRefModel();
-  for (const photo of photos.slice(0, Math.max(0, m.maxRefs - state.refs.length))) {
+  for (const photo of photos.slice(0, Math.max(0, activeRefLimit() - state.refs.length))) {
     state.refs.push({ key: photo, fromChar: true });
   }
 }
@@ -602,10 +626,10 @@ function generate() {
       refs: state.refs.map((r) => r.key), characterId: state.pinnedId || null,
       characterVariantId: state.characterVariantId || null
     } : isVideo ? {
-      modelId: state.video.modelId, prompt,
+      modelId: state.video.modelId, prompt, mode: state.video.mode,
       aspectRatio: state.video.aspectRatio, resolution: state.video.resolution,
       duration: state.video.duration, audio: state.video.audio,
-      refs: state.refs.slice(0, model.maxRefs).map((r) => r.key),
+      refs: state.refs.slice(0, activeRefLimit()).map((r) => r.key),
       characterId: state.pinnedId || null
     } : { text: prompt, voiceId, voiceName: voice?.name || pc?.voiceName || '', characterId: state.pinnedId || null }
   };
@@ -768,6 +792,7 @@ async function regenerate(entry) {
     state.video.modelId = entry.modelId;
     state.video.aspectRatio = entry.aspectRatio;
     state.video.resolution = entry.resolution;
+    state.video.mode = entry.mode || 'reference';
     state.video.duration = entry.duration || 5;
     state.video.audio = Boolean(entry.audio);
     state.refs = (entry.refs || []).map((k) => ({ key: k, fromChar: false }));
@@ -795,6 +820,7 @@ function editEntry(entry) {
     state.video.modelId = entry.modelId;
     state.video.aspectRatio = entry.aspectRatio;
     state.video.resolution = entry.resolution;
+    state.video.mode = entry.mode || 'reference';
     state.video.duration = entry.duration || 5;
     state.video.audio = Boolean(entry.audio);
     state.refs = (entry.refs || []).map((k) => ({ key: k, fromChar: false }));

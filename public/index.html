@@ -162,10 +162,14 @@
           <label>Audio</label>
           <label class="poser-toggle"><input type="checkbox" id="videoAudio"> generar audio (voces, ambiente, efectos)</label>
         </div>
+        <div class="control-row">
+          <label>Modo</label>
+          <div id="videoModeChips" class="chips"></div>
+        </div>
         <div class="control-row refs-row">
-          <label>Fotogramas <span id="videoRefsCount" class="refs-count"></span></label>
+          <label>Imágenes <span id="videoRefsCount" class="refs-count"></span></label>
           <div id="videoRefsStrip" class="refs-strip"></div>
-          <span class="hint">1ª imagen = fotograma inicial · 2ª = final</span>
+          <span class="hint" id="videoRefsHint"></span>
         </div>
         <div id="videoModelNote" class="model-note"></div>
       </div>
