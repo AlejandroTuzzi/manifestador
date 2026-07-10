@@ -9,6 +9,7 @@ import { OrbitControls } from './vendor/OrbitControls.js';
 import { TGALoader } from './vendor/TGALoader.js';
 import { DDSLoader } from './vendor/DDSLoader.js';
 import { parseXps, parsePoseFile, serializePose } from './poser-xps.js';
+import { POSER_BODY_PARTS } from './poser-bodyparts.js';
 
 const B = window.manifestadorBridge;
 const $ = (s) => document.querySelector(s);
@@ -25,6 +26,7 @@ const P = {
   selectedBone: -1,
   soloDots: false,      // seleccionado por etiqueta: solo se ve el punto activo
   aliases: {},          // { modelId: { nombreHueso: etiqueta } }
+  bodymap: {},          // { modelId: { partId: nombreHueso } } — mapa corporal fijo
   meshItems: [],        // meshes del modelo con su grupo de "parte/ropa"
   modelSize: 1,
   boneSearch: '',
@@ -113,7 +115,7 @@ function disposeModel() {
   if (P.boneMarker) { P.scene.remove(P.boneMarker); P.boneMarker = null; }
   P.root = null; P.skeleton = null; P.boneObjs = []; P.restLocal = []; P.selectedBone = -1;
   P.meshItems = []; P.soloDots = false;
-  renderBoneList(); renderBoneControls(); renderParts(); renderAliasChips();
+  renderBoneList(); renderBoneControls(); renderParts(); renderAliasChips(); renderBodyMap();
 }
 
 // DDS: DXT1/3/5 vía DDSLoader (comprimida, no admite flipY en GPU: se compensa
@@ -281,6 +283,7 @@ function buildModel(parsed) {
   renderBoneControls();
   renderParts();
   renderAliasChips();
+  renderBodyMap();
 }
 
 // Convención XNALara: los meshes "+Grupo.item" / "-Grupo.item" son partes
@@ -381,14 +384,17 @@ function renderBoneList() {
   list.querySelectorAll('[data-bone]').forEach((btn) => btn.addEventListener('click', () => selectBone(Number(btn.dataset.bone))));
 }
 
-function selectBone(i, solo = false) {
+function selectBone(i, solo = false, scrollToList = true) {
   P.selectedBone = i;
   P.soloDots = solo;
   renderBoneList();
   renderBoneControls();
   renderAliasChips();
-  const active = $('#poserBoneList .poser-bone.active');
-  if (active) active.scrollIntoView({ block: 'nearest' });
+  renderBodyMap();
+  if (scrollToList) {
+    const active = $('#poserBoneList .poser-bone.active');
+    if (active) active.scrollIntoView({ block: 'nearest' });
+  }
 }
 
 function renderBoneControls() {
@@ -398,6 +404,7 @@ function renderBoneControls() {
   if (!bone) return;
   $('#poserBoneName').textContent = bone.name;
   $('#poserAliasInput').value = (P.aliases[P.model?.id] || {})[bone.name] || '';
+  $('#poserBodyPartSelect').value = bodyPartForBone(bone.name);
   for (const [axis, id] of [['x', '#poserRotX'], ['y', '#poserRotY'], ['z', '#poserRotZ']]) {
     const input = $(id);
     input.value = Math.round(deg(bone.rotation[axis]));
@@ -437,6 +444,60 @@ function renderAliasChips() {
   }));
 }
 
+// Mapa corporal: vocabulario fijo de 16 partes, convive con los alias libres.
+// Un clic sobre el monigote selecciona el hueso asignado a esa parte; para
+// asignar, se elige el hueso primero y se guarda desde su ventana.
+$('#poserBodyPartSelect').innerHTML = '<option value="">— ninguna —</option>'
+  + POSER_BODY_PARTS.map((p) => `<option value="${p.id}">${p.label}</option>`).join('');
+
+function bodyPartForBone(boneName) {
+  const map = P.bodymap[P.model?.id] || {};
+  const entry = Object.entries(map).find(([, bone]) => bone === boneName);
+  return entry ? entry[0] : '';
+}
+
+function renderBodyMap() {
+  const map = P.bodymap[P.model?.id] || {};
+  const selectedName = P.boneObjs[P.selectedBone]?.name;
+  document.querySelectorAll('#poserBodyMap [data-part]').forEach((el) => {
+    const bone = map[el.dataset.part];
+    el.classList.toggle('assigned', Boolean(bone));
+    el.classList.toggle('active', Boolean(bone) && bone === selectedName);
+  });
+}
+
+$('#poserBodyMap').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-part]');
+  if (!el || !P.model) return;
+  const boneName = (P.bodymap[P.model.id] || {})[el.dataset.part];
+  if (!boneName) {
+    const label = POSER_BODY_PARTS.find((p) => p.id === el.dataset.part)?.label || el.dataset.part;
+    B.toast(`Sin hueso asignado a "${label}". Elegí un hueso y asignalo desde su ventana.`, 'err');
+    return;
+  }
+  const idx = P.boneObjs.findIndex((b) => b.name === boneName);
+  if (idx === -1) return B.toast('El hueso asignado ya no existe en este modelo.', 'err');
+  selectBone(idx, true, false);
+});
+
+$('#poserBodyPartSave').addEventListener('click', async () => {
+  const bone = P.boneObjs[P.selectedBone];
+  if (!bone || !P.model) return;
+  const newPart = $('#poserBodyPartSelect').value;
+  const oldPart = bodyPartForBone(bone.name);
+  if (oldPart && oldPart !== newPart) {
+    const res = await B.api('/api/poser/bodymap', { method: 'PUT', body: { modelId: P.model.id, part: oldPart, bone: '' } });
+    P.bodymap = res.bodymap;
+  }
+  if (newPart) {
+    const res = await B.api('/api/poser/bodymap', { method: 'PUT', body: { modelId: P.model.id, part: newPart, bone: bone.name } });
+    P.bodymap = res.bodymap;
+  }
+  renderBodyMap();
+  const label = POSER_BODY_PARTS.find((p) => p.id === newPart)?.label;
+  B.toast(label ? `Asignado a "${label}"` : 'Parte del cuerpo borrada');
+});
+
 $('#poserAliasSave').addEventListener('click', async () => {
   const bone = P.boneObjs[P.selectedBone];
   if (!bone || !P.model) return;
@@ -454,6 +515,7 @@ $('#poserBoneWinClose').addEventListener('click', () => {
   renderBoneList();
   renderBoneControls();
   renderAliasChips();
+  renderBodyMap();
 });
 
 // la ventana de hueso se puede arrastrar desde su encabezado
@@ -524,6 +586,7 @@ async function refreshPoser() {
   P.models = data.models;
   P.poses = data.poses;
   P.aliases = data.aliases || {};
+  P.bodymap = data.bodymap || {};
   $('#poserFolderHint').textContent = P.models.length
     ? ''
     : `Copiá cada modelo (su carpeta con el .xps/.mesh y las texturas) dentro de ${data.folder} y tocá "Releer carpeta".`;
@@ -536,6 +599,7 @@ async function refreshPoser() {
   if (pick) sel.value = pick.id;
   if (pick && pick.id !== P.model?.id) await loadModel(pick);
   renderSceneList();
+  renderBodyMap();
 }
 
 async function loadModel(model) {
@@ -770,6 +834,28 @@ function renderSceneList() {
     }
   })));
 }
+
+// ---------------------------------------------------------------------------
+// paneles colapsables: se acuerda cuáles quedaron cerrados
+// ---------------------------------------------------------------------------
+
+const COLLAPSED_PANELS_KEY = 'poserCollapsedPanels';
+const collapsedPanels = (() => {
+  try { return new Set(JSON.parse(localStorage.getItem(COLLAPSED_PANELS_KEY) || '[]')); } catch { return new Set(); }
+})();
+document.querySelectorAll('.poser-panel[data-panel]').forEach((panel) => {
+  panel.classList.toggle('collapsed', collapsedPanels.has(panel.dataset.panel));
+});
+document.querySelectorAll('[data-panel-toggle]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const panel = btn.closest('.poser-panel');
+    if (!panel) return;
+    const collapsed = panel.classList.toggle('collapsed');
+    if (collapsed) collapsedPanels.add(panel.dataset.panel);
+    else collapsedPanels.delete(panel.dataset.panel);
+    localStorage.setItem(COLLAPSED_PANELS_KEY, JSON.stringify([...collapsedPanels]));
+  });
+});
 
 // ---------------------------------------------------------------------------
 // entrada desde app.js

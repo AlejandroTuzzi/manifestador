@@ -230,13 +230,40 @@
               <input type="text" id="poserAliasInput" class="text-input" placeholder="Etiqueta (ej: Control Cuello)">
               <button id="poserAliasSave" class="mini-btn" title="Guardar etiqueta para selección rápida"><svg class="ic"><use href="#i-save"/></svg></button>
             </div>
+            <div class="poser-row">
+              <select id="poserBodyPartSelect" class="select"></select>
+              <button id="poserBodyPartSave" class="mini-btn" title="Asignar este hueso a la parte del cuerpo elegida">Asignar</button>
+            </div>
             <button id="poserBoneReset" class="mini-btn">Resetear hueso</button>
           </div>
         </div>
 
         <aside class="poser-side">
-          <div class="poser-panel">
-            <div class="panel-title">Cámara</div>
+          <div class="poser-panel" data-panel="bodymap">
+            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> Mapa corporal</button></div>
+            <svg id="poserBodyMap" class="poser-bodymap" viewBox="0 0 100 155" aria-label="Mapa corporal">
+              <rect class="poser-bodypart" data-part="abdomen" x="33" y="31" width="34" height="24" rx="9"><title>Abdomen</title></rect>
+              <rect class="poser-bodypart" data-part="cintura" x="35" y="57" width="30" height="14" rx="6"><title>Cintura</title></rect>
+              <rect class="poser-bodypart" data-part="brazo-derecho" x="17" y="41" width="9" height="28" rx="4"><title>Brazo derecho</title></rect>
+              <rect class="poser-bodypart" data-part="brazo-izquierdo" x="74" y="41" width="9" height="28" rx="4"><title>Brazo izquierdo</title></rect>
+              <rect class="poser-bodypart" data-part="muslo-derecha" x="36" y="73" width="13" height="34" rx="5"><title>Muslo derecha</title></rect>
+              <rect class="poser-bodypart" data-part="muslo-izquierda" x="51" y="73" width="13" height="34" rx="5"><title>Muslo izquierda</title></rect>
+              <rect class="poser-bodypart" data-part="pierna-derecha" x="36.5" y="109" width="12" height="30" rx="5"><title>Pierna derecha</title></rect>
+              <rect class="poser-bodypart" data-part="pierna-izquierda" x="51.5" y="109" width="12" height="30" rx="5"><title>Pierna izquierda</title></rect>
+              <rect class="poser-bodypart" data-part="cuello" x="46" y="23" width="8" height="6"><title>Cuello</title></rect>
+              <circle class="poser-bodypart" data-part="hombro-derecho" cx="25" cy="33" r="6"><title>Hombro derecho</title></circle>
+              <circle class="poser-bodypart" data-part="hombro-izquierdo" cx="75" cy="33" r="6"><title>Hombro izquierdo</title></circle>
+              <circle class="poser-bodypart" data-part="cabeza" cx="50" cy="12" r="9"><title>Cabeza</title></circle>
+              <circle class="poser-bodypart" data-part="mano-derecha" cx="21" cy="78" r="7"><title>Mano derecha</title></circle>
+              <circle class="poser-bodypart" data-part="mano-izquierda" cx="79" cy="78" r="7"><title>Mano izquierda</title></circle>
+              <rect class="poser-bodypart" data-part="pie-derecha" x="33" y="141" width="16" height="8" rx="4"><title>Pie derecha</title></rect>
+              <rect class="poser-bodypart" data-part="pie-izquierda" x="51" y="141" width="16" height="8" rx="4"><title>Pie izquierda</title></rect>
+            </svg>
+            <p class="hint">Vista frontal — la derecha/izquierda es la del personaje (queda invertida en pantalla). Seleccioná un hueso y asignalo desde su ventana; después con un clic acá lo volvés a seleccionar.</p>
+          </div>
+
+          <div class="poser-panel" data-panel="camera">
+            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> Cámara</button></div>
             <label class="poser-label">Lente <span id="poserFovLabel" class="hint"></span></label>
             <input type="range" id="poserFov" min="10" max="120" step="1" value="45">
             <div class="poser-row">
@@ -250,13 +277,13 @@
             </div>
           </div>
 
-          <div class="poser-panel">
-            <div class="panel-title">Partes y ropa</div>
+          <div class="poser-panel" data-panel="parts">
+            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> Partes y ropa</button></div>
             <div id="poserPartsList" class="poser-parts"></div>
           </div>
 
-          <div class="poser-panel">
-            <div class="panel-title">Huesos <label class="poser-toggle"><input type="checkbox" id="poserShowBones" checked> ver puntos</label></div>
+          <div class="poser-panel" data-panel="bones">
+            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> Huesos</button> <label class="poser-toggle"><input type="checkbox" id="poserShowBones" checked> ver puntos</label></div>
             <div id="poserAliasChips" class="poser-chips" hidden></div>
             <input type="text" id="poserBoneSearch" class="text-input" placeholder="Buscar hueso…">
             <label class="poser-toggle"><input type="checkbox" id="poserOnlyTouched"> <span class="poser-touched">●</span> solo huesos modificados</label>
@@ -268,8 +295,8 @@
             </div>
           </div>
 
-          <div class="poser-panel">
-            <div class="panel-title">Escenas guardadas</div>
+          <div class="poser-panel" data-panel="scenes">
+            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> Escenas guardadas</button></div>
             <div class="poser-row">
               <input id="poserSceneName" class="text-input" placeholder="Nombre">
               <input id="poserSceneCategory" class="text-input" placeholder="Categoría" list="poserCategories">

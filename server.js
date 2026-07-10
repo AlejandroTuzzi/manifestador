@@ -14,6 +14,7 @@ import {
   listVoices, generateSpeech, translateText, searchUpdatedPricing, testService
 } from './lib/providers.js';
 import { mergePricing, imagePrice, videoPrice, audioPrice, translatePrice } from './lib/pricing.js';
+import { POSER_BODY_PARTS } from './public/poser-bodyparts.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(ROOT, 'data');
@@ -1025,11 +1026,12 @@ const server = http.createServer(async (req, res) => {
         models.push({ id: entry.name, name: entry.name, meshFile, files });
       }
       models.sort((a, b) => a.name.localeCompare(b.name));
-      const [poses, aliases] = await Promise.all([
+      const [poses, aliases, bodymap] = await Promise.all([
         readJson('poser-poses.json', []),
-        readJson('poser-aliases.json', {})
+        readJson('poser-aliases.json', {}),
+        readJson('poser-bodymap.json', {})
       ]);
-      return send(res, 200, { models, poses, aliases, folder: cfg.paths.poser });
+      return send(res, 200, { models, poses, aliases, bodymap, folder: cfg.paths.poser });
     }
     // --- Photoshop ---
     if (p === '/api/photoshop/detect' && req.method === 'POST') {
@@ -1084,6 +1086,21 @@ const server = http.createServer(async (req, res) => {
         return { ...all, [modelId]: forModel };
       });
       return send(res, 200, { aliases });
+    }
+    if (p === '/api/poser/bodymap' && req.method === 'PUT') {
+      const body = await readJsonBody(req);
+      const modelId = String(body.modelId || '');
+      const part = String(body.part || '');
+      const bone = String(body.bone || '');
+      if (!modelId || !part) throw new Error('Faltan modelo o parte del cuerpo.');
+      if (!POSER_BODY_PARTS.some((x) => x.id === part)) throw new Error('Parte de cuerpo desconocida.');
+      const bodymap = await updateJson('poser-bodymap.json', {}, (all) => {
+        const forModel = { ...(all[modelId] || {}) };
+        if (bone) forModel[part] = bone;
+        else delete forModel[part];
+        return { ...all, [modelId]: forModel };
+      });
+      return send(res, 200, { bodymap });
     }
     if (p === '/api/poser/poses' && req.method === 'POST') {
       const body = await readJsonBody(req);
