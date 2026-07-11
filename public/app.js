@@ -9,6 +9,7 @@ const state = {
   models: [],
   characters: [],
   prompts: [],
+  promptCategoriesExtra: {},
   assetLinks: [],
   promptQuickCategory: '',
   promptQuickSearch: '',
@@ -370,6 +371,7 @@ function chipRow(container, values, active, onPick, labelFn = (v) => v) {
   container.innerHTML = '';
   for (const v of values) {
     const b = document.createElement('button');
+    b.type = 'button';
     b.className = 'chip' + (container.id === 'modelChips' ? ' model-chip' : '');
     b.textContent = labelFn(v);
     b.classList.toggle('active', v === active);
@@ -926,7 +928,7 @@ function renderPromptsPanel() {
     return;
   }
   panel.innerHTML = '';
-  const categories = [...new Set(state.prompts.map((p) => p.category || 'General'))].sort((a, b) => a.localeCompare(b));
+  const categories = promptCategories();
   const toolbar = document.createElement('div');
   toolbar.className = 'prompts-quick-tools';
   toolbar.innerHTML = `
@@ -954,14 +956,14 @@ function renderPromptsPanel() {
   for (const pr of filtered) {
     const d = document.createElement('div');
     d.className = 'prompt-item';
-    d.innerHTML = `<span class="p-mode">${pr.mode === 'audio' ? IC('mic') : IC('image')}</span>
+    d.innerHTML = `<span class="p-mode">${pr.mode === 'audio' ? IC('mic') : pr.mode === 'video' ? IC('film') : IC('image')}</span>
       <span class="p-title">${esc(pr.category || 'General')} · ${esc(pr.title)}</span>
       <span class="p-text">${esc(pr.text)}</span>
       <button class="icon-btn" title="Eliminar">${IC('x')}</button>`;
     d.addEventListener('click', (e) => {
       if (e.target.closest('.icon-btn')) return;
       promptBox.value = pr.text;
-      setMode(pr.mode === 'audio' ? 'audio' : 'image');
+      setMode(['audio', 'video'].includes(pr.mode) ? pr.mode : 'image');
       renderHighlight();
       promptBox.focus();
     });
@@ -1177,8 +1179,22 @@ function usePrompt(pr) {
   promptBox.focus();
 }
 
-function promptCategories() {
-  return [...new Set(state.prompts.map((p) => p.category || 'General'))].sort((a, b) => a.localeCompare(b));
+function promptCategories(mode = null) {
+  const source = mode ? state.prompts.filter((p) => (p.mode || 'image') === mode) : state.prompts;
+  const fromPrompts = source.map((p) => p.category || 'General');
+  const extra = mode
+    ? (state.promptCategoriesExtra[mode] || [])
+    : Object.values(state.promptCategoriesExtra).flat();
+  return [...new Set([...fromPrompts, ...extra])].sort((a, b) => a.localeCompare(b));
+}
+
+function renderPromptEditorCategories() {
+  const cats = promptCategories($('#promptEditorMode').value);
+  $('#promptEditorCategories').innerHTML = cats.map((c) => `<option value="${esc(c)}">`).join('');
+  chipRow($('#promptEditorCategoryChips'), cats, $('#promptEditorCategory').value.trim(), (c) => {
+    $('#promptEditorCategory').value = c;
+    renderPromptEditorCategories();
+  });
 }
 
 function openPromptEditor({ prompt = null, initialText = '', initialMode = state.mode, source = 'library' } = {}) {
@@ -1186,12 +1202,15 @@ function openPromptEditor({ prompt = null, initialText = '', initialMode = state
   $('#promptEditorTitle').textContent = prompt ? 'Editar prompt' : 'Nuevo prompt';
   $('#promptEditorName').value = prompt?.title || (initialText ? initialText.slice(0, 60) : '');
   $('#promptEditorCategory').value = prompt?.category || 'General';
-  $('#promptEditorMode').value = prompt?.mode || (initialMode === 'audio' ? 'audio' : 'image');
+  $('#promptEditorMode').value = prompt?.mode || (['audio', 'video'].includes(initialMode) ? initialMode : 'image');
   $('#promptEditorText').value = prompt?.text || initialText || '';
-  $('#promptEditorCategories').innerHTML = promptCategories().map((c) => `<option value="${esc(c)}">`).join('');
+  renderPromptEditorCategories();
   $('#promptEditorModal').hidden = false;
   setTimeout(() => $('#promptEditorName').focus(), 0);
 }
+
+$('#promptEditorMode').addEventListener('change', renderPromptEditorCategories);
+$('#promptEditorCategory').addEventListener('input', renderPromptEditorCategories);
 
 function closePromptEditor() {
   $('#promptEditorModal').hidden = true;
@@ -1233,7 +1252,7 @@ $('#promptEditorForm').addEventListener('submit', async (e) => {
 function renderPromptLibrary() {
   const library = $('#promptLibrary');
   if (!library) return;
-  const categories = [...new Set(state.prompts.map((p) => p.category || 'General'))].sort((a, b) => a.localeCompare(b));
+  const categories = promptCategories();
   const filter = $('#promptCategoryFilter');
   const selected = filter.value;
   filter.innerHTML = '<option value="">Todas las categorías</option>' + categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
@@ -1243,7 +1262,7 @@ function renderPromptLibrary() {
     && (!query || `${p.title} ${p.text} ${p.category || ''}`.toLowerCase().includes(query)));
   library.innerHTML = items.length ? items.map((pr) => `
     <article class="prompt-library-card" data-prompt="${pr.id}">
-      <div class="prompt-library-head"><div><span class="prompt-category">${esc(pr.category || 'General')}</span><h3>${esc(pr.title)}</h3></div><span>${pr.mode === 'audio' ? IC('mic') : IC('image')}</span></div>
+      <div class="prompt-library-head"><div><span class="prompt-category">${esc(pr.category || 'General')}</span><h3>${esc(pr.title)}</h3></div><span>${pr.mode === 'audio' ? IC('mic') : pr.mode === 'video' ? IC('film') : IC('image')}</span></div>
       <div class="prompt-library-text">${esc(pr.text)}</div>
       <div class="prompt-library-actions"><button class="mini-btn" data-pact="use">Usar</button><button class="mini-btn" data-pact="edit">${IC('edit')} Editar</button><button class="mini-btn danger" data-pact="delete">${IC('trash')}</button></div>
     </article>`).join('') : '<div class="empty-note">No hay prompts que coincidan.</div>';
@@ -1262,6 +1281,30 @@ function renderPromptLibrary() {
 
 $('#promptSearch').addEventListener('input', renderPromptLibrary);
 $('#promptCategoryFilter').addEventListener('change', renderPromptLibrary);
+
+$('#btnNewPromptCategory').addEventListener('click', () => {
+  $('#newCategoryRow').hidden = false;
+  $('#newCategoryName').value = '';
+  $('#newCategoryName').focus();
+});
+$('#newCategoryCancel').addEventListener('click', () => { $('#newCategoryRow').hidden = true; });
+$('#newCategoryName').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#newCategorySave').click(); } });
+$('#newCategorySave').addEventListener('click', async () => {
+  const mode = $('#newCategoryMode').value;
+  const name = $('#newCategoryName').value.trim();
+  if (!name) return toast('Escribí un nombre para la categoría', 'err');
+  try {
+    const { promptCategories: updated } = await api('/api/prompt-categories', { method: 'POST', body: { mode, name } });
+    state.promptCategoriesExtra = updated;
+    $('#newCategoryRow').hidden = true;
+    renderPromptLibrary();
+    $('#promptCategoryFilter').value = name;
+    renderPromptLibrary();
+    toast(`Categoría "${name}" creada`);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+});
 $('#btnNewPrompt').addEventListener('click', () => openPromptEditor({ initialMode: state.mode }));
 
 function groupAssetSessions(items) {
@@ -2147,6 +2190,7 @@ async function init() {
     state.videoModels = s.videoModels || [];
     state.characters = s.characters;
     state.prompts = s.prompts;
+    state.promptCategoriesExtra = s.promptCategories || {};
     state.assetLinks = s.assetLinks || [];
     state.history = s.history;
     state.pricing = s.pricing;

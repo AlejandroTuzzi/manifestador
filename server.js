@@ -622,10 +622,11 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, history, pricing, assetLinks] = await Promise.all([
+      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
+        readJson('prompt-categories.json', {}),
         readJson('history.json', []),
         getPricing(),
         readJson('asset-links.json', [])
@@ -637,10 +638,23 @@ const server = http.createServer(async (req, res) => {
         audioModel: AUDIO_MODEL,
         characters,
         prompts,
+        promptCategories,
         history: history.slice(0, 200),
         pricing,
         assetLinks
       });
+    }
+
+    if (p === '/api/prompt-categories' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const mode = ['image', 'video', 'audio'].includes(body.mode) ? body.mode : null;
+      const name = String(body.name || '').trim().slice(0, 80);
+      if (!mode || !name) throw new Error('Faltan el tipo o el nombre de la categoría.');
+      const promptCategories = await updateJson('prompt-categories.json', {}, (all) => {
+        const forMode = all[mode] || [];
+        return forMode.includes(name) ? all : { ...all, [mode]: [...forMode, name] };
+      });
+      return send(res, 200, { promptCategories });
     }
 
     if (p === '/api/config' && req.method === 'PUT') {
@@ -841,7 +855,7 @@ const server = http.createServer(async (req, res) => {
         id: newId(),
         title: String(body.title || '').trim() || 'Sin título',
         text: String(body.text || ''),
-        mode: body.mode === 'audio' ? 'audio' : 'image',
+        mode: ['audio', 'video'].includes(body.mode) ? body.mode : 'image',
         category: String(body.category || '').trim() || 'General',
         ts: Date.now()
       };
@@ -860,7 +874,7 @@ const server = http.createServer(async (req, res) => {
         title: body.title !== undefined ? String(body.title).trim() || 'Sin título' : prompts[idx].title,
         text: body.text !== undefined ? String(body.text) : prompts[idx].text,
         category: body.category !== undefined ? String(body.category).trim() || 'General' : (prompts[idx].category || 'General'),
-        mode: body.mode !== undefined ? (body.mode === 'audio' ? 'audio' : 'image') : prompts[idx].mode
+        mode: body.mode !== undefined ? (['audio', 'video'].includes(body.mode) ? body.mode : 'image') : prompts[idx].mode
       };
       await writeJson('prompts.json', prompts);
       return send(res, 200, prompts[idx]);

@@ -316,6 +316,17 @@
       <div class="prompt-library-tools">
         <input id="promptSearch" type="search" placeholder="Buscar prompts…">
         <select id="promptCategoryFilter" class="select"><option value="">Todas las categorías</option></select>
+        <button type="button" id="btnNewPromptCategory" class="mini-btn" title="Crear categoría nueva"><svg class="ic"><use href="#i-plus"/></svg> Categoría</button>
+      </div>
+      <div id="newCategoryRow" class="prompt-library-tools" hidden>
+        <select id="newCategoryMode" class="select">
+          <option value="image">Imagen</option>
+          <option value="video">Video</option>
+          <option value="audio">Audio</option>
+        </select>
+        <input id="newCategoryName" type="text" maxlength="80" placeholder="Nombre de la categoría">
+        <button type="button" id="newCategorySave" class="mini-btn">Crear</button>
+        <button type="button" id="newCategoryCancel" class="icon-btn" title="Cancelar"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
       <div id="promptLibrary" class="prompt-library"></div>
     </section>
@@ -507,6 +518,7 @@
     <label>Título<input id="promptEditorName" type="text" maxlength="120" placeholder="Ej: Retrato editorial" required></label>
     <label>Categoría<input id="promptEditorCategory" type="text" maxlength="80" placeholder="General" list="promptEditorCategories"></label>
     <datalist id="promptEditorCategories"></datalist>
+    <div id="promptEditorCategoryChips" class="chips"></div>
     <label>Tipo
       <select id="promptEditorMode" class="select">
         <option value="image">Imagen</option>
