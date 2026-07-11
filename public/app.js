@@ -189,6 +189,8 @@ function renderHighlight() {
     highlighter.innerHTML = esc(text).replace(/\[([^\]\n]{1,60})\]/g, '<span class="tag">[$1]</span>') + '\n';
   } else if (state.mode === 'video' && state.video.mode === 'reference') {
     highlighter.innerHTML = esc(text).replace(/@image\d+/gi, '<span class="tag">$&</span>') + '\n';
+  } else if (state.mode === 'video') {
+    highlighter.innerHTML = esc(text) + '\n';
   } else {
     return;
   }
