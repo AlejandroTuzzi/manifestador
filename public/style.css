@@ -618,6 +618,15 @@ audio { width: 100%; margin-top: 6px; }
 .character-source span { color: var(--muted); font-size: 12px; }
 .char-photos-grid { display: flex; flex-wrap: wrap; gap: 8px; }
 .char-photos-grid .ref-thumb { width: 76px; height: 76px; }
+.char-photos-grid .ref-thumb[draggable="true"] { cursor: grab; }
+.char-photos-grid .ref-thumb.dragging { opacity: 0.4; cursor: grabbing; }
+.char-photos-grid .ref-thumb.is-profile { border-color: var(--pink); box-shadow: 0 0 0 1px var(--pink); }
+.char-photos-grid .ref-thumb.is-profile::after {
+  content: "Perfil"; position: absolute; bottom: 2px; left: 2px;
+  background: rgba(0, 0, 0, 0.7); color: var(--pink);
+  font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  padding: 1px 5px; pointer-events: none;
+}
 
 /* ---------- config ---------- */
 .config-form { max-width: 720px; display: flex; flex-direction: column; gap: 14px; }

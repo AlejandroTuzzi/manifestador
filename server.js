@@ -1251,6 +1251,17 @@ const server = http.createServer(async (req, res) => {
         await writeJson('characters.json', characters);
         return send(res, 200, ch);
       }
+      if (isPhotos && req.method === 'PUT') {
+        const body = await readJsonBody(req);
+        const order = Array.isArray(body.order) ? body.order.map(String) : [];
+        const sameSet = order.length === ch.photos.length
+          && new Set(order).size === order.length
+          && order.every((k) => ch.photos.includes(k));
+        if (!sameSet) return send(res, 400, { error: 'El orden no coincide con las fotos del personaje' });
+        ch.photos = order;
+        await writeJson('characters.json', characters);
+        return send(res, 200, ch);
+      }
       if (!isPhotos && req.method === 'PUT') {
         const body = await readJsonBody(req);
         characters[idx] = {

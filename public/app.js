@@ -1748,8 +1748,9 @@ function renderCharModal() {
     </div>
     ${id ? `
     <div><label>Fotos (${c.photos.length})</label>
+      ${c.photos.length > 1 ? '<div class="hint" style="margin-bottom:6px">Arrastrá para ordenar — la primera es la foto de perfil</div>' : ''}
       <div class="char-photos-grid" id="chPhotos">
-        ${c.photos.map((p) => `<div class="ref-thumb"><img src="${fileUrl(p)}" alt=""><button class="rm" data-key="${esc(p)}">×</button></div>`).join('')}
+        ${c.photos.map((p, pi) => `<div class="ref-thumb${pi === 0 ? ' is-profile' : ''}" draggable="true" data-photo="${esc(p)}"><img src="${fileUrl(p)}" draggable="false" alt=""><button class="rm" data-key="${esc(p)}">×</button></div>`).join('')}
         <button class="ref-add" id="chAddPhoto">+</button>
       </div>
     </div>
@@ -1871,6 +1872,58 @@ function renderCharModal() {
       renderCharacters();
       renderPinned();
     });
+  });
+
+  setupCharPhotoDrag(id);
+}
+
+function setupCharPhotoDrag(id) {
+  const grid = $('#chPhotos');
+  if (!grid || grid.querySelectorAll('[data-photo]').length < 2) return;
+  let dragging = null;
+
+  grid.querySelectorAll('[data-photo]').forEach((thumb) => {
+    thumb.addEventListener('dragstart', (e) => {
+      dragging = thumb;
+      thumb.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', thumb.dataset.photo);
+    });
+    thumb.addEventListener('dragend', () => {
+      thumb.classList.remove('dragging');
+      dragging = null;
+    });
+  });
+
+  grid.addEventListener('dragover', (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    const target = e.target.closest('[data-photo]');
+    if (!target || target === dragging) return;
+    const rect = target.getBoundingClientRect();
+    const before = e.clientX < rect.left + rect.width / 2;
+    grid.insertBefore(dragging, before ? target : target.nextSibling);
+  });
+
+  grid.addEventListener('drop', async (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    const order = [...grid.querySelectorAll('[data-photo]')].map((el) => el.dataset.photo);
+    const i = state.characters.findIndex((x) => x.id === id);
+    const previous = state.characters[i]?.photos || [];
+    if (order.join('\n') === previous.join('\n')) return;
+    try {
+      const updated = await api(`/api/characters/${id}/photos`, { method: 'PUT', body: { order } });
+      state.characters[i] = updated;
+      if (state.pinnedId === id && !state.characterVariantId) applyPinnedCharacterPhotos();
+      renderCharModal();
+      renderCharacters();
+      renderPinned();
+      renderRefs();
+    } catch (err) {
+      toast(err.message, 'err');
+      renderCharModal();
+    }
   });
 }
 
