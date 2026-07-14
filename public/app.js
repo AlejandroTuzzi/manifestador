@@ -151,6 +151,9 @@ function goToCreate() {
 
 function setMode(mode) {
   state.mode = mode;
+  // el personaje anclado aporta refs distintas según el modo
+  // (asset:// verificado en video, fotos en imagen)
+  if (state.pinnedId) applyPinnedCharacterPhotos();
   $('#modeImage').classList.toggle('active', mode === 'image');
   $('#modeVideo').classList.toggle('active', mode === 'video');
   $('#modeAudio').classList.toggle('active', mode === 'audio');
@@ -450,19 +453,22 @@ function renderRefs() {
   $(isVideo ? '#videoRefsCount' : '#refsCount').textContent = `${state.refs.length}/${maxRefs}`;
   const refMode = isVideo ? state.video.mode : null;
   state.refs.forEach((r, i) => {
+    const isAsset = r.key.startsWith('asset://');
     const d = document.createElement('div');
-    d.className = 'ref-thumb' + (r.fromChar ? ' from-char' : '');
+    d.className = 'ref-thumb' + (r.fromChar ? ' from-char' : '') + (isAsset ? ' verified-asset' : '');
     const badge = refMode === 'reference' ? `<button class="ref-at" title="Insertar @image${i + 1} en el prompt">@${i + 1}</button>`
       : refMode === 'frames' ? `<span class="ref-badge">${i === 0 ? 'inicio' : 'fin'}</span>`
       : '';
-    d.innerHTML = `<img src="${fileUrl(r.key)}" alt="">${badge}<button class="rm" title="Quitar">×</button>`;
+    d.innerHTML = isAsset
+      ? `<div class="asset-face" title="${esc(r.key)}">${IC('user', 'ic ic-lg')}<span>verificado</span></div>${badge}<button class="rm" title="Quitar">×</button>`
+      : `<img src="${fileUrl(r.key)}" alt="">${badge}<button class="rm" title="Quitar">×</button>`;
     d.querySelector('.rm').addEventListener('click', () => {
       state.refs.splice(i, 1);
       renderRefs();
       renderHighlight();
     });
     d.querySelector('.ref-at')?.addEventListener('click', () => insertAtCursor(`@image${i + 1} `));
-    d.querySelector('img').addEventListener('click', () => openLightbox(r.key, state.refs.map((ref) => ref.key)));
+    d.querySelector('img')?.addEventListener('click', () => openLightbox(r.key, state.refs.filter((ref) => !ref.key.startsWith('asset://')).map((ref) => ref.key)));
     strip.appendChild(d);
   });
   if (state.refs.length < maxRefs) {
@@ -551,6 +557,12 @@ function applyPinnedCharacterPhotos() {
   state.refs = state.refs.filter((r) => !r.fromChar);
   const pc = pinnedChar();
   if (!pc) return;
+  // En video, un personaje con rostro real verificado va como asset://
+  // (Seedance rechaza fotos con caras reales como input directo).
+  if (state.mode === 'video' && pc.arkAssetId) {
+    if (state.refs.length < activeRefLimit()) state.refs.push({ key: `asset://${pc.arkAssetId}`, fromChar: true });
+    return;
+  }
   const variant = (pc.variants || []).find((v) => v.id === state.characterVariantId);
   const photos = variant?.photos?.length ? variant.photos : pc.photos;
   for (const photo of photos.slice(0, Math.max(0, activeRefLimit() - state.refs.length))) {
@@ -599,6 +611,8 @@ function renderPinnedHint() {
   const variant = (pc.variants || []).find((v) => v.id === state.characterVariantId);
   hint.textContent = state.mode === 'image'
     ? `${pc.name}${variant ? ` · ${variant.name}` : ' · Original'}: sus fotos van como referencia`
+    : state.mode === 'video' && pc.arkAssetId
+    ? `${pc.name}: va como rostro real verificado (asset de ModelArk)`
     : `${pc.name}: ${pc.voiceName ? 'habla con su voz (' + pc.voiceName + ')' : 'no tiene voz asignada'}`;
 }
 
@@ -1746,6 +1760,10 @@ function renderCharModal() {
       </select>
       ${voices.length ? '' : '<div class="hint" style="margin-top:4px">Cargá la key de ElevenLabs en Configuración y recargá.</div>'}
     </div>
+    <div><label>Asset ID de Seedance (rostro real verificado)</label>
+      <input type="text" id="chArkAsset" value="${esc(c.arkAssetId || '')}" placeholder="ej: asset-20260222234430-mxpgh">
+      <div class="hint" style="margin-top:4px">Para personas reales: verificá la identidad en la consola de ModelArk (Playground → My assets → Real-human) y pegá acá el asset ID. En video se usa en lugar de las fotos, que Seedance rechaza si tienen rostros reales.</div>
+    </div>
     ${id ? `
     <div><label>Fotos (${c.photos.length})</label>
       ${c.photos.length > 1 ? '<div class="hint" style="margin-bottom:6px">Arrastrá para ordenar — la primera es la foto de perfil</div>' : ''}
@@ -1776,7 +1794,8 @@ function renderCharModal() {
       name: $('#chName').value,
       description: $('#chDesc').value,
       voiceId,
-      voiceName: voices2.find((v) => v.id === voiceId)?.name || ''
+      voiceName: voices2.find((v) => v.id === voiceId)?.name || '',
+      arkAssetId: $('#chArkAsset').value.trim()
     };
     try {
       if (id) {

@@ -183,6 +183,9 @@ h3 { font-size: 15px; }
   white-space: pre-wrap;
   word-wrap: break-word;
   overflow-wrap: break-word;
+  /* reserva el ancho de la barra de scroll en ambas capas para que las
+     líneas quiebren igual y el cursor no se desfase del texto pintado */
+  scrollbar-gutter: stable;
 }
 
 #promptBox {
@@ -206,6 +209,9 @@ h3 { font-size: 15px; }
 .highlighter {
   position: absolute;
   inset: 0;
+  /* encima del textarea: si queda debajo, el fondo semitransparente
+     del textarea apaga el texto pintado y se ve gris */
+  z-index: 1;
   pointer-events: none;
   border: 1px solid transparent;
   color: var(--text);
@@ -350,6 +356,14 @@ h3 { font-size: 15px; }
   content: "👤"; position: absolute; bottom: 2px; left: 3px; font-size: 11px;
   filter: drop-shadow(0 1px 2px black);
 }
+.ref-thumb.verified-asset { border-color: var(--pink); }
+.ref-thumb.verified-asset::after { content: none; }
+.ref-thumb .asset-face {
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  background: rgba(236, 72, 153, 0.12); color: var(--pink);
+}
+.ref-thumb .asset-face span { font-size: 8px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .ref-add {
   width: 64px; height: 64px;
   border: 1.5px dashed var(--border);

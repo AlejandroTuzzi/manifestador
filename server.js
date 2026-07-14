@@ -311,6 +311,9 @@ async function runImageGeneration(req) {
   if (refs.length < model.minRefs) {
     throw new Error(`${model.name} necesita al menos ${model.minRefs} imagen(es) de referencia.`);
   }
+  if (refs.some((key) => String(key).startsWith('asset://'))) {
+    throw new Error('Los assets verificados de Seedance (asset://) solo sirven para video. Para imágenes usá fotos comunes.');
+  }
   const refPaths = [];
   for (const key of refs) refPaths.push(await resolveAssetKey(key));
   const characterRefs = refs.map((key) => /^characters\/([^/]+)(?:\/variants\/([^/]+))?\//.exec(key)).filter(Boolean);
@@ -409,7 +412,11 @@ async function runVideoGeneration(req) {
   const refLimit = model.refLimits?.[mode] ?? model.maxRefs;
   const refs = Array.isArray(req.refs) ? req.refs.slice(0, refLimit) : [];
   const refPaths = [];
-  for (const key of refs) refPaths.push(await resolveAssetKey(key));
+  for (const key of refs) {
+    // "asset://<id>": rostro verificado de ModelArk, va directo a la API
+    if (/^asset:\/\/[A-Za-z0-9._-]+$/.test(key)) refPaths.push(key);
+    else refPaths.push(await resolveAssetKey(key));
+  }
 
   const aspectRatio = model.aspectRatios.includes(req.aspectRatio) ? req.aspectRatio : model.aspectRatios[0];
   const resolution = model.resolutions.includes(req.resolution) ? req.resolution : model.resolutions[0];
@@ -938,6 +945,7 @@ const server = http.createServer(async (req, res) => {
         description: String(body.description || ''),
         voiceId: body.voiceId || '',
         voiceName: body.voiceName || '',
+        arkAssetId: String(body.arkAssetId || '').trim().replace(/^asset:\/\//, ''),
         photos: [],
         variants: [],
         ts: Date.now()
@@ -1270,6 +1278,7 @@ const server = http.createServer(async (req, res) => {
           description: body.description !== undefined ? String(body.description) : ch.description,
           voiceId: body.voiceId !== undefined ? body.voiceId : ch.voiceId,
           voiceName: body.voiceName !== undefined ? body.voiceName : ch.voiceName,
+          arkAssetId: body.arkAssetId !== undefined ? String(body.arkAssetId).trim().replace(/^asset:\/\//, '') : (ch.arkAssetId || ''),
           variants: ch.variants || []
         };
         await writeJson('characters.json', characters);
