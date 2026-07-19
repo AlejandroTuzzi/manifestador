@@ -30,6 +30,12 @@ const state = {
   assetsZone: 'generated',
   selectedAssets: new Set(),
   assetRange: { from: null, to: null },
+  assetFilterCharacterId: '',
+  assetFilterSeriesId: '',
+  series: [],
+  editingSeriesId: null,
+  seriesDraftCharacterIds: new Set(),
+  pendingSeriesAssetKey: null,
   pickerTab: 'upload',
   editingCharId: null,
   pendingCharacterAsset: null,
@@ -134,6 +140,7 @@ $$('.nav-btn').forEach((btn) => {
     $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
     if (view === 'assets') refreshAssets();
     if (view === 'characters') renderCharacters();
+    if (view === 'series') renderSeries();
     if (view === 'poser') window.poserEnter?.();
     if (view === 'prompts') renderPromptLibrary();
     if (view === 'costs') loadCosts();
@@ -1119,8 +1126,29 @@ document.addEventListener('paste', async (e) => {
 
 async function refreshAssets() {
   state.assets = await api('/api/assets');
+  renderAssetFilterOptions();
   renderAssetsGrid();
 }
+
+function renderAssetFilterOptions() {
+  const charSel = $('#assetFilterCharacter');
+  const seriesSel = $('#assetFilterSeries');
+  charSel.innerHTML = '<option value="">Todos</option>' + state.characters.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  seriesSel.innerHTML = '<option value="">Todas</option>' + state.series.map((s) => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
+  charSel.value = state.characters.some((c) => c.id === state.assetFilterCharacterId) ? state.assetFilterCharacterId : '';
+  seriesSel.value = state.series.some((s) => s.id === state.assetFilterSeriesId) ? state.assetFilterSeriesId : '';
+  state.assetFilterCharacterId = charSel.value;
+  state.assetFilterSeriesId = seriesSel.value;
+}
+
+$('#assetFilterCharacter').addEventListener('change', () => {
+  state.assetFilterCharacterId = $('#assetFilterCharacter').value;
+  renderAssetsGrid();
+});
+$('#assetFilterSeries').addEventListener('change', () => {
+  state.assetFilterSeriesId = $('#assetFilterSeries').value;
+  renderAssetsGrid();
+});
 
 $$('#view-assets .tabs .tab').forEach((t) => {
   t.addEventListener('click', () => {
@@ -1164,7 +1192,7 @@ function renderAssetsGrid() {
     for (const a of group) {
       const card = document.createElement('div');
       card.className = `asset-card${state.selectedAssets.has(a.key) ? ' selected' : ''}`;
-      card.innerHTML = `<button class="asset-check" title="Seleccionar">${state.selectedAssets.has(a.key) ? '✓' : ''}</button><button class="asset-info" title="Información">${IC('info')}</button>${a.prompt ? `<button class="asset-copy" title="Copiar prompt">${IC('copy')}</button>` : ''}<button class="asset-delete" title="Borrar">${IC('trash')}</button>`;
+      card.innerHTML = `<button class="asset-check" title="Seleccionar">${state.selectedAssets.has(a.key) ? '✓' : ''}</button><button class="asset-series" title="Asociar a serie">${IC('layers')}</button><button class="asset-info" title="Información">${IC('info')}</button>${a.prompt ? `<button class="asset-copy" title="Copiar prompt">${IC('copy')}</button>` : ''}<button class="asset-delete" title="Borrar">${IC('trash')}</button>`;
       if (state.assetsZone === 'audio') {
         card.insertAdjacentHTML('beforeend', `<div class="audio-tile">${IC('play', 'ic ic-lg')}</div><div class="a-name">${esc(a.name)}</div>`);
         card.querySelector('.audio-tile').addEventListener('click', () => toggleAudioPlay(card, a.key));
@@ -1176,6 +1204,7 @@ function renderAssetsGrid() {
         card.querySelector('img').addEventListener('click', () => openLightbox(a.key, items.map((item) => item.key)));
       }
       card.querySelector('.asset-check').addEventListener('click', () => toggleAssetSelection(a.key));
+      card.querySelector('.asset-series').addEventListener('click', () => openSeriesAssign(a.key));
       card.querySelector('.asset-info').addEventListener('click', () => openAssetInfo(a));
       card.querySelector('.asset-copy')?.addEventListener('click', () => copyPrompt(a.prompt));
       card.querySelector('.asset-delete').addEventListener('click', () => deleteAssets([a.key]));
@@ -1332,10 +1361,24 @@ function groupAssetSessions(items) {
   return groups;
 }
 
+function assetMatchesCharacter(a, characterId) {
+  if (!characterId) return true;
+  if (a.characterId === characterId) return true;
+  return state.assetLinks.some((link) => link.key === a.key && link.characterId === characterId);
+}
+
+function assetMatchesSeries(a, seriesId) {
+  if (!seriesId) return true;
+  const s = state.series.find((x) => x.id === seriesId);
+  return Boolean(s && (s.assetKeys || []).includes(a.key));
+}
+
 function visibleAssets() {
   return (state.assets[state.assetsZone] || []).filter((a) =>
     (!state.assetRange.from || a.mtime >= state.assetRange.from)
-    && (!state.assetRange.to || a.mtime <= state.assetRange.to));
+    && (!state.assetRange.to || a.mtime <= state.assetRange.to)
+    && assetMatchesCharacter(a, state.assetFilterCharacterId)
+    && assetMatchesSeries(a, state.assetFilterSeriesId));
 }
 
 function toggleAssetSelection(key) {
@@ -1346,6 +1389,8 @@ function toggleAssetSelection(key) {
 function updateAssetSelection() {
   $('#selectedCount').textContent = state.selectedAssets.size;
   $('#btnDeleteSelected').disabled = !state.selectedAssets.size;
+  $('#seriesSelectedCount').textContent = state.selectedAssets.size;
+  $('#btnSeriesSelected').disabled = !state.selectedAssets.size;
 }
 
 async function deleteAssets(keys) {
@@ -1353,6 +1398,7 @@ async function deleteAssets(keys) {
   if (!confirm(`¿Borrar definitivamente ${keys.length} archivo${keys.length === 1 ? '' : 's'} del disco?\n\nEsta acción no se puede deshacer.`)) return;
   const result = await api('/api/assets/delete', { method: 'POST', body: { keys } });
   keys.forEach((key) => state.selectedAssets.delete(key));
+  state.series.forEach((s) => { s.assetKeys = (s.assetKeys || []).filter((key) => !keys.includes(key)); });
   state.history = result.history;
   renderHistory();
   await refreshAssets();
@@ -1360,6 +1406,7 @@ async function deleteAssets(keys) {
 }
 
 $('#btnDeleteSelected').addEventListener('click', () => deleteAssets([...state.selectedAssets]));
+$('#btnSeriesSelected').addEventListener('click', () => openSeriesAssign([...state.selectedAssets]));
 $('#btnSelectVisible').addEventListener('click', () => {
   const visible = visibleAssets();
   const every = visible.length && visible.every((a) => state.selectedAssets.has(a.key));
@@ -1494,6 +1541,7 @@ function openLightbox(key, keys = null) {
     ${info?.prompt ? `<button class="mini-btn" id="lbCopyPrompt">${IC('copy')} Copiar prompt</button>` : ''}
     ${!isVideo ? `<button class="mini-btn" id="lbRef">${IC('link')} Usar como referencia</button>` : ''}
     ${!isVideo && /^(generated|uploads)\//.test(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} Asociar a personaje</button>` : ''}
+    <button class="mini-btn" id="lbSeries">${IC('layers')} Asociar a serie</button>
     ${!isVideo && key.startsWith('generated/') ? `<button class="mini-btn" id="lbCharacter">${IC('user')} Convertir en personaje</button>` : ''}
     ${!isVideo ? `<button class="mini-btn" id="lbPhotoshop">${IC('pen')} Abrir en Photoshop</button>` : ''}
     <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} Descargar</a>`;
@@ -1520,6 +1568,7 @@ function openLightbox(key, keys = null) {
     openCharModal(null, key);
   });
   $('#lbAssociate')?.addEventListener('click', () => associateAsset(key));
+  $('#lbSeries')?.addEventListener('click', () => openSeriesAssign(key));
 }
 
 function navigateLightbox(delta) {
@@ -1597,7 +1646,244 @@ document.addEventListener('keydown', (e) => {
     closeLightbox(); $('#pickerModal').hidden = true; $('#charModal').hidden = true;
     $('#characterGalleryModal').hidden = true; $('#variantEditorModal').hidden = true; $('#associateAssetModal').hidden = true;
     $('#assetInfoModal').hidden = true;
+    $('#seriesModal').hidden = true; $('#seriesAssignModal').hidden = true; state.editingSeriesId = null;
     $('#promptEditorModal').hidden = true; state.promptEditor = null;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// series
+// ---------------------------------------------------------------------------
+
+function fmtSeriesStructure(s) {
+  const total = (s.chapters || 0) * (s.chapterSeconds || 0);
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  const totalTxt = mins ? `${mins} min${secs ? ` ${secs} s` : ''}` : `${secs} s`;
+  return `${s.chapters} capítulo${s.chapters === 1 ? '' : 's'} × ${s.chapterSeconds} s · ${totalTxt} en total`;
+}
+
+function seriesAssetThumb(key) {
+  if (key.startsWith('audio/')) return `<div class="series-audio">${IC('mic')}</div>`;
+  if (key.startsWith('video/')) return `<video src="${fileUrl(key)}" preload="metadata" muted></video>`;
+  return `<img src="${fileUrl(key)}" loading="lazy" alt="">`;
+}
+
+function renderSeries() {
+  const grid = $('#seriesGrid');
+  if (!state.series.length) {
+    grid.innerHTML = '<div class="empty-note">Creá tu primera serie: título, descripción, formato y estructura. Después asociale personajes y assets.</div>';
+    return;
+  }
+  grid.innerHTML = '';
+  for (const s of state.series) {
+    const characters = (s.characterIds || []).map((id) => state.characters.find((c) => c.id === id)).filter(Boolean);
+    const assetCount = (s.assetKeys || []).length;
+    const card = document.createElement('div');
+    card.className = 'char-card';
+    card.innerHTML = `
+      <div class="series-head-row">
+        <div class="char-name">${esc(s.title)}</div>
+        <span class="series-format">${esc(s.format)}</span>
+      </div>
+      <div class="hint" style="margin-bottom:8px">${esc(fmtSeriesStructure(s))}</div>
+      <div class="char-desc">${esc(s.description || '')}</div>
+      <div class="series-chars">${characters.length
+        ? characters.map((c) => c.photos[0]
+          ? `<img src="${fileUrl(c.photos[0])}" title="${esc(c.name)}" alt="">`
+          : `<span class="series-char-ph" title="${esc(c.name)}">${IC('user')}</span>`).join('')
+        : '<span class="hint">Sin personajes asociados</span>'}</div>
+      <div class="char-actions">
+        <button class="mini-btn" data-act="edit">${IC('edit')} Editar</button>
+        <button class="mini-btn" data-act="assets">${IC('image')} Assets${assetCount ? ` (${assetCount})` : ''}</button>
+        <button class="mini-btn danger" data-act="del" title="Eliminar">${IC('trash')}</button>
+      </div>`;
+    card.querySelectorAll('[data-act]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const act = b.dataset.act;
+        if (act === 'edit') openSeriesModal(s.id);
+        if (act === 'assets') openSeriesAssets(s.id);
+        if (act === 'del') {
+          if (!confirm(`¿Eliminar la serie “${s.title}”?\n\nLos personajes y assets no se borran, solo la serie.`)) return;
+          await api(`/api/series/${s.id}`, { method: 'DELETE' });
+          state.series = state.series.filter((x) => x.id !== s.id);
+          renderSeries();
+          renderCharacters();
+        }
+      });
+    });
+    grid.appendChild(card);
+  }
+}
+
+function openSeriesAssets(id) {
+  const s = state.series.find((x) => x.id === id);
+  if (!s) return;
+  const keys = s.assetKeys || [];
+  const viewable = keys.filter((key) => !key.startsWith('audio/'));
+  $('#characterGalleryTitle').textContent = `${s.title} · Assets asociados`;
+  $('#characterGalleryBody').innerHTML = `<section class="character-gallery-group">
+    <div class="character-gallery-group-head"><h4>${esc(s.title)}</h4><span>${keys.length} asset${keys.length === 1 ? '' : 's'}</span></div>
+    <div class="character-gallery-grid linked-assets">${keys.length ? keys.map((key) => `
+      <div class="linked-asset">${key.startsWith('audio/')
+        ? `<div class="series-audio big">${IC('mic', 'ic ic-lg')}</div>`
+        : `<button data-gallery-photo="${esc(key)}">${seriesAssetThumb(key)}</button>`}
+      <button class="linked-remove" data-unlink="${esc(key)}" title="Quitar de la serie">×</button></div>`).join('') : '<div class="hint">Sin assets asociados. Desde Assets, usá el botón de capas o “Asociar a serie” en el visor.</div>'}</div>
+  </section>`;
+  $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) =>
+    button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto, viewable)));
+  $('#characterGalleryBody').querySelectorAll('[data-unlink]').forEach((button) =>
+    button.addEventListener('click', async () => {
+      const updated = await api(`/api/series/${id}/assets?key=${encodeURIComponent(button.dataset.unlink)}`, { method: 'DELETE' });
+      state.series[state.series.findIndex((x) => x.id === id)] = updated;
+      openSeriesAssets(id);
+      renderSeries();
+    }));
+  $('#characterGalleryModal').hidden = false;
+}
+
+function updateSeriesStructureHint() {
+  $('#seriesStructureHint').textContent = fmtSeriesStructure({
+    chapters: parseInt($('#seriesChapters').value, 10) || 0,
+    chapterSeconds: parseInt($('#seriesChapterSeconds').value, 10) || 0
+  });
+}
+
+function renderSeriesCharacterChips() {
+  const wrap = $('#seriesCharacterChips');
+  if (!state.characters.length) {
+    wrap.innerHTML = '<span class="hint">Todavía no hay personajes creados.</span>';
+    return;
+  }
+  wrap.innerHTML = '';
+  for (const c of state.characters) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chip series-chip' + (state.seriesDraftCharacterIds.has(c.id) ? ' active' : '');
+    btn.innerHTML = `${c.photos[0] ? `<img src="${fileUrl(c.photos[0])}" alt="">` : IC('user')} ${esc(c.name)}`;
+    btn.addEventListener('click', () => {
+      state.seriesDraftCharacterIds.has(c.id) ? state.seriesDraftCharacterIds.delete(c.id) : state.seriesDraftCharacterIds.add(c.id);
+      renderSeriesCharacterChips();
+    });
+    wrap.appendChild(btn);
+  }
+}
+
+function renderSeriesModalAssets() {
+  const s = state.editingSeriesId ? state.series.find((x) => x.id === state.editingSeriesId) : null;
+  $('#seriesAssetsBlock').hidden = !s;
+  if (!s) return;
+  const keys = s.assetKeys || [];
+  $('#seriesAssetsList').innerHTML = keys.length
+    ? keys.map((key) => `<div class="series-asset">${seriesAssetThumb(key)}<button type="button" class="linked-remove" data-unlink="${esc(key)}" title="Quitar de la serie">×</button></div>`).join('')
+    : '<span class="hint">Sin assets todavía.</span>';
+  $('#seriesAssetsList').querySelectorAll('[data-unlink]').forEach((button) =>
+    button.addEventListener('click', async () => {
+      const updated = await api(`/api/series/${s.id}/assets?key=${encodeURIComponent(button.dataset.unlink)}`, { method: 'DELETE' });
+      state.series[state.series.findIndex((x) => x.id === s.id)] = updated;
+      renderSeriesModalAssets();
+      renderSeries();
+    }));
+}
+
+function openSeriesModal(id = null) {
+  const s = id ? state.series.find((x) => x.id === id) : null;
+  state.editingSeriesId = s ? s.id : null;
+  state.seriesDraftCharacterIds = new Set(s?.characterIds || []);
+  $('#seriesModalTitle').textContent = s ? 'Editar serie' : 'Nueva serie';
+  $('#seriesTitle').value = s?.title || '';
+  $('#seriesDescription').value = s?.description || '';
+  $('#seriesFormat').value = s?.format || '9:16';
+  $('#seriesChapters').value = s?.chapters || 5;
+  $('#seriesChapterSeconds').value = s?.chapterSeconds || 90;
+  renderSeriesCharacterChips();
+  renderSeriesModalAssets();
+  updateSeriesStructureHint();
+  $('#seriesModal').hidden = false;
+  setTimeout(() => $('#seriesTitle').focus(), 0);
+}
+
+function closeSeriesModal() {
+  $('#seriesModal').hidden = true;
+  state.editingSeriesId = null;
+}
+
+$('#btnNewSeries').addEventListener('click', () => openSeriesModal(null));
+$('#seriesModalClose').addEventListener('click', closeSeriesModal);
+$('#seriesModalCancel').addEventListener('click', closeSeriesModal);
+$('#seriesModal').addEventListener('click', (e) => { if (e.target.id === 'seriesModal') closeSeriesModal(); });
+$('#seriesChapters').addEventListener('input', updateSeriesStructureHint);
+$('#seriesChapterSeconds').addEventListener('input', updateSeriesStructureHint);
+
+$('#seriesForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    title: $('#seriesTitle').value.trim(),
+    description: $('#seriesDescription').value.trim(),
+    format: $('#seriesFormat').value,
+    chapters: parseInt($('#seriesChapters').value, 10) || 1,
+    chapterSeconds: parseInt($('#seriesChapterSeconds').value, 10) || 60,
+    characterIds: [...state.seriesDraftCharacterIds]
+  };
+  if (!body.title) return;
+  try {
+    if (state.editingSeriesId) {
+      const updated = await api(`/api/series/${state.editingSeriesId}`, { method: 'PUT', body });
+      state.series[state.series.findIndex((x) => x.id === updated.id)] = updated;
+      toast('Serie actualizada');
+    } else {
+      const created = await api('/api/series', { method: 'POST', body });
+      state.series.unshift(created);
+      toast(`Serie “${created.title}” creada`);
+    }
+    closeSeriesModal();
+    renderSeries();
+    renderCharacters();
+    renderAssetFilterOptions();
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+});
+
+function openSeriesAssign(keyOrKeys) {
+  const keys = [...new Set(Array.isArray(keyOrKeys) ? keyOrKeys : [keyOrKeys])];
+  if (!keys.length) return;
+  if (!state.series.length) return toast('Primero creá una serie en la sección Series', 'err');
+  state.pendingSeriesAssetKey = keys;
+  closeLightbox();
+  const select = $('#seriesAssignSelect');
+  select.innerHTML = state.series.map((s) => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
+  if (keys.length === 1) {
+    const current = state.series.filter((s) => (s.assetKeys || []).includes(keys[0]));
+    if (current.length) select.value = current[0].id;
+    $('#seriesAssignPreview').innerHTML = `${seriesAssetThumb(keys[0])}<div><strong>${current.length ? `Ya está en ${current.map((s) => `“${esc(s.title)}”`).join(', ')}` : 'Nuevo vínculo'}</strong><div class="hint">Un asset puede estar en varias series a la vez.</div></div>`;
+  } else {
+    $('#seriesAssignPreview').innerHTML = `<div class="series-assign-batch">${keys.slice(0, 4).map(seriesAssetThumb).join('')}${keys.length > 4 ? `<div class="series-audio">+${keys.length - 4}</div>` : ''}</div><div><strong>${keys.length} assets seleccionados</strong><div class="hint">Se asocian todos a la serie elegida.</div></div>`;
+  }
+  $('#seriesAssignModal').hidden = false;
+}
+
+function closeSeriesAssign() {
+  $('#seriesAssignModal').hidden = true;
+  state.pendingSeriesAssetKey = null;
+}
+
+$('#seriesAssignClose').addEventListener('click', closeSeriesAssign);
+$('#seriesAssignCancel').addEventListener('click', closeSeriesAssign);
+$('#seriesAssignModal').addEventListener('click', (e) => { if (e.target.id === 'seriesAssignModal') closeSeriesAssign(); });
+$('#seriesAssignForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const seriesId = $('#seriesAssignSelect').value;
+  const keys = state.pendingSeriesAssetKey || [];
+  try {
+    const updated = await api(`/api/series/${seriesId}/assets`, { method: 'POST', body: { keys } });
+    state.series[state.series.findIndex((x) => x.id === updated.id)] = updated;
+    closeSeriesAssign();
+    toast(keys.length === 1 ? `Asset asociado a “${updated.title}”` : `${keys.length} assets asociados a “${updated.title}”`);
+    renderSeries();
+    renderAssetsGrid();
+  } catch (err) {
+    toast(err.message, 'err');
   }
 });
 
@@ -1621,6 +1907,7 @@ function renderCharacters() {
     const minis = c.photos.slice(1, 5).map((p) => `<img src="${fileUrl(p)}" alt="">`).join('')
       + (c.photos.length > 5 ? `<div class="more">+${c.photos.length - 5}</div>` : '');
     const linkedCount = state.assetLinks.filter((link) => link.characterId === c.id).length;
+    const inSeries = state.series.filter((s) => (s.characterIds || []).includes(c.id));
     card.innerHTML = `
       <div class="char-top">${avatar}<div>
         <div class="char-name">${esc(c.name)}</div>
@@ -1628,6 +1915,7 @@ function renderCharacters() {
       </div></div>
       <div class="char-desc">${esc(c.description || '')}</div>
       ${(c.variants || []).length ? `<div class="hint" style="margin-bottom:8px">${(c.variants || []).length} variante${c.variants.length === 1 ? '' : 's'} de outfit</div>` : ''}
+      ${inSeries.length ? `<div class="char-series">${IC('layers')} ${inSeries.map((s) => esc(s.title)).join(' · ')}</div>` : ''}
       <div class="char-photos-mini">${minis}</div>
       <div class="char-actions">
         <button class="mini-btn" data-act="pin">${IC('pin')} ${c.id === state.pinnedId ? 'Anclado' : 'Anclar'}</button>
@@ -1657,6 +1945,7 @@ function renderCharacters() {
           if (!confirm(`¿Eliminar a ${c.name} y sus fotos?`)) return;
           await api(`/api/characters/${c.id}`, { method: 'DELETE' });
           state.characters = state.characters.filter((x) => x.id !== c.id);
+          state.series.forEach((s) => { s.characterIds = (s.characterIds || []).filter((cid) => cid !== c.id); });
           if (state.pinnedId === c.id) setPinned('');
           renderCharacters();
         }
@@ -2264,6 +2553,7 @@ async function init() {
     state.prompts = s.prompts;
     state.promptCategoriesExtra = s.promptCategories || {};
     state.assetLinks = s.assetLinks || [];
+    state.series = s.series || [];
     state.history = s.history;
     state.pricing = s.pricing;
     state.modelId = s.models[0]?.id;
@@ -2287,10 +2577,10 @@ async function init() {
   setMode('image');
   if (state.pinnedId && !pinnedChar()) setPinned('');
 
-  // deep-links: #audio, #assets, #characters, #prompts, #costs, #config
+  // deep-links: #audio, #assets, #characters, #series, #prompts, #costs, #config
   const h = location.hash.slice(1);
   if (h === 'audio') setMode('audio');
-  else if (['assets', 'characters', 'prompts', 'costs', 'config'].includes(h)) {
+  else if (['assets', 'characters', 'series', 'prompts', 'costs', 'config'].includes(h)) {
     $(`.nav-btn[data-view="${h}"]`)?.click();
   }
 }

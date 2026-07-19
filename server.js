@@ -629,14 +629,15 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks] = await Promise.all([
+      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
         readJson('prompt-categories.json', {}),
         readJson('history.json', []),
         getPricing(),
-        readJson('asset-links.json', [])
+        readJson('asset-links.json', []),
+        readJson('series.json', [])
       ]);
       return send(res, 200, {
         config: publicConfig(cfg),
@@ -648,7 +649,8 @@ const server = http.createServer(async (req, res) => {
         promptCategories,
         history: history.slice(0, 200),
         pricing,
-        assetLinks
+        assetLinks,
+        series
       });
     }
 
@@ -742,6 +744,80 @@ const server = http.createServer(async (req, res) => {
       const key = url.searchParams.get('key');
       const next = await updateJson('asset-links.json', [], (links) => links.filter((link) => link.key !== key));
       return send(res, 200, { links: next });
+    }
+
+    // --- series ---
+    if (p === '/api/series' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const characters = await readJson('characters.json', []);
+      const item = {
+        id: newId(),
+        title: String(body.title || '').trim() || 'Sin título',
+        description: String(body.description || ''),
+        format: body.format === '16:9' ? '16:9' : '9:16',
+        chapters: Math.max(1, Math.min(500, parseInt(body.chapters, 10) || 1)),
+        chapterSeconds: Math.max(1, Math.min(36000, parseInt(body.chapterSeconds, 10) || 60)),
+        characterIds: [...new Set((Array.isArray(body.characterIds) ? body.characterIds : []).map(String))]
+          .filter((cid) => characters.some((c) => c.id === cid)),
+        assetKeys: [],
+        ts: Date.now()
+      };
+      await updateJson('series.json', [], (all) => [item, ...all]);
+      return send(res, 200, item);
+    }
+
+    const seriesMatch = /^\/api\/series\/([a-z0-9]+)(\/assets)?$/.exec(p);
+    if (seriesMatch) {
+      const [, seriesId, isSeriesAssets] = seriesMatch;
+      const series = await readJson('series.json', []);
+      const seriesIdx = series.findIndex((s) => s.id === seriesId);
+      if (seriesIdx === -1) return send(res, 404, { error: 'Serie no encontrada' });
+      const item = series[seriesIdx];
+
+      if (isSeriesAssets && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const keys = [...new Set((Array.isArray(body.keys) ? body.keys : [body.key]).map(String).filter(Boolean))];
+        if (!keys.length) throw new Error('No se indicó ningún asset.');
+        if (keys.length > 1000) throw new Error('Demasiados assets en una sola operación.');
+        for (const key of keys) {
+          if (!/^(generated|uploads|video|audio)\//.test(key)) throw new Error(`Ese archivo no se puede asociar a una serie: ${key}`);
+          await fs.access(await resolveAssetKey(key));
+        }
+        item.assetKeys = [...keys, ...(item.assetKeys || []).filter((k) => !keys.includes(k))];
+        await writeJson('series.json', series);
+        return send(res, 200, item);
+      }
+      if (isSeriesAssets && req.method === 'DELETE') {
+        const key = url.searchParams.get('key');
+        item.assetKeys = (item.assetKeys || []).filter((k) => k !== key);
+        await writeJson('series.json', series);
+        return send(res, 200, item);
+      }
+      if (!isSeriesAssets && req.method === 'PUT') {
+        const body = await readJsonBody(req);
+        let characterIds = item.characterIds || [];
+        if (body.characterIds !== undefined) {
+          const characters = await readJson('characters.json', []);
+          characterIds = [...new Set((Array.isArray(body.characterIds) ? body.characterIds : []).map(String))]
+            .filter((cid) => characters.some((c) => c.id === cid));
+        }
+        series[seriesIdx] = {
+          ...item,
+          title: body.title !== undefined ? (String(body.title).trim() || item.title) : item.title,
+          description: body.description !== undefined ? String(body.description) : item.description,
+          format: body.format !== undefined ? (body.format === '16:9' ? '16:9' : '9:16') : item.format,
+          chapters: body.chapters !== undefined ? Math.max(1, Math.min(500, parseInt(body.chapters, 10) || 1)) : item.chapters,
+          chapterSeconds: body.chapterSeconds !== undefined ? Math.max(1, Math.min(36000, parseInt(body.chapterSeconds, 10) || 60)) : item.chapterSeconds,
+          characterIds
+        };
+        await writeJson('series.json', series);
+        return send(res, 200, series[seriesIdx]);
+      }
+      if (!isSeriesAssets && req.method === 'DELETE') {
+        series.splice(seriesIdx, 1);
+        await writeJson('series.json', series);
+        return send(res, 200, { ok: true });
+      }
     }
 
     if (p === '/api/generate/image' && req.method === 'POST') {
@@ -925,6 +1001,10 @@ const server = http.createServer(async (req, res) => {
       await writeJson('asset-metadata.json', metadata);
       const links = await readJson('asset-links.json', []);
       await writeJson('asset-links.json', links.filter((link) => !removed.has(link.key)));
+      await updateJson('series.json', [], (all) => all.map((s) => ({
+        ...s,
+        assetKeys: (s.assetKeys || []).filter((key) => !removed.has(key))
+      })));
       const history = await readJson('history.json', []);
       const cleaned = history.map((entry) => ({
         ...entry,
@@ -1287,6 +1367,10 @@ const server = http.createServer(async (req, res) => {
       if (!isPhotos && req.method === 'DELETE') {
         const links = await readJson('asset-links.json', []);
         await writeJson('asset-links.json', links.filter((link) => link.characterId !== id));
+        await updateJson('series.json', [], (all) => all.map((s) => ({
+          ...s,
+          characterIds: (s.characterIds || []).filter((cid) => cid !== id)
+        })));
         characters.splice(idx, 1);
         await writeJson('characters.json', characters);
         await fs.rm(path.join(DATA_DIR, 'characters', id), { recursive: true, force: true }).catch(() => {});

@@ -43,6 +43,7 @@
     <symbol id="i-pen" viewBox="0 0 24 24"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/><path d="M15 5l4 4"/></symbol>
     <symbol id="i-film" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 7h5M17 17h5"/></symbol>
     <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 2l10 5-10 5L2 7l10-5z"/><path d="M2 12l10 5 10-5"/><path d="M2 17l10 5 10-5"/></symbol>
   </defs>
 </svg>
 
@@ -54,6 +55,7 @@
       <button class="nav-btn active" data-view="create"><svg class="ic"><use href="#i-wand"/></svg> Crear</button>
       <button class="nav-btn" data-view="assets"><svg class="ic"><use href="#i-grid"/></svg> Assets</button>
       <button class="nav-btn" data-view="characters"><svg class="ic"><use href="#i-user"/></svg> Personajes</button>
+      <button class="nav-btn" data-view="series"><svg class="ic"><use href="#i-layers"/></svg> Series</button>
       <button class="nav-btn" data-view="poser"><svg class="ic"><use href="#i-cube"/></svg> Poser</button>
       <button class="nav-btn" data-view="prompts"><svg class="ic"><use href="#i-book"/></svg> Prompts</button>
       <button class="nav-btn" data-view="costs"><svg class="ic"><use href="#i-dollar"/></svg> Consumo</button>
@@ -343,6 +345,7 @@
       <div class="assets-toolbar">
         <button id="btnUploadAsset" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> Subir imagen</button>
         <button id="btnSelectVisible" class="tool-btn">Seleccionar visibles</button>
+        <button id="btnSeriesSelected" class="tool-btn" disabled><svg class="ic"><use href="#i-layers"/></svg> Asociar a serie <span id="seriesSelectedCount">0</span></button>
         <button id="btnDeleteSelected" class="tool-btn danger" disabled><svg class="ic"><use href="#i-trash"/></svg> Borrar <span id="selectedCount">0</span></button>
         <span id="assetsSummary" class="hint"></span>
       </div>
@@ -353,6 +356,8 @@
           <button class="mini-btn" data-range="morning">Esta mañana</button>
           <button class="mini-btn" data-range="afternoon">Esta tarde</button>
         </div>
+        <label>Personaje <select id="assetFilterCharacter" class="select"><option value="">Todos</option></select></label>
+        <label>Serie <select id="assetFilterSeries" class="select"><option value="">Todas</option></select></label>
         <label>Desde <input id="assetFrom" type="datetime-local"></label>
         <label>Hasta <input id="assetTo" type="datetime-local"></label>
         <button id="btnApplyAssetRange" class="mini-btn">Aplicar rango</button>
@@ -367,6 +372,15 @@
         <div><button id="btnImportCharacter" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> Importar ZIP</button> <button id="btnNewChar" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Nuevo personaje</button></div>
       </div>
       <div id="charsGrid" class="chars-grid"></div>
+    </section>
+
+    <!-- ==================== SERIES ==================== -->
+    <section id="view-series" class="view">
+      <div class="chars-head">
+        <h2>Series</h2>
+        <button id="btnNewSeries" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Nueva serie</button>
+      </div>
+      <div id="seriesGrid" class="chars-grid"></div>
     </section>
 
     <!-- ==================== CONSUMO ==================== -->
@@ -505,6 +519,50 @@
     <label>Personaje<select id="associateCharacter" class="select" required></select></label>
     <label>Original o variante<select id="associateVariant" class="select"></select></label>
     <div class="form-modal-actions"><button type="button" class="mini-btn" id="associateAssetCancel">Cancelar</button><button type="submit" class="generate-btn small">Asociar</button></div>
+  </form>
+</div>
+
+<!-- Crear o editar serie -->
+<div id="seriesModal" class="modal" hidden>
+  <form id="seriesForm" class="modal-box form-modal-box">
+    <div class="modal-head">
+      <div><h3 id="seriesModalTitle">Nueva serie</h3><p class="hint">Título, formato, estructura y personajes</p></div>
+      <button type="button" class="icon-btn" id="seriesModalClose"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <label>Título<input id="seriesTitle" type="text" maxlength="120" placeholder="Ej: Las aventuras de Tonya" required></label>
+    <label>Descripción<textarea id="seriesDescription" rows="3" placeholder="De qué va la serie…"></textarea></label>
+    <div class="series-structure-row">
+      <label>Formato
+        <select id="seriesFormat" class="select">
+          <option value="9:16">9:16 (vertical)</option>
+          <option value="16:9">16:9 (horizontal)</option>
+        </select>
+      </label>
+      <label>Capítulos<input id="seriesChapters" type="number" min="1" max="500" value="5" required></label>
+      <label>Segundos por capítulo<input id="seriesChapterSeconds" type="number" min="1" max="36000" value="90" required></label>
+    </div>
+    <div id="seriesStructureHint" class="hint"></div>
+    <div class="series-field-label">Personajes</div>
+    <div id="seriesCharacterChips" class="chips"></div>
+    <div id="seriesAssetsBlock" hidden>
+      <div class="series-field-label">Assets asociados</div>
+      <div id="seriesAssetsList" class="series-assets-list"></div>
+      <p class="hint">Para sumar assets: en Assets, abrí un archivo y usá “Asociar a serie”.</p>
+    </div>
+    <div class="form-modal-actions">
+      <button type="button" class="mini-btn" id="seriesModalCancel">Cancelar</button>
+      <button type="submit" class="generate-btn small">Guardar</button>
+    </div>
+  </form>
+</div>
+
+<!-- Asociar asset a una serie -->
+<div id="seriesAssignModal" class="modal" hidden>
+  <form id="seriesAssignForm" class="modal-box form-modal-box">
+    <div class="modal-head"><div><h3>Asociar a serie</h3><p class="hint">El archivo no se moverá ni duplicará</p></div><button type="button" class="icon-btn" id="seriesAssignClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div id="seriesAssignPreview" class="associate-preview"></div>
+    <label>Serie<select id="seriesAssignSelect" class="select" required></select></label>
+    <div class="form-modal-actions"><button type="button" class="mini-btn" id="seriesAssignCancel">Cancelar</button><button type="submit" class="generate-btn small">Asociar</button></div>
   </form>
 </div>
 

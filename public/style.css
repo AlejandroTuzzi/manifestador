@@ -542,7 +542,7 @@ audio { width: 100%; margin-top: 6px; }
 }
 .asset-card:hover { border-color: var(--pink); }
 .asset-card.selected { border-color: var(--pink); outline: 2px solid rgba(236,72,153,.35); outline-offset: -3px; }
-.asset-check, .asset-info, .asset-copy, .asset-delete { position: absolute; z-index: 3; top: 7px; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.25); background: rgba(8,4,14,.82); color: white; cursor: pointer; }
+.asset-check, .asset-series, .asset-info, .asset-copy, .asset-delete { position: absolute; z-index: 3; top: 7px; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.25); background: rgba(8,4,14,.82); color: white; cursor: pointer; }
 .asset-check { left: 7px; font-size: 16px; }
 .asset-info { right: 77px; color: #d8ccf5; opacity: 0; transition: opacity .12s; }
 .asset-copy { right: 42px; color: #c4b5fd; opacity: 0; transition: opacity .12s; }
@@ -935,3 +935,28 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .ref-thumb .ref-at { position: absolute; bottom: 2px; left: 2px; border: none; background: rgba(0,0,0,0.7); color: var(--pink); font: inherit; font-size: 10px; font-weight: 700; padding: 1px 5px; cursor: pointer; }
 .ref-thumb .ref-at:hover { background: var(--pink); color: #fff; }
 .ref-thumb .ref-badge { position: absolute; bottom: 2px; left: 2px; background: rgba(0,0,0,0.7); color: var(--muted); font-size: 9px; letter-spacing: .05em; text-transform: uppercase; padding: 1px 5px; }
+
+/* ---------- series ---------- */
+.char-series { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.char-series .ic { flex-shrink: 0; color: var(--violet); }
+.series-head-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.series-format { flex-shrink: 0; border: 1px solid var(--violet); color: var(--text); font-size: 11px; font-weight: 700; letter-spacing: .5px; padding: 2px 8px; }
+.series-chars { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; min-height: 28px; }
+.series-chars img, .series-char-ph { width: 28px; height: 28px; object-fit: cover; border: 1px solid var(--border); }
+.series-char-ph { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); background: rgba(139,92,246,.08); }
+.series-structure-row { display: flex; gap: 10px; }
+.series-structure-row label { flex: 1; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.series-field-label { color: var(--muted); font-size: 12px; font-weight: 700; }
+.chip.series-chip { display: inline-flex; align-items: center; gap: 6px; }
+.chip.series-chip img { width: 20px; height: 20px; object-fit: cover; }
+.series-assets-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.series-asset { position: relative; }
+.series-asset img, .series-asset video, .series-asset .series-audio, .associate-preview .series-audio, .associate-preview video { width: 72px; height: 72px; object-fit: cover; display: block; background: #000; }
+.series-audio { display: flex; align-items: center; justify-content: center; color: var(--muted); background: rgba(139,92,246,.08); border: 1px solid var(--border-soft); }
+.series-audio.big { width: 100%; aspect-ratio: 1; }
+.series-assign-batch { display: flex; gap: 4px; flex-wrap: wrap; max-width: 200px; }
+.series-assign-batch img, .series-assign-batch video, .series-assign-batch .series-audio { width: 44px; height: 44px; font-size: 12px; font-weight: 700; }
+.series-asset .linked-remove { position: absolute; top: 2px; right: 2px; }
+.asset-series { left: 7px; top: 42px; color: #f9a8d4; opacity: 0; transition: opacity .12s; }
+.asset-card:hover .asset-series, .asset-card.selected .asset-series { opacity: 1; }
+.asset-filters .select { background: rgba(10,5,18,.65); color: var(--text); border: 1px solid var(--border); padding: 7px 9px; font: inherit; min-width: 130px; }
