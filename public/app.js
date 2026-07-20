@@ -36,7 +36,17 @@ const state = {
   editingSeriesId: null,
   seriesDraftCharacterIds: new Set(),
   pendingSeriesAssetKey: null,
+  scripts: [],
+  scriptEditor: null,        // copia de trabajo del guion abierto en el editor
+  scriptDirty: false,
+  scriptBriefText: '',
+  storyboardScript: null,    // copia de trabajo en el área de asignación de assets (guion solo lectura)
+  shotAssetsTarget: null,    // { si, hi } índice del plano cuyo modal de assets está abierto
+  shotAssetsZone: 'series',
   pickerTab: 'upload',
+  pickerCharacterId: '',     // drill-down del tab Personajes del picker
+  pickerVariantId: '',
+  charAssetPicker: null,     // { characterId, variantId, zone } al elegir un asset como foto de variante
   editingCharId: null,
   pendingCharacterAsset: null,
   variantEditor: null,
@@ -1042,20 +1052,8 @@ async function setPickerTab(src) {
         ).join('')}</div>`
       : '<div class="empty-note">Todavía no guardaste escenas en el Poser.</div>';
   } else if (src === 'characters') {
-    let html = '';
-    for (const c of state.characters) {
-      html += (c.photos || []).map((ph) =>
-        `<div class="pick" data-key="${esc(ph)}"><img src="${fileUrl(ph)}" loading="lazy" alt=""><div class="p-label">${esc(c.name)} · Original</div></div>`
-      ).join('');
-      for (const variant of (c.variants || [])) {
-        html += (variant.photos || []).map((ph) =>
-          `<div class="pick" data-key="${esc(ph)}"><img src="${fileUrl(ph)}" loading="lazy" alt=""><div class="p-label">${esc(c.name)} · ${esc(variant.name)}</div></div>`
-        ).join('');
-      }
-    }
-    body.innerHTML = html
-      ? `<div class="picker-grid">${html}</div>`
-      : '<div class="empty-note">Ningún personaje tiene fotos todavía.</div>';
+    renderPickerCharacters();
+    return;
   } else {
     await refreshAssets();
     const items = state.assets[src] || [];
@@ -1072,6 +1070,61 @@ async function setPickerTab(src) {
       $('#pickerModal').hidden = true;
     });
   });
+}
+
+// tab Personajes del picker: primero se elige el personaje, después Original o variante
+function renderPickerCharacters() {
+  const body = $('#pickerBody');
+  const c = state.characters.find((x) => x.id === state.pickerCharacterId);
+
+  if (!c) {
+    body.innerHTML = state.characters.length
+      ? `<div class="picker-grid">${state.characters.map((ch) => {
+          const versions = 1 + (ch.variants || []).length;
+          const cover = ch.photos[0] || (ch.variants || []).find((v) => (v.photos || []).length)?.photos[0];
+          return `<div class="pick" data-char="${ch.id}">${cover
+            ? `<img src="${fileUrl(cover)}" loading="lazy" alt="">`
+            : `<div class="pick-ph">${IC('user', 'ic ic-lg')}</div>`}
+            <div class="p-label">${esc(ch.name)}${versions > 1 ? ` · ${versions} versiones` : ''}</div></div>`;
+        }).join('')}</div>`
+      : '<div class="empty-note">Todavía no hay personajes.</div>';
+    body.querySelectorAll('[data-char]').forEach((el) => el.addEventListener('click', () => {
+      state.pickerCharacterId = el.dataset.char;
+      state.pickerVariantId = '';
+      renderPickerCharacters();
+    }));
+    return;
+  }
+
+  const groups = [
+    { id: '', name: 'Original', photos: c.photos || [] },
+    ...(c.variants || []).map((v) => ({ id: v.id, name: v.name, photos: v.photos || [] }))
+  ];
+  const group = groups.find((g) => g.id === state.pickerVariantId) || groups[0];
+  body.innerHTML = `
+    <div class="picker-char-head">
+      <button class="mini-btn" id="pickerCharBack">← Personajes</button>
+      <strong>${esc(c.name)}</strong>
+      <div class="chips">${groups.map((g) =>
+        `<button class="chip${g.id === group.id ? ' active' : ''}" data-vg="${esc(g.id)}">${esc(g.name)} (${g.photos.length})</button>`).join('')}</div>
+    </div>
+    ${group.photos.length
+      ? `<div class="picker-grid">${group.photos.map((ph) =>
+          `<div class="pick" data-key="${esc(ph)}"><img src="${fileUrl(ph)}" loading="lazy" alt=""><div class="p-label">${esc(c.name)} · ${esc(group.name)}</div></div>`).join('')}</div>`
+      : '<div class="empty-note">Esta versión todavía no tiene fotos.</div>'}`;
+  $('#pickerCharBack').addEventListener('click', () => {
+    state.pickerCharacterId = '';
+    state.pickerVariantId = '';
+    renderPickerCharacters();
+  });
+  body.querySelectorAll('[data-vg]').forEach((b) => b.addEventListener('click', () => {
+    state.pickerVariantId = b.dataset.vg;
+    renderPickerCharacters();
+  }));
+  body.querySelectorAll('.pick[data-key]').forEach((p) => p.addEventListener('click', () => {
+    addRef(p.dataset.key);
+    $('#pickerModal').hidden = true;
+  }));
 }
 
 async function uploadFiles(files, asRefs) {
@@ -1610,6 +1663,7 @@ async function associateAsset(key) {
   const existing = state.assetLinks.find((link) => link.key === key);
   if (existing && state.characters.some((c) => c.id === existing.characterId)) select.value = existing.characterId;
   renderAssociationVariants(existing?.variantId || '');
+  $('#associateAsPhoto').checked = false;
   $('#associateAssetPreview').innerHTML = `<img src="${fileUrl(key)}" alt=""><div><strong>${existing ? 'Reasignar asset' : 'Nuevo vínculo'}</strong><div class="hint">El archivo no se moverá ni duplicará.</div></div>`;
   $('#associateAssetModal').hidden = false;
 }
@@ -1623,15 +1677,31 @@ function renderAssociationVariants(selected = '') {
 $('#associateCharacter').addEventListener('change', () => renderAssociationVariants());
 $('#associateAssetForm').addEventListener('submit', async (e) => {
   e.preventDefault();
+  const key = state.pendingAssociationKey;
   const characterId = $('#associateCharacter').value;
   const variantId = $('#associateVariant').value || null;
-  const result = await api('/api/asset-links', { method: 'POST', body: { key: state.pendingAssociationKey, characterId, variantId } });
-  state.assetLinks = result.links;
-  $('#associateAssetModal').hidden = true;
-  const character = state.characters.find((c) => c.id === characterId);
-  const variant = (character?.variants || []).find((v) => v.id === variantId);
-  toast(`Asset asociado a ${character.name} · ${variant?.name || 'Original'}`);
-  renderCharacters();
+  try {
+    const result = await api('/api/asset-links', { method: 'POST', body: { key, characterId, variantId } });
+    state.assetLinks = result.links;
+    let asPhoto = false;
+    if ($('#associateAsPhoto').checked) {
+      const endpoint = variantId
+        ? `/api/characters/${characterId}/variants/${variantId}/photos`
+        : `/api/characters/${characterId}/photos`;
+      const updated = await api(endpoint, { method: 'POST', body: { assetKey: key } });
+      state.characters[state.characters.findIndex((x) => x.id === characterId)] = updated;
+      asPhoto = true;
+      if (state.pinnedId === characterId) { applyPinnedCharacterPhotos(); renderRefs(); renderCharacterVariantControl(); }
+    }
+    $('#associateAssetModal').hidden = true;
+    const character = state.characters.find((c) => c.id === characterId);
+    const variant = (character?.variants || []).find((v) => v.id === variantId);
+    toast(`Asset asociado a ${character.name} · ${variant?.name || 'Original'}${asPhoto ? ' y agregado como foto' : ''}`);
+    renderCharacters();
+    renderPinned();
+  } catch (err) {
+    toast(err.message, 'err');
+  }
 });
 function closeAssociateAsset() { $('#associateAssetModal').hidden = true; state.pendingAssociationKey = null; }
 $('#associateAssetClose').addEventListener('click', closeAssociateAsset);
@@ -1647,6 +1717,8 @@ document.addEventListener('keydown', (e) => {
     $('#characterGalleryModal').hidden = true; $('#variantEditorModal').hidden = true; $('#associateAssetModal').hidden = true;
     $('#assetInfoModal').hidden = true;
     $('#seriesModal').hidden = true; $('#seriesAssignModal').hidden = true; state.editingSeriesId = null;
+    $('#charAssetPickerModal').hidden = true; state.charAssetPicker = null;
+    if (!$('#shotAssetsModal').hidden) closeShotAssets();
     $('#promptEditorModal').hidden = true; state.promptEditor = null;
   }
 });
@@ -1695,6 +1767,7 @@ function renderSeries() {
         : '<span class="hint">Sin personajes asociados</span>'}</div>
       <div class="char-actions">
         <button class="mini-btn" data-act="edit">${IC('edit')} Editar</button>
+        <button class="mini-btn" data-act="scripts">${IC('clapper')} Guiones${state.scripts.filter((sc) => sc.seriesId === s.id).length ? ` (${state.scripts.filter((sc) => sc.seriesId === s.id).length})` : ''}</button>
         <button class="mini-btn" data-act="assets">${IC('image')} Assets${assetCount ? ` (${assetCount})` : ''}</button>
         <button class="mini-btn danger" data-act="del" title="Eliminar">${IC('trash')}</button>
       </div>`;
@@ -1702,11 +1775,13 @@ function renderSeries() {
       b.addEventListener('click', async () => {
         const act = b.dataset.act;
         if (act === 'edit') openSeriesModal(s.id);
+        if (act === 'scripts') openSeriesScripts(s.id);
         if (act === 'assets') openSeriesAssets(s.id);
         if (act === 'del') {
-          if (!confirm(`¿Eliminar la serie “${s.title}”?\n\nLos personajes y assets no se borran, solo la serie.`)) return;
+          if (!confirm(`¿Eliminar la serie “${s.title}”?\n\nSe eliminan también sus guiones. Los personajes y assets no se borran.`)) return;
           await api(`/api/series/${s.id}`, { method: 'DELETE' });
           state.series = state.series.filter((x) => x.id !== s.id);
+          state.scripts = state.scripts.filter((sc) => sc.seriesId !== s.id);
           renderSeries();
           renderCharacters();
         }
@@ -1888,6 +1963,523 @@ $('#seriesAssignForm').addEventListener('submit', async (e) => {
 });
 
 // ---------------------------------------------------------------------------
+// guiones — mismo modelo y funciones que Hookcast (escenas → planos → ítems),
+// más assets asociados a cada plano
+// ---------------------------------------------------------------------------
+
+const SCRIPT_FORMATS = ['Vertical 9:16', 'Horizontal 16:9', 'Square 1:1'];
+const SCRIPT_TIMES = ['Dawn', 'Day', 'Afternoon', 'Night'];
+const SCRIPT_LENSES = ['Wide angle', 'Normal', 'Telephoto'];
+const SCRIPT_SIZES = ['Extreme wide', 'Wide', 'Full', 'Medium', 'Medium close-up', 'Close-up', 'Extreme close-up', 'Insert'];
+
+// ids provisorios del editor; el server los regenera al guardar
+const tmpId = () => Math.random().toString(36).slice(2, 14);
+const newScriptShot = () => ({ id: tmpId(), size: 'Medium', lens: 'Normal', camera: '', items: [], assetKeys: [] });
+const newScriptScene = () => ({ id: tmpId(), intExt: 'INT', location: '', timeOfDay: 'Day', shots: [newScriptShot()] });
+
+function moveInArray(arr, i, d) {
+  const j = i + d;
+  if (i < 0 || j < 0 || j >= arr.length) return;
+  [arr[i], arr[j]] = [arr[j], arr[i]];
+}
+
+function scriptShotCount(sc) {
+  return (sc.scenes || []).reduce((n, scene) => n + (scene.shots || []).length, 0);
+}
+
+// --- lista de guiones de una serie (modal) ---
+
+function openSeriesScripts(seriesId) {
+  const s = state.series.find((x) => x.id === seriesId);
+  if (!s) return;
+  const scripts = state.scripts.filter((sc) => sc.seriesId === seriesId);
+  $('#characterGalleryTitle').textContent = `${s.title} · Guiones`;
+  $('#characterGalleryBody').innerHTML = `
+    <div class="script-list-toolbar">
+      <button class="generate-btn small" id="scriptListNew">${IC('plus')} Nuevo guion</button>
+      <button class="mini-btn" id="scriptListImport">${IC('upload')} Importar JSON de Hookcast</button>
+    </div>
+    ${scripts.length ? scripts.map((sc) => {
+      const shots = scriptShotCount(sc);
+      return `<div class="script-row" data-script="${sc.id}">
+        <div>
+          <strong>${esc(sc.title)}</strong>
+          <div class="hint">${sc.scenes.length} escena${sc.scenes.length === 1 ? '' : 's'} · ${shots} plano${shots === 1 ? '' : 's'} · ${esc(sc.format)}${sc.source === 'hookcast' ? ' · importado de Hookcast' : ''} · ${fmtDate(sc.updatedAt || sc.ts)}</div>
+        </div>
+        <div class="script-row-actions">
+          <button class="mini-btn" data-sact="open">${IC('edit')} Editar guion</button>
+          <button class="mini-btn" data-sact="assign">${IC('image')} Asignar assets</button>
+          <button class="mini-btn danger" data-sact="del" title="Eliminar">${IC('trash')}</button>
+        </div>
+      </div>`;
+    }).join('') : '<div class="hint" style="margin-top:12px">Sin guiones todavía: creá uno acá o importá el JSON exportado desde Hookcast (Export JSON, en el editor del guion).</div>'}`;
+  $('#scriptListNew').addEventListener('click', async () => {
+    try {
+      const created = await api('/api/scripts', { method: 'POST', body: { seriesId } });
+      state.scripts.unshift(created);
+      $('#characterGalleryModal').hidden = true;
+      renderSeries();
+      openScriptEditor(created.id);
+    } catch (err) { toast(err.message, 'err'); }
+  });
+  $('#scriptListImport').addEventListener('click', () => {
+    $('#scriptImportInput').onchange = async (e) => {
+      const file = e.target.files[0]; e.target.value = '';
+      if (!file) return;
+      try {
+        const data = JSON.parse(await file.text());
+        const result = await api('/api/scripts/import', { method: 'POST', body: { seriesId, data } });
+        state.scripts.unshift(result.script);
+        const idx = state.series.findIndex((x) => x.id === seriesId);
+        if (idx !== -1) state.series[idx] = result.serie;
+        const matched = result.script.characters.filter((ch) => ch.characterId).length;
+        toast(`“${result.script.title}” importado — ${result.script.scenes.length} escenas${matched ? `, ${matched} personaje${matched === 1 ? '' : 's'} reconocido${matched === 1 ? '' : 's'}` : ''}`);
+        renderSeries(); renderCharacters();
+        openSeriesScripts(seriesId);
+      } catch (err) { toast(`No se pudo importar: ${err.message}`, 'err'); }
+    };
+    $('#scriptImportInput').click();
+  });
+  $('#characterGalleryBody').querySelectorAll('.script-row').forEach((row) => {
+    const sc = state.scripts.find((x) => x.id === row.dataset.script);
+    row.querySelector('[data-sact="open"]').addEventListener('click', () => {
+      $('#characterGalleryModal').hidden = true;
+      openScriptEditor(sc.id);
+    });
+    row.querySelector('[data-sact="assign"]').addEventListener('click', () => {
+      $('#characterGalleryModal').hidden = true;
+      openStoryboard(sc.id);
+    });
+    row.querySelector('[data-sact="del"]').addEventListener('click', async () => {
+      if (!confirm(`¿Eliminar el guion “${sc.title}”?`)) return;
+      await api(`/api/scripts/${sc.id}`, { method: 'DELETE' });
+      state.scripts = state.scripts.filter((x) => x.id !== sc.id);
+      renderSeries();
+      openSeriesScripts(seriesId);
+    });
+  });
+  $('#characterGalleryModal').hidden = false;
+}
+
+// --- editor de guion (vista propia, se entra desde Series) ---
+
+function markScriptDirty() { state.scriptDirty = true; $('#scriptDirtyBadge').hidden = false; }
+function clearScriptDirty() { state.scriptDirty = false; $('#scriptDirtyBadge').hidden = true; }
+
+function openScriptEditor(id) {
+  const sc = state.scripts.find((x) => x.id === id);
+  if (!sc) return;
+  state.scriptEditor = structuredClone(sc);
+  state.scriptBriefText = '';
+  clearScriptDirty();
+  $$('.nav-btn').forEach((b) => b.classList.remove('active'));
+  $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-script'));
+  renderScriptEditor();
+  window.scrollTo(0, 0);
+}
+
+function closeScriptEditor() {
+  if (state.scriptDirty && !confirm('Hay cambios sin guardar en el guion. ¿Salir igual?')) return;
+  state.scriptEditor = null;
+  clearScriptDirty();
+  $('.nav-btn[data-view="series"]').click();
+}
+$('#scriptBack').addEventListener('click', closeScriptEditor);
+
+function renderScriptEditor() {
+  const ed = state.scriptEditor;
+  if (!ed) return;
+  const serie = state.series.find((s) => s.id === ed.seriesId);
+  $('#scriptViewTitle').textContent = ed.title || 'Guion';
+  $('#scriptViewSeries').textContent = serie ? `Serie: ${serie.title} · ${serie.format}` : '';
+  $('#scriptEditorRoot').innerHTML = `
+    <datalist id="scriptCastList"></datalist>
+    <section class="script-block">
+      <h3>Datos y elenco</h3>
+      <div class="script-meta-grid">
+        <label>Título<input id="scMetaTitle" maxlength="140" value="${esc(ed.title)}"></label>
+        <label>Formato<select id="scMetaFormat" class="select">${SCRIPT_FORMATS.map((f) => `<option${f === ed.format ? ' selected' : ''}>${f}</option>`).join('')}</select></label>
+      </div>
+      <label class="script-label">Sinopsis<textarea id="scMetaSummary" rows="2" maxlength="3000" placeholder="Un párrafo sobre de qué va este guion.">${esc(ed.summary || '')}</textarea></label>
+      <div class="script-cast" id="scriptCastRows"></div>
+      <button class="mini-btn" id="scCastAdd">${IC('plus')} Agregar al elenco</button>
+    </section>
+    <section class="script-block">
+      <h3>Guionista IA</h3>
+      <p class="hint">Contá la historia y la IA escribe el guion técnico completo — escena por escena, con cámara, acciones y diálogos del elenco asignado. Usa tu API key de OpenAI (Configuración).</p>
+      <label class="script-label">Brief de la historia<textarea id="scBrief" rows="4" maxlength="6000" placeholder="Premisa, tono, beats clave, giro, cómo termina… El guion se escribe en el idioma del brief.">${esc(state.scriptBriefText || '')}</textarea></label>
+      <button class="generate-btn small" id="scGenerate">${ed.scenes.length ? 'Regenerar guion completo con IA' : 'Generar guion completo con IA'}</button>
+    </section>
+    <section class="script-block">
+      <h3>Guion técnico</h3>
+      <div id="scriptScenes"></div>
+      <button class="mini-btn" id="scAddScene">${IC('plus')} Agregar escena</button>
+    </section>`;
+  $('#scMetaTitle').addEventListener('input', (e) => { ed.title = e.target.value; $('#scriptViewTitle').textContent = ed.title || 'Guion'; markScriptDirty(); });
+  $('#scMetaFormat').addEventListener('change', (e) => { ed.format = e.target.value; markScriptDirty(); });
+  $('#scMetaSummary').addEventListener('input', (e) => { ed.summary = e.target.value; markScriptDirty(); });
+  $('#scBrief').addEventListener('input', (e) => { state.scriptBriefText = e.target.value; });
+  $('#scCastAdd').addEventListener('click', () => {
+    ed.characters.push({ id: tmpId(), characterId: '', name: '', role: '' });
+    markScriptDirty();
+    renderScriptCast();
+  });
+  $('#scAddScene').addEventListener('click', () => {
+    ed.scenes.push(newScriptScene());
+    markScriptDirty();
+    renderScriptScenes();
+  });
+  $('#scGenerate').addEventListener('click', generateScriptWithAI);
+  renderScriptCast();
+  renderScriptScenes();
+}
+
+function renderScriptCastDatalist() {
+  const list = $('#scriptCastList');
+  if (list) list.innerHTML = state.scriptEditor.characters.filter((ch) => ch.name.trim()).map((ch) => `<option value="${esc(ch.name)}">`).join('');
+}
+
+function renderScriptCast() {
+  const ed = state.scriptEditor;
+  const wrap = $('#scriptCastRows');
+  wrap.innerHTML = ed.characters.length ? ed.characters.map((ch, i) => `
+    <div class="script-cast-row" data-i="${i}">
+      <label>Personaje<select class="select" data-f="characterId">
+        <option value="">Sin vincular</option>
+        ${state.characters.map((c) => `<option value="${c.id}"${c.id === ch.characterId ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}
+      </select></label>
+      <label>Nombre en el guion<input data-f="name" maxlength="80" value="${esc(ch.name)}" placeholder="VALENTINA"></label>
+      <label>Rol<input data-f="role" maxlength="160" value="${esc(ch.role || '')}" placeholder="Protagonista"></label>
+      <button class="icon-btn script-row-remove" title="Quitar del elenco">${IC('x')}</button>
+    </div>`).join('') : '<p class="hint">Sin elenco todavía. Sumá personajes para que la IA y los diálogos los usen.</p>';
+  wrap.querySelectorAll('.script-cast-row').forEach((row) => {
+    const ch = ed.characters[Number(row.dataset.i)];
+    row.querySelector('[data-f="characterId"]').addEventListener('change', (e) => {
+      ch.characterId = e.target.value;
+      const linked = state.characters.find((c) => c.id === ch.characterId);
+      if (linked) { ch.name = linked.name; row.querySelector('[data-f="name"]').value = linked.name; renderScriptCastDatalist(); }
+      markScriptDirty();
+    });
+    row.querySelector('[data-f="name"]').addEventListener('input', (e) => { ch.name = e.target.value; renderScriptCastDatalist(); markScriptDirty(); });
+    row.querySelector('[data-f="role"]').addEventListener('input', (e) => { ch.role = e.target.value; markScriptDirty(); });
+    row.querySelector('.script-row-remove').addEventListener('click', () => {
+      ed.characters.splice(Number(row.dataset.i), 1);
+      markScriptDirty();
+      renderScriptCast();
+    });
+  });
+  renderScriptCastDatalist();
+}
+
+function renderScriptScenes() {
+  const ed = state.scriptEditor;
+  const wrap = $('#scriptScenes');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (!ed.scenes.length) {
+    wrap.innerHTML = '<p class="hint">Sin escenas todavía. Agregá la primera o generá el guion completo con IA.</p>';
+    return;
+  }
+  ed.scenes.forEach((scene, si) => wrap.appendChild(buildSceneCard(scene, si)));
+}
+
+function buildSceneCard(scene, si) {
+  const ed = state.scriptEditor;
+  const card = document.createElement('article');
+  card.className = 'script-scene';
+  card.innerHTML = `
+    <header class="script-scene-head">
+      <strong>Escena ${si + 1}</strong>
+      <div class="script-mini-actions">
+        <button class="mini-btn" data-a="up"${si === 0 ? ' disabled' : ''} title="Subir escena">↑</button>
+        <button class="mini-btn" data-a="down"${si === ed.scenes.length - 1 ? ' disabled' : ''} title="Bajar escena">↓</button>
+        <button class="mini-btn danger" data-a="del">${IC('trash')} Eliminar</button>
+      </div>
+    </header>
+    <div class="script-slug-row">
+      <label>Int / Ext<select class="select" data-f="intExt"><option${scene.intExt !== 'EXT' ? ' selected' : ''}>INT</option><option${scene.intExt === 'EXT' ? ' selected' : ''}>EXT</option></select></label>
+      <label>Locación<input data-f="location" maxlength="120" value="${esc(scene.location || '')}" placeholder="SUITE DEL HOTEL"></label>
+      <label>Momento<select class="select" data-f="timeOfDay">${SCRIPT_TIMES.map((t) => `<option${t === scene.timeOfDay ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
+    </div>
+    <div class="script-shots"></div>
+    <button class="mini-btn" data-a="addshot">${IC('plus')} Agregar plano</button>`;
+  card.querySelector('[data-a="up"]').addEventListener('click', () => { moveInArray(ed.scenes, si, -1); markScriptDirty(); renderScriptScenes(); });
+  card.querySelector('[data-a="down"]').addEventListener('click', () => { moveInArray(ed.scenes, si, 1); markScriptDirty(); renderScriptScenes(); });
+  card.querySelector('[data-a="del"]').addEventListener('click', () => {
+    if (!confirm(`¿Eliminar la escena ${si + 1}?`)) return;
+    ed.scenes.splice(si, 1);
+    markScriptDirty();
+    renderScriptScenes();
+  });
+  card.querySelector('[data-a="addshot"]').addEventListener('click', () => {
+    scene.shots.push(newScriptShot());
+    markScriptDirty();
+    renderScriptScenes();
+  });
+  card.querySelector('[data-f="intExt"]').addEventListener('change', (e) => { scene.intExt = e.target.value; markScriptDirty(); });
+  card.querySelector('[data-f="location"]').addEventListener('input', (e) => { scene.location = e.target.value; markScriptDirty(); });
+  card.querySelector('[data-f="timeOfDay"]').addEventListener('change', (e) => { scene.timeOfDay = e.target.value; markScriptDirty(); });
+  const shotsWrap = card.querySelector('.script-shots');
+  scene.shots.forEach((shot, hi) => shotsWrap.appendChild(buildShotCard(scene, shot, si, hi)));
+  return card;
+}
+
+function buildShotCard(scene, shot, si, hi) {
+  const div = document.createElement('div');
+  div.className = 'script-shot';
+  div.innerHTML = `
+    <div class="script-shot-head">
+      <strong>Plano ${si + 1}.${hi + 1}</strong>
+      <div class="script-mini-actions">
+        <button class="mini-btn" data-a="insert" title="Insertar un plano nuevo debajo de este">${IC('plus')} Insertar debajo</button>
+        <button class="mini-btn" data-a="up"${hi === 0 ? ' disabled' : ''} title="Subir plano">↑</button>
+        <button class="mini-btn" data-a="down"${hi === scene.shots.length - 1 ? ' disabled' : ''} title="Bajar plano">↓</button>
+        <button class="mini-btn danger" data-a="del"${scene.shots.length === 1 ? ' disabled' : ''} title="Quitar plano">${IC('trash')}</button>
+      </div>
+    </div>
+    <div class="script-camera-row">
+      <label>Plano (tamaño)<select class="select" data-f="size">${SCRIPT_SIZES.map((x) => `<option${x === shot.size ? ' selected' : ''}>${x}</option>`).join('')}</select></label>
+      <label>Lente<select class="select" data-f="lens">${SCRIPT_LENSES.map((x) => `<option${x === shot.lens ? ' selected' : ''}>${x}</option>`).join('')}</select></label>
+      <label>Cámara — ángulo, movimiento, sensación<textarea data-f="camera" rows="2" maxlength="600" placeholder="Ángulo bajo, push-in lento, cámara en mano.">${esc(shot.camera || '')}</textarea></label>
+    </div>
+    <div class="script-items"></div>
+    <div class="script-shot-foot">
+      <button class="mini-btn" data-a="addaction">${IC('plus')} Acción</button>
+      <button class="mini-btn" data-a="adddialogue">${IC('plus')} Diálogo</button>
+    </div>`;
+  div.querySelector('[data-a="insert"]').addEventListener('click', () => {
+    scene.shots.splice(hi + 1, 0, newScriptShot());
+    markScriptDirty();
+    renderScriptScenes();
+  });
+  div.querySelector('[data-a="up"]').addEventListener('click', () => { moveInArray(scene.shots, hi, -1); markScriptDirty(); renderScriptScenes(); });
+  div.querySelector('[data-a="down"]').addEventListener('click', () => { moveInArray(scene.shots, hi, 1); markScriptDirty(); renderScriptScenes(); });
+  div.querySelector('[data-a="del"]').addEventListener('click', () => {
+    scene.shots.splice(hi, 1);
+    markScriptDirty();
+    renderScriptScenes();
+  });
+  div.querySelector('[data-f="size"]').addEventListener('change', (e) => { shot.size = e.target.value; markScriptDirty(); });
+  div.querySelector('[data-f="lens"]').addEventListener('change', (e) => { shot.lens = e.target.value; markScriptDirty(); });
+  div.querySelector('[data-f="camera"]').addEventListener('input', (e) => { shot.camera = e.target.value; markScriptDirty(); });
+  div.querySelector('[data-a="addaction"]').addEventListener('click', () => {
+    shot.items.push({ id: tmpId(), kind: 'action', character: '', text: '' });
+    markScriptDirty();
+    renderScriptScenes();
+  });
+  div.querySelector('[data-a="adddialogue"]').addEventListener('click', () => {
+    shot.items.push({ id: tmpId(), kind: 'dialogue', character: '', text: '' });
+    markScriptDirty();
+    renderScriptScenes();
+  });
+  const itemsWrap = div.querySelector('.script-items');
+  shot.items.forEach((item, ii) => itemsWrap.appendChild(buildItemRow(shot, item, ii)));
+  return div;
+}
+
+function buildItemRow(shot, item, ii) {
+  const row = document.createElement('div');
+  row.className = `script-item ${item.kind}`;
+  if (item.kind === 'dialogue') {
+    row.innerHTML = `
+      <label>Personaje<input data-f="character" maxlength="80" list="scriptCastList" value="${esc(item.character || '')}" placeholder="VALENTINA"></label>
+      <label>Línea<input data-f="text" maxlength="500" value="${esc(item.text || '')}" placeholder="Nunca tendrías que haber encontrado eso."></label>
+      <button class="icon-btn script-row-remove" title="Quitar diálogo">${IC('x')}</button>`;
+    row.querySelector('[data-f="character"]').addEventListener('input', (e) => { item.character = e.target.value; markScriptDirty(); });
+  } else {
+    row.innerHTML = `
+      <label>Acción<textarea data-f="text" rows="2" maxlength="1500" placeholder="Qué vemos en este plano, en presente.">${esc(item.text || '')}</textarea></label>
+      <button class="icon-btn script-row-remove" title="Quitar acción">${IC('x')}</button>`;
+  }
+  row.querySelector('[data-f="text"]').addEventListener('input', (e) => { item.text = e.target.value; markScriptDirty(); });
+  row.querySelector('.script-row-remove').addEventListener('click', () => {
+    shot.items.splice(ii, 1);
+    markScriptDirty();
+    renderScriptScenes();
+  });
+  return row;
+}
+
+async function saveScript() {
+  const ed = state.scriptEditor;
+  if (!ed) return false;
+  try {
+    const updated = await api(`/api/scripts/${ed.id}`, { method: 'PUT', body: {
+      title: ed.title, summary: ed.summary, format: ed.format,
+      characters: ed.characters, scenes: ed.scenes
+    } });
+    state.scripts[state.scripts.findIndex((x) => x.id === updated.id)] = updated;
+    state.scriptEditor = structuredClone(updated);
+    clearScriptDirty();
+    renderScriptEditor();
+    toast('Guion guardado');
+    return true;
+  } catch (err) {
+    toast(err.message, 'err');
+    return false;
+  }
+}
+$('#btnSaveScript').addEventListener('click', saveScript);
+
+async function generateScriptWithAI() {
+  const ed = state.scriptEditor;
+  if (!ed) return;
+  const brief = $('#scBrief').value.trim();
+  if (!brief) return toast('Escribí un brief de la historia para generar el guion', 'err');
+  if (ed.scenes.length && !confirm('Generar con IA reemplaza todas las escenas actuales. ¿Continuar?')) return;
+  const btn = $('#scGenerate');
+  btn.disabled = true;
+  btn.textContent = 'Escribiendo el guion… puede tardar un minuto';
+  try {
+    if (state.scriptDirty && !(await saveScript())) throw new Error('No se pudo guardar el guion antes de generar.');
+    const updated = await api(`/api/scripts/${state.scriptEditor.id}/generate`, { method: 'POST', body: { brief } });
+    state.scripts[state.scripts.findIndex((x) => x.id === updated.id)] = updated;
+    state.scriptEditor = structuredClone(updated);
+    clearScriptDirty();
+    renderScriptEditor();
+    toast(`Guion generado: ${updated.scenes.length} escenas, ${scriptShotCount(updated)} planos`);
+  } catch (err) {
+    toast(err.message, 'err');
+    renderScriptEditor();
+  }
+}
+
+// --- asignación de assets: otra área del pipeline, con el guion solo lectura ---
+
+function openStoryboard(id) {
+  const sc = state.scripts.find((x) => x.id === id);
+  if (!sc) return;
+  state.storyboardScript = structuredClone(sc);
+  $$('.nav-btn').forEach((b) => b.classList.remove('active'));
+  $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-storyboard'));
+  renderStoryboard();
+  window.scrollTo(0, 0);
+}
+$('#storyboardBack').addEventListener('click', () => {
+  state.storyboardScript = null;
+  $('.nav-btn[data-view="series"]').click();
+});
+
+function sbItemLine(item) {
+  return item.kind === 'dialogue'
+    ? `<div class="sb-dialogue"><strong>${esc(item.character || '¿?')}</strong>${esc(item.text)}</div>`
+    : `<div class="sb-action">${esc(item.text)}</div>`;
+}
+
+function renderStoryboard() {
+  const sb = state.storyboardScript;
+  if (!sb) return;
+  const serie = state.series.find((s) => s.id === sb.seriesId);
+  $('#storyboardTitle').textContent = `Asignar assets · ${sb.title}`;
+  $('#storyboardSeries').textContent = serie ? `Serie: ${serie.title} · ${sb.format} · el guion no se edita acá` : '';
+  const root = $('#storyboardRoot');
+  if (!sb.scenes.length) {
+    root.innerHTML = '<p class="hint">Este guion todavía no tiene escenas. Se editan en “Editar guion”.</p>';
+    return;
+  }
+  root.innerHTML = sb.scenes.map((scene, si) => `
+    <article class="sb-scene">
+      <div class="sb-scene-head">
+        <h4>Escena ${si + 1}</h4>
+        <span class="sb-slug">${esc(`${scene.intExt}. ${(scene.location || '').toUpperCase()} — ${scene.timeOfDay}`)}</span>
+      </div>
+      ${scene.shots.map((shot, hi) => `
+        <div class="sb-shot">
+          <div class="sb-shot-head">
+            <div><strong>Plano ${si + 1}.${hi + 1}</strong> <span class="sb-shot-specs">· ${esc(shot.size)} · ${esc(shot.lens)}</span></div>
+            <button class="mini-btn" data-sb="${si}:${hi}">${IC('image')} Asignar assets${(shot.assetKeys || []).length ? ` (${shot.assetKeys.length})` : ''}</button>
+          </div>
+          ${shot.camera ? `<div class="sb-camera">${esc(shot.camera)}</div>` : ''}
+          ${shot.items.length ? `<div class="sb-items">${shot.items.map(sbItemLine).join('')}</div>` : ''}
+          <div class="sb-assets" data-sbstrip="${si}:${hi}">${(shot.assetKeys || []).map((k) => `<button class="script-asset-thumb" data-k="${esc(k)}" title="${esc(k)}">${seriesAssetThumb(k)}</button>`).join('')}</div>
+        </div>`).join('')}
+    </article>`).join('');
+  root.querySelectorAll('[data-sb]').forEach((b) => b.addEventListener('click', () => {
+    const [si, hi] = b.dataset.sb.split(':').map(Number);
+    openShotAssets(si, hi);
+  }));
+  root.querySelectorAll('.script-asset-thumb').forEach((b) => b.addEventListener('click', () => {
+    const key = b.dataset.k;
+    const [si, hi] = b.closest('[data-sbstrip]').dataset.sbstrip.split(':').map(Number);
+    const keys = (sb.scenes[si].shots[hi].assetKeys || []).filter((x) => !x.startsWith('audio/'));
+    if (!key.startsWith('audio/')) openLightbox(key, keys);
+  }));
+}
+
+// el plano se identifica por índice (los ids se regeneran al guardar)
+function currentShotAssetsShot() {
+  const sb = state.storyboardScript;
+  const target = state.shotAssetsTarget;
+  if (!sb || !target) return null;
+  return sb.scenes[target.si]?.shots[target.hi] || null;
+}
+
+async function openShotAssets(si, hi) {
+  const sb = state.storyboardScript;
+  const shot = sb?.scenes[si]?.shots[hi];
+  if (!shot) return;
+  state.shotAssetsTarget = { si, hi };
+  state.shotAssetsZone = 'series';
+  const zonesEmpty = !state.assets.generated.length && !state.assets.uploads.length
+    && !state.assets.video.length && !state.assets.audio.length;
+  if (zonesEmpty) {
+    try { state.assets = await api('/api/assets'); } catch { /* sin assets no bloqueamos el modal */ }
+  }
+  $('#shotAssetsTitle').textContent = `Assets del plano ${si + 1}.${hi + 1}`;
+  renderShotAssetsGrid();
+  $('#shotAssetsModal').hidden = false;
+}
+
+function renderShotAssetsGrid() {
+  const shot = currentShotAssetsShot();
+  if (!shot) return;
+  $$('#shotAssetsTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.szone === state.shotAssetsZone));
+  const serie = state.series.find((s) => s.id === state.storyboardScript.seriesId);
+  const keys = state.shotAssetsZone === 'series'
+    ? (serie?.assetKeys || [])
+    : (state.assets[state.shotAssetsZone] || []).map((a) => a.key);
+  const selected = shot.assetKeys || [];
+  $('#shotAssetsGrid').innerHTML = keys.length ? keys.map((k) => `
+    <button class="shot-asset-cell${selected.includes(k) ? ' selected' : ''}" data-k="${esc(k)}" title="${esc(k)}">
+      ${seriesAssetThumb(k)}${selected.includes(k) ? `<span class="shot-asset-check">${IC('check')}</span>` : ''}
+    </button>`).join('')
+    : `<div class="hint">${state.shotAssetsZone === 'series'
+      ? 'La serie todavía no tiene assets asociados — asociale assets desde la sección Assets.'
+      : 'No hay assets en esta zona.'}</div>`;
+  $('#shotAssetsGrid').querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => {
+    const k = b.dataset.k;
+    shot.assetKeys = shot.assetKeys || [];
+    shot.assetKeys = shot.assetKeys.includes(k) ? shot.assetKeys.filter((x) => x !== k) : [...shot.assetKeys, k];
+    renderShotAssetsGrid();
+  }));
+}
+
+$$('#shotAssetsTabs .tab').forEach((t) => t.addEventListener('click', () => {
+  state.shotAssetsZone = t.dataset.szone;
+  renderShotAssetsGrid();
+}));
+
+// al cerrar el modal se guarda solo la asignación (el guion no se toca acá)
+async function closeShotAssets() {
+  $('#shotAssetsModal').hidden = true;
+  state.shotAssetsTarget = null;
+  const sb = state.storyboardScript;
+  if (!sb) return;
+  try {
+    const updated = await api(`/api/scripts/${sb.id}`, { method: 'PUT', body: { scenes: sb.scenes } });
+    state.scripts[state.scripts.findIndex((x) => x.id === updated.id)] = updated;
+    state.storyboardScript = structuredClone(updated);
+    toast('Asignación guardada');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+  renderStoryboard();
+}
+$('#shotAssetsClose').addEventListener('click', closeShotAssets);
+$('#shotAssetsDone').addEventListener('click', closeShotAssets);
+$('#shotAssetsModal').addEventListener('click', (e) => { if (e.target.id === 'shotAssetsModal') closeShotAssets(); });
+
+// ---------------------------------------------------------------------------
 // personajes
 // ---------------------------------------------------------------------------
 
@@ -2067,7 +2659,8 @@ function renderCharModal() {
         <div class="variant-item" data-variant="${v.id}">
           <div class="variant-item-head"><strong>${esc(v.name)}</strong><div>
             <button type="button" class="mini-btn" data-vact="rename">Editar</button>
-            <button type="button" class="mini-btn" data-vact="photo">${IC('plus')} Fotos</button>
+            <button type="button" class="mini-btn" data-vact="photo">${IC('upload')} Subir</button>
+            <button type="button" class="mini-btn" data-vact="fromassets">${IC('image')} Desde assets</button>
             <button type="button" class="mini-btn danger" data-vact="delete">${IC('trash')}</button>
           </div></div>
           ${v.description ? `<div class="hint">${esc(v.description)}</div>` : ''}
@@ -2149,6 +2742,7 @@ function renderCharModal() {
       if (state.characterVariantId === variantId) { state.characterVariantId = ''; applyPinnedCharacterPhotos(); }
       renderCharModal(); renderCharacters(); renderCharacterVariantControl(); renderRefs();
     });
+    item.querySelector('[data-vact="fromassets"]').addEventListener('click', () => openCharAssetPicker(id, variantId));
     item.querySelector('[data-vact="photo"]').addEventListener('click', () => {
       $('#fileInput').onchange = async (e) => {
         const files = [...e.target.files]; e.target.value = '';
@@ -2234,6 +2828,59 @@ function setupCharPhotoDrag(id) {
     }
   });
 }
+
+// elegir un asset como foto de variante, sin salir del modal de personaje
+async function openCharAssetPicker(characterId, variantId) {
+  state.charAssetPicker = { characterId, variantId, zone: 'generated' };
+  if (!state.assets.generated.length && !state.assets.uploads.length) {
+    try { state.assets = await api('/api/assets'); } catch { /* sin assets igual mostramos el modal */ }
+  }
+  const c = state.characters.find((x) => x.id === characterId);
+  const v = (c?.variants || []).find((x) => x.id === variantId);
+  $('#charAssetPickerTitle').textContent = `Fotos para “${v?.name || c?.name || 'la variante'}”`;
+  renderCharAssetPickerGrid();
+  $('#charAssetPickerModal').hidden = false;
+}
+
+function renderCharAssetPickerGrid() {
+  const cp = state.charAssetPicker;
+  if (!cp) return;
+  $$('#charAssetPickerTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.czone === cp.zone));
+  const items = (state.assets[cp.zone] || []).filter((a) => /\.(png|jpe?g|webp)$/i.test(a.key));
+  $('#charAssetPickerGrid').innerHTML = items.length ? items.map((a) => `
+    <button class="shot-asset-cell" data-k="${esc(a.key)}" title="${esc(a.name)}"><img src="${fileUrl(a.key)}" loading="lazy" alt=""></button>`).join('')
+    : '<div class="hint">No hay imágenes en esta zona.</div>';
+  $('#charAssetPickerGrid').querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', async () => {
+    const { characterId, variantId } = state.charAssetPicker || {};
+    if (!characterId) return;
+    try {
+      const updated = await api(`/api/characters/${characterId}/variants/${variantId}/photos`,
+        { method: 'POST', body: { assetKey: b.dataset.k } });
+      state.characters[state.characters.findIndex((x) => x.id === characterId)] = updated;
+      if (state.pinnedId === characterId) { applyPinnedCharacterPhotos(); renderRefs(); renderCharacterVariantControl(); }
+      renderCharModal();
+      renderCharacters();
+      renderPinned();
+      toast('Foto agregada a la variante');
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  }));
+}
+
+$$('#charAssetPickerTabs .tab').forEach((t) => t.addEventListener('click', () => {
+  if (!state.charAssetPicker) return;
+  state.charAssetPicker.zone = t.dataset.czone;
+  renderCharAssetPickerGrid();
+}));
+
+function closeCharAssetPicker() {
+  $('#charAssetPickerModal').hidden = true;
+  state.charAssetPicker = null;
+}
+$('#charAssetPickerClose').addEventListener('click', closeCharAssetPicker);
+$('#charAssetPickerDone').addEventListener('click', closeCharAssetPicker);
+$('#charAssetPickerModal').addEventListener('click', (e) => { if (e.target.id === 'charAssetPickerModal') closeCharAssetPicker(); });
 
 function openVariantEditor(characterId, variantId = null) {
   const character = state.characters.find((c) => c.id === characterId);
@@ -2554,6 +3201,7 @@ async function init() {
     state.promptCategoriesExtra = s.promptCategories || {};
     state.assetLinks = s.assetLinks || [];
     state.series = s.series || [];
+    state.scripts = s.scripts || [];
     state.history = s.history;
     state.pricing = s.pricing;
     state.modelId = s.models[0]?.id;

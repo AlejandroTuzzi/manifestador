@@ -44,6 +44,8 @@
     <symbol id="i-film" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 7h5M17 17h5"/></symbol>
     <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
     <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 2l10 5-10 5L2 7l10-5z"/><path d="M2 12l10 5 10-5"/><path d="M2 17l10 5 10-5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+    <symbol id="i-clapper" viewBox="0 0 24 24"><rect x="2" y="8" width="20" height="13"/><path d="M2 8l2-5 20 3-2 5"/><path d="M8 3.9L6 8.8M13 4.6l-2 4.9M18 5.4l-2 4.9"/></symbol>
   </defs>
 </svg>
 
@@ -383,6 +385,38 @@
       <div id="seriesGrid" class="chars-grid"></div>
     </section>
 
+    <!-- ==================== GUION (se abre desde Series) ==================== -->
+    <section id="view-script" class="view">
+      <div class="chars-head script-head">
+        <div class="script-head-left">
+          <button id="scriptBack" class="mini-btn">← Volver a Series</button>
+          <div>
+            <h2 id="scriptViewTitle">Guion</h2>
+            <span id="scriptViewSeries" class="hint"></span>
+          </div>
+        </div>
+        <div class="script-head-right">
+          <span id="scriptDirtyBadge" class="script-dirty" hidden>Cambios sin guardar</span>
+          <button id="btnSaveScript" class="generate-btn small"><svg class="ic"><use href="#i-check"/></svg> Guardar guion</button>
+        </div>
+      </div>
+      <div id="scriptEditorRoot" class="script-editor"></div>
+    </section>
+
+    <!-- ==================== ASIGNAR ASSETS AL GUION (solo lectura, se abre desde Series) ==================== -->
+    <section id="view-storyboard" class="view">
+      <div class="chars-head script-head">
+        <div class="script-head-left">
+          <button id="storyboardBack" class="mini-btn">← Volver a Series</button>
+          <div>
+            <h2 id="storyboardTitle">Asignar assets</h2>
+            <span id="storyboardSeries" class="hint"></span>
+          </div>
+        </div>
+      </div>
+      <div id="storyboardRoot" class="script-editor"></div>
+    </section>
+
     <!-- ==================== CONSUMO ==================== -->
     <section id="view-costs" class="view">
       <div class="chars-head">
@@ -518,6 +552,7 @@
     <div id="associateAssetPreview" class="associate-preview"></div>
     <label>Personaje<select id="associateCharacter" class="select" required></select></label>
     <label>Original o variante<select id="associateVariant" class="select"></select></label>
+    <label class="check-row"><input type="checkbox" id="associateAsPhoto"> Agregar también como foto del original o la variante elegida (para usarla de referencia)</label>
     <div class="form-modal-actions"><button type="button" class="mini-btn" id="associateAssetCancel">Cancelar</button><button type="submit" class="generate-btn small">Asociar</button></div>
   </form>
 </div>
@@ -554,6 +589,25 @@
       <button type="submit" class="generate-btn small">Guardar</button>
     </div>
   </form>
+</div>
+
+<!-- Assets de un plano del guion -->
+<div id="shotAssetsModal" class="modal" hidden>
+  <div class="modal-box shot-assets-box">
+    <div class="modal-head">
+      <div><h3 id="shotAssetsTitle">Assets del plano</h3><p class="hint">Clickeá para asignar o quitar; se guarda al cerrar</p></div>
+      <button class="icon-btn" id="shotAssetsClose"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="tabs" id="shotAssetsTabs">
+      <button class="tab active" data-szone="series">De la serie</button>
+      <button class="tab" data-szone="generated">Generadas</button>
+      <button class="tab" data-szone="uploads">Subidas</button>
+      <button class="tab" data-szone="video">Videos</button>
+      <button class="tab" data-szone="audio">Audio</button>
+    </div>
+    <div id="shotAssetsGrid" class="shot-assets-grid"></div>
+    <div class="form-modal-actions"><button type="button" class="generate-btn small" id="shotAssetsDone">Listo</button></div>
+  </div>
 </div>
 
 <!-- Asociar asset a una serie -->
@@ -645,6 +699,22 @@
   </div>
 </div>
 
+<!-- Elegir un asset como foto de una variante (se abre encima del modal de personaje) -->
+<div id="charAssetPickerModal" class="modal" hidden>
+  <div class="modal-box shot-assets-box">
+    <div class="modal-head">
+      <div><h3 id="charAssetPickerTitle">Elegir asset</h3><p class="hint">Clickeá una imagen para agregarla como foto; podés agregar varias</p></div>
+      <button class="icon-btn" id="charAssetPickerClose"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="tabs" id="charAssetPickerTabs">
+      <button class="tab active" data-czone="generated">Generadas</button>
+      <button class="tab" data-czone="uploads">Subidas</button>
+    </div>
+    <div id="charAssetPickerGrid" class="shot-assets-grid"></div>
+    <div class="form-modal-actions"><button type="button" class="generate-btn small" id="charAssetPickerDone">Listo</button></div>
+  </div>
+</div>
+
 <!-- Modal de personaje -->
 <div id="charModal" class="modal" hidden>
   <div class="modal-head-wrap modal-box">
@@ -659,6 +729,7 @@
 <div id="toast" class="toast" hidden></div>
 <input type="file" id="fileInput" accept="image/*" multiple hidden>
 <input type="file" id="characterImportInput" accept=".zip,application/zip" hidden>
+<input type="file" id="scriptImportInput" accept=".json,application/json" hidden>
 
 <script src="app.js"></script>
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>

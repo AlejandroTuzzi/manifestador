@@ -10,10 +10,10 @@ import { spawn, execFile } from 'node:child_process';
 
 import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODEL, getImageModel, getVideoModel } from './lib/models.js';
 import {
-  generateGemini, generateSeedream, generateSeedanceVideo,
+  generateGemini, generateSeedream, generateSeedanceVideo, generateScreenplay,
   listVoices, generateSpeech, translateText, searchUpdatedPricing, testService
 } from './lib/providers.js';
-import { mergePricing, imagePrice, videoPrice, audioPrice, translatePrice } from './lib/pricing.js';
+import { mergePricing, imagePrice, videoPrice, audioPrice, translatePrice, scriptPrice } from './lib/pricing.js';
 import { POSER_BODY_PARTS } from './public/poser-bodyparts.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -581,6 +581,72 @@ const STATIC_MIME = {
   '.ico': 'image/x-icon'
 };
 
+// ---------------------------------------------------------------------------
+// Guiones — mismo modelo que Hookcast (escenas → planos → acciones/diálogos)
+// ---------------------------------------------------------------------------
+
+const SCRIPT_FORMATS = ['Vertical 9:16', 'Horizontal 16:9', 'Square 1:1'];
+const SCRIPT_TIMES = ['Dawn', 'Day', 'Afternoon', 'Night'];
+const SCRIPT_LENSES = ['Wide angle', 'Normal', 'Telephoto'];
+const SCRIPT_SIZES = ['Extreme wide', 'Wide', 'Full', 'Medium', 'Medium close-up', 'Close-up', 'Extreme close-up', 'Insert'];
+const LEGACY_SCRIPT_TIMES = { Amanecer: 'Dawn', 'Día': 'Day', Tarde: 'Afternoon', Noche: 'Night' };
+const LEGACY_SCRIPT_LENSES = { 'Gran angular': 'Wide angle', Tele: 'Telephoto' };
+
+// Escena tal como viene de Hookcast (con posibles campos viejos: slugline
+// suelto o description/dialogues sin planos) → forma canónica con shots.
+function hookcastScene(scene) {
+  let { intExt, location, timeOfDay } = scene;
+  if (!location && !intExt && scene.slugline) {
+    const m = /^\s*(INT|EXT)\.?\s*(.*?)\s*(?:[—–-]+\s*(.+?)\s*)?$/i.exec(scene.slugline);
+    const raw = (m?.[3] || '').toLowerCase();
+    timeOfDay = raw.includes('noche') || raw.includes('night') ? 'Night'
+      : raw.includes('tarde') || raw.includes('afternoon') || raw.includes('evening') || raw.includes('dusk') ? 'Afternoon'
+      : raw.includes('amanecer') || raw.includes('dawn') || raw.includes('sunrise') ? 'Dawn' : 'Day';
+    intExt = m?.[1]?.toUpperCase() === 'EXT' ? 'EXT' : 'INT';
+    location = m ? m[2] : scene.slugline;
+  }
+  let shots = scene.shots;
+  if (!Array.isArray(shots)) {
+    const items = [];
+    if (scene.description) items.push({ kind: 'action', character: '', text: scene.description });
+    for (const d of scene.dialogues || []) items.push({ kind: 'dialogue', character: d.character || '', text: d.line || '' });
+    shots = [{ size: 'Medium', lens: scene.lens || 'Normal', camera: scene.camera || '', items }];
+  }
+  return { ...scene, intExt, location, timeOfDay, shots };
+}
+
+function sanitizeScriptScenes(scenes) {
+  return (Array.isArray(scenes) ? scenes : []).slice(0, 100).map((scene) => ({
+    id: newId(),
+    intExt: scene.intExt === 'EXT' ? 'EXT' : 'INT',
+    location: String(scene.location || '').slice(0, 120),
+    timeOfDay: SCRIPT_TIMES.includes(scene.timeOfDay) ? scene.timeOfDay : (LEGACY_SCRIPT_TIMES[scene.timeOfDay] || 'Day'),
+    shots: (Array.isArray(scene.shots) ? scene.shots : []).slice(0, 50).map((shot) => ({
+      id: newId(),
+      size: SCRIPT_SIZES.includes(shot.size) ? shot.size : 'Medium',
+      lens: SCRIPT_LENSES.includes(shot.lens) ? shot.lens : (LEGACY_SCRIPT_LENSES[shot.lens] || 'Normal'),
+      camera: String(shot.camera || '').slice(0, 600),
+      items: (Array.isArray(shot.items) ? shot.items : []).slice(0, 50).map((item) => ({
+        id: newId(),
+        kind: item.kind === 'dialogue' ? 'dialogue' : 'action',
+        character: String(item.character || '').slice(0, 80),
+        text: String(item.text || '').slice(0, 1500)
+      })),
+      assetKeys: [...new Set((Array.isArray(shot.assetKeys) ? shot.assetKeys : []).map(String))]
+        .filter((key) => /^(generated|uploads|video|audio)\//.test(key)).slice(0, 200)
+    }))
+  }));
+}
+
+function sanitizeScriptCast(list, characters) {
+  return (Array.isArray(list) ? list : []).slice(0, 50).map((ch) => ({
+    id: newId(),
+    characterId: characters.some((c) => c.id === ch.characterId) ? ch.characterId : '',
+    name: String(ch.name || '').trim().slice(0, 80),
+    role: String(ch.role || '').slice(0, 160)
+  })).filter((ch) => ch.name);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const p = url.pathname;
@@ -629,7 +695,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series] = await Promise.all([
+      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
@@ -637,7 +703,8 @@ const server = http.createServer(async (req, res) => {
         readJson('history.json', []),
         getPricing(),
         readJson('asset-links.json', []),
-        readJson('series.json', [])
+        readJson('series.json', []),
+        readJson('scripts.json', [])
       ]);
       return send(res, 200, {
         config: publicConfig(cfg),
@@ -650,7 +717,8 @@ const server = http.createServer(async (req, res) => {
         history: history.slice(0, 200),
         pricing,
         assetLinks,
-        series
+        series,
+        scripts
       });
     }
 
@@ -816,7 +884,130 @@ const server = http.createServer(async (req, res) => {
       if (!isSeriesAssets && req.method === 'DELETE') {
         series.splice(seriesIdx, 1);
         await writeJson('series.json', series);
+        await updateJson('scripts.json', [], (all) => all.filter((sc) => sc.seriesId !== seriesId));
         return send(res, 200, { ok: true });
+      }
+    }
+
+    // --- guiones (dentro de una serie) ---
+    if (p === '/api/scripts' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const series = await readJson('series.json', []);
+      const serie = series.find((s) => s.id === body.seriesId);
+      if (!serie) throw new Error('Serie no encontrada.');
+      const item = {
+        id: newId(),
+        seriesId: serie.id,
+        title: String(body.title || '').trim().slice(0, 140) || 'Guion nuevo',
+        summary: '',
+        format: serie.format === '16:9' ? 'Horizontal 16:9' : 'Vertical 9:16',
+        characters: [],
+        scenes: [],
+        source: 'manual',
+        ts: Date.now(),
+        updatedAt: Date.now()
+      };
+      await updateJson('scripts.json', [], (all) => [item, ...all]);
+      return send(res, 200, item);
+    }
+
+    if (p === '/api/scripts/import' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const series = await readJson('series.json', []);
+      const serie = series.find((s) => s.id === body.seriesId);
+      if (!serie) throw new Error('Serie no encontrada.');
+      const data = body.data;
+      const source = data?.format === 'hookcast-script' ? data.script : data;
+      if (!source || !Array.isArray(source.scenes)) throw new Error('Ese JSON no parece un guion exportado de Hookcast.');
+      const characters = await readJson('characters.json', []);
+      // el elenco se matchea contra tus personajes por nombre
+      const cast = (Array.isArray(source.characters) ? source.characters : []).map((ch) => {
+        const match = characters.find((c) => c.name.trim().toLowerCase() === String(ch.name || '').trim().toLowerCase());
+        return { characterId: match?.id || '', name: ch.name, role: ch.role };
+      });
+      const item = {
+        id: newId(),
+        seriesId: serie.id,
+        title: String(source.title || '').trim().slice(0, 140) || 'Guion importado',
+        summary: String(source.summary || '').slice(0, 3000),
+        format: SCRIPT_FORMATS.includes(source.format) ? source.format : (serie.format === '16:9' ? 'Horizontal 16:9' : 'Vertical 9:16'),
+        characters: sanitizeScriptCast(cast, characters),
+        scenes: sanitizeScriptScenes(source.scenes.map(hookcastScene)),
+        source: 'hookcast',
+        ts: Date.now(),
+        updatedAt: Date.now()
+      };
+      await updateJson('scripts.json', [], (all) => [item, ...all]);
+      const matched = item.characters.map((c) => c.characterId).filter(Boolean);
+      if (matched.length) {
+        serie.characterIds = [...new Set([...(serie.characterIds || []), ...matched])];
+        await writeJson('series.json', series);
+      }
+      return send(res, 200, { script: item, serie });
+    }
+
+    const scriptMatch = /^\/api\/scripts\/([a-z0-9]+)(\/generate)?$/.exec(p);
+    if (scriptMatch) {
+      const [, scriptId, isGenerate] = scriptMatch;
+      const scripts = await readJson('scripts.json', []);
+      const scriptIdx = scripts.findIndex((sc) => sc.id === scriptId);
+      if (scriptIdx === -1) return send(res, 404, { error: 'Guion no encontrado' });
+      const script = scripts[scriptIdx];
+
+      if (!isGenerate && req.method === 'PUT') {
+        const body = await readJsonBody(req);
+        const characters = await readJson('characters.json', []);
+        scripts[scriptIdx] = {
+          ...script,
+          title: body.title !== undefined ? (String(body.title).trim().slice(0, 140) || script.title) : script.title,
+          summary: body.summary !== undefined ? String(body.summary).slice(0, 3000) : script.summary,
+          format: SCRIPT_FORMATS.includes(body.format) ? body.format : script.format,
+          characters: body.characters !== undefined ? sanitizeScriptCast(body.characters, characters) : script.characters,
+          scenes: body.scenes !== undefined ? sanitizeScriptScenes(body.scenes) : script.scenes,
+          updatedAt: Date.now()
+        };
+        await writeJson('scripts.json', scripts);
+        return send(res, 200, scripts[scriptIdx]);
+      }
+
+      if (!isGenerate && req.method === 'DELETE') {
+        scripts.splice(scriptIdx, 1);
+        await writeJson('scripts.json', scripts);
+        return send(res, 200, { ok: true });
+      }
+
+      if (isGenerate && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const brief = String(body.brief || '').trim().slice(0, 6000);
+        if (!brief) throw new Error('Escribí un brief de la historia para generar el guion.');
+        const cfg = await getConfig();
+        const characters = await readJson('characters.json', []);
+        const cast = (script.characters || []).map((ch) => ({
+          name: ch.name,
+          role: ch.role,
+          description: characters.find((c) => c.id === ch.characterId)?.description || ''
+        }));
+        const generated = await generateScreenplay({
+          apiKey: cfg.keys.openai,
+          model: cfg.openaiModel,
+          brief,
+          cast,
+          currentTitle: script.title,
+          format: script.format
+        });
+        const pricing = await getPricing();
+        await recordCost({
+          type: 'script', modelId: cfg.openaiModel || 'gpt-5-mini', label: 'Guionista IA (OpenAI)',
+          units: generated.tokens, unitLabel: 'tokens', cost: scriptPrice(pricing, generated.tokens)
+        });
+        scripts[scriptIdx] = {
+          ...script,
+          title: String(generated.title || script.title).trim().slice(0, 140) || script.title,
+          scenes: sanitizeScriptScenes(generated.scenes),
+          updatedAt: Date.now()
+        };
+        await writeJson('scripts.json', scripts);
+        return send(res, 200, scripts[scriptIdx]);
       }
     }
 
@@ -1004,6 +1195,16 @@ const server = http.createServer(async (req, res) => {
       await updateJson('series.json', [], (all) => all.map((s) => ({
         ...s,
         assetKeys: (s.assetKeys || []).filter((key) => !removed.has(key))
+      })));
+      await updateJson('scripts.json', [], (all) => all.map((sc) => ({
+        ...sc,
+        scenes: (sc.scenes || []).map((scene) => ({
+          ...scene,
+          shots: (scene.shots || []).map((shot) => ({
+            ...shot,
+            assetKeys: (shot.assetKeys || []).filter((key) => !removed.has(key))
+          }))
+        }))
       })));
       const history = await readJson('history.json', []);
       const cleaned = history.map((entry) => ({
@@ -1284,11 +1485,22 @@ const server = http.createServer(async (req, res) => {
       }
       if (isPhotos && req.method === 'POST') {
         const body = await readJsonBody(req);
-        const { mime, buffer } = parseDataUrl(body.dataUrl);
         const dir = path.join(DATA_DIR, 'characters', id, 'variants', variantId);
         await fs.mkdir(dir, { recursive: true });
-        const name = `${ts()}-${sanitizeName(body.name).replace(/\.[^.]+$/, '')}${extForMime(mime)}`;
-        await fs.writeFile(path.join(dir, name), buffer);
+        let name;
+        if (body.assetKey) {
+          const assetKey = String(body.assetKey);
+          if (!/^(generated|uploads)\//.test(assetKey)) throw new Error('Solo se pueden usar imágenes como foto de variante.');
+          const source = await resolveAssetKey(assetKey);
+          const ext = path.extname(source).toLowerCase();
+          if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) throw new Error('Formato de imagen no admitido.');
+          name = `${ts()}-asset-${newId()}${ext}`;
+          await fs.copyFile(source, path.join(dir, name));
+        } else {
+          const { mime, buffer } = parseDataUrl(body.dataUrl);
+          name = `${ts()}-${sanitizeName(body.name).replace(/\.[^.]+$/, '')}${extForMime(mime)}`;
+          await fs.writeFile(path.join(dir, name), buffer);
+        }
         variant.photos.push(`characters/${id}/variants/${variantId}/${name}`);
         await writeJson('characters.json', characters);
         return send(res, 200, ch);
