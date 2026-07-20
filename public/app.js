@@ -2578,6 +2578,16 @@ function sbItemLine(item) {
     : `<div class="sb-action">${esc(item.text)}</div>`;
 }
 
+// bloque colapsable del prompt asignado a un plano — se usa en el storyboard
+// y en "Ver guion"; arranca cerrado para no alargar la lectura del guion
+function sbPromptView(shot) {
+  if (!shot.prompt) return '';
+  return `<details class="sb-prompt-view">
+    <summary>Prompt utilizado${shot.promptTitle ? `: <strong>${esc(shot.promptTitle)}</strong>` : ''}</summary>
+    <pre>${esc(shot.prompt)}</pre>
+  </details>`;
+}
+
 function renderStoryboard() {
   const sb = state.storyboardScript;
   if (!sb) return;
@@ -2609,9 +2619,7 @@ function renderStoryboard() {
               ${shot.prompt ? `<button class="mini-btn" data-sbcopy="${si}:${hi}">${IC('copy')} Copiar</button><button class="mini-btn danger" data-sbclearprompt="${si}:${hi}">Quitar</button>` : ''}
               <button class="mini-btn" data-sbpickprompt="${si}:${hi}">${IC('book')} Elegir de Prompts</button>
             </div></div>
-            ${shot.prompt
-              ? `<div class="sb-prompt-view">${shot.promptTitle ? `<strong>${esc(shot.promptTitle)}</strong>` : ''}<pre>${esc(shot.prompt)}</pre></div>`
-              : '<span class="hint">Sin prompt asignado — elegilo de tu biblioteca de Prompts.</span>'}
+            ${shot.prompt ? sbPromptView(shot) : '<span class="hint">Sin prompt asignado — elegilo de tu biblioteca de Prompts.</span>'}
           </div>
         </div>`).join('')}
     </article>`).join('');
@@ -2684,7 +2692,7 @@ function renderScriptView() {
             <div class="sb-shot-head"><div><strong>Plano ${si + 1}.${hi + 1}</strong> <span class="sb-shot-specs">· ${esc(shot.size)} · ${esc(shot.lens)}</span></div></div>
             ${shot.camera ? `<div class="sb-camera">${esc(shot.camera)}</div>` : ''}
             ${shot.items.length ? `<div class="sb-items">${shot.items.map(sbItemLine).join('')}</div>` : ''}
-            ${shot.prompt ? `<div class="sb-prompt-view">${shot.promptTitle ? `<strong>${esc(shot.promptTitle)}</strong>` : ''}<pre>${esc(shot.prompt)}</pre></div>` : ''}
+            ${sbPromptView(shot)}
             ${(shot.assetKeys || []).length ? `<div class="sb-assets" data-vgstrip="${si}:${hi}">${shot.assetKeys.map((k) =>
               `<button class="script-asset-thumb" data-k="${esc(k)}" title="${esc(k)}">${seriesAssetThumb(k)}</button>`).join('')}</div>` : ''}
           </div>`).join('')}
