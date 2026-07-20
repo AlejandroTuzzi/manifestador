@@ -1039,3 +1039,29 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .sb-items .sb-action { color: var(--muted); }
 .sb-items .sb-dialogue strong { color: var(--pink); font-weight: 700; margin-right: 6px; }
 .sb-assets { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.sb-prompt { display: flex; flex-direction: column; gap: 5px; }
+.sb-prompt-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; min-height: 22px; }
+.sb-prompt-head span { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .7px; }
+.sb-prompt-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.sb-prompt-view { border: 1px solid var(--border-soft); background: rgba(10,5,18,.55); padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.sb-prompt-view strong { font-size: 12px; color: var(--pink); }
+.sb-prompt-view pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: inherit; font-size: 12.5px; line-height: 1.5; color: #d9ccef; max-height: 120px; overflow: auto; }
+.shot-prompt-filters { display: flex; gap: 8px; margin-bottom: 10px; }
+.shot-prompt-filters input { flex: 1; min-width: 0; background: rgba(10,5,18,.7); border: 1px solid var(--border); color: var(--text); padding: 9px 12px; font: inherit; }
+.shot-prompt-filters input:focus { outline: none; border-color: var(--violet); }
+.shot-prompt-filters .select { min-width: 180px; }
+.shot-prompt-list { display: flex; flex-direction: column; gap: 6px; max-height: 52vh; overflow-y: auto; }
+.shot-prompt-row { text-align: left; border: 1px solid var(--border-soft); background: rgba(139,92,246,.05); padding: 10px 12px; cursor: pointer; color: var(--text); font: inherit; }
+.shot-prompt-row:hover { border-color: var(--pink); }
+.shot-prompt-row > div:first-child { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+.shot-prompt-row span { color: var(--muted); font-size: 11px; }
+.shot-prompt-text { color: var(--muted); font-size: 12px; max-height: 3em; overflow: hidden; }
+
+/* ---------- Ver guion (lectura) ---------- */
+.mini-btn.accent { border-color: var(--pink); color: white; background: rgba(236, 72, 153, 0.14); }
+.mini-btn.accent:hover { background: rgba(236, 72, 153, 0.28); }
+.vg-summary { color: var(--muted); margin: 0 0 12px; max-width: 720px; }
+.vg-cast { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+.vg-cast-chip { display: inline-flex; align-items: center; gap: 6px; cursor: default; }
+.vg-cast-chip img { width: 20px; height: 20px; object-fit: cover; }
+.vg-cast-chip em { color: var(--muted); font-style: normal; font-size: 11px; }

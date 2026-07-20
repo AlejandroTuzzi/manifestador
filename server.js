@@ -10,7 +10,7 @@ import { spawn, execFile } from 'node:child_process';
 
 import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODEL, getImageModel, getVideoModel } from './lib/models.js';
 import {
-  generateGemini, generateSeedream, generateSeedanceVideo, generateScreenplay,
+  generateGemini, generateSeedream, generateOpenAIImage, generateSeedanceVideo, generateScreenplay,
   listVoices, generateSpeech, translateText, searchUpdatedPricing, testService
 } from './lib/providers.js';
 import { mergePricing, imagePrice, videoPrice, audioPrice, translatePrice, scriptPrice } from './lib/pricing.js';
@@ -344,6 +344,11 @@ async function runImageGeneration(req) {
           apiKey: cfg.keys.ark, apiModel, endpoint: cfg.endpoints.ark,
           prompt: sentPrompt, refPaths, aspectRatio: req.aspectRatio, resolution: req.resolution
         });
+      case 'openai':
+        return generateOpenAIImage({
+          apiKey: cfg.keys.openai, apiModel, prompt: sentPrompt, refPaths,
+          aspectRatio: req.aspectRatio, resolution: req.resolution
+        });
       default:
         throw new Error(`Proveedor no implementado: ${model.provider}`);
     }
@@ -633,7 +638,10 @@ function sanitizeScriptScenes(scenes) {
         text: String(item.text || '').slice(0, 1500)
       })),
       assetKeys: [...new Set((Array.isArray(shot.assetKeys) ? shot.assetKeys : []).map(String))]
-        .filter((key) => /^(generated|uploads|video|audio)\//.test(key)).slice(0, 200)
+        .filter((key) => /^(generated|uploads|video|audio)\//.test(key)).slice(0, 200),
+      prompt: String(shot.prompt || '').slice(0, 5000),
+      promptId: String(shot.promptId || ''),
+      promptTitle: String(shot.promptTitle || '').slice(0, 120)
     }))
   }));
 }

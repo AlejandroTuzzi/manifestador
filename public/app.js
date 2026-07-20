@@ -47,6 +47,8 @@ const state = {
   pickerCharacterId: '',     // drill-down del tab Personajes del picker
   pickerVariantId: '',
   charAssetPicker: null,     // { characterId, variantId, zone } al elegir un asset como foto de variante
+  shotPromptTarget: null,    // { si, hi } del plano que está eligiendo prompt de la biblioteca
+  scriptViewId: null,        // guion abierto en la vista de lectura "Ver guion"
   editingCharId: null,
   pendingCharacterAsset: null,
   variantEditor: null,
@@ -1718,6 +1720,7 @@ document.addEventListener('keydown', (e) => {
     $('#assetInfoModal').hidden = true;
     $('#seriesModal').hidden = true; $('#seriesAssignModal').hidden = true; state.editingSeriesId = null;
     $('#charAssetPickerModal').hidden = true; state.charAssetPicker = null;
+    $('#shotPromptModal').hidden = true; state.shotPromptTarget = null;
     if (!$('#shotAssetsModal').hidden) closeShotAssets();
     $('#promptEditorModal').hidden = true; state.promptEditor = null;
   }
@@ -1766,6 +1769,7 @@ function renderSeries() {
           : `<span class="series-char-ph" title="${esc(c.name)}">${IC('user')}</span>`).join('')
         : '<span class="hint">Sin personajes asociados</span>'}</div>
       <div class="char-actions">
+        <button class="mini-btn accent" data-act="view">${IC('eye')} Ver guion</button>
         <button class="mini-btn" data-act="edit">${IC('edit')} Editar</button>
         <button class="mini-btn" data-act="scripts">${IC('clapper')} Guiones${state.scripts.filter((sc) => sc.seriesId === s.id).length ? ` (${state.scripts.filter((sc) => sc.seriesId === s.id).length})` : ''}</button>
         <button class="mini-btn" data-act="assets">${IC('image')} Assets${assetCount ? ` (${assetCount})` : ''}</button>
@@ -1774,6 +1778,12 @@ function renderSeries() {
     card.querySelectorAll('[data-act]').forEach((b) => {
       b.addEventListener('click', async () => {
         const act = b.dataset.act;
+        if (act === 'view') {
+          const list = state.scripts.filter((sc) => sc.seriesId === s.id);
+          if (!list.length) return toast('Esta serie todavía no tiene guiones — creá o importá uno desde “Guiones”', 'err');
+          if (list.length === 1) return openScriptView(list[0].id);
+          openSeriesScripts(s.id); // varios guiones: se elige desde la lista
+        }
         if (act === 'edit') openSeriesModal(s.id);
         if (act === 'scripts') openSeriesScripts(s.id);
         if (act === 'assets') openSeriesAssets(s.id);
@@ -2007,6 +2017,7 @@ function openSeriesScripts(seriesId) {
           <div class="hint">${sc.scenes.length} escena${sc.scenes.length === 1 ? '' : 's'} · ${shots} plano${shots === 1 ? '' : 's'} · ${esc(sc.format)}${sc.source === 'hookcast' ? ' · importado de Hookcast' : ''} · ${fmtDate(sc.updatedAt || sc.ts)}</div>
         </div>
         <div class="script-row-actions">
+          <button class="mini-btn accent" data-sact="view">${IC('eye')} Ver</button>
           <button class="mini-btn" data-sact="open">${IC('edit')} Editar guion</button>
           <button class="mini-btn" data-sact="assign">${IC('image')} Asignar assets</button>
           <button class="mini-btn danger" data-sact="del" title="Eliminar">${IC('trash')}</button>
@@ -2042,6 +2053,10 @@ function openSeriesScripts(seriesId) {
   });
   $('#characterGalleryBody').querySelectorAll('.script-row').forEach((row) => {
     const sc = state.scripts.find((x) => x.id === row.dataset.script);
+    row.querySelector('[data-sact="view"]').addEventListener('click', () => {
+      $('#characterGalleryModal').hidden = true;
+      openScriptView(sc.id);
+    });
     row.querySelector('[data-sact="open"]').addEventListener('click', () => {
       $('#characterGalleryModal').hidden = true;
       openScriptEditor(sc.id);
@@ -2392,6 +2407,15 @@ function renderStoryboard() {
           ${shot.camera ? `<div class="sb-camera">${esc(shot.camera)}</div>` : ''}
           ${shot.items.length ? `<div class="sb-items">${shot.items.map(sbItemLine).join('')}</div>` : ''}
           <div class="sb-assets" data-sbstrip="${si}:${hi}">${(shot.assetKeys || []).map((k) => `<button class="script-asset-thumb" data-k="${esc(k)}" title="${esc(k)}">${seriesAssetThumb(k)}</button>`).join('')}</div>
+          <div class="sb-prompt">
+            <div class="sb-prompt-head"><span>Prompt del plano</span><div class="sb-prompt-actions">
+              ${shot.prompt ? `<button class="mini-btn" data-sbcopy="${si}:${hi}">${IC('copy')} Copiar</button><button class="mini-btn danger" data-sbclearprompt="${si}:${hi}">Quitar</button>` : ''}
+              <button class="mini-btn" data-sbpickprompt="${si}:${hi}">${IC('book')} Elegir de Prompts</button>
+            </div></div>
+            ${shot.prompt
+              ? `<div class="sb-prompt-view">${shot.promptTitle ? `<strong>${esc(shot.promptTitle)}</strong>` : ''}<pre>${esc(shot.prompt)}</pre></div>`
+              : '<span class="hint">Sin prompt asignado — elegilo de tu biblioteca de Prompts.</span>'}
+          </div>
         </div>`).join('')}
     </article>`).join('');
   root.querySelectorAll('[data-sb]').forEach((b) => b.addEventListener('click', () => {
@@ -2404,6 +2428,137 @@ function renderStoryboard() {
     const keys = (sb.scenes[si].shots[hi].assetKeys || []).filter((x) => !x.startsWith('audio/'));
     if (!key.startsWith('audio/')) openLightbox(key, keys);
   }));
+  root.querySelectorAll('[data-sbpickprompt]').forEach((b) => b.addEventListener('click', () => {
+    const [si, hi] = b.dataset.sbpickprompt.split(':').map(Number);
+    openShotPromptPicker(si, hi);
+  }));
+  root.querySelectorAll('[data-sbclearprompt]').forEach((b) => b.addEventListener('click', async () => {
+    const [si, hi] = b.dataset.sbclearprompt.split(':').map(Number);
+    const shot = sb.scenes[si].shots[hi];
+    shot.prompt = ''; shot.promptId = ''; shot.promptTitle = '';
+    await saveStoryboard('Prompt quitado del plano');
+    renderStoryboard();
+  }));
+  root.querySelectorAll('[data-sbcopy]').forEach((b) => b.addEventListener('click', () => {
+    const [si, hi] = b.dataset.sbcopy.split(':').map(Number);
+    copyPrompt(sb.scenes[si].shots[hi].prompt || '');
+  }));
+}
+
+// --- Ver guion: lectura completa (guion + prompts + assets por plano) ---
+
+function openScriptView(id) {
+  const sc = state.scripts.find((x) => x.id === id);
+  if (!sc) return;
+  state.scriptViewId = id;
+  $$('.nav-btn').forEach((b) => b.classList.remove('active'));
+  $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-scriptview'));
+  renderScriptView();
+  window.scrollTo(0, 0);
+}
+$('#scriptViewBack').addEventListener('click', () => {
+  state.scriptViewId = null;
+  $('.nav-btn[data-view="series"]').click();
+});
+
+function renderScriptView() {
+  const sc = state.scripts.find((x) => x.id === state.scriptViewId);
+  if (!sc) return;
+  const serie = state.series.find((s) => s.id === sc.seriesId);
+  const shots = scriptShotCount(sc);
+  $('#scriptViewTitle').textContent = sc.title;
+  $('#scriptViewMeta').textContent = `${serie ? `Serie: ${serie.title} · ` : ''}${sc.format} · ${sc.scenes.length} escena${sc.scenes.length === 1 ? '' : 's'} · ${shots} plano${shots === 1 ? '' : 's'}`;
+  const root = $('#scriptViewRoot');
+  const cast = sc.characters || [];
+  root.innerHTML = `
+    ${sc.summary ? `<p class="vg-summary">${esc(sc.summary)}</p>` : ''}
+    ${cast.length ? `<div class="vg-cast">${cast.map((ch) => {
+      const linked = state.characters.find((x) => x.id === ch.characterId);
+      return `<span class="chip vg-cast-chip">${linked?.photos[0] ? `<img src="${fileUrl(linked.photos[0])}" alt="">` : ''}${esc(ch.name)}${ch.role ? ` <em>— ${esc(ch.role)}</em>` : ''}</span>`;
+    }).join('')}</div>` : ''}
+    ${sc.scenes.length ? sc.scenes.map((scene, si) => `
+      <article class="sb-scene">
+        <div class="sb-scene-head">
+          <h4>Escena ${si + 1}</h4>
+          <span class="sb-slug">${esc(`${scene.intExt}. ${(scene.location || '').toUpperCase()} — ${scene.timeOfDay}`)}</span>
+        </div>
+        ${scene.shots.map((shot, hi) => `
+          <div class="sb-shot">
+            <div class="sb-shot-head"><div><strong>Plano ${si + 1}.${hi + 1}</strong> <span class="sb-shot-specs">· ${esc(shot.size)} · ${esc(shot.lens)}</span></div></div>
+            ${shot.camera ? `<div class="sb-camera">${esc(shot.camera)}</div>` : ''}
+            ${shot.items.length ? `<div class="sb-items">${shot.items.map(sbItemLine).join('')}</div>` : ''}
+            ${shot.prompt ? `<div class="sb-prompt-view">${shot.promptTitle ? `<strong>${esc(shot.promptTitle)}</strong>` : ''}<pre>${esc(shot.prompt)}</pre></div>` : ''}
+            ${(shot.assetKeys || []).length ? `<div class="sb-assets" data-vgstrip="${si}:${hi}">${shot.assetKeys.map((k) =>
+              `<button class="script-asset-thumb" data-k="${esc(k)}" title="${esc(k)}">${seriesAssetThumb(k)}</button>`).join('')}</div>` : ''}
+          </div>`).join('')}
+      </article>`).join('') : '<p class="hint">Este guion todavía no tiene escenas.</p>'}`;
+  root.querySelectorAll('.script-asset-thumb').forEach((b) => b.addEventListener('click', () => {
+    const key = b.dataset.k;
+    const [si, hi] = b.closest('[data-vgstrip]').dataset.vgstrip.split(':').map(Number);
+    const keys = (sc.scenes[si].shots[hi].assetKeys || []).filter((x) => !x.startsWith('audio/'));
+    if (!key.startsWith('audio/')) openLightbox(key, keys);
+  }));
+}
+
+// --- picker de prompts de la biblioteca para un plano ---
+
+function openShotPromptPicker(si, hi) {
+  if (!state.prompts.length) return toast('Todavía no hay prompts guardados — archivalos desde la caja de Crear', 'err');
+  state.shotPromptTarget = { si, hi };
+  $('#shotPromptTitle').textContent = `Prompt para el plano ${si + 1}.${hi + 1}`;
+  $('#shotPromptSearch').value = '';
+  const cats = promptCategories();
+  $('#shotPromptCategory').innerHTML = '<option value="">Todas las categorías</option>'
+    + cats.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  renderShotPromptList();
+  $('#shotPromptModal').hidden = false;
+  setTimeout(() => $('#shotPromptSearch').focus(), 0);
+}
+
+function renderShotPromptList() {
+  const query = $('#shotPromptSearch').value.trim().toLowerCase();
+  const cat = $('#shotPromptCategory').value;
+  const items = state.prompts.filter((p) => (!cat || (p.category || 'General') === cat)
+    && (!query || `${p.title} ${p.text} ${p.category || ''}`.toLowerCase().includes(query)));
+  $('#shotPromptList').innerHTML = items.length ? items.map((p) => `
+    <button class="shot-prompt-row" data-p="${p.id}">
+      <div><strong>${esc(p.title)}</strong><span>${esc(p.category || 'General')}</span>${p.mode === 'video' ? IC('film') : p.mode === 'audio' ? IC('mic') : IC('image')}</div>
+      <div class="shot-prompt-text">${esc(p.text)}</div>
+    </button>`).join('') : '<div class="hint">No hay prompts que coincidan.</div>';
+  $('#shotPromptList').querySelectorAll('[data-p]').forEach((b) => b.addEventListener('click', async () => {
+    const pr = state.prompts.find((x) => x.id === b.dataset.p);
+    const target = state.shotPromptTarget;
+    const shot = state.storyboardScript?.scenes[target?.si]?.shots[target?.hi];
+    if (!pr || !shot) return;
+    shot.prompt = pr.text;
+    shot.promptId = pr.id;
+    shot.promptTitle = pr.title;
+    closeShotPromptPicker();
+    await saveStoryboard(`Prompt “${pr.title}” asignado al plano`);
+    renderStoryboard();
+  }));
+}
+
+$('#shotPromptSearch').addEventListener('input', renderShotPromptList);
+$('#shotPromptCategory').addEventListener('change', renderShotPromptList);
+function closeShotPromptPicker() {
+  $('#shotPromptModal').hidden = true;
+  state.shotPromptTarget = null;
+}
+$('#shotPromptClose').addEventListener('click', closeShotPromptPicker);
+$('#shotPromptModal').addEventListener('click', (e) => { if (e.target.id === 'shotPromptModal') closeShotPromptPicker(); });
+
+async function saveStoryboard(message) {
+  const sb = state.storyboardScript;
+  if (!sb) return;
+  try {
+    const updated = await api(`/api/scripts/${sb.id}`, { method: 'PUT', body: { scenes: sb.scenes } });
+    state.scripts[state.scripts.findIndex((x) => x.id === updated.id)] = updated;
+    state.storyboardScript = structuredClone(updated);
+    if (message) toast(message);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
 }
 
 // el plano se identifica por índice (los ids se regeneran al guardar)
@@ -2463,16 +2618,8 @@ $$('#shotAssetsTabs .tab').forEach((t) => t.addEventListener('click', () => {
 async function closeShotAssets() {
   $('#shotAssetsModal').hidden = true;
   state.shotAssetsTarget = null;
-  const sb = state.storyboardScript;
-  if (!sb) return;
-  try {
-    const updated = await api(`/api/scripts/${sb.id}`, { method: 'PUT', body: { scenes: sb.scenes } });
-    state.scripts[state.scripts.findIndex((x) => x.id === updated.id)] = updated;
-    state.storyboardScript = structuredClone(updated);
-    toast('Asignación guardada');
-  } catch (err) {
-    toast(err.message, 'err');
-  }
+  if (!state.storyboardScript) return;
+  await saveStoryboard('Asignación guardada');
   renderStoryboard();
 }
 $('#shotAssetsClose').addEventListener('click', closeShotAssets);

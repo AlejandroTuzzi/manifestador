@@ -403,6 +403,20 @@
       <div id="scriptEditorRoot" class="script-editor"></div>
     </section>
 
+    <!-- ==================== VER GUION (lectura completa: guion + prompts + assets) ==================== -->
+    <section id="view-scriptview" class="view">
+      <div class="chars-head script-head">
+        <div class="script-head-left">
+          <button id="scriptViewBack" class="mini-btn">← Volver a Series</button>
+          <div>
+            <h2 id="scriptViewTitle">Guion</h2>
+            <span id="scriptViewMeta" class="hint"></span>
+          </div>
+        </div>
+      </div>
+      <div id="scriptViewRoot" class="script-editor"></div>
+    </section>
+
     <!-- ==================== ASIGNAR ASSETS AL GUION (solo lectura, se abre desde Series) ==================== -->
     <section id="view-storyboard" class="view">
       <div class="chars-head script-head">
@@ -696,6 +710,21 @@
     <button class="lb-nav lb-next" id="lbNext" title="Siguiente"><svg class="ic ic-lg"><use href="#i-right"/></svg></button>
     <div id="lbCounter" class="lb-counter"></div>
     <div id="lbActions" class="lb-actions"></div>
+  </div>
+</div>
+
+<!-- Elegir un prompt de la biblioteca para un plano del guion -->
+<div id="shotPromptModal" class="modal" hidden>
+  <div class="modal-box shot-assets-box">
+    <div class="modal-head">
+      <div><h3 id="shotPromptTitle">Elegir prompt</h3><p class="hint">De tu biblioteca de Prompts; queda registrado en el plano</p></div>
+      <button class="icon-btn" id="shotPromptClose"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="shot-prompt-filters">
+      <input id="shotPromptSearch" type="text" placeholder="Buscar por título o texto…">
+      <select id="shotPromptCategory" class="select"><option value="">Todas las categorías</option></select>
+    </div>
+    <div id="shotPromptList" class="shot-prompt-list"></div>
   </div>
 </div>
 
