@@ -356,6 +356,20 @@ h3 { font-size: 15px; }
   content: "👤"; position: absolute; bottom: 2px; left: 3px; font-size: 11px;
   filter: drop-shadow(0 1px 2px black);
 }
+.ref-thumb .ref-label-btn {
+  position: absolute; bottom: 2px; right: 2px;
+  width: 18px; height: 18px; border: none; border-radius: 0;
+  background: rgba(0, 0, 0, 0.65); color: #d8ccf5;
+  font-size: 11px; font-weight: 700; cursor: pointer; line-height: 1;
+}
+.ref-thumb .ref-label-btn.on { background: var(--pink); color: white; }
+.ref-thumb .ref-label-tag {
+  position: absolute; top: 0; left: 0; right: 0;
+  background: rgba(255, 255, 255, 0.92); color: #000;
+  font-size: 9px; font-weight: 700; text-transform: uppercase; text-align: center;
+  padding: 1px 20px 1px 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  pointer-events: none;
+}
 .ref-thumb.verified-asset { border-color: var(--pink); }
 .ref-thumb.verified-asset::after { content: none; }
 .ref-thumb .asset-face {
@@ -1056,6 +1070,28 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .shot-prompt-row > div:first-child { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
 .shot-prompt-row span { color: var(--muted); font-size: 11px; }
 .shot-prompt-text { color: var(--muted); font-size: 12px; max-height: 3em; overflow: hidden; }
+
+/* ---------- locaciones y objetos ---------- */
+.element-filters { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.element-filters label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; }
+.element-filters .select { min-width: 160px; }
+.element-meta { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
+.element-kind-badge { border: 1px solid var(--border); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; padding: 1px 6px; }
+.element-kind-badge.location { border-color: var(--pink); color: #f9a8d4; }
+.element-kind-badge.object { border-color: var(--violet); color: #c4b5fd; }
+.element-category { color: var(--muted); font-size: 11px; }
+#elementModalBody { display: flex; flex-direction: column; gap: 14px; }
+#elementModalBody > label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+#elementModalBody input, #elementModalBody textarea { width: 100%; background: rgba(10,5,18,.7); border: 1px solid var(--border); color: var(--text); padding: 11px 12px; font: inherit; }
+#elementModalBody input:focus, #elementModalBody textarea:focus { outline: none; border-color: var(--violet); }
+#elementModalBody .select { min-width: 0; width: 100%; }
+#elementModalBody .generate-btn { align-self: flex-start; }
+
+/* ---------- lupita del lightbox ---------- */
+#lbZoomWrap { max-width: 92vw; max-height: 82vh; overflow: hidden; }
+#lbZoomWrap img { max-width: 92vw; max-height: 82vh; display: block; cursor: zoom-in; box-shadow: var(--shadow); }
+#lbZoomWrap.zoomed { overflow: auto; scrollbar-width: thin; }
+#lbZoomWrap.zoomed img { max-width: none; max-height: none; cursor: zoom-out; }
 
 /* ---------- Ver guion (lectura) ---------- */
 .mini-btn.accent { border-color: var(--pink); color: white; background: rgba(236, 72, 153, 0.14); }

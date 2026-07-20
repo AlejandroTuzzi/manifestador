@@ -57,6 +57,7 @@
       <button class="nav-btn active" data-view="create"><svg class="ic"><use href="#i-wand"/></svg> Crear</button>
       <button class="nav-btn" data-view="assets"><svg class="ic"><use href="#i-grid"/></svg> Assets</button>
       <button class="nav-btn" data-view="characters"><svg class="ic"><use href="#i-user"/></svg> Personajes</button>
+      <button class="nav-btn" data-view="elements"><svg class="ic"><use href="#i-globe"/></svg> Locaciones y objetos</button>
       <button class="nav-btn" data-view="series"><svg class="ic"><use href="#i-layers"/></svg> Series</button>
       <button class="nav-btn" data-view="poser"><svg class="ic"><use href="#i-cube"/></svg> Poser</button>
       <button class="nav-btn" data-view="prompts"><svg class="ic"><use href="#i-book"/></svg> Prompts</button>
@@ -376,6 +377,23 @@
       <div id="charsGrid" class="chars-grid"></div>
     </section>
 
+    <!-- ==================== LOCACIONES Y OBJETOS ==================== -->
+    <section id="view-elements" class="view">
+      <div class="chars-head">
+        <h2>Locaciones y objetos</h2>
+        <button id="btnNewElement" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Nueva locación u objeto</button>
+      </div>
+      <div class="element-filters">
+        <div class="chips" id="elementKindChips">
+          <button class="chip active" data-ekind="">Todos</button>
+          <button class="chip" data-ekind="location">Locaciones</button>
+          <button class="chip" data-ekind="object">Objetos</button>
+        </div>
+        <label>Categoría <select id="elementCategoryFilter" class="select"><option value="">Todas</option></select></label>
+      </div>
+      <div id="elementsGrid" class="chars-grid"></div>
+    </section>
+
     <!-- ==================== SERIES ==================== -->
     <section id="view-series" class="view">
       <div class="chars-head">
@@ -564,7 +582,13 @@
   <form id="associateAssetForm" class="modal-box form-modal-box">
     <div class="modal-head"><div><h3>Asociar asset</h3><p class="hint">Elegí el personaje y su versión</p></div><button type="button" class="icon-btn" id="associateAssetClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
     <div id="associateAssetPreview" class="associate-preview"></div>
-    <label>Personaje<select id="associateCharacter" class="select" required></select></label>
+    <label>Destino
+      <select id="associateTargetType" class="select">
+        <option value="character">Personaje</option>
+        <option value="element">Locación u objeto</option>
+      </select>
+    </label>
+    <label><span id="associateOwnerLabelText">Personaje</span><select id="associateCharacter" class="select" required></select></label>
     <label>Original o variante<select id="associateVariant" class="select"></select></label>
     <label class="check-row"><input type="checkbox" id="associateAsPhoto"> Agregar también como foto del original o la variante elegida (para usarla de referencia)</label>
     <div class="form-modal-actions"><button type="button" class="mini-btn" id="associateAssetCancel">Cancelar</button><button type="submit" class="generate-btn small">Asociar</button></div>
@@ -683,6 +707,7 @@
       <button class="tab" data-src="uploads">Subidas</button>
       <button class="tab" data-src="generated">Generadas</button>
       <button class="tab" data-src="characters">Personajes</button>
+      <button class="tab" data-src="elements">Locaciones/Objetos</button>
       <button class="tab" data-src="poses">Poses</button>
     </div>
     <div id="pickerBody" class="picker-body"></div>
@@ -705,7 +730,7 @@
   <div class="lightbox-box">
     <button class="icon-btn lb-close" id="lbClose"><svg class="ic"><use href="#i-x"/></svg></button>
     <button class="lb-nav lb-prev" id="lbPrev" title="Anterior"><svg class="ic ic-lg"><use href="#i-left"/></svg></button>
-    <img id="lbImg" alt="">
+    <div id="lbZoomWrap"><img id="lbImg" alt=""></div>
     <video id="lbVideo" controls loop hidden></video>
     <button class="lb-nav lb-next" id="lbNext" title="Siguiente"><svg class="ic ic-lg"><use href="#i-right"/></svg></button>
     <div id="lbCounter" class="lb-counter"></div>
@@ -743,6 +768,18 @@
     <div class="form-modal-actions"><button type="button" class="generate-btn small" id="charAssetPickerDone">Listo</button></div>
   </div>
 </div>
+
+<!-- Modal de locación u objeto -->
+<div id="elementModal" class="modal" hidden>
+  <div class="modal-head-wrap modal-box form-modal-box">
+    <div class="modal-head">
+      <h3 id="elementModalTitle">Locación u objeto</h3>
+      <button class="icon-btn" id="elementModalClose"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div id="elementModalBody" class="char-modal-body"></div>
+  </div>
+</div>
+<datalist id="elementCategoryList"></datalist>
 
 <!-- Modal de personaje -->
 <div id="charModal" class="modal" hidden>

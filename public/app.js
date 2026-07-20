@@ -49,6 +49,13 @@ const state = {
   charAssetPicker: null,     // { characterId, variantId, zone } al elegir un asset como foto de variante
   shotPromptTarget: null,    // { si, hi } del plano que está eligiendo prompt de la biblioteca
   scriptViewId: null,        // guion abierto en la vista de lectura "Ver guion"
+  elements: [],              // locaciones y objetos
+  elementLinks: [],
+  editingElementId: null,
+  elementKindFilter: '',
+  elementCategoryFilter: '',
+  pickerElementId: '',       // drill-down del tab Locaciones/Objetos del picker
+  pickerElementVariantId: '',
   editingCharId: null,
   pendingCharacterAsset: null,
   variantEditor: null,
@@ -153,6 +160,7 @@ $$('.nav-btn').forEach((btn) => {
     if (view === 'assets') refreshAssets();
     if (view === 'characters') renderCharacters();
     if (view === 'series') renderSeries();
+    if (view === 'elements') renderElements();
     if (view === 'poser') window.poserEnter?.();
     if (view === 'prompts') renderPromptLibrary();
     if (view === 'costs') loadCosts();
@@ -475,18 +483,31 @@ function renderRefs() {
     const isAsset = r.key.startsWith('asset://');
     const d = document.createElement('div');
     d.className = 'ref-thumb' + (r.fromChar ? ' from-char' : '') + (isAsset ? ' verified-asset' : '');
+    // cómo se cita esta ref en el prompt: en video Seedance exige @imageN;
+    // en imagen se cita por su etiqueta (si tiene) para decirle quién es quién
+    const mention = refMode === 'reference' || !r.label ? `@image${i + 1}` : `@${r.label}`;
     const badge = refMode === 'reference' ? `<button class="ref-at" title="Insertar @image${i + 1} en el prompt">@${i + 1}</button>`
       : refMode === 'frames' ? `<span class="ref-badge">${i === 0 ? 'inicio' : 'fin'}</span>`
+      : !isVideo && !isAsset ? `<button class="ref-at" title="Insertar ${esc(mention)} en el prompt">@${i + 1}</button>`
       : '';
     d.innerHTML = isAsset
       ? `<div class="asset-face" title="${esc(r.key)}">${IC('user', 'ic ic-lg')}<span>verificado</span></div>${badge}<button class="rm" title="Quitar">×</button>`
-      : `<img src="${fileUrl(r.key)}" alt="">${badge}<button class="rm" title="Quitar">×</button>`;
+      : `<img src="${fileUrl(r.key)}" alt="">${r.label ? `<span class="ref-label-tag" title="La IA verá este texto sobre la imagen">${esc(r.label)}</span>` : ''}${badge}<button class="rm" title="Quitar">×</button><button class="ref-label-btn${r.label ? ' on' : ''}" title="${r.label ? `Etiqueta: ${esc(r.label)}` : 'Etiquetar para la IA (quién es quién)'}">T</button>`;
     d.querySelector('.rm').addEventListener('click', () => {
       state.refs.splice(i, 1);
       renderRefs();
       renderHighlight();
     });
-    d.querySelector('.ref-at')?.addEventListener('click', () => insertAtCursor(`@image${i + 1} `));
+    d.querySelector('.ref-label-btn')?.addEventListener('click', () => {
+      const value = window.prompt(
+        'Texto que la IA verá sobreimpreso en esta referencia (solo en la petición, la imagen no se modifica). Vacío = sin etiqueta:',
+        r.label || refLabelSuggestion(r.key)
+      );
+      if (value === null) return;
+      r.label = value.trim();
+      renderRefs();
+    });
+    d.querySelector('.ref-at')?.addEventListener('click', () => insertAtCursor(`${mention} `));
     d.querySelector('img')?.addEventListener('click', () => openLightbox(r.key, state.refs.filter((ref) => !ref.key.startsWith('asset://')).map((ref) => ref.key)));
     strip.appendChild(d);
   });
@@ -507,8 +528,62 @@ function addRef(key, fromChar = false) {
   if (state.refs.length >= maxRefs) {
     return toast(`${m.name} admite hasta ${maxRefs} referencia(s) en este modo`, 'err');
   }
-  state.refs.push({ key, fromChar });
+  // las fotos de personajes llevan siempre el nombre como etiqueta (editable con T)
+  state.refs.push({ key, fromChar, label: refLabelSuggestion(key) });
   renderRefs();
+}
+
+// nombre sugerido para etiquetar una ref que viene de un personaje o elemento
+function refLabelSuggestion(key) {
+  const charMatch = /^characters\/([^/]+)(?:\/variants\/([^/]+))?\//.exec(key);
+  if (charMatch) return state.characters.find((c) => c.id === charMatch[1])?.name || '';
+  const elMatch = /^elements\/([^/]+)(?:\/variants\/([^/]+))?\//.exec(key);
+  if (elMatch) {
+    const el = state.elements.find((x) => x.id === elMatch[1]);
+    if (!el) return '';
+    const variant = elMatch[2] ? (el.variants || []).find((v) => v.id === elMatch[2]) : null;
+    return variant ? `${el.name} · ${variant.name}` : el.name;
+  }
+  return '';
+}
+
+// Estampa el texto sobre una COPIA de la imagen (banner blanco arriba, texto
+// negro). El archivo original no se toca: la copia viaja solo en la petición.
+function stampLabel(key, text) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const bannerH = Math.max(36, Math.round(canvas.height * 0.08));
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, bannerH);
+      ctx.fillStyle = '#000000';
+      ctx.font = `bold ${Math.round(bannerH * 0.55)}px Arial, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text.toUpperCase(), canvas.width / 2, bannerH / 2, canvas.width - 20);
+      resolve(canvas.toDataURL('image/jpeg', 0.92));
+    };
+    img.onerror = () => reject(new Error('No se pudo leer la imagen para etiquetarla'));
+    img.src = fileUrl(key);
+  });
+}
+
+async function buildLabeledRefs(refItems) {
+  const out = {};
+  for (const r of refItems) {
+    if (!r.label || r.key.startsWith('asset://')) continue;
+    try {
+      out[r.key] = await stampLabel(r.key, r.label);
+    } catch {
+      toast(`No pude etiquetar una referencia; va sin etiqueta`, 'err');
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -585,7 +660,7 @@ function applyPinnedCharacterPhotos() {
   const variant = (pc.variants || []).find((v) => v.id === state.characterVariantId);
   const photos = variant?.photos?.length ? variant.photos : pc.photos;
   for (const photo of photos.slice(0, Math.max(0, activeRefLimit() - state.refs.length))) {
-    state.refs.push({ key: photo, fromChar: true });
+    state.refs.push({ key: photo, fromChar: true, label: pc.name });
   }
 }
 
@@ -641,7 +716,7 @@ $('#unpinBtn').addEventListener('click', () => setPinned(''));
 // generación
 // ---------------------------------------------------------------------------
 
-function generate() {
+async function generate() {
   const prompt = promptBox.value.trim();
   if (!prompt) return toast('Escribí un prompt primero', 'err');
   const pc = pinnedChar();
@@ -650,6 +725,9 @@ function generate() {
   const isImage = state.mode === 'image';
   const isVideo = state.mode === 'video';
   const model = isVideo ? currentVideoModel() : currentModel();
+  // las etiquetas se estampan acá, sobre copias: el asset guardado queda limpio
+  const refsUsed = isImage ? state.refs : isVideo ? state.refs.slice(0, activeRefLimit()) : [];
+  const labeledRefs = refsUsed.some((r) => r.label) ? await buildLabeledRefs(refsUsed) : {};
   const job = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     status: 'queued', prompt, createdAt: Date.now(),
@@ -660,13 +738,13 @@ function generate() {
     body: isImage ? {
       modelId: state.modelId, prompt, aspectRatio: state.aspectRatio,
       resolution: state.resolution, batch: state.batch,
-      refs: state.refs.map((r) => r.key), characterId: state.pinnedId || null,
+      refs: state.refs.map((r) => r.key), labeledRefs, characterId: state.pinnedId || null,
       characterVariantId: state.characterVariantId || null
     } : isVideo ? {
       modelId: state.video.modelId, prompt, mode: state.video.mode,
       aspectRatio: state.video.aspectRatio, resolution: state.video.resolution,
       duration: state.video.duration, audio: state.video.audio,
-      refs: state.refs.slice(0, activeRefLimit()).map((r) => r.key),
+      refs: state.refs.slice(0, activeRefLimit()).map((r) => r.key), labeledRefs,
       characterId: state.pinnedId || null
     } : { text: prompt, voiceId, voiceName: voice?.name || pc?.voiceName || '', characterId: state.pinnedId || null }
   };
@@ -1056,6 +1134,9 @@ async function setPickerTab(src) {
   } else if (src === 'characters') {
     renderPickerCharacters();
     return;
+  } else if (src === 'elements') {
+    renderPickerElements();
+    return;
   } else {
     await refreshAssets();
     const items = state.assets[src] || [];
@@ -1072,6 +1153,61 @@ async function setPickerTab(src) {
       $('#pickerModal').hidden = true;
     });
   });
+}
+
+// tab Locaciones/Objetos del picker: mismo esquema en dos pasos que Personajes
+function renderPickerElements() {
+  const body = $('#pickerBody');
+  const el = state.elements.find((x) => x.id === state.pickerElementId);
+
+  if (!el) {
+    body.innerHTML = state.elements.length
+      ? `<div class="picker-grid">${state.elements.map((item) => {
+          const versions = 1 + (item.variants || []).length;
+          const cover = item.photos[0] || (item.variants || []).find((v) => (v.photos || []).length)?.photos[0];
+          return `<div class="pick" data-el="${item.id}">${cover
+            ? `<img src="${fileUrl(cover)}" loading="lazy" alt="">`
+            : `<div class="pick-ph">${IC('globe', 'ic ic-lg')}</div>`}
+            <div class="p-label">${esc(item.name)} · ${ELEMENT_KIND_LABEL[item.kind] || ''}${versions > 1 ? ` · ${versions} versiones` : ''}</div></div>`;
+        }).join('')}</div>`
+      : '<div class="empty-note">Todavía no hay locaciones ni objetos.</div>';
+    body.querySelectorAll('[data-el]').forEach((n) => n.addEventListener('click', () => {
+      state.pickerElementId = n.dataset.el;
+      state.pickerElementVariantId = '';
+      renderPickerElements();
+    }));
+    return;
+  }
+
+  const groups = [
+    { id: '', name: 'Original', photos: el.photos || [] },
+    ...(el.variants || []).map((v) => ({ id: v.id, name: v.name, photos: v.photos || [] }))
+  ];
+  const group = groups.find((g) => g.id === state.pickerElementVariantId) || groups[0];
+  body.innerHTML = `
+    <div class="picker-char-head">
+      <button class="mini-btn" id="pickerElementBack">← Locaciones y objetos</button>
+      <strong>${esc(el.name)}</strong>
+      <div class="chips">${groups.map((g) =>
+        `<button class="chip${g.id === group.id ? ' active' : ''}" data-evg="${esc(g.id)}">${esc(g.name)} (${g.photos.length})</button>`).join('')}</div>
+    </div>
+    ${group.photos.length
+      ? `<div class="picker-grid">${group.photos.map((ph) =>
+          `<div class="pick" data-key="${esc(ph)}"><img src="${fileUrl(ph)}" loading="lazy" alt=""><div class="p-label">${esc(el.name)} · ${esc(group.name)}</div></div>`).join('')}</div>`
+      : '<div class="empty-note">Esta versión todavía no tiene fotos.</div>'}`;
+  $('#pickerElementBack').addEventListener('click', () => {
+    state.pickerElementId = '';
+    state.pickerElementVariantId = '';
+    renderPickerElements();
+  });
+  body.querySelectorAll('[data-evg]').forEach((b) => b.addEventListener('click', () => {
+    state.pickerElementVariantId = b.dataset.evg;
+    renderPickerElements();
+  }));
+  body.querySelectorAll('.pick[data-key]').forEach((p) => p.addEventListener('click', () => {
+    addRef(p.dataset.key);
+    $('#pickerModal').hidden = true;
+  }));
 }
 
 // tab Personajes del picker: primero se elige el personaje, después Original o variante
@@ -1575,6 +1711,7 @@ function openLightbox(key, keys = null) {
   state.lightboxKeys = keys?.length ? [...new Set(keys)] : [key];
   state.lightboxIndex = Math.max(0, state.lightboxKeys.indexOf(key));
   $('#lightbox').hidden = false;
+  $('#lbZoomWrap').classList.remove('zoomed');
   const isVideo = isVideoKey(key);
   $('#lbImg').hidden = isVideo;
   $('#lbVideo').hidden = !isVideo;
@@ -1595,7 +1732,7 @@ function openLightbox(key, keys = null) {
     ${info ? `<button class="mini-btn" id="lbInfo">${IC('info')} Información</button>` : ''}
     ${info?.prompt ? `<button class="mini-btn" id="lbCopyPrompt">${IC('copy')} Copiar prompt</button>` : ''}
     ${!isVideo ? `<button class="mini-btn" id="lbRef">${IC('link')} Usar como referencia</button>` : ''}
-    ${!isVideo && /^(generated|uploads)\//.test(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} Asociar a personaje</button>` : ''}
+    ${!isVideo && /^(generated|uploads)\//.test(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} Asociar a personaje/elemento</button>` : ''}
     <button class="mini-btn" id="lbSeries">${IC('layers')} Asociar a serie</button>
     ${!isVideo && key.startsWith('generated/') ? `<button class="mini-btn" id="lbCharacter">${IC('user')} Convertir en personaje</button>` : ''}
     ${!isVideo ? `<button class="mini-btn" id="lbPhotoshop">${IC('pen')} Abrir en Photoshop</button>` : ''}
@@ -1634,6 +1771,39 @@ function navigateLightbox(delta) {
 $('#lbPrev').addEventListener('click', () => navigateLightbox(-1));
 $('#lbNext').addEventListener('click', () => navigateLightbox(1));
 
+// --- lupita: click en la imagen → 100% centrado en el punto; arrastre para recorrerla ---
+const lbZoomWrap = $('#lbZoomWrap');
+let lbPan = null;
+let lbPanMoved = false;
+
+$('#lbImg').addEventListener('click', (e) => {
+  if (lbPanMoved) { lbPanMoved = false; return; } // fue un arrastre, no un click
+  const img = e.target;
+  const zoomed = lbZoomWrap.classList.toggle('zoomed');
+  if (!zoomed) return;
+  const rx = e.offsetX / img.clientWidth;
+  const ry = e.offsetY / img.clientHeight;
+  requestAnimationFrame(() => {
+    lbZoomWrap.scrollLeft = rx * img.naturalWidth - lbZoomWrap.clientWidth / 2;
+    lbZoomWrap.scrollTop = ry * img.naturalHeight - lbZoomWrap.clientHeight / 2;
+  });
+});
+lbZoomWrap.addEventListener('mousedown', (e) => {
+  if (!lbZoomWrap.classList.contains('zoomed')) return;
+  lbPan = { x: e.clientX, y: e.clientY, sl: lbZoomWrap.scrollLeft, st: lbZoomWrap.scrollTop };
+  lbPanMoved = false;
+  e.preventDefault();
+});
+window.addEventListener('mousemove', (e) => {
+  if (!lbPan) return;
+  const dx = e.clientX - lbPan.x;
+  const dy = e.clientY - lbPan.y;
+  if (Math.abs(dx) + Math.abs(dy) > 4) lbPanMoved = true;
+  lbZoomWrap.scrollLeft = lbPan.sl - dx;
+  lbZoomWrap.scrollTop = lbPan.st - dy;
+});
+window.addEventListener('mouseup', () => { lbPan = null; });
+
 function openAssetInfo(asset) {
   closeLightbox();
   const character = state.characters.find((c) => c.id === asset.characterId);
@@ -1656,51 +1826,77 @@ function openAssetInfo(asset) {
 $('#assetInfoClose').addEventListener('click', () => { $('#assetInfoModal').hidden = true; });
 $('#assetInfoModal').addEventListener('click', (e) => { if (e.target.id === 'assetInfoModal') $('#assetInfoModal').hidden = true; });
 
+function associationIsElement() {
+  return $('#associateTargetType').value === 'element';
+}
+
 async function associateAsset(key) {
-  if (!state.characters.length) return toast('Primero creá un personaje', 'err');
+  if (!state.characters.length && !state.elements.length) return toast('Primero creá un personaje o una locación/objeto', 'err');
   state.pendingAssociationKey = key;
   closeLightbox();
-  const select = $('#associateCharacter');
-  select.innerHTML = state.characters.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
-  const existing = state.assetLinks.find((link) => link.key === key);
-  if (existing && state.characters.some((c) => c.id === existing.characterId)) select.value = existing.characterId;
-  renderAssociationVariants(existing?.variantId || '');
+  const existingChar = state.assetLinks.find((link) => link.key === key);
+  const existingEl = state.elementLinks.find((link) => link.key === key);
+  const preferElement = (existingEl && !existingChar) || !state.characters.length;
+  $('#associateTargetType').value = preferElement && state.elements.length ? 'element' : 'character';
+  const existing = $('#associateTargetType').value === 'element' ? existingEl : existingChar;
+  renderAssociationOwners(existing ? (existing.characterId || existing.elementId) : '', existing?.variantId || '');
   $('#associateAsPhoto').checked = false;
   $('#associateAssetPreview').innerHTML = `<img src="${fileUrl(key)}" alt=""><div><strong>${existing ? 'Reasignar asset' : 'Nuevo vínculo'}</strong><div class="hint">El archivo no se moverá ni duplicará.</div></div>`;
   $('#associateAssetModal').hidden = false;
 }
 
+function renderAssociationOwners(ownerId = '', variantId = '') {
+  const isElement = associationIsElement();
+  $('#associateOwnerLabelText').textContent = isElement ? 'Locación u objeto' : 'Personaje';
+  const list = isElement ? state.elements : state.characters;
+  const select = $('#associateCharacter');
+  select.innerHTML = list.map((c) => `<option value="${c.id}">${esc(c.name)}${isElement ? ` (${ELEMENT_KIND_LABEL[c.kind] || ''})` : ''}</option>`).join('');
+  if (ownerId && list.some((c) => c.id === ownerId)) select.value = ownerId;
+  renderAssociationVariants(variantId);
+}
+
 function renderAssociationVariants(selected = '') {
-  const character = state.characters.find((c) => c.id === $('#associateCharacter').value);
-  $('#associateVariant').innerHTML = '<option value="">Original</option>' + (character?.variants || []).map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('');
+  const list = associationIsElement() ? state.elements : state.characters;
+  const owner = list.find((c) => c.id === $('#associateCharacter').value);
+  $('#associateVariant').innerHTML = '<option value="">Original</option>' + (owner?.variants || []).map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('');
   $('#associateVariant').value = selected;
 }
 
+$('#associateTargetType').addEventListener('change', () => renderAssociationOwners());
 $('#associateCharacter').addEventListener('change', () => renderAssociationVariants());
 $('#associateAssetForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const key = state.pendingAssociationKey;
-  const characterId = $('#associateCharacter').value;
+  const isElement = associationIsElement();
+  const ownerId = $('#associateCharacter').value;
   const variantId = $('#associateVariant').value || null;
   try {
-    const result = await api('/api/asset-links', { method: 'POST', body: { key, characterId, variantId } });
-    state.assetLinks = result.links;
+    if (isElement) {
+      const result = await api('/api/element-links', { method: 'POST', body: { key, elementId: ownerId, variantId } });
+      state.elementLinks = result.links;
+    } else {
+      const result = await api('/api/asset-links', { method: 'POST', body: { key, characterId: ownerId, variantId } });
+      state.assetLinks = result.links;
+    }
     let asPhoto = false;
     if ($('#associateAsPhoto').checked) {
-      const endpoint = variantId
-        ? `/api/characters/${characterId}/variants/${variantId}/photos`
-        : `/api/characters/${characterId}/photos`;
+      const base = isElement ? `/api/elements/${ownerId}` : `/api/characters/${ownerId}`;
+      const endpoint = variantId ? `${base}/variants/${variantId}/photos` : `${base}/photos`;
       const updated = await api(endpoint, { method: 'POST', body: { assetKey: key } });
-      state.characters[state.characters.findIndex((x) => x.id === characterId)] = updated;
       asPhoto = true;
-      if (state.pinnedId === characterId) { applyPinnedCharacterPhotos(); renderRefs(); renderCharacterVariantControl(); }
+      if (isElement) {
+        state.elements[state.elements.findIndex((x) => x.id === ownerId)] = updated;
+      } else {
+        state.characters[state.characters.findIndex((x) => x.id === ownerId)] = updated;
+        if (state.pinnedId === ownerId) { applyPinnedCharacterPhotos(); renderRefs(); renderCharacterVariantControl(); }
+      }
     }
     $('#associateAssetModal').hidden = true;
-    const character = state.characters.find((c) => c.id === characterId);
-    const variant = (character?.variants || []).find((v) => v.id === variantId);
-    toast(`Asset asociado a ${character.name} · ${variant?.name || 'Original'}${asPhoto ? ' y agregado como foto' : ''}`);
-    renderCharacters();
-    renderPinned();
+    const list = isElement ? state.elements : state.characters;
+    const owner = list.find((c) => c.id === ownerId);
+    const variant = (owner?.variants || []).find((v) => v.id === variantId);
+    toast(`Asset asociado a ${owner.name} · ${variant?.name || 'Original'}${asPhoto ? ' y agregado como foto' : ''}`);
+    if (isElement) renderElements(); else { renderCharacters(); renderPinned(); }
   } catch (err) {
     toast(err.message, 'err');
   }
@@ -1721,6 +1917,7 @@ document.addEventListener('keydown', (e) => {
     $('#seriesModal').hidden = true; $('#seriesAssignModal').hidden = true; state.editingSeriesId = null;
     $('#charAssetPickerModal').hidden = true; state.charAssetPicker = null;
     $('#shotPromptModal').hidden = true; state.shotPromptTarget = null;
+    $('#elementModal').hidden = true; state.editingElementId = null;
     if (!$('#shotAssetsModal').hidden) closeShotAssets();
     $('#promptEditorModal').hidden = true; state.promptEditor = null;
   }
@@ -2976,15 +3173,20 @@ function setupCharPhotoDrag(id) {
   });
 }
 
-// elegir un asset como foto de variante, sin salir del modal de personaje
-async function openCharAssetPicker(characterId, variantId) {
-  state.charAssetPicker = { characterId, variantId, zone: 'generated' };
+// elegir un asset como foto (de variante de personaje, o de locación/objeto y
+// sus variantes) sin salir del modal correspondiente
+async function openCharAssetPicker(target) {
+  // acepta la forma vieja (characterId, variantId) y la nueva ({entity, ownerId, variantId})
+  const t = typeof target === 'object' && target !== null && target.ownerId !== undefined
+    ? target
+    : { entity: 'character', ownerId: arguments[0], variantId: arguments[1] };
+  state.charAssetPicker = { ...t, zone: 'generated' };
   if (!state.assets.generated.length && !state.assets.uploads.length) {
     try { state.assets = await api('/api/assets'); } catch { /* sin assets igual mostramos el modal */ }
   }
-  const c = state.characters.find((x) => x.id === characterId);
-  const v = (c?.variants || []).find((x) => x.id === variantId);
-  $('#charAssetPickerTitle').textContent = `Fotos para “${v?.name || c?.name || 'la variante'}”`;
+  const owner = (t.entity === 'element' ? state.elements : state.characters).find((x) => x.id === t.ownerId);
+  const v = (owner?.variants || []).find((x) => x.id === t.variantId);
+  $('#charAssetPickerTitle').textContent = `Fotos para “${v?.name || owner?.name || ''}”`;
   renderCharAssetPickerGrid();
   $('#charAssetPickerModal').hidden = false;
 }
@@ -2998,17 +3200,24 @@ function renderCharAssetPickerGrid() {
     <button class="shot-asset-cell" data-k="${esc(a.key)}" title="${esc(a.name)}"><img src="${fileUrl(a.key)}" loading="lazy" alt=""></button>`).join('')
     : '<div class="hint">No hay imágenes en esta zona.</div>';
   $('#charAssetPickerGrid').querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', async () => {
-    const { characterId, variantId } = state.charAssetPicker || {};
-    if (!characterId) return;
+    const { entity, ownerId, variantId } = state.charAssetPicker || {};
+    if (!ownerId) return;
     try {
-      const updated = await api(`/api/characters/${characterId}/variants/${variantId}/photos`,
-        { method: 'POST', body: { assetKey: b.dataset.k } });
-      state.characters[state.characters.findIndex((x) => x.id === characterId)] = updated;
-      if (state.pinnedId === characterId) { applyPinnedCharacterPhotos(); renderRefs(); renderCharacterVariantControl(); }
-      renderCharModal();
-      renderCharacters();
-      renderPinned();
-      toast('Foto agregada a la variante');
+      const base = entity === 'element' ? `/api/elements/${ownerId}` : `/api/characters/${ownerId}`;
+      const endpoint = variantId ? `${base}/variants/${variantId}/photos` : `${base}/photos`;
+      const updated = await api(endpoint, { method: 'POST', body: { assetKey: b.dataset.k } });
+      if (entity === 'element') {
+        state.elements[state.elements.findIndex((x) => x.id === ownerId)] = updated;
+        renderElementModal();
+        renderElements();
+      } else {
+        state.characters[state.characters.findIndex((x) => x.id === ownerId)] = updated;
+        if (state.pinnedId === ownerId) { applyPinnedCharacterPhotos(); renderRefs(); renderCharacterVariantControl(); }
+        renderCharModal();
+        renderCharacters();
+        renderPinned();
+      }
+      toast('Foto agregada');
     } catch (err) {
       toast(err.message, 'err');
     }
@@ -3029,10 +3238,11 @@ $('#charAssetPickerClose').addEventListener('click', closeCharAssetPicker);
 $('#charAssetPickerDone').addEventListener('click', closeCharAssetPicker);
 $('#charAssetPickerModal').addEventListener('click', (e) => { if (e.target.id === 'charAssetPickerModal') closeCharAssetPicker(); });
 
-function openVariantEditor(characterId, variantId = null) {
-  const character = state.characters.find((c) => c.id === characterId);
-  const variant = (character?.variants || []).find((v) => v.id === variantId);
-  state.variantEditor = { characterId, variantId };
+// sirve para variantes de personajes Y de locaciones/objetos (entity)
+function openVariantEditor(ownerId, variantId = null, entity = 'character') {
+  const owner = (entity === 'element' ? state.elements : state.characters).find((c) => c.id === ownerId);
+  const variant = (owner?.variants || []).find((v) => v.id === variantId);
+  state.variantEditor = { ownerId, variantId, entity };
   $('#variantEditorTitle').textContent = variant ? 'Editar variante' : 'Nueva variante';
   $('#variantEditorName').value = variant?.name || '';
   $('#variantEditorDescription').value = variant?.description || '';
@@ -3046,17 +3256,287 @@ $('#variantEditorCancel').addEventListener('click', closeVariantEditor);
 $('#variantEditorModal').addEventListener('click', (e) => { if (e.target.id === 'variantEditorModal') closeVariantEditor(); });
 $('#variantEditorForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const { characterId, variantId } = state.variantEditor || {};
-  if (!characterId) return;
+  const { ownerId, variantId, entity } = state.variantEditor || {};
+  if (!ownerId) return;
   const body = { name: $('#variantEditorName').value.trim(), description: $('#variantEditorDescription').value.trim() };
   if (!body.name) return;
-  const path = variantId ? `/api/characters/${characterId}/variants/${variantId}` : `/api/characters/${characterId}/variants`;
-  const updated = await api(path, { method: variantId ? 'PUT' : 'POST', body });
-  state.characters[state.characters.findIndex((x) => x.id === characterId)] = updated;
-  closeVariantEditor();
-  renderCharModal(); renderCharacters(); renderCharacterVariantControl();
-  toast(variantId ? 'Variante actualizada' : 'Variante creada');
+  const base = entity === 'element' ? `/api/elements/${ownerId}/variants` : `/api/characters/${ownerId}/variants`;
+  try {
+    const updated = await api(variantId ? `${base}/${variantId}` : base, { method: variantId ? 'PUT' : 'POST', body });
+    if (entity === 'element') {
+      state.elements[state.elements.findIndex((x) => x.id === ownerId)] = updated;
+      closeVariantEditor();
+      renderElementModal(); renderElements();
+    } else {
+      state.characters[state.characters.findIndex((x) => x.id === ownerId)] = updated;
+      closeVariantEditor();
+      renderCharModal(); renderCharacters(); renderCharacterVariantControl();
+    }
+    toast(variantId ? 'Variante actualizada' : 'Variante creada');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
 });
+
+// ---------------------------------------------------------------------------
+// locaciones y objetos ("elementos")
+// ---------------------------------------------------------------------------
+
+const ELEMENT_KIND_LABEL = { location: 'Locación', object: 'Objeto' };
+
+function elementCategories(kind = '') {
+  return [...new Set(state.elements
+    .filter((el) => !kind || el.kind === kind)
+    .map((el) => (el.category || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
+function renderElements() {
+  const catSel = $('#elementCategoryFilter');
+  const cats = elementCategories(state.elementKindFilter);
+  catSel.innerHTML = '<option value="">Todas</option>' + cats.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  catSel.value = cats.includes(state.elementCategoryFilter) ? state.elementCategoryFilter : '';
+  state.elementCategoryFilter = catSel.value;
+  $$('#elementKindChips .chip').forEach((c) => c.classList.toggle('active', c.dataset.ekind === state.elementKindFilter));
+
+  const grid = $('#elementsGrid');
+  const items = state.elements.filter((el) =>
+    (!state.elementKindFilter || el.kind === state.elementKindFilter)
+    && (!state.elementCategoryFilter || (el.category || '') === state.elementCategoryFilter));
+  if (!items.length) {
+    grid.innerHTML = '<div class="empty-note">Creá tu primera locación u objeto: nombre, categoría, fotos y variantes (ej: “Fábrica abandonada” → “en invierno”).</div>';
+    return;
+  }
+  grid.innerHTML = '';
+  for (const el of items) {
+    const card = document.createElement('div');
+    card.className = 'char-card';
+    const avatar = el.photos[0]
+      ? `<img class="char-avatar" src="${fileUrl(el.photos[0])}" alt="">`
+      : `<div class="char-avatar ph">${IC('globe', 'ic ic-lg')}</div>`;
+    const minis = el.photos.slice(1, 5).map((p) => `<img src="${fileUrl(p)}" alt="">`).join('')
+      + (el.photos.length > 5 ? `<div class="more">+${el.photos.length - 5}</div>` : '');
+    const linkedCount = state.elementLinks.filter((link) => link.elementId === el.id).length;
+    card.innerHTML = `
+      <div class="char-top">${avatar}<div>
+        <div class="char-name">${esc(el.name)}</div>
+        <div class="element-meta"><span class="element-kind-badge ${el.kind}">${ELEMENT_KIND_LABEL[el.kind] || el.kind}</span>${el.category ? `<span class="element-category">${esc(el.category)}</span>` : ''}</div>
+      </div></div>
+      <div class="char-desc">${esc(el.description || '')}</div>
+      ${(el.variants || []).length ? `<div class="hint" style="margin-bottom:8px">${el.variants.length} variante${el.variants.length === 1 ? '' : 's'}</div>` : ''}
+      <div class="char-photos-mini">${minis}</div>
+      <div class="char-actions">
+        <button class="mini-btn" data-eact="use">${IC('link')} Usar fotos</button>
+        <button class="mini-btn" data-eact="edit">${IC('edit')} Editar</button>
+        <button class="mini-btn" data-eact="gallery">${IC('eye')} Ver fotos</button>
+        <button class="mini-btn" data-eact="assets">${IC('image')} Assets${linkedCount ? ` (${linkedCount})` : ''}</button>
+        <button class="mini-btn danger" data-eact="del" title="Eliminar">${IC('trash')}</button>
+      </div>`;
+    card.querySelectorAll('[data-eact]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const act = b.dataset.eact;
+        if (act === 'use') {
+          if (!el.photos.length) return toast('No tiene fotos todavía', 'err');
+          setMode('image');
+          for (const p of el.photos) addRef(p, false);
+          goToCreate();
+          toast(`Fotos de ${el.name} agregadas como referencia`);
+        }
+        if (act === 'edit') openElementModal(el.id);
+        if (act === 'gallery') openElementGallery(el.id);
+        if (act === 'assets') openElementAssets(el.id);
+        if (act === 'del') {
+          if (!confirm(`¿Eliminar “${el.name}” y sus fotos?`)) return;
+          await api(`/api/elements/${el.id}`, { method: 'DELETE' });
+          state.elements = state.elements.filter((x) => x.id !== el.id);
+          state.elementLinks = state.elementLinks.filter((link) => link.elementId !== el.id);
+          renderElements();
+        }
+      });
+    });
+    grid.appendChild(card);
+  }
+}
+
+$('#btnNewElement').addEventListener('click', () => openElementModal(null));
+$$('#elementKindChips .chip').forEach((c) => c.addEventListener('click', () => {
+  state.elementKindFilter = c.dataset.ekind;
+  renderElements();
+}));
+$('#elementCategoryFilter').addEventListener('change', () => {
+  state.elementCategoryFilter = $('#elementCategoryFilter').value;
+  renderElements();
+});
+
+function openElementModal(id) {
+  state.editingElementId = id || null;
+  $('#elementModalTitle').textContent = id ? 'Editar locación u objeto' : 'Nueva locación u objeto';
+  renderElementModal();
+  $('#elementModal').hidden = false;
+}
+function closeElementModal() {
+  $('#elementModal').hidden = true;
+  state.editingElementId = null;
+}
+$('#elementModalClose').addEventListener('click', closeElementModal);
+$('#elementModal').addEventListener('click', (e) => { if (e.target.id === 'elementModal') closeElementModal(); });
+
+function renderElementModal() {
+  const id = state.editingElementId;
+  const el = id ? state.elements.find((x) => x.id === id) : null;
+  $('#elementCategoryList').innerHTML = elementCategories().map((c) => `<option value="${esc(c)}">`).join('');
+  const thumb = (p, attr) => `<span class="ref-thumb"><img src="${fileUrl(p)}" alt=""><button class="rm" ${attr}="${esc(p)}" title="Quitar">×</button></span>`;
+  $('#elementModalBody').innerHTML = `
+    <label>Tipo
+      <select id="elKind" class="select">
+        <option value="location"${(el?.kind || 'location') === 'location' ? ' selected' : ''}>Locación</option>
+        <option value="object"${el?.kind === 'object' ? ' selected' : ''}>Objeto</option>
+      </select>
+    </label>
+    <label>Nombre<input id="elName" type="text" maxlength="120" value="${esc(el?.name || '')}" placeholder="Ej: Fábrica abandonada, Espada mandoble"></label>
+    <label>Categoría<input id="elCategory" type="text" maxlength="80" list="elementCategoryList" value="${esc(el?.category || '')}" placeholder="Ej: Exteriores, Armas… escribí para crear una nueva"></label>
+    <label>Descripción<textarea id="elDescription" rows="3">${esc(el?.description || '')}</textarea></label>
+    ${el ? `
+    <div class="variant-manager">
+      <div class="variant-manager-head"><label>Fotos (${el.photos.length})</label><div>
+        <button type="button" class="mini-btn" id="elAddPhoto">${IC('upload')} Subir</button>
+        <button type="button" class="mini-btn" id="elAddFromAssets">${IC('image')} Desde assets</button>
+      </div></div>
+      <div class="variant-photos">${el.photos.map((p) => thumb(p, 'data-elphoto')).join('') || '<span class="hint">Sin fotos todavía</span>'}</div>
+    </div>
+    <div class="variant-manager">
+      <div class="variant-manager-head"><label>Variantes (${(el.variants || []).length})</label><button type="button" class="mini-btn" id="elAddVariant">${IC('plus')} Nueva variante</button></div>
+      <div class="variant-list">${(el.variants || []).map((v) => `
+        <div class="variant-item" data-elvariant="${v.id}">
+          <div class="variant-item-head"><strong>${esc(v.name)}</strong><div>
+            <button type="button" class="mini-btn" data-evact="rename">Editar</button>
+            <button type="button" class="mini-btn" data-evact="photo">${IC('upload')} Subir</button>
+            <button type="button" class="mini-btn" data-evact="fromassets">${IC('image')} Desde assets</button>
+            <button type="button" class="mini-btn danger" data-evact="delete">${IC('trash')}</button>
+          </div></div>
+          ${v.description ? `<div class="hint">${esc(v.description)}</div>` : ''}
+          <div class="variant-photos">${v.photos.map((p) => thumb(p, 'data-evphoto')).join('') || '<span class="hint">Sin fotos todavía</span>'}</div>
+        </div>`).join('')}</div>
+    </div>` : '<p class="hint">Guardalo primero y después cargale fotos y variantes.</p>'}
+    <button class="generate-btn small" id="elSave">${el ? 'Guardar cambios' : 'Crear'}</button>`;
+
+  const body = $('#elementModalBody');
+  const refreshElement = (updated) => {
+    state.elements[state.elements.findIndex((x) => x.id === updated.id)] = updated;
+    renderElementModal();
+    renderElements();
+  };
+
+  $('#elSave').addEventListener('click', async () => {
+    const payload = {
+      kind: $('#elKind').value,
+      name: $('#elName').value.trim(),
+      category: $('#elCategory').value.trim(),
+      description: $('#elDescription').value.trim()
+    };
+    if (!payload.name) return toast('Poné un nombre', 'err');
+    try {
+      if (id) {
+        refreshElement(await api(`/api/elements/${id}`, { method: 'PUT', body: payload }));
+        toast('Guardado');
+      } else {
+        const created = await api('/api/elements', { method: 'POST', body: payload });
+        state.elements.unshift(created);
+        state.editingElementId = created.id;
+        $('#elementModalTitle').textContent = 'Editar locación u objeto';
+        renderElementModal();
+        renderElements();
+        toast(`${created.name} — ahora cargale fotos`);
+      }
+    } catch (err) { toast(err.message, 'err'); }
+  });
+
+  if (!el) return;
+
+  const uploadPhotos = (endpoint) => {
+    $('#fileInput').onchange = async (e) => {
+      const files = [...e.target.files]; e.target.value = '';
+      let updated;
+      for (const f of files) {
+        try {
+          const dataUrl = await readFileAsDataUrl(f);
+          updated = await api(endpoint, { method: 'POST', body: { name: f.name, dataUrl } });
+        } catch (err) { toast(`${f.name}: ${err.message}`, 'err'); }
+      }
+      if (updated) refreshElement(updated);
+    };
+    $('#fileInput').click();
+  };
+
+  $('#elAddPhoto')?.addEventListener('click', () => uploadPhotos(`/api/elements/${id}/photos`));
+  $('#elAddFromAssets')?.addEventListener('click', () => openCharAssetPicker({ entity: 'element', ownerId: id, variantId: null }));
+  $('#elAddVariant')?.addEventListener('click', () => openVariantEditor(id, null, 'element'));
+
+  body.querySelectorAll('[data-elphoto]').forEach((b) => b.addEventListener('click', async () => {
+    refreshElement(await api(`/api/elements/${id}/photos?key=${encodeURIComponent(b.dataset.elphoto)}`, { method: 'DELETE' }));
+  }));
+  body.querySelectorAll('.variant-photos img').forEach((img) => img.addEventListener('click', () => {
+    const key = img.src.includes('/files/') ? decodeURIComponent(img.src.split('/files/')[1]) : null;
+    if (key) openLightbox(key, [...el.photos, ...(el.variants || []).flatMap((v) => v.photos)]);
+  }));
+
+  body.querySelectorAll('.variant-item').forEach((item) => {
+    const variantId = item.dataset.elvariant;
+    const variant = (el.variants || []).find((v) => v.id === variantId);
+    item.querySelector('[data-evact="rename"]').addEventListener('click', () => openVariantEditor(id, variantId, 'element'));
+    item.querySelector('[data-evact="photo"]').addEventListener('click', () => uploadPhotos(`/api/elements/${id}/variants/${variantId}/photos`));
+    item.querySelector('[data-evact="fromassets"]').addEventListener('click', () => openCharAssetPicker({ entity: 'element', ownerId: id, variantId }));
+    item.querySelector('[data-evact="delete"]').addEventListener('click', async () => {
+      if (!confirm(`¿Borrar la variante “${variant.name}” y sus fotos?`)) return;
+      refreshElement(await api(`/api/elements/${id}/variants/${variantId}`, { method: 'DELETE' }));
+    });
+    item.querySelectorAll('[data-evphoto]').forEach((b) => b.addEventListener('click', async () => {
+      refreshElement(await api(`/api/elements/${id}/variants/${variantId}/photos?key=${encodeURIComponent(b.dataset.evphoto)}`, { method: 'DELETE' }));
+    }));
+  });
+}
+
+function openElementGallery(id) {
+  const el = state.elements.find((x) => x.id === id);
+  if (!el) return;
+  $('#characterGalleryTitle').textContent = `${el.name} · ${ELEMENT_KIND_LABEL[el.kind] || ''}`;
+  const groups = [{ name: 'Original', description: el.description || '', photos: el.photos || [] }, ...(el.variants || [])];
+  $('#characterGalleryBody').innerHTML = groups.map((group) => `
+    <section class="character-gallery-group">
+      <div class="character-gallery-group-head"><h4>${esc(group.name)}</h4><span>${group.photos.length} foto${group.photos.length === 1 ? '' : 's'}</span></div>
+      ${group.description ? `<p>${esc(group.description)}</p>` : ''}
+      <div class="character-gallery-grid">${group.photos.length
+        ? group.photos.map((photo) => `<button data-gallery-photo="${esc(photo)}"><img src="${fileUrl(photo)}" loading="lazy" alt=""></button>`).join('')
+        : '<div class="hint">Esta variante todavía no tiene fotos.</div>'}</div>
+    </section>`).join('');
+  $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) => {
+    button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto, groups.flatMap((group) => group.photos || [])));
+  });
+  $('#characterGalleryModal').hidden = false;
+}
+
+function openElementAssets(id) {
+  const el = state.elements.find((x) => x.id === id);
+  if (!el) return;
+  $('#characterGalleryTitle').textContent = `${el.name} · Assets asociados`;
+  const groups = [{ id: null, name: 'Original' }, ...(el.variants || []).map((v) => ({ id: v.id, name: v.name }))];
+  const links = state.elementLinks.filter((link) => link.elementId === id);
+  $('#characterGalleryBody').innerHTML = groups.map((group) => {
+    const items = links.filter((link) => (link.variantId || null) === group.id);
+    return `<section class="character-gallery-group">
+      <div class="character-gallery-group-head"><h4>${esc(group.name)}</h4><span>${items.length} asset${items.length === 1 ? '' : 's'}</span></div>
+      <div class="character-gallery-grid linked-assets">${items.length ? items.map((link) => `
+        <div class="linked-asset"><button data-gallery-photo="${esc(link.key)}"><img src="${fileUrl(link.key)}" loading="lazy" alt=""></button><button class="linked-remove" data-elunlink="${esc(link.key)}" title="Quitar asociación">×</button></div>`).join('') : '<div class="hint">Sin assets asociados.</div>'}</div>
+    </section>`;
+  }).join('');
+  $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) => button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto, links.map((link) => link.key))));
+  $('#characterGalleryBody').querySelectorAll('[data-elunlink]').forEach((button) => button.addEventListener('click', async () => {
+    const result = await api(`/api/element-links?key=${encodeURIComponent(button.dataset.elunlink)}`, { method: 'DELETE' });
+    state.elementLinks = result.links;
+    openElementAssets(id);
+    renderElements();
+  }));
+  $('#characterGalleryModal').hidden = false;
+}
 
 // ---------------------------------------------------------------------------
 // consumo y precios
@@ -3349,6 +3829,8 @@ async function init() {
     state.assetLinks = s.assetLinks || [];
     state.series = s.series || [];
     state.scripts = s.scripts || [];
+    state.elements = s.elements || [];
+    state.elementLinks = s.elementLinks || [];
     state.history = s.history;
     state.pricing = s.pricing;
     state.modelId = s.models[0]?.id;

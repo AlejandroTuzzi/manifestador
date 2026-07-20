@@ -216,6 +216,7 @@ async function resolveAssetKey(key) {
   else if (zone === 'audio') baseDir = resolveDir(cfg.paths.audio);
   else if (zone === 'video') baseDir = resolveDir(cfg.paths.video);
   else if (zone === 'characters') baseDir = path.join(DATA_DIR, 'characters');
+  else if (zone === 'elements') baseDir = path.join(DATA_DIR, 'elements');
   else if (zone === 'poser') baseDir = path.join(DATA_DIR, 'poser');
   else if (zone === 'poser-models') baseDir = resolveDir(cfg.paths.poser);
   else throw new Error(`Zona de asset desconocida: ${zone}`);
@@ -314,8 +315,12 @@ async function runImageGeneration(req) {
   if (refs.some((key) => String(key).startsWith('asset://'))) {
     throw new Error('Los assets verificados de Seedance (asset://) solo sirven para video. Para imágenes usá fotos comunes.');
   }
+  // Refs etiquetadas: el cliente manda una copia con el texto estampado
+  // (data URL) que reemplaza al archivo SOLO en esta petición.
+  const labeledRefs = req.labeledRefs && typeof req.labeledRefs === 'object' ? req.labeledRefs : {};
+  const validStamp = (v) => typeof v === 'string' && v.startsWith('data:image/') && v.length < 40 * 1024 * 1024;
   const refPaths = [];
-  for (const key of refs) refPaths.push(await resolveAssetKey(key));
+  for (const key of refs) refPaths.push(validStamp(labeledRefs[key]) ? labeledRefs[key] : await resolveAssetKey(key));
   const characterRefs = refs.map((key) => /^characters\/([^/]+)(?:\/variants\/([^/]+))?\//.exec(key)).filter(Boolean);
   const inferredCharacter = characterRefs.length && characterRefs.every((match) => match[1] === characterRefs[0][1])
     ? { characterId: characterRefs[0][1], variantId: characterRefs.every((match) => (match[2] || null) === (characterRefs[0][2] || null)) ? (characterRefs[0][2] || null) : null }
@@ -416,10 +421,13 @@ async function runVideoGeneration(req) {
   const mode = req.mode === 'frames' ? 'frames' : 'reference';
   const refLimit = model.refLimits?.[mode] ?? model.maxRefs;
   const refs = Array.isArray(req.refs) ? req.refs.slice(0, refLimit) : [];
+  const labeledRefs = req.labeledRefs && typeof req.labeledRefs === 'object' ? req.labeledRefs : {};
+  const validStamp = (v) => typeof v === 'string' && v.startsWith('data:image/') && v.length < 40 * 1024 * 1024;
   const refPaths = [];
   for (const key of refs) {
     // "asset://<id>": rostro verificado de ModelArk, va directo a la API
     if (/^asset:\/\/[A-Za-z0-9._-]+$/.test(key)) refPaths.push(key);
+    else if (validStamp(labeledRefs[key])) refPaths.push(labeledRefs[key]);
     else refPaths.push(await resolveAssetKey(key));
   }
 
@@ -703,7 +711,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts] = await Promise.all([
+      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
@@ -712,7 +720,9 @@ const server = http.createServer(async (req, res) => {
         getPricing(),
         readJson('asset-links.json', []),
         readJson('series.json', []),
-        readJson('scripts.json', [])
+        readJson('scripts.json', []),
+        readJson('elements.json', []),
+        readJson('element-links.json', [])
       ]);
       return send(res, 200, {
         config: publicConfig(cfg),
@@ -726,7 +736,9 @@ const server = http.createServer(async (req, res) => {
         pricing,
         assetLinks,
         series,
-        scripts
+        scripts,
+        elements,
+        elementLinks
       });
     }
 
@@ -1200,6 +1212,7 @@ const server = http.createServer(async (req, res) => {
       await writeJson('asset-metadata.json', metadata);
       const links = await readJson('asset-links.json', []);
       await writeJson('asset-links.json', links.filter((link) => !removed.has(link.key)));
+      await updateJson('element-links.json', [], (links2) => links2.filter((link) => !removed.has(link.key)));
       await updateJson('series.json', [], (all) => all.map((s) => ({
         ...s,
         assetKeys: (s.assetKeys || []).filter((key) => !removed.has(key))
@@ -1307,6 +1320,168 @@ const server = http.createServer(async (req, res) => {
       const zip = createZip(entries);
       const filename = `${sanitizeName(character.name || 'personaje').replace(/\.[^.]+$/, '')}.manifestador.zip`;
       return send(res, 200, zip, { mime: 'application/zip', extra: { 'Content-Disposition': `attachment; filename="${filename}"` } });
+    }
+
+    // --- locaciones y objetos ("elementos"): espejo de personajes ---
+    if (p === '/api/elements' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const item = {
+        id: newId(),
+        kind: body.kind === 'object' ? 'object' : 'location',
+        name: String(body.name || '').trim() || 'Sin nombre',
+        category: String(body.category || '').trim().slice(0, 80),
+        description: String(body.description || ''),
+        photos: [],
+        variants: [],
+        ts: Date.now()
+      };
+      await updateJson('elements.json', [], (all) => [item, ...all]);
+      return send(res, 200, item);
+    }
+
+    if (p === '/api/element-links' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const key = String(body.key || '');
+      if (!/^(generated|uploads)\//.test(key)) throw new Error('Solo se pueden asociar imágenes.');
+      await fs.access(await resolveAssetKey(key));
+      const elements = await readJson('elements.json', []);
+      const element = elements.find((el) => el.id === body.elementId);
+      if (!element) throw new Error('Locación u objeto no encontrado.');
+      const variantId = body.variantId || null;
+      if (variantId && !(element.variants || []).some((v) => v.id === variantId)) throw new Error('Variante no encontrada.');
+      const next = await updateJson('element-links.json', [], (links) =>
+        [{ key, elementId: element.id, variantId, ts: Date.now() }, ...links.filter((link) => link.key !== key)].slice(0, 10000));
+      return send(res, 200, { links: next });
+    }
+    if (p === '/api/element-links' && req.method === 'DELETE') {
+      const key = url.searchParams.get('key');
+      const next = await updateJson('element-links.json', [], (links) => links.filter((link) => link.key !== key));
+      return send(res, 200, { links: next });
+    }
+
+    const elVariantMatch = /^\/api\/elements\/([a-z0-9]+)\/variants(?:\/([a-z0-9]+))?(\/photos)?$/.exec(p);
+    if (elVariantMatch) {
+      const [, id, variantId, isPhotos] = elVariantMatch;
+      const elements = await readJson('elements.json', []);
+      const idx = elements.findIndex((el) => el.id === id);
+      if (idx === -1) return send(res, 404, { error: 'Locación u objeto no encontrado' });
+      const el = elements[idx];
+      el.variants = el.variants || [];
+
+      if (!variantId && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const variant = { id: newId(), name: String(body.name || '').trim() || 'Nueva variante', description: String(body.description || ''), photos: [], ts: Date.now() };
+        el.variants.push(variant);
+        await writeJson('elements.json', elements);
+        return send(res, 200, el);
+      }
+      const variant = el.variants.find((v) => v.id === variantId);
+      if (!variant) return send(res, 404, { error: 'Variante no encontrada' });
+      if (!isPhotos && req.method === 'PUT') {
+        const body = await readJsonBody(req);
+        if (body.name !== undefined) variant.name = String(body.name).trim() || variant.name;
+        if (body.description !== undefined) variant.description = String(body.description);
+        await writeJson('elements.json', elements);
+        return send(res, 200, el);
+      }
+      if (!isPhotos && req.method === 'DELETE') {
+        el.variants = el.variants.filter((v) => v.id !== variantId);
+        const links = await readJson('element-links.json', []);
+        await writeJson('element-links.json', links.map((link) =>
+          link.elementId === id && link.variantId === variantId ? { ...link, variantId: null } : link));
+        await writeJson('elements.json', elements);
+        await fs.rm(path.join(DATA_DIR, 'elements', id, 'variants', variantId), { recursive: true, force: true }).catch(() => {});
+        return send(res, 200, el);
+      }
+      if (isPhotos && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const dir = path.join(DATA_DIR, 'elements', id, 'variants', variantId);
+        await fs.mkdir(dir, { recursive: true });
+        let name;
+        if (body.assetKey) {
+          const assetKey = String(body.assetKey);
+          if (!/^(generated|uploads)\//.test(assetKey)) throw new Error('Solo se pueden usar imágenes como foto.');
+          const source = await resolveAssetKey(assetKey);
+          const ext = path.extname(source).toLowerCase();
+          if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) throw new Error('Formato de imagen no admitido.');
+          name = `${ts()}-asset-${newId()}${ext}`;
+          await fs.copyFile(source, path.join(dir, name));
+        } else {
+          const { mime, buffer } = parseDataUrl(body.dataUrl);
+          name = `${ts()}-${sanitizeName(body.name).replace(/\.[^.]+$/, '')}${extForMime(mime)}`;
+          await fs.writeFile(path.join(dir, name), buffer);
+        }
+        variant.photos.push(`elements/${id}/variants/${variantId}/${name}`);
+        await writeJson('elements.json', elements);
+        return send(res, 200, el);
+      }
+      if (isPhotos && req.method === 'DELETE') {
+        const key = url.searchParams.get('key');
+        variant.photos = variant.photos.filter((k) => k !== key);
+        if (key) await fs.unlink(await resolveAssetKey(key)).catch(() => {});
+        await writeJson('elements.json', elements);
+        return send(res, 200, el);
+      }
+    }
+
+    const elementMatch = /^\/api\/elements\/([a-z0-9]+)(\/photos)?$/.exec(p);
+    if (elementMatch) {
+      const [, id, isPhotos] = elementMatch;
+      const elements = await readJson('elements.json', []);
+      const idx = elements.findIndex((el) => el.id === id);
+      if (idx === -1) return send(res, 404, { error: 'Locación u objeto no encontrado' });
+      const el = elements[idx];
+
+      if (isPhotos && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const dir = path.join(DATA_DIR, 'elements', id);
+        await fs.mkdir(dir, { recursive: true });
+        let name;
+        if (body.assetKey) {
+          const assetKey = String(body.assetKey);
+          if (!/^(generated|uploads)\//.test(assetKey)) throw new Error('Solo se pueden usar imágenes como foto.');
+          const source = await resolveAssetKey(assetKey);
+          const ext = path.extname(source).toLowerCase();
+          if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) throw new Error('Formato de imagen no admitido.');
+          name = `${ts()}-asset-${newId()}${ext}`;
+          await fs.copyFile(source, path.join(dir, name));
+        } else {
+          const { mime, buffer } = parseDataUrl(body.dataUrl);
+          name = `${ts()}-${sanitizeName(body.name).replace(/\.[^.]+$/, '')}${extForMime(mime)}`;
+          await fs.writeFile(path.join(dir, name), buffer);
+        }
+        el.photos.push(`elements/${id}/${name}`);
+        await writeJson('elements.json', elements);
+        return send(res, 200, el);
+      }
+      if (isPhotos && req.method === 'DELETE') {
+        const key = url.searchParams.get('key');
+        el.photos = el.photos.filter((k) => k !== key);
+        if (key) await fs.unlink(await resolveAssetKey(key)).catch(() => {});
+        await writeJson('elements.json', elements);
+        return send(res, 200, el);
+      }
+      if (!isPhotos && req.method === 'PUT') {
+        const body = await readJsonBody(req);
+        elements[idx] = {
+          ...el,
+          kind: body.kind !== undefined ? (body.kind === 'object' ? 'object' : 'location') : el.kind,
+          name: body.name !== undefined ? (String(body.name).trim() || el.name) : el.name,
+          category: body.category !== undefined ? String(body.category).trim().slice(0, 80) : (el.category || ''),
+          description: body.description !== undefined ? String(body.description) : el.description,
+          variants: el.variants || []
+        };
+        await writeJson('elements.json', elements);
+        return send(res, 200, elements[idx]);
+      }
+      if (!isPhotos && req.method === 'DELETE') {
+        const links = await readJson('element-links.json', []);
+        await writeJson('element-links.json', links.filter((link) => link.elementId !== id));
+        elements.splice(idx, 1);
+        await writeJson('elements.json', elements);
+        await fs.rm(path.join(DATA_DIR, 'elements', id), { recursive: true, force: true }).catch(() => {});
+        return send(res, 200, { ok: true });
+      }
     }
 
     // --- Poser: modelos XNALara/XPS (carpetas en assets/poser) y poses ---
