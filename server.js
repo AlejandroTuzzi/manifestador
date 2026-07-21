@@ -26,6 +26,14 @@ const sessions = new Map();
 // referencia viene del Poser, para que el modelo la tome solo como pose.
 const DEFAULT_POSER_PROMPT = 'The attached 3D figure render is ONLY a reference for pose and framing. Exactly replicate the camera position, angle and framing, and the character\'s full body pose — torso, head, arms, hands and legs — precisely matching the reference. Do NOT copy the 3D model\'s appearance: ignore its clothing, colors, materials and anatomy style. The main character must keep their own clothing, facial features and morphology.';
 
+// Se antepone (sin mostrarse en la caja) cuando alguna referencia lleva
+// etiqueta estampada. Va PRIMERO y en pocas palabras: cuando la instrucción
+// iba al final y describía el cartel en detalle, los modelos lo replicaban
+// igual (describir un elemento visual tiende a reforzarlo). Ahora se enuncia
+// como una propiedad del resultado —una fotografía limpia, sin sobreimpresos—
+// en vez de como una prohibición sobre algo descripto.
+const LABELED_REFS_PROMPT = 'The reference images are annotated working proofs: the name tag across the top of each one identifies the subject for you and is not part of its scene. Read the tags, then ignore them. Produce a clean, unannotated photograph: the frame contains only the depicted scene, edge to edge, with no overlay, tag, strip, banner, caption or lettering added on top of it. Text that physically exists inside the scene (signage, posters, packaging, screens, graffiti, or any text the prompt asks for) is rendered as usual.';
+
 const DEFAULT_CONFIG = {
   poserPrompt: DEFAULT_POSER_PROMPT,
   photoshopPath: '',
@@ -332,26 +340,28 @@ async function runImageGeneration(req) {
   // Si alguna referencia viene del Poser, se anexa el prompt de pose
   // (invisible en la caja) para que la IA la use solo como pose/encuadre.
   const hasPoserRef = refs.some((key) => String(key).startsWith('poser/'));
-  const sentPrompt = hasPoserRef && cfg.poserPrompt?.trim()
-    ? `${prompt}\n\n${cfg.poserPrompt.trim()}`
-    : prompt;
+  // la nota de las etiquetas va adelante (los modelos de imagen pesan más lo
+  // que leen primero); el prompt del Poser sigue yendo detrás del pedido
+  const preface = refs.some((key) => validStamp(labeledRefs[key])) ? LABELED_REFS_PROMPT : '';
+  const suffix = hasPoserRef && cfg.poserPrompt?.trim() ? cfg.poserPrompt.trim() : '';
+  const sentPrompt = [prompt, suffix].filter(Boolean).join('\n\n');
 
   const call = async () => {
     switch (model.provider) {
       case 'gemini':
         return generateGemini({
-          apiKey: cfg.keys.gemini, apiModel, prompt: sentPrompt, refPaths,
+          apiKey: cfg.keys.gemini, apiModel, prompt: sentPrompt, preface, refPaths,
           aspectRatio: req.aspectRatio, resolution: req.resolution,
           supportsSize: model.resolutions.length > 1
         });
       case 'seedream':
         return generateSeedream({
           apiKey: cfg.keys.ark, apiModel, endpoint: cfg.endpoints.ark,
-          prompt: sentPrompt, refPaths, aspectRatio: req.aspectRatio, resolution: req.resolution
+          prompt: sentPrompt, preface, refPaths, aspectRatio: req.aspectRatio, resolution: req.resolution
         });
       case 'openai':
         return generateOpenAIImage({
-          apiKey: cfg.keys.openai, apiModel, prompt: sentPrompt, refPaths,
+          apiKey: cfg.keys.openai, apiModel, prompt: sentPrompt, preface, refPaths,
           aspectRatio: req.aspectRatio, resolution: req.resolution
         });
       default:
@@ -437,9 +447,9 @@ async function runVideoGeneration(req) {
   const audio = model.audio ? Boolean(req.audio) : null;
 
   const hasPoserRef = refs.some((key) => String(key).startsWith('poser/'));
-  const sentPrompt = hasPoserRef && cfg.poserPrompt?.trim()
-    ? `${prompt}\n\n${cfg.poserPrompt.trim()}`
-    : prompt;
+  const preface = refs.some((key) => validStamp(labeledRefs[key])) ? LABELED_REFS_PROMPT : '';
+  const suffix = hasPoserRef && cfg.poserPrompt?.trim() ? cfg.poserPrompt.trim() : '';
+  const sentPrompt = [preface, prompt, suffix].filter(Boolean).join('\n\n');
 
   const apiModel = model.id === 'seedance-2'
     ? (cfg.seedanceModelId || model.apiModel)

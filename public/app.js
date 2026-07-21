@@ -56,6 +56,8 @@ const state = {
   elementCategoryFilter: '',
   pickerElementId: '',       // drill-down del tab Locaciones/Objetos del picker
   pickerElementVariantId: '',
+  pickerSeriesId: '',        // drill-down del tab Series del picker
+  shotList: [],              // duraciones (s) de cada toma del armador de video
   editingCharId: null,
   pendingCharacterAsset: null,
   variantEditor: null,
@@ -135,6 +137,17 @@ function activeRefLimit() {
   return m.maxRefs;
 }
 
+// Personajes, locaciones/objetos y series se listan siempre alfabéticamente:
+// es más fácil de navegar que por fecha de creación. Se llama al inicio de cada
+// render que arma una lista, así vale para cualquier mutación previa.
+const byName = (a, b) => String(a).localeCompare(String(b), 'es', { numeric: true, sensitivity: 'base' });
+
+function sortEntities() {
+  state.characters.sort((a, b) => byName(a.name, b.name));
+  state.elements.sort((a, b) => byName(a.name, b.name));
+  state.series.sort((a, b) => byName(a.title, b.title));
+}
+
 function pinnedChar() {
   return state.characters.find((c) => c.id === state.pinnedId) || null;
 }
@@ -188,6 +201,9 @@ function setMode(mode) {
   $('#videoControls').hidden = mode !== 'video';
   $('#audioControls').hidden = mode !== 'audio';
   $('#tagPalette').hidden = mode !== 'audio';
+  // el armador de tomas es propio del video
+  $('#btnShotList').hidden = mode !== 'video';
+  if (mode !== 'video') $('#shotListPanel').hidden = true;
   $('.editor-wrap').classList.toggle('tags-on', mode === 'audio' || mode === 'video');
   $('#promptBox').placeholder = mode === 'audio'
     ? 'Escribí el texto a locutar… usá [risas] o [whispers] para expresiones'
@@ -458,7 +474,13 @@ function renderVideoControls() {
   chipRow($('#videoResChips'), m.resolutions, state.video.resolution,
     (v) => { state.video.resolution = v; renderVideoControls(); });
   chipRow($('#videoDurChips'), m.durations, state.video.duration,
-    (v) => { state.video.duration = v; renderVideoControls(); },
+    (v) => {
+      state.video.duration = v;
+      // al cambiar la duración del clip, las tomas se re-reparten solas
+      if (state.shotList.length) state.shotList = shotListEven(state.shotList.length);
+      renderVideoControls();
+      if (!$('#shotListPanel').hidden) renderShotList();
+    },
     (v) => `${v}s`);
 
   $('#videoAudioRow').hidden = !m.audio;
@@ -547,8 +569,11 @@ function refLabelSuggestion(key) {
   return '';
 }
 
-// Estampa el texto sobre una COPIA de la imagen (banner blanco arriba, texto
-// negro). El archivo original no se toca: la copia viaja solo en la petición.
+// Estampa el texto sobre una COPIA de la imagen: chapita centrada arriba, de
+// media imagen de ancho y blanco semitransparente, para que la IA la lea sin
+// tapar la escena. El archivo original no se toca: la copia va solo en la
+// petición. Se dimensiona por el ANCHO (si se usara el alto, en una imagen
+// vertical el cartel se comería media escena).
 function stampLabel(key, text) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -558,14 +583,26 @@ function stampLabel(key, text) {
       canvas.height = img.naturalHeight;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0);
-      const bannerH = Math.max(36, Math.round(canvas.height * 0.08));
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, bannerH);
+
+      const label = text.toUpperCase();
+      const bannerW = Math.round(canvas.width * 0.5);
+      let fontSize = Math.max(12, Math.round(canvas.width * 0.035));
+      ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+      // si el texto no entra en la mitad del ancho, achicamos la tipografía
+      const padding = Math.round(fontSize * 0.6);
+      while (fontSize > 10 && ctx.measureText(label).width > bannerW - padding * 2) {
+        fontSize -= 1;
+        ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+      }
+      const bannerH = Math.round(fontSize * 1.5);
+      const x = Math.round((canvas.width - bannerW) / 2);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.fillRect(x, 0, bannerW, bannerH);
       ctx.fillStyle = '#000000';
-      ctx.font = `bold ${Math.round(bannerH * 0.55)}px Arial, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(text.toUpperCase(), canvas.width / 2, bannerH / 2, canvas.width - 20);
+      ctx.fillText(label, canvas.width / 2, bannerH / 2, bannerW - padding * 2);
       resolve(canvas.toDataURL('image/jpeg', 0.92));
     };
     img.onerror = () => reject(new Error('No se pudo leer la imagen para etiquetarla'));
@@ -665,6 +702,7 @@ function applyPinnedCharacterPhotos() {
 }
 
 function renderCharacterVariantControl() {
+  sortEntities();
   const pc = pinnedChar();
   const row = $('#characterVariantRow');
   row.hidden = !pc || !(pc.variants || []).length;
@@ -711,6 +749,238 @@ function renderPinnedHint() {
 }
 
 $('#unpinBtn').addEventListener('click', () => setPinned(''));
+
+// ---------------------------------------------------------------------------
+// lista de tomas para video: arma el esqueleto "Shot N:" con sus tiempos
+//
+// La forma documentada para Seedance 2.0 es la toma numerada ("Shot 1: …"),
+// con marca de tiempo de INICIO entre corchetes ("[0s]", "[3s]"). Los rangos
+// tipo "[00-03s]" no son el formato documentado y fijar segundos exactos puede
+// degradar el resultado, por eso las marcas son opcionales.
+// ---------------------------------------------------------------------------
+
+function videoMaxDuration() {
+  return state.video.duration || currentVideoModel()?.durations?.at(-1) || 10;
+}
+
+function shotListEven(count = state.shotList.length) {
+  const total = videoMaxDuration();
+  const n = Math.max(1, count);
+  const base = Math.floor((total / n) * 10) / 10;
+  const rows = Array.from({ length: n }, () => base);
+  // el resto se lo lleva la última toma para cerrar justo en el total
+  rows[n - 1] = Math.round((total - base * (n - 1)) * 10) / 10;
+  return rows;
+}
+
+function renderShotList() {
+  const total = videoMaxDuration();
+  const used = Math.round(state.shotList.reduce((sum, d) => sum + d, 0) * 10) / 10;
+  $('#shotListTotal').textContent = `${state.shotList.length} toma${state.shotList.length === 1 ? '' : 's'} · ${fmtSec(used)} asignados · clip de ${fmtSec(total)}`;
+  const warn = $('#shotListWarn');
+  warn.textContent = used > total ? `Se pasa ${fmtSec(Math.round((used - total) * 10) / 10)} del clip: acortá tomas o usá “Repartir parejo”`
+    : used < total ? `Quedan ${fmtSec(Math.round((total - used) * 10) / 10)} sin asignar` : '';
+  warn.className = 'hint' + (used > total ? ' warn' : '');
+
+  let at = 0;
+  $('#shotListRows').innerHTML = state.shotList.map((dur, i) => {
+    const start = Math.round(at * 10) / 10;
+    at = Math.round((at + dur) * 10) / 10;
+    // los rangos se muestran tal cual son (sin recortarlos al clip): si una
+    // toma queda fuera, se marca en rojo en vez de mostrar un rango invertido
+    const over = at > total;
+    return `<div class="shot-list-row${over ? ' over' : ''}">
+      <span class="shot-list-n">Shot ${i + 1}</span>
+      <span class="shot-list-range">${fmtSec(start)} → ${fmtSec(at)}${start >= total ? ' · fuera del clip' : over ? ' · se corta' : ''}</span>
+      <span class="num-field">
+        <input type="number" min="0.5" max="${total}" step="0.5" value="${dur}" data-shotdur="${i}">
+        <span class="num-steps">
+          <button type="button" class="num-step" data-shotstep="${i}:1" title="Más">${IC('right')}</button>
+          <button type="button" class="num-step" data-shotstep="${i}:-1" title="Menos">${IC('right')}</button>
+        </span>
+      </span> s
+      <button class="mini-btn danger" data-shotdel="${i}" title="Quitar">×</button>
+    </div>`;
+  }).join('');
+  $('#shotListRows').querySelectorAll('[data-shotdur]').forEach((input) => input.addEventListener('change', () => {
+    const i = Number(input.dataset.shotdur);
+    state.shotList[i] = Math.max(0.5, Math.min(total, Number(input.value) || 0.5));
+    renderShotList();
+  }));
+  $('#shotListRows').querySelectorAll('[data-shotstep]').forEach((b) => b.addEventListener('click', () => {
+    const [i, dir] = b.dataset.shotstep.split(':').map(Number);
+    state.shotList[i] = Math.max(0.5, Math.min(total, Math.round((state.shotList[i] + dir * 0.5) * 10) / 10));
+    renderShotList();
+  }));
+  $('#shotListRows').querySelectorAll('[data-shotdel]').forEach((b) => b.addEventListener('click', () => {
+    state.shotList.splice(Number(b.dataset.shotdel), 1);
+    if (!state.shotList.length) state.shotList = shotListEven(1);
+    renderShotList();
+  }));
+  $('#shotListPreview').textContent = shotListText();
+}
+
+const fmtSec = (s) => `${Number.isInteger(s) ? s : s.toFixed(1)}s`;
+
+function shotListText() {
+  const marks = $('#shotListMarks').checked;
+  let at = 0;
+  return state.shotList.map((dur, i) => {
+    const line = `${marks ? `[${fmtSec(at)}] ` : ''}Shot ${i + 1}: `;
+    at = Math.round((at + dur) * 10) / 10;
+    return line;
+  }).join('\n');
+}
+
+function openShotList() {
+  if (!state.shotList.length) state.shotList = shotListEven(3);
+  $('#shotListPanel').hidden = false;
+  renderShotList();
+}
+
+$('#btnShotList').addEventListener('click', () => {
+  const panel = $('#shotListPanel');
+  if (panel.hidden) openShotList(); else panel.hidden = true;
+});
+$('#shotListClose').addEventListener('click', () => { $('#shotListPanel').hidden = true; });
+$('#shotListMarks').addEventListener('change', renderShotList);
+$('#shotListAdd').addEventListener('click', () => {
+  // la toma nueva ocupa lo que quede libre del clip: así no se pasa sola
+  const total = videoMaxDuration();
+  const used = state.shotList.reduce((sum, d) => sum + d, 0);
+  const free = Math.round((total - used) * 10) / 10;
+  if (free < 0.5) {
+    // ya no entra: se reparte todo de nuevo entre una toma más
+    state.shotList = shotListEven(state.shotList.length + 1);
+    toast('No quedaba lugar: repartí el clip entre todas las tomas');
+  } else {
+    state.shotList.push(Math.min(free, 2));
+  }
+  renderShotList();
+});
+$('#shotListEven').addEventListener('click', () => {
+  state.shotList = shotListEven(state.shotList.length);
+  renderShotList();
+});
+$('#shotListInsert').addEventListener('click', () => {
+  const text = shotListText();
+  const current = promptBox.value.trimEnd();
+  promptBox.value = current ? `${current}\n\n${text}` : text;
+  renderHighlight();
+  $('#shotListPanel').hidden = true;
+  // el cursor queda al final de la primera toma, listo para escribir
+  const firstEnd = promptBox.value.indexOf('\n', promptBox.value.length - text.length);
+  const pos = firstEnd === -1 ? promptBox.value.length : firstEnd;
+  promptBox.focus();
+  promptBox.setSelectionRange(pos, pos);
+  toast(`${state.shotList.length} tomas insertadas — completá cada una en inglés`);
+});
+
+// ---------------------------------------------------------------------------
+// panel "Toma del guion": consulta de qué hay que generar, sin salir de Crear
+// ---------------------------------------------------------------------------
+
+function shotPanelScripts() {
+  return state.scripts.filter((sc) => sc.seriesId === $('#shotPanelSeries').value);
+}
+
+function shotPanelCurrent() {
+  const sc = state.scripts.find((x) => x.id === $('#shotPanelScript').value);
+  if (!sc) return null;
+  const [si, hi] = String($('#shotPanelShot').value || '').split(':').map(Number);
+  const scene = sc.scenes[si];
+  const shot = scene?.shots[hi];
+  return shot ? { script: sc, scene, shot, si, hi } : null;
+}
+
+function renderShotPanelSeries() {
+  sortEntities();
+  const sel = $('#shotPanelSeries');
+  const withScripts = state.series.filter((s) => state.scripts.some((sc) => sc.seriesId === s.id));
+  sel.innerHTML = withScripts.map((s) => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
+  renderShotPanelScripts();
+}
+
+function renderShotPanelScripts() {
+  const sel = $('#shotPanelScript');
+  sel.innerHTML = shotPanelScripts().map((sc) => `<option value="${sc.id}">${esc(sc.title)}</option>`).join('');
+  renderShotPanelShots();
+}
+
+function renderShotPanelShots() {
+  const sc = state.scripts.find((x) => x.id === $('#shotPanelScript').value);
+  const options = [];
+  (sc?.scenes || []).forEach((scene, si) => scene.shots.forEach((shot, hi) => {
+    options.push(`<option value="${si}:${hi}">Plano ${si + 1}.${hi + 1} — ${esc((scene.location || 'Sin locación').slice(0, 40))}</option>`);
+  }));
+  $('#shotPanelShot').innerHTML = options.join('');
+  renderShotPanelBody();
+}
+
+function renderShotPanelBody() {
+  const body = $('#shotPanelBody');
+  const current = shotPanelCurrent();
+  if (!current) {
+    body.innerHTML = '<div class="hint">Elegí una serie con guiones para ver sus tomas. Los guiones se crean o importan desde Series.</div>';
+    return;
+  }
+  const { script, scene, shot, si, hi } = current;
+  const serie = state.series.find((s) => s.id === script.seriesId);
+  body.innerHTML = `
+    <div class="shot-panel-head">
+      <strong>Plano ${si + 1}.${hi + 1}</strong>
+      <span class="sb-slug">${esc(`${scene.intExt}. ${(scene.location || '').toUpperCase()} — ${scene.timeOfDay}`)}</span>
+      <span class="sb-shot-specs">${esc(shot.size)} · ${esc(shot.lens)}${serie ? ` · ${esc(serie.format)}` : ''}</span>
+    </div>
+    ${shot.camera ? `<div class="sb-camera">${esc(shot.camera)}</div>` : ''}
+    ${shot.items.length ? `<div class="sb-items">${shot.items.map(sbItemLine).join('')}</div>` : ''}
+    ${sbPromptView(shot)}
+    ${(shot.assetKeys || []).length ? `<div class="sb-assets" data-shotpanelstrip="1">${shot.assetKeys.map((k) =>
+      `<button class="script-asset-thumb" data-k="${esc(k)}" title="${esc(k)}">${seriesAssetThumb(k)}</button>`).join('')}</div>` : ''}
+    <div class="shot-panel-actions">
+      ${shot.prompt ? `<button class="mini-btn" id="shotPanelUsePrompt">${IC('copy')} Usar su prompt en la caja</button>` : ''}
+      <button class="mini-btn" id="shotPanelCopyDesc">${IC('copy')} Copiar la descripción</button>
+    </div>`;
+  body.querySelectorAll('.script-asset-thumb').forEach((b) => b.addEventListener('click', () => {
+    const key = b.dataset.k;
+    if (!key.startsWith('audio/')) openLightbox(key, (shot.assetKeys || []).filter((x) => !x.startsWith('audio/')));
+  }));
+  $('#shotPanelUsePrompt')?.addEventListener('click', () => {
+    promptBox.value = shot.prompt;
+    renderHighlight();
+    promptBox.focus();
+    toast('Prompt del plano cargado en la caja');
+  });
+  $('#shotPanelCopyDesc')?.addEventListener('click', () => {
+    const text = [
+      `${scene.intExt}. ${(scene.location || '').toUpperCase()} — ${scene.timeOfDay}`,
+      `${shot.size} · ${shot.lens}${shot.camera ? ` · ${shot.camera}` : ''}`,
+      ...shot.items.map((item) => item.kind === 'dialogue' ? `${item.character}: ${item.text}` : item.text)
+    ].join('\n');
+    copyPrompt(text);
+  });
+}
+
+function moveShotPanel(delta) {
+  const sel = $('#shotPanelShot');
+  const next = sel.selectedIndex + delta;
+  if (next < 0 || next >= sel.options.length) return;
+  sel.selectedIndex = next;
+  renderShotPanelBody();
+}
+
+$('#btnShotPanel').addEventListener('click', () => {
+  const panel = $('#shotPanel');
+  const show = panel.hidden;
+  panel.hidden = !show;
+  $('#btnShotPanel').classList.toggle('active', show);
+  if (show) renderShotPanelSeries();
+});
+$('#shotPanelSeries').addEventListener('change', renderShotPanelScripts);
+$('#shotPanelScript').addEventListener('change', renderShotPanelShots);
+$('#shotPanelShot').addEventListener('change', renderShotPanelBody);
+$('#shotPanelPrev').addEventListener('click', () => moveShotPanel(-1));
+$('#shotPanelNext').addEventListener('click', () => moveShotPanel(1));
 
 // ---------------------------------------------------------------------------
 // generación
@@ -1137,6 +1407,9 @@ async function setPickerTab(src) {
   } else if (src === 'elements') {
     renderPickerElements();
     return;
+  } else if (src === 'series') {
+    renderPickerSeries();
+    return;
   } else {
     await refreshAssets();
     const items = state.assets[src] || [];
@@ -1155,8 +1428,53 @@ async function setPickerTab(src) {
   });
 }
 
+// tab Series del picker: assets asociados a una serie (solo imágenes)
+function renderPickerSeries() {
+  sortEntities();
+  const body = $('#pickerBody');
+  const serie = state.series.find((s) => s.id === state.pickerSeriesId);
+
+  if (!serie) {
+    body.innerHTML = state.series.length
+      ? `<div class="picker-grid">${state.series.map((s) => {
+          const keys = (s.assetKeys || []).filter((k) => !/^(audio|video)\//.test(k));
+          return `<div class="pick" data-serie="${s.id}">${keys[0]
+            ? `<img src="${fileUrl(keys[0])}" loading="lazy" alt="">`
+            : `<div class="pick-ph">${IC('layers', 'ic ic-lg')}</div>`}
+            <div class="p-label">${esc(s.title)} · ${keys.length} img</div></div>`;
+        }).join('')}</div>`
+      : '<div class="empty-note">Todavía no hay series.</div>';
+    body.querySelectorAll('[data-serie]').forEach((n) => n.addEventListener('click', () => {
+      state.pickerSeriesId = n.dataset.serie;
+      renderPickerSeries();
+    }));
+    return;
+  }
+
+  const keys = (serie.assetKeys || []).filter((k) => !/^(audio|video)\//.test(k));
+  body.innerHTML = `
+    <div class="picker-char-head">
+      <button class="mini-btn" id="pickerSeriesBack">← Series</button>
+      <strong>${esc(serie.title)}</strong>
+      <span class="hint">${keys.length} imagen${keys.length === 1 ? '' : 'es'} asociada${keys.length === 1 ? '' : 's'}</span>
+    </div>
+    ${keys.length
+      ? `<div class="picker-grid">${keys.map((k) =>
+          `<div class="pick" data-key="${esc(k)}"><img src="${fileUrl(k)}" loading="lazy" alt=""><div class="p-label">${esc(serie.title)}</div></div>`).join('')}</div>`
+      : '<div class="empty-note">Esta serie no tiene imágenes asociadas todavía.</div>'}`;
+  $('#pickerSeriesBack').addEventListener('click', () => {
+    state.pickerSeriesId = '';
+    renderPickerSeries();
+  });
+  body.querySelectorAll('.pick[data-key]').forEach((p) => p.addEventListener('click', () => {
+    addRef(p.dataset.key);
+    $('#pickerModal').hidden = true;
+  }));
+}
+
 // tab Locaciones/Objetos del picker: mismo esquema en dos pasos que Personajes
 function renderPickerElements() {
+  sortEntities();
   const body = $('#pickerBody');
   const el = state.elements.find((x) => x.id === state.pickerElementId);
 
@@ -1212,6 +1530,7 @@ function renderPickerElements() {
 
 // tab Personajes del picker: primero se elige el personaje, después Original o variante
 function renderPickerCharacters() {
+  sortEntities();
   const body = $('#pickerBody');
   const c = state.characters.find((x) => x.id === state.pickerCharacterId);
 
@@ -1424,7 +1743,6 @@ function promptCategories(mode = null) {
 
 function renderPromptEditorCategories() {
   const cats = promptCategories($('#promptEditorMode').value);
-  $('#promptEditorCategories').innerHTML = cats.map((c) => `<option value="${esc(c)}">`).join('');
   chipRow($('#promptEditorCategoryChips'), cats, $('#promptEditorCategory').value.trim(), (c) => {
     $('#promptEditorCategory').value = c;
     renderPromptEditorCategories();
@@ -1846,6 +2164,7 @@ async function associateAsset(key) {
 }
 
 function renderAssociationOwners(ownerId = '', variantId = '') {
+  sortEntities();
   const isElement = associationIsElement();
   $('#associateOwnerLabelText').textContent = isElement ? 'Locación u objeto' : 'Personaje';
   const list = isElement ? state.elements : state.characters;
@@ -1942,6 +2261,7 @@ function seriesAssetThumb(key) {
 }
 
 function renderSeries() {
+  sortEntities();
   const grid = $('#seriesGrid');
   if (!state.series.length) {
     grid.innerHTML = '<div class="empty-note">Creá tu primera serie: título, descripción, formato y estructura. Después asociale personajes y assets.</div>';
@@ -2032,6 +2352,7 @@ function updateSeriesStructureHint() {
 }
 
 function renderSeriesCharacterChips() {
+  sortEntities();
   const wrap = $('#seriesCharacterChips');
   if (!state.characters.length) {
     wrap.innerHTML = '<span class="hint">Todavía no hay personajes creados.</span>';
@@ -2836,6 +3157,7 @@ $('#shotAssetsModal').addEventListener('click', (e) => { if (e.target.id === 'sh
 // ---------------------------------------------------------------------------
 
 function renderCharacters() {
+  sortEntities();
   const grid = $('#charsGrid');
   if (!state.characters.length) {
     grid.innerHTML = '<div class="empty-note">Creá tu primer personaje: nombre, descripción, fotos y una voz de ElevenLabs.</div>';
@@ -3299,6 +3621,7 @@ function elementCategories(kind = '') {
 }
 
 function renderElements() {
+  sortEntities();
   const catSel = $('#elementCategoryFilter');
   const cats = elementCategories(state.elementKindFilter);
   catSel.innerHTML = '<option value="">Todas</option>' + cats.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
@@ -3391,7 +3714,6 @@ $('#elementModal').addEventListener('click', (e) => { if (e.target.id === 'eleme
 function renderElementModal() {
   const id = state.editingElementId;
   const el = id ? state.elements.find((x) => x.id === id) : null;
-  $('#elementCategoryList').innerHTML = elementCategories().map((c) => `<option value="${esc(c)}">`).join('');
   const thumb = (p, attr) => `<span class="ref-thumb"><img src="${fileUrl(p)}" alt=""><button class="rm" ${attr}="${esc(p)}" title="Quitar">×</button></span>`;
   $('#elementModalBody').innerHTML = `
     <label>Tipo
@@ -3401,7 +3723,8 @@ function renderElementModal() {
       </select>
     </label>
     <label>Nombre<input id="elName" type="text" maxlength="120" value="${esc(el?.name || '')}" placeholder="Ej: Fábrica abandonada, Espada mandoble"></label>
-    <label>Categoría<input id="elCategory" type="text" maxlength="80" list="elementCategoryList" value="${esc(el?.category || '')}" placeholder="Ej: Exteriores, Armas… escribí para crear una nueva"></label>
+    <label>Categoría<input id="elCategory" type="text" maxlength="80" value="${esc(el?.category || '')}" placeholder="Ej: Exteriores, Armas… escribí para crear una nueva"></label>
+    <div id="elCategoryChips" class="chips"></div>
     <label>Descripción<textarea id="elDescription" rows="3">${esc(el?.description || '')}</textarea></label>
     ${el ? `
     <div class="variant-manager">
@@ -3428,6 +3751,13 @@ function renderElementModal() {
     <button class="generate-btn small" id="elSave">${el ? 'Guardar cambios' : 'Crear'}</button>`;
 
   const body = $('#elementModalBody');
+  const renderElCategoryChips = () => chipRow($('#elCategoryChips'), elementCategories(), $('#elCategory').value.trim(), (c) => {
+    $('#elCategory').value = c;
+    renderElCategoryChips();
+  });
+  renderElCategoryChips();
+  $('#elCategory').addEventListener('input', renderElCategoryChips);
+
   const refreshElement = (updated) => {
     state.elements[state.elements.findIndex((x) => x.id === updated.id)] = updated;
     renderElementModal();

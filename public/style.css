@@ -156,6 +156,28 @@ h3 { font-size: 15px; }
 }
 .mode-btn.active { background: var(--pink-strong); color: white; }
 
+/* pestaña "Toma del guion": tabulada a la derecha, fuera del switch de modo */
+.shot-tab {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 7px;
+  padding: 9px 16px; font-size: 13px;
+  background: var(--panel); border: 1px solid var(--border-soft); color: var(--muted);
+}
+.shot-tab:hover { border-color: var(--violet); color: var(--text); }
+.shot-tab.active { background: var(--violet-strong); border-color: var(--violet-strong); color: white; }
+
+.shot-panel { border: 1px solid var(--violet); background: rgba(139,92,246,.06); padding: 14px 16px; margin-bottom: 14px; }
+.shot-panel-pickers { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.shot-panel-pickers label { display: flex; flex-direction: column; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .7px; min-width: 0; }
+.shot-panel-pickers .select { min-width: 150px; max-width: 260px; }
+/* los nombres de toma son largos: este selector se lleva el ancho sobrante */
+.shot-panel-shot { flex: 1 1 340px; }
+.shot-panel-shot .select { min-width: 0; max-width: none; width: 100%; }
+.shot-panel-nav { display: flex; gap: 6px; margin-left: auto; }
+.shot-panel-body { display: flex; flex-direction: column; gap: 12px; }
+.shot-panel-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 1px solid var(--border-soft); }
+.shot-panel-head strong { font-size: 14px; }
+.shot-panel-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
 .pinned-hint {
   font-size: 12px; color: var(--pink);
   background: rgba(236, 72, 153, 0.08);
@@ -363,11 +385,12 @@ h3 { font-size: 15px; }
   font-size: 11px; font-weight: 700; cursor: pointer; line-height: 1;
 }
 .ref-thumb .ref-label-btn.on { background: var(--pink); color: white; }
+/* refleja el estampado real: chapita centrada, media imagen de ancho, 50% */
 .ref-thumb .ref-label-tag {
-  position: absolute; top: 0; left: 0; right: 0;
-  background: rgba(255, 255, 255, 0.92); color: #000;
-  font-size: 9px; font-weight: 700; text-transform: uppercase; text-align: center;
-  padding: 1px 20px 1px 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  position: absolute; top: 0; left: 25%; width: 50%;
+  background: rgba(255, 255, 255, 0.5); color: #000;
+  font-size: 8px; font-weight: 700; text-transform: uppercase; text-align: center;
+  padding: 1px 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   pointer-events: none;
 }
 .ref-thumb.verified-asset { border-color: var(--pink); }
@@ -515,7 +538,16 @@ h3 { font-size: 15px; }
 audio { width: 100%; margin-top: 6px; }
 
 /* ---------- assets ---------- */
-.tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+/* las pestañas nunca deben desbordar: se desplazan de lado si no entran */
+.tabs {
+  display: flex; gap: 6px; margin-bottom: 14px;
+  overflow-x: auto; overflow-y: hidden; padding-bottom: 4px;
+  scrollbar-width: thin; scrollbar-color: var(--violet) rgba(10,5,18,.4);
+}
+.tabs::-webkit-scrollbar { height: 7px; }
+.tabs::-webkit-scrollbar-track { background: rgba(10,5,18,.4); }
+.tabs::-webkit-scrollbar-thumb { background: var(--violet); border-radius: 4px; }
+.tabs::-webkit-scrollbar-thumb:hover { background: var(--pink); }
 .tab {
   padding: 9px 18px;
   border: 1px solid var(--border);
@@ -523,6 +555,7 @@ audio { width: 100%; margin-top: 6px; }
   background: transparent; color: var(--muted);
   font-size: 13px; font-weight: 700; cursor: pointer;
   transition: all 0.12s;
+  flex: 0 0 auto; white-space: nowrap;
 }
 .tab.active { background: var(--grad); color: white; border-color: transparent; }
 
@@ -773,7 +806,7 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .login-mark img { width: 72px; height: 72px; object-fit: contain; }
 .modal-box {
   width: 100%; max-width: 640px; max-height: 86vh;
-  overflow-y: auto;
+  overflow-y: auto; overflow-x: hidden;
   background: var(--panel-solid);
   border: 1px solid var(--border);
   border-radius: 0;
@@ -952,6 +985,42 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .ref-thumb .ref-at { position: absolute; bottom: 2px; left: 2px; border: none; background: rgba(0,0,0,0.7); color: var(--pink); font: inherit; font-size: 10px; font-weight: 700; padding: 1px 5px; cursor: pointer; }
 .ref-thumb .ref-at:hover { background: var(--pink); color: #fff; }
 .ref-thumb .ref-badge { position: absolute; bottom: 2px; left: 2px; background: rgba(0,0,0,0.7); color: var(--muted); font-size: 9px; letter-spacing: .05em; text-transform: uppercase; padding: 1px 5px; }
+
+/* ---------- armador de tomas para video ---------- */
+.shot-list-panel { margin-top: 12px; border: 1px solid var(--violet); background: rgba(139,92,246,.06); padding: 12px 14px; }
+.shot-list-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.shot-list-head strong { font-size: 13px; }
+.shot-list-head .check-row { margin-left: auto; color: var(--muted); font-weight: 700; }
+.shot-list-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.shot-list-row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); }
+.shot-list-n { color: var(--pink); font-weight: 700; min-width: 58px; }
+.shot-list-range { min-width: 150px; color: var(--text); font-variant-numeric: tabular-nums; }
+.shot-list-row.over .shot-list-range { color: #fda4af; }
+.shot-list-row.over .shot-list-n { opacity: .6; }
+.shot-list-row input { width: 74px; background: rgba(10,5,18,.7); border: 1px solid var(--border); color: var(--text); padding: 5px 8px; font: inherit; font-size: 12.5px; }
+.shot-list-row input:focus { outline: none; border-color: var(--violet); }
+/* el spinner nativo se dibuja en claro y no se puede pintar: se oculta y las
+   flechas se dibujan con los iconos de línea de la app */
+input[type="number"] { color-scheme: dark; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
+
+.num-field { position: relative; display: inline-flex; align-items: center; }
+.num-field input { padding-right: 22px !important; }
+.num-steps { position: absolute; right: 5px; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; gap: 1px; }
+.num-step {
+  border: none; background: none; padding: 0; cursor: pointer;
+  color: var(--pink); display: grid; place-items: center; height: 11px;
+}
+.num-step .ic { width: 11px; height: 11px; }
+.num-step:first-child .ic { transform: rotate(-90deg); }
+.num-step:last-child .ic { transform: rotate(90deg); }
+.num-step:hover { color: var(--pink-strong); }
+.shot-list-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.shot-list-actions .generate-btn { margin-left: auto; }
+.hint.warn { color: #fda4af; }
+.shot-list-preview { margin: 10px 0 0; padding: 9px 11px; background: rgba(10,5,18,.6); border: 1px solid var(--border-soft); color: #d9ccef; font: inherit; font-size: 12px; line-height: 1.7; white-space: pre-wrap; max-height: 140px; overflow: auto; }
 
 /* ---------- picker de personajes en dos pasos ---------- */
 .picker-char-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }

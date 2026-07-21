@@ -86,6 +86,21 @@
           <button id="modeAudio" class="mode-btn"><svg class="ic"><use href="#i-mic"/></svg> Audio</button>
         </div>
         <div id="pinnedHint" class="pinned-hint" hidden></div>
+        <button id="btnShotPanel" class="mode-btn shot-tab"><svg class="ic"><use href="#i-clapper"/></svg> Toma del guion</button>
+      </div>
+
+      <!-- consulta de una toma del guion mientras se escribe el prompt -->
+      <div id="shotPanel" class="shot-panel" hidden>
+        <div class="shot-panel-pickers">
+          <label>Serie<select id="shotPanelSeries" class="select"></select></label>
+          <label>Guion<select id="shotPanelScript" class="select"></select></label>
+          <label class="shot-panel-shot">Toma<select id="shotPanelShot" class="select"></select></label>
+          <div class="shot-panel-nav">
+            <button id="shotPanelPrev" class="mini-btn" title="Toma anterior">←</button>
+            <button id="shotPanelNext" class="mini-btn" title="Toma siguiente">→</button>
+          </div>
+        </div>
+        <div id="shotPanelBody" class="shot-panel-body"></div>
       </div>
 
       <div class="prompt-card">
@@ -103,11 +118,29 @@
             <span class="tool-sep"></span>
             <button id="btnSavePrompt" class="tool-btn" title="Archivar este prompt"><svg class="ic"><use href="#i-save"/></svg> Guardar</button>
             <button id="btnPrompts" class="tool-btn" title="Prompts archivados"><svg class="ic"><use href="#i-book"/></svg> Prompts</button>
+            <button id="btnShotList" class="tool-btn" title="Insertar una lista de tomas con sus tiempos" hidden><svg class="ic"><use href="#i-clapper"/></svg> Tomas</button>
           </div>
           <div class="gen-side">
             <span id="costEstimate" class="cost-estimate" title="Costo estimado de esta generación"></span>
             <button id="btnGenerate" class="generate-btn"><svg class="ic"><use href="#i-spark"/></svg> Manifestar</button>
           </div>
+        </div>
+
+        <div id="shotListPanel" class="shot-list-panel" hidden>
+          <div class="shot-list-head">
+            <strong>Lista de tomas</strong>
+            <span class="hint" id="shotListTotal"></span>
+            <label class="check-row"><input type="checkbox" id="shotListMarks" checked> marcas de tiempo</label>
+            <button id="shotListClose" class="icon-btn" title="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button>
+          </div>
+          <div class="shot-list-rows" id="shotListRows"></div>
+          <div class="shot-list-actions">
+            <button id="shotListAdd" class="mini-btn"><svg class="ic"><use href="#i-plus"/></svg> Agregar toma</button>
+            <button id="shotListEven" class="mini-btn">Repartir parejo</button>
+            <span class="hint" id="shotListWarn"></span>
+            <button id="shotListInsert" class="generate-btn small">Insertar en el prompt</button>
+          </div>
+          <pre class="shot-list-preview" id="shotListPreview"></pre>
         </div>
 
         <div id="promptsPanel" class="prompts-panel" hidden></div>
@@ -195,8 +228,8 @@
 
       <!-- Resultados -->
       <div class="results">
-        <div id="generationQueue" class="generation-queue" hidden></div>
         <div id="bigView" class="big-view" hidden></div>
+        <div id="generationQueue" class="generation-queue" hidden></div>
         <div class="history-head">
           <h3>Historial</h3>
           <button id="btnClearHistory" class="mini-btn danger"><svg class="ic"><use href="#i-trash"/></svg> Borrar todo</button>
@@ -304,8 +337,8 @@
             <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> Escenas guardadas</button></div>
             <div class="poser-row">
               <input id="poserSceneName" class="text-input" placeholder="Nombre">
-              <input id="poserSceneCategory" class="text-input" placeholder="Categoría" list="poserCategories">
-              <datalist id="poserCategories"></datalist>
+              <input id="poserSceneCategory" class="text-input" placeholder="Categoría">
+              <div id="poserCategoryChips" class="chips"></div>
               <button id="poserSaveScene" class="mini-btn"><svg class="ic"><use href="#i-save"/></svg> Guardar</button>
             </div>
             <div id="poserSceneList" class="poser-scene-list"></div>
@@ -666,8 +699,7 @@
       <button type="button" class="icon-btn" id="promptEditorClose"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
     <label>Título<input id="promptEditorName" type="text" maxlength="120" placeholder="Ej: Retrato editorial" required></label>
-    <label>Categoría<input id="promptEditorCategory" type="text" maxlength="80" placeholder="General" list="promptEditorCategories"></label>
-    <datalist id="promptEditorCategories"></datalist>
+    <label>Categoría<input id="promptEditorCategory" type="text" maxlength="80" placeholder="General"></label>
     <div id="promptEditorCategoryChips" class="chips"></div>
     <label>Tipo
       <select id="promptEditorMode" class="select">
@@ -708,6 +740,7 @@
       <button class="tab" data-src="generated">Generadas</button>
       <button class="tab" data-src="characters">Personajes</button>
       <button class="tab" data-src="elements">Locaciones/Objetos</button>
+      <button class="tab" data-src="series">Series</button>
       <button class="tab" data-src="poses">Poses</button>
     </div>
     <div id="pickerBody" class="picker-body"></div>
@@ -779,7 +812,6 @@
     <div id="elementModalBody" class="char-modal-body"></div>
   </div>
 </div>
-<datalist id="elementCategoryList"></datalist>
 
 <!-- Modal de personaje -->
 <div id="charModal" class="modal" hidden>

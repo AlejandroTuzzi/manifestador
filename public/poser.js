@@ -775,7 +775,20 @@ $('#poserSaveScene').addEventListener('click', async () => {
 function renderSceneList() {
   const list = $('#poserSceneList');
   const cats = [...new Set(P.poses.map((x) => x.category || 'General'))].sort((a, b) => a.localeCompare(b));
-  $('#poserCategories').innerHTML = cats.map((c) => `<option value="${B.esc(c)}">`).join('');
+  // chips de categorías existentes (para escribir una nueva, se usa el campo)
+  const chips = $('#poserCategoryChips');
+  chips.innerHTML = '';
+  for (const c of cats) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip' + ($('#poserSceneCategory').value.trim() === c ? ' active' : '');
+    b.textContent = c;
+    b.addEventListener('click', () => {
+      $('#poserSceneCategory').value = c;
+      renderSceneList();
+    });
+    chips.appendChild(b);
+  }
   if (!P.poses.length) {
     list.innerHTML = '<div class="hint" style="padding:8px">Todavía no guardaste escenas.</div>';
     return;
