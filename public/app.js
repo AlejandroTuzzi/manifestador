@@ -1588,6 +1588,11 @@ async function uploadFiles(files, asRefs) {
   if (!files.length) return;
   for (const f of files) {
     try {
+      // el cuerpo de la petición admite 150 MB y el base64 infla ~33%
+      if (f.size > 100 * 1024 * 1024) {
+        toast(`${f.name}: pesa más de 100 MB, achicalo antes de subirlo`, 'err');
+        continue;
+      }
       const dataUrl = await readFileAsDataUrl(f);
       const { key } = await api('/api/upload', { method: 'POST', body: { name: f.name, dataUrl } });
       if (asRefs) addRef(key);
