@@ -23,7 +23,7 @@ const state = {
   batch: 1,
   videoModels: [],
   video: { modelId: null, mode: 'reference', aspectRatio: '16:9', resolution: '720p', duration: 5, audio: false },
-  refs: [],              // [{ key, fromChar }]
+  refs: [],              // [{ key, fromChar, label }]
   voiceId: '',
   currentEntry: null,
   currentOutput: 0,
@@ -46,7 +46,7 @@ const state = {
   pickerTab: 'upload',
   pickerCharacterId: '',     // drill-down del tab Personajes del picker
   pickerVariantId: '',
-  charAssetPicker: null,     // { characterId, variantId, zone } al elegir un asset como foto de variante
+  charAssetPicker: null,     // { entity, ownerId, variantId, zone, added } al elegir un asset como foto
   shotPromptTarget: null,    // { si, hi } del plano que está eligiendo prompt de la biblioteca
   scriptViewId: null,        // guion abierto en la vista de lectura "Ver guion"
   elements: [],              // locaciones y objetos

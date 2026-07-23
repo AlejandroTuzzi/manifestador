@@ -167,11 +167,12 @@ async function recordAssetMetadata(entry) {
   });
 }
 
-// Backfill de una sola vez por arranque: completa la metadata de assets viejos
-// (previos a que se persistiera al generar) leyendo el historial. Después de la
-// primera vez, /api/assets no vuelve a tocar el historial.
+// Backfill + limpieza de una sola vez por arranque: completa la metadata de
+// assets viejos (previos a que se persistiera al generar) desde el historial y
+// descarta las entradas huérfanas (archivos borrados por fuera de la app).
+// Después de la primera vez, /api/assets solo lee la metadata.
 let assetMetadataBackfilled = false;
-async function backfilledAssetMetadata() {
+async function backfilledAssetMetadata(liveKeys = null) {
   const metadata = await readJson('asset-metadata.json', {});
   if (assetMetadataBackfilled) return metadata;
   assetMetadataBackfilled = true;
@@ -180,11 +181,12 @@ async function backfilledAssetMetadata() {
   for (const entry of history) for (const key of entry.outputs || []) {
     if (!metadata[key]) missing[key] = metadataFromEntry(entry);
   }
-  if (Object.keys(missing).length) {
-    await updateJson('asset-metadata.json', {}, (m) => ({ ...missing, ...m }));
-    return { ...missing, ...metadata };
-  }
-  return metadata;
+  const next = { ...missing, ...metadata };
+  // huérfanos: metadata de archivos que ya no existen (borrados por fuera)
+  if (liveKeys) for (const key of Object.keys(next)) if (!liveKeys.has(key)) delete next[key];
+  const changed = Object.keys(missing).length || (liveKeys && Object.keys(next).length !== Object.keys(metadata).length);
+  if (changed) await updateJson('asset-metadata.json', {}, () => next);
+  return next;
 }
 
 // ZIP mínimo y portable (entradas almacenadas, sin dependencias externas).
@@ -1116,11 +1118,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/assets' && req.method === 'GET') {
-      const [generated, uploads, audio, video, metadata] = await Promise.all([
-        listZone('generated'), listZone('uploads'), listZone('audio'), listZone('video'),
-        backfilledAssetMetadata()
+      const [generated, uploads, audio, video] = await Promise.all([
+        listZone('generated'), listZone('uploads'), listZone('audio'), listZone('video')
       ]);
-      for (const item of [...generated, ...uploads, ...audio, ...video]) Object.assign(item, metadata[item.key] || {});
+      const all = [...generated, ...uploads, ...audio, ...video];
+      const metadata = await backfilledAssetMetadata(new Set(all.map((a) => a.key)));
+      for (const item of all) Object.assign(item, metadata[item.key] || {});
       return send(res, 200, { generated, uploads, audio, video });
     }
 
