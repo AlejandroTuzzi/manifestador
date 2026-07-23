@@ -1156,10 +1156,16 @@ const server = http.createServer(async (req, res) => {
     const seriesMatch = /^\/api\/series\/([a-z0-9]+)(\/assets)?$/.exec(p);
     if (seriesMatch) {
       const [, seriesId, isSeriesAssets] = seriesMatch;
-      const series = await readJson('series.json', []);
-      const seriesIdx = series.findIndex((s) => s.id === seriesId);
-      if (seriesIdx === -1) return send(res, 404, { error: 'Serie no encontrada' });
-      const item = series[seriesIdx];
+      // el updater re-busca la serie bajo el lock; devuelve null si no existe
+      const mutateSeries = async (fn) => {
+        let out = null;
+        await updateJson('series.json', [], (all) => {
+          const s = all.find((x) => x.id === seriesId);
+          if (s) { fn(s); out = s; }
+          return all;
+        });
+        return out;
+      };
 
       if (isSeriesAssets && req.method === 'POST') {
         const body = await readJsonBody(req);
@@ -1170,39 +1176,36 @@ const server = http.createServer(async (req, res) => {
           if (!/^(generated|uploads|video|audio)\//.test(key)) throw new Error(`Ese archivo no se puede asociar a una serie: ${key}`);
           await fs.access(await resolveAssetKey(key));
         }
-        item.assetKeys = [...keys, ...(item.assetKeys || []).filter((k) => !keys.includes(k))];
-        await writeJson('series.json', series);
-        return send(res, 200, item);
+        const item = await mutateSeries((s) => { s.assetKeys = [...keys, ...(s.assetKeys || []).filter((k) => !keys.includes(k))]; });
+        return item ? send(res, 200, item) : send(res, 404, { error: 'Serie no encontrada' });
       }
       if (isSeriesAssets && req.method === 'DELETE') {
         const key = url.searchParams.get('key');
-        item.assetKeys = (item.assetKeys || []).filter((k) => k !== key);
-        await writeJson('series.json', series);
-        return send(res, 200, item);
+        const item = await mutateSeries((s) => { s.assetKeys = (s.assetKeys || []).filter((k) => k !== key); });
+        return item ? send(res, 200, item) : send(res, 404, { error: 'Serie no encontrada' });
       }
       if (!isSeriesAssets && req.method === 'PUT') {
         const body = await readJsonBody(req);
-        let characterIds = item.characterIds || [];
+        let validIds = null;
         if (body.characterIds !== undefined) {
           const characters = await readJson('characters.json', []);
-          characterIds = [...new Set((Array.isArray(body.characterIds) ? body.characterIds : []).map(String))]
+          validIds = [...new Set((Array.isArray(body.characterIds) ? body.characterIds : []).map(String))]
             .filter((cid) => characters.some((c) => c.id === cid));
         }
-        series[seriesIdx] = {
-          ...item,
-          title: body.title !== undefined ? (String(body.title).trim() || item.title) : item.title,
-          description: body.description !== undefined ? String(body.description) : item.description,
-          format: body.format !== undefined ? (body.format === '16:9' ? '16:9' : '9:16') : item.format,
-          chapters: body.chapters !== undefined ? Math.max(1, Math.min(500, parseInt(body.chapters, 10) || 1)) : item.chapters,
-          chapterSeconds: body.chapterSeconds !== undefined ? Math.max(1, Math.min(36000, parseInt(body.chapterSeconds, 10) || 60)) : item.chapterSeconds,
-          characterIds
-        };
-        await writeJson('series.json', series);
-        return send(res, 200, series[seriesIdx]);
+        const item = await mutateSeries((s) => {
+          if (body.title !== undefined) s.title = String(body.title).trim() || s.title;
+          if (body.description !== undefined) s.description = String(body.description);
+          if (body.format !== undefined) s.format = body.format === '16:9' ? '16:9' : '9:16';
+          if (body.chapters !== undefined) s.chapters = Math.max(1, Math.min(500, parseInt(body.chapters, 10) || 1));
+          if (body.chapterSeconds !== undefined) s.chapterSeconds = Math.max(1, Math.min(36000, parseInt(body.chapterSeconds, 10) || 60));
+          if (validIds) s.characterIds = validIds;
+        });
+        return item ? send(res, 200, item) : send(res, 404, { error: 'Serie no encontrada' });
       }
       if (!isSeriesAssets && req.method === 'DELETE') {
-        series.splice(seriesIdx, 1);
-        await writeJson('series.json', series);
+        let existed = false;
+        await updateJson('series.json', [], (all) => { existed = all.some((s) => s.id === seriesId); return all.filter((s) => s.id !== seriesId); });
+        if (!existed) return send(res, 404, { error: 'Serie no encontrada' });
         await updateJson('scripts.json', [], (all) => all.filter((sc) => sc.seriesId !== seriesId));
         return send(res, 200, { ok: true });
       }
@@ -1259,8 +1262,9 @@ const server = http.createServer(async (req, res) => {
       await updateJson('scripts.json', [], (all) => [item, ...all]);
       const matched = item.characters.map((c) => c.characterId).filter(Boolean);
       if (matched.length) {
+        await updateJson('series.json', [], (all) => all.map((s) =>
+          s.id === serie.id ? { ...s, characterIds: [...new Set([...(s.characterIds || []), ...matched])] } : s));
         serie.characterIds = [...new Set([...(serie.characterIds || []), ...matched])];
-        await writeJson('series.json', series);
       }
       return send(res, 200, { script: item, serie });
     }
@@ -1276,22 +1280,26 @@ const server = http.createServer(async (req, res) => {
       if (!isGenerate && req.method === 'PUT') {
         const body = await readJsonBody(req);
         const characters = await readJson('characters.json', []);
-        scripts[scriptIdx] = {
-          ...script,
-          title: body.title !== undefined ? (String(body.title).trim().slice(0, 140) || script.title) : script.title,
-          summary: body.summary !== undefined ? String(body.summary).slice(0, 3000) : script.summary,
-          format: SCRIPT_FORMATS.includes(body.format) ? body.format : script.format,
-          characters: body.characters !== undefined ? sanitizeScriptCast(body.characters, characters) : script.characters,
-          scenes: body.scenes !== undefined ? sanitizeScriptScenes(body.scenes) : script.scenes,
-          updatedAt: Date.now()
-        };
-        await writeJson('scripts.json', scripts);
-        return send(res, 200, scripts[scriptIdx]);
+        let out = null;
+        await updateJson('scripts.json', [], (all) => {
+          const i = all.findIndex((sc) => sc.id === scriptId);
+          if (i === -1) return all;
+          all[i] = {
+            ...all[i],
+            title: body.title !== undefined ? (String(body.title).trim().slice(0, 140) || all[i].title) : all[i].title,
+            summary: body.summary !== undefined ? String(body.summary).slice(0, 3000) : all[i].summary,
+            format: SCRIPT_FORMATS.includes(body.format) ? body.format : all[i].format,
+            characters: body.characters !== undefined ? sanitizeScriptCast(body.characters, characters) : all[i].characters,
+            scenes: body.scenes !== undefined ? sanitizeScriptScenes(body.scenes) : all[i].scenes,
+            updatedAt: Date.now()
+          };
+          out = all[i]; return all;
+        });
+        return out ? send(res, 200, out) : send(res, 404, { error: 'Guion no encontrado' });
       }
 
       if (!isGenerate && req.method === 'DELETE') {
-        scripts.splice(scriptIdx, 1);
-        await writeJson('scripts.json', scripts);
+        await updateJson('scripts.json', [], (all) => all.filter((sc) => sc.id !== scriptId));
         return send(res, 200, { ok: true });
       }
 
@@ -1319,14 +1327,19 @@ const server = http.createServer(async (req, res) => {
           type: 'script', modelId: cfg.openaiModel || 'gpt-5-mini', label: 'Guionista IA (OpenAI)',
           units: generated.tokens, unitLabel: 'tokens', cost: scriptPrice(pricing, generated.tokens)
         });
-        scripts[scriptIdx] = {
-          ...script,
-          title: String(generated.title || script.title).trim().slice(0, 140) || script.title,
-          scenes: sanitizeScriptScenes(generated.scenes),
-          updatedAt: Date.now()
-        };
-        await writeJson('scripts.json', scripts);
-        return send(res, 200, scripts[scriptIdx]);
+        let out = null;
+        await updateJson('scripts.json', [], (all) => {
+          const i = all.findIndex((sc) => sc.id === scriptId);
+          if (i === -1) return all;
+          all[i] = {
+            ...all[i],
+            title: String(generated.title || all[i].title).trim().slice(0, 140) || all[i].title,
+            scenes: sanitizeScriptScenes(generated.scenes),
+            updatedAt: Date.now()
+          };
+          out = all[i]; return all;
+        });
+        return out ? send(res, 200, out) : send(res, 404, { error: 'Guion no encontrado' });
       }
     }
 
@@ -1443,7 +1456,6 @@ const server = http.createServer(async (req, res) => {
     // --- prompts archivados ---
     if (p === '/api/prompts' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const prompts = await readJson('prompts.json', []);
       const item = {
         id: newId(),
         title: String(body.title || '').trim() || 'Sin título',
@@ -1452,44 +1464,43 @@ const server = http.createServer(async (req, res) => {
         category: String(body.category || '').trim() || 'General',
         ts: Date.now()
       };
-      prompts.unshift(item);
-      await writeJson('prompts.json', prompts);
+      await updateJson('prompts.json', [], (all) => [item, ...all]);
       return send(res, 200, item);
     }
     if (p.startsWith('/api/prompts/') && req.method === 'PUT') {
       const id = p.split('/').pop();
       const body = await readJsonBody(req);
-      const prompts = await readJson('prompts.json', []);
-      const idx = prompts.findIndex((x) => x.id === id);
-      if (idx === -1) return send(res, 404, { error: 'Prompt no encontrado' });
-      prompts[idx] = {
-        ...prompts[idx],
-        title: body.title !== undefined ? String(body.title).trim() || 'Sin título' : prompts[idx].title,
-        text: body.text !== undefined ? String(body.text) : prompts[idx].text,
-        category: body.category !== undefined ? String(body.category).trim() || 'General' : (prompts[idx].category || 'General'),
-        mode: body.mode !== undefined ? (['audio', 'video'].includes(body.mode) ? body.mode : 'image') : prompts[idx].mode
-      };
-      await writeJson('prompts.json', prompts);
-      return send(res, 200, prompts[idx]);
+      let out = null;
+      await updateJson('prompts.json', [], (all) => {
+        const i = all.findIndex((x) => x.id === id);
+        if (i === -1) return all;
+        all[i] = {
+          ...all[i],
+          title: body.title !== undefined ? String(body.title).trim() || 'Sin título' : all[i].title,
+          text: body.text !== undefined ? String(body.text) : all[i].text,
+          category: body.category !== undefined ? String(body.category).trim() || 'General' : (all[i].category || 'General'),
+          mode: body.mode !== undefined ? (['audio', 'video'].includes(body.mode) ? body.mode : 'image') : all[i].mode
+        };
+        out = all[i]; return all;
+      });
+      return out ? send(res, 200, out) : send(res, 404, { error: 'Prompt no encontrado' });
     }
     if (p.startsWith('/api/prompts/') && req.method === 'DELETE') {
       const id = p.split('/').pop();
-      const prompts = await readJson('prompts.json', []);
-      await writeJson('prompts.json', prompts.filter((x) => x.id !== id));
+      await updateJson('prompts.json', [], (all) => all.filter((x) => x.id !== id));
       return send(res, 200, { ok: true });
     }
 
     // --- historial ---
     if (p.startsWith('/api/history/') && req.method === 'DELETE') {
       const id = p.split('/').pop();
-      const history = await readJson('history.json', []);
-      await writeJson('history.json', history.filter((x) => x.id !== id));
+      await updateJson('history.json', [], (all) => all.filter((x) => x.id !== id));
       return send(res, 200, { ok: true });
     }
     if (p === '/api/history' && req.method === 'DELETE') {
-      const history = await readJson('history.json', []);
-      await writeJson('history.json', []);
-      return send(res, 200, { ok: true, deleted: history.length });
+      let deleted = 0;
+      await updateJson('history.json', [], (all) => { deleted = all.length; return []; });
+      return send(res, 200, { ok: true, deleted });
     }
 
     // --- borrado de assets (los archivos se eliminan de disco) ---
@@ -1506,11 +1517,11 @@ const server = http.createServer(async (req, res) => {
         });
       }
       const removed = new Set(allowed);
-      const metadata = await readJson('asset-metadata.json', {});
-      for (const key of removed) delete metadata[key];
-      await writeJson('asset-metadata.json', metadata);
-      const links = await readJson('asset-links.json', []);
-      await writeJson('asset-links.json', links.filter((link) => !removed.has(link.key)));
+      await updateJson('asset-metadata.json', {}, (meta) => {
+        for (const key of removed) delete meta[key];
+        return meta;
+      });
+      await updateJson('asset-links.json', [], (links) => links.filter((link) => !removed.has(link.key)));
       await updateJson('element-links.json', [], (links2) => links2.filter((link) => !removed.has(link.key)));
       await updateJson('series.json', [], (all) => all.map((s) => ({
         ...s,
@@ -1526,13 +1537,11 @@ const server = http.createServer(async (req, res) => {
           }))
         }))
       })));
-      const history = await readJson('history.json', []);
-      const cleaned = history.map((entry) => ({
+      const cleaned = await updateJson('history.json', [], (all) => all.map((entry) => ({
         ...entry,
         outputs: (entry.outputs || []).filter((key) => !removed.has(key)),
         refs: (entry.refs || []).filter((key) => !removed.has(key))
-      })).filter((entry) => entry.outputs.length);
-      await writeJson('history.json', cleaned);
+      })).filter((entry) => entry.outputs.length));
       return send(res, 200, { ok: true, deleted: allowed.length, history: cleaned.slice(0, 200) });
     }
 
