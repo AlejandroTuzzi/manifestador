@@ -148,6 +148,73 @@ function sortEntities() {
   state.series.sort((a, b) => byName(a.title, b.title));
 }
 
+// encuadre de la foto de portada (personajes y elementos): mover (object-position)
+// + acercar (scale). La miniatura de tarjeta usa exactamente el mismo render.
+function avatarStyle(entity) {
+  const p = entity?.avatarPos || {};
+  const x = p.x ?? 50, y = p.y ?? 50, z = p.zoom ?? 1;
+  return `object-position:${x}% ${y}%;transform:scale(${z});transform-origin:${x}% ${y}%`;
+}
+
+function avatarHtml(entity, phIcon) {
+  const cover = entity.photos[0];
+  return cover
+    ? `<div class="char-avatar"><img src="${fileUrl(cover)}" style="${avatarStyle(entity)}" alt=""></div>`
+    : `<div class="char-avatar ph">${IC(phIcon, 'ic ic-lg')}</div>`;
+}
+
+// Herramienta de encuadre: cuadrado con la portada; se arrastra para mover y se
+// usa la rueda o el slider para acercar. Guarda al soltar / al cambiar el zoom.
+function buildCoverPositioner(entity, onSave) {
+  const wrap = document.createElement('div');
+  wrap.className = 'cover-positioner';
+  const pos = { x: 50, y: 50, zoom: 1, ...(entity.avatarPos || {}) };
+  wrap.innerHTML = `
+    <div class="cover-square"><img src="${fileUrl(entity.photos[0])}" draggable="false" alt=""></div>
+    <div class="cover-tools">
+      <span class="hint">Arrastrá para mover · rueda o slider para acercar</span>
+      <label class="cover-zoom">Zoom <input type="range" min="1" max="4" step="0.05" value="${pos.zoom}"></label>
+      <button type="button" class="mini-btn" data-cover="center">Restablecer</button>
+    </div>`;
+  const img = wrap.querySelector('img');
+  const zoomInput = wrap.querySelector('input[type="range"]');
+  const apply = () => { img.style = `object-position:${pos.x}% ${pos.y}%;transform:scale(${pos.zoom});transform-origin:${pos.x}% ${pos.y}%`; };
+  const save = () => onSave({ x: Math.round(pos.x), y: Math.round(pos.y), zoom: Math.round(pos.zoom * 100) / 100 });
+  apply();
+
+  let drag = null;
+  const square = wrap.querySelector('.cover-square');
+  square.addEventListener('pointerdown', (e) => {
+    drag = { x: e.clientX, y: e.clientY, px: pos.x, py: pos.y };
+    square.setPointerCapture(e.pointerId);
+    square.classList.add('dragging');
+  });
+  square.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const rect = square.getBoundingClientRect();
+    // dividido por el zoom para que el paneo se sienta parejo al acercar
+    pos.x = Math.max(0, Math.min(100, drag.px - ((e.clientX - drag.x) / rect.width) * 100 / pos.zoom));
+    pos.y = Math.max(0, Math.min(100, drag.py - ((e.clientY - drag.y) / rect.height) * 100 / pos.zoom));
+    apply();
+  });
+  const end = () => { if (!drag) { return; } drag = null; square.classList.remove('dragging'); save(); };
+  square.addEventListener('pointerup', end);
+  square.addEventListener('pointercancel', end);
+  square.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    pos.zoom = Math.max(1, Math.min(4, Math.round((pos.zoom - e.deltaY * 0.002) * 100) / 100));
+    zoomInput.value = pos.zoom;
+    apply();
+    clearTimeout(square._zt); square._zt = setTimeout(save, 250);
+  }, { passive: false });
+  zoomInput.addEventListener('input', () => { pos.zoom = Number(zoomInput.value); apply(); });
+  zoomInput.addEventListener('change', save);
+  wrap.querySelector('[data-cover="center"]').addEventListener('click', () => {
+    pos.x = 50; pos.y = 50; pos.zoom = 1; zoomInput.value = 1; apply(); save();
+  });
+  return wrap;
+}
+
 function pinnedChar() {
   return state.characters.find((c) => c.id === state.pinnedId) || null;
 }
@@ -3172,9 +3239,7 @@ function renderCharacters() {
   for (const c of state.characters) {
     const card = document.createElement('div');
     card.className = 'char-card' + (c.id === state.pinnedId ? ' pinned' : '');
-    const avatar = c.photos[0]
-      ? `<img class="char-avatar" src="${fileUrl(c.photos[0])}" alt="">`
-      : `<div class="char-avatar ph">${IC('user', 'ic ic-lg')}</div>`;
+    const avatar = avatarHtml(c, 'user');
     const minis = c.photos.slice(1, 5).map((p) => `<img src="${fileUrl(p)}" alt="">`).join('')
       + (c.photos.length > 5 ? `<div class="more">+${c.photos.length - 5}</div>` : '');
     const linkedCount = state.assetLinks.filter((link) => link.characterId === c.id).length;
@@ -3325,6 +3390,7 @@ function renderCharModal() {
       <div class="hint" style="margin-top:4px">Para personas reales: verificá la identidad en la consola de ModelArk (Playground → My assets → Real-human) y pegá acá el asset ID. En video se usa en lugar de las fotos, que Seedance rechaza si tienen rostros reales.</div>
     </div>
     ${id ? `
+    ${c.photos.length ? '<div><label>Portada</label><div id="chCover"></div></div>' : ''}
     <div><label>Fotos (${c.photos.length})</label>
       ${c.photos.length > 1 ? '<div class="hint" style="margin-bottom:6px">Arrastrá para ordenar — la primera es la foto de perfil</div>' : ''}
       <div class="char-photos-grid" id="chPhotos">
@@ -3347,6 +3413,15 @@ function renderCharModal() {
         </div>`).join('')}</div>
     </div>` : '<p class="hint">Guardá el personaje primero y después subile fotos y variantes.</p>'}
     <button class="generate-btn small" id="chSave">${id ? 'Guardar cambios' : 'Crear personaje'}</button>`;
+
+  if (id && c.photos.length) {
+    $('#chCover').appendChild(buildCoverPositioner(c, async (avatarPos) => {
+      const updated = await api(`/api/characters/${id}`, { method: 'PUT', body: { avatarPos } });
+      state.characters[state.characters.findIndex((x) => x.id === id)] = updated;
+      renderCharacters();
+      renderPinned();
+    }));
+  }
 
   $('#chSave').addEventListener('click', async () => {
     const voices2 = state.voices || [];
@@ -3515,7 +3590,9 @@ async function openCharAssetPicker(target) {
   const t = typeof target === 'object' && target !== null && target.ownerId !== undefined
     ? target
     : { entity: 'character', ownerId: arguments[0], variantId: arguments[1] };
-  state.charAssetPicker = { ...t, zone: 'generated' };
+  // added: assetKey → key de la foto ya creada en esta sesión, para dar feedback
+  // y permitir quitar (las fotos se copian con otro nombre, no hay vínculo directo)
+  state.charAssetPicker = { ...t, zone: 'generated', added: new Map() };
   if (!state.assets.generated.length && !state.assets.uploads.length) {
     try { state.assets = await api('/api/assets'); } catch { /* sin assets igual mostramos el modal */ }
   }
@@ -3526,35 +3603,65 @@ async function openCharAssetPicker(target) {
   $('#charAssetPickerModal').hidden = false;
 }
 
+function pickerTargetPhotos(entity) {
+  const cp = state.charAssetPicker;
+  const owner = entity || (cp.entity === 'element' ? state.elements : state.characters).find((x) => x.id === cp.ownerId);
+  if (!owner) return [];
+  return cp.variantId ? ((owner.variants || []).find((v) => v.id === cp.variantId)?.photos || []) : (owner.photos || []);
+}
+
+function refreshPickerEntity(updated) {
+  const cp = state.charAssetPicker;
+  if (cp.entity === 'element') {
+    state.elements[state.elements.findIndex((x) => x.id === cp.ownerId)] = updated;
+    renderElementModal();
+    renderElements();
+  } else {
+    state.characters[state.characters.findIndex((x) => x.id === cp.ownerId)] = updated;
+    if (state.pinnedId === cp.ownerId) { applyPinnedCharacterPhotos(); renderRefs(); renderCharacterVariantControl(); }
+    renderCharModal();
+    renderCharacters();
+    renderPinned();
+  }
+}
+
 function renderCharAssetPickerGrid() {
   const cp = state.charAssetPicker;
   if (!cp) return;
   $$('#charAssetPickerTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.czone === cp.zone));
   const items = (state.assets[cp.zone] || []).filter((a) => /\.(png|jpe?g|webp)$/i.test(a.key));
-  $('#charAssetPickerGrid').innerHTML = items.length ? items.map((a) => `
-    <button class="shot-asset-cell" data-k="${esc(a.key)}" title="${esc(a.name)}"><img src="${fileUrl(a.key)}" loading="lazy" alt=""></button>`).join('')
-    : '<div class="hint">No hay imágenes en esta zona.</div>';
+  const added = cp.added.size;
+  $('#charAssetPickerHint').textContent = added ? `${added} agregada${added === 1 ? '' : 's'} en esta tanda — clickeá de nuevo para quitar` : '';
+  $('#charAssetPickerGrid').innerHTML = items.length ? items.map((a) => {
+    const on = cp.added.has(a.key);
+    return `<button class="shot-asset-cell${on ? ' selected' : ''}" data-k="${esc(a.key)}" title="${esc(a.name)}">
+      <img src="${fileUrl(a.key)}" loading="lazy" alt="">${on ? `<span class="shot-asset-check">${IC('check')}</span>` : ''}</button>`;
+  }).join('') : '<div class="hint">No hay imágenes en esta zona.</div>';
   $('#charAssetPickerGrid').querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', async () => {
-    const { entity, ownerId, variantId } = state.charAssetPicker || {};
-    if (!ownerId) return;
+    const key = b.dataset.k;
+    if (!cp.ownerId) return;
+    b.disabled = true;
+    const base = cp.entity === 'element' ? `/api/elements/${cp.ownerId}` : `/api/characters/${cp.ownerId}`;
+    const endpoint = cp.variantId ? `${base}/variants/${cp.variantId}/photos` : `${base}/photos`;
     try {
-      const base = entity === 'element' ? `/api/elements/${ownerId}` : `/api/characters/${ownerId}`;
-      const endpoint = variantId ? `${base}/variants/${variantId}/photos` : `${base}/photos`;
-      const updated = await api(endpoint, { method: 'POST', body: { assetKey: b.dataset.k } });
-      if (entity === 'element') {
-        state.elements[state.elements.findIndex((x) => x.id === ownerId)] = updated;
-        renderElementModal();
-        renderElements();
+      if (cp.added.has(key)) {
+        const photoKey = cp.added.get(key);
+        const updated = await api(`${endpoint}?key=${encodeURIComponent(photoKey)}`, { method: 'DELETE' });
+        cp.added.delete(key);
+        refreshPickerEntity(updated);
+        toast('Foto quitada');
       } else {
-        state.characters[state.characters.findIndex((x) => x.id === ownerId)] = updated;
-        if (state.pinnedId === ownerId) { applyPinnedCharacterPhotos(); renderRefs(); renderCharacterVariantControl(); }
-        renderCharModal();
-        renderCharacters();
-        renderPinned();
+        const before = pickerTargetPhotos();
+        const updated = await api(endpoint, { method: 'POST', body: { assetKey: key } });
+        const newKey = pickerTargetPhotos(updated).find((k) => !before.includes(k));
+        if (newKey) cp.added.set(key, newKey);
+        refreshPickerEntity(updated);
+        toast('Foto agregada');
       }
-      toast('Foto agregada');
+      renderCharAssetPickerGrid();
     } catch (err) {
       toast(err.message, 'err');
+      b.disabled = false;
     }
   }));
 }
@@ -3646,9 +3753,7 @@ function renderElements() {
   for (const el of items) {
     const card = document.createElement('div');
     card.className = 'char-card';
-    const avatar = el.photos[0]
-      ? `<img class="char-avatar" src="${fileUrl(el.photos[0])}" alt="">`
-      : `<div class="char-avatar ph">${IC('globe', 'ic ic-lg')}</div>`;
+    const avatar = avatarHtml(el, 'globe');
     const minis = el.photos.slice(1, 5).map((p) => `<img src="${fileUrl(p)}" alt="">`).join('')
       + (el.photos.length > 5 ? `<div class="more">+${el.photos.length - 5}</div>` : '');
     const linkedCount = state.elementLinks.filter((link) => link.elementId === el.id).length;
@@ -3732,6 +3837,7 @@ function renderElementModal() {
     <div id="elCategoryChips" class="chips"></div>
     <label>Descripción<textarea id="elDescription" rows="3">${esc(el?.description || '')}</textarea></label>
     ${el ? `
+    ${el.photos.length ? '<div class="variant-manager"><label>Portada</label><div id="elCover"></div></div>' : ''}
     <div class="variant-manager">
       <div class="variant-manager-head"><label>Fotos (${el.photos.length})</label><div>
         <button type="button" class="mini-btn" id="elAddPhoto">${IC('upload')} Subir</button>
@@ -3809,6 +3915,12 @@ function renderElementModal() {
     };
     $('#fileInput').click();
   };
+
+  if (el.photos.length) {
+    $('#elCover').appendChild(buildCoverPositioner(el, async (avatarPos) => {
+      refreshElement(await api(`/api/elements/${id}`, { method: 'PUT', body: { avatarPos } }));
+    }));
+  }
 
   $('#elAddPhoto')?.addEventListener('click', () => uploadPhotos(`/api/elements/${id}/photos`));
   $('#elAddFromAssets')?.addEventListener('click', () => openCharAssetPicker({ entity: 'element', ownerId: id, variantId: null }));

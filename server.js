@@ -272,6 +272,17 @@ function sanitizeName(name) {
   return String(name || 'archivo').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80);
 }
 
+// encuadre de la portada: posición (0–100 por eje) y zoom (1–4)
+function sanitizeAvatarPos(pos) {
+  const clamp = (v) => Math.max(0, Math.min(100, Math.round(Number(v))));
+  const zoom = Number(pos?.zoom);
+  return {
+    x: Number.isFinite(Number(pos?.x)) ? clamp(pos.x) : 50,
+    y: Number.isFinite(Number(pos?.y)) ? clamp(pos.y) : 50,
+    zoom: Number.isFinite(zoom) ? Math.max(1, Math.min(4, Math.round(zoom * 100) / 100)) : 1
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Photoshop: detección de la instalación y apertura de archivos
 // ---------------------------------------------------------------------------
@@ -1260,6 +1271,7 @@ const server = http.createServer(async (req, res) => {
         arkAssetId: String(body.arkAssetId || '').trim().replace(/^asset:\/\//, ''),
         photos: [],
         variants: [],
+        avatarPos: { x: 50, y: 50, zoom: 1 },
         ts: Date.now()
       };
       characters.unshift(item);
@@ -1343,6 +1355,7 @@ const server = http.createServer(async (req, res) => {
         description: String(body.description || ''),
         photos: [],
         variants: [],
+        avatarPos: { x: 50, y: 50, zoom: 1 },
         ts: Date.now()
       };
       await updateJson('elements.json', [], (all) => [item, ...all]);
@@ -1479,6 +1492,7 @@ const server = http.createServer(async (req, res) => {
           name: body.name !== undefined ? (String(body.name).trim() || el.name) : el.name,
           category: body.category !== undefined ? String(body.category).trim().slice(0, 80) : (el.category || ''),
           description: body.description !== undefined ? String(body.description) : el.description,
+          avatarPos: body.avatarPos !== undefined ? sanitizeAvatarPos(body.avatarPos) : (el.avatarPos || { x: 50, y: 50 }),
           variants: el.variants || []
         };
         await writeJson('elements.json', elements);
@@ -1764,6 +1778,7 @@ const server = http.createServer(async (req, res) => {
           voiceId: body.voiceId !== undefined ? body.voiceId : ch.voiceId,
           voiceName: body.voiceName !== undefined ? body.voiceName : ch.voiceName,
           arkAssetId: body.arkAssetId !== undefined ? String(body.arkAssetId).trim().replace(/^asset:\/\//, '') : (ch.arkAssetId || ''),
+          avatarPos: body.avatarPos !== undefined ? sanitizeAvatarPos(body.avatarPos) : (ch.avatarPos || { x: 50, y: 50 }),
           variants: ch.variants || []
         };
         await writeJson('characters.json', characters);

@@ -624,9 +624,18 @@ audio { width: 100%; margin-top: 6px; }
 .char-card.pinned { border-color: var(--pink); }
 .char-top { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; }
 .char-avatar {
-  width: 56px; height: 56px; border-radius: 0; object-fit: cover;
-  border: 1px solid var(--border);
+  width: 56px; height: 56px; border-radius: 0; overflow: hidden;
+  border: 1px solid var(--border); flex-shrink: 0;
 }
+.char-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* herramienta de encuadre de la portada (mover + zoom) */
+.cover-positioner { display: flex; gap: 12px; align-items: center; }
+.cover-square { width: 120px; height: 120px; overflow: hidden; border: 1px solid var(--border); flex-shrink: 0; cursor: grab; touch-action: none; background: #000; }
+.cover-square.dragging { cursor: grabbing; border-color: var(--pink); }
+.cover-square img { width: 100%; height: 100%; object-fit: cover; display: block; user-select: none; pointer-events: none; }
+.cover-tools { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.cover-zoom { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.cover-zoom input[type="range"] { width: 130px; accent-color: var(--pink-strong); }
 .char-avatar.ph { display: grid; place-items: center; font-size: 24px; background: var(--grad-soft); }
 .char-name { font-weight: 800; font-size: 15px; }
 .char-voice { font-size: 11.5px; color: var(--pink); margin-top: 2px; }
