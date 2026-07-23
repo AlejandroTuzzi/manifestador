@@ -1495,160 +1495,97 @@ async function setPickerTab(src) {
   });
 }
 
-// tab Series del picker: assets asociados a una serie (solo imágenes)
-function renderPickerSeries() {
+// Drill-down genérico del picker: lista de entidades → (opcional) chips de
+// versión → fotos. Lo usan Personajes, Locaciones/Objetos y Series con su
+// propia config. `render` es la función-wrapper de cada tab (para re-dibujar).
+function renderEntityPicker(cfg) {
   sortEntities();
   const body = $('#pickerBody');
-  const serie = state.series.find((s) => s.id === state.pickerSeriesId);
+  const chosen = cfg.items().find((x) => x.id === state[cfg.idKey]);
+  const attachPick = () => body.querySelectorAll('.pick[data-key]').forEach((p) =>
+    p.addEventListener('click', () => { addRef(p.dataset.key); $('#pickerModal').hidden = true; }));
 
-  if (!serie) {
-    body.innerHTML = state.series.length
-      ? `<div class="picker-grid">${state.series.map((s) => {
-          const keys = (s.assetKeys || []).filter((k) => !/^(audio|video)\//.test(k));
-          return `<div class="pick" data-serie="${s.id}">${keys[0]
-            ? `<img src="${fileUrl(keys[0])}" loading="lazy" alt="">`
-            : `<div class="pick-ph">${IC('layers', 'ic ic-lg')}</div>`}
-            <div class="p-label">${esc(s.title)} · ${keys.length} img</div></div>`;
-        }).join('')}</div>`
-      : '<div class="empty-note">Todavía no hay series.</div>';
-    body.querySelectorAll('[data-serie]').forEach((n) => n.addEventListener('click', () => {
-      state.pickerSeriesId = n.dataset.serie;
-      renderPickerSeries();
-    }));
-    return;
-  }
-
-  const keys = (serie.assetKeys || []).filter((k) => !/^(audio|video)\//.test(k));
-  body.innerHTML = `
-    <div class="picker-char-head">
-      <button class="mini-btn" id="pickerSeriesBack">← Series</button>
-      <strong>${esc(serie.title)}</strong>
-      <span class="hint">${keys.length} imagen${keys.length === 1 ? '' : 'es'} asociada${keys.length === 1 ? '' : 's'}</span>
-    </div>
-    ${keys.length
-      ? `<div class="picker-grid">${keys.map((k) =>
-          `<div class="pick" data-key="${esc(k)}"><img src="${fileUrl(k)}" loading="lazy" alt=""><div class="p-label">${esc(serie.title)}</div></div>`).join('')}</div>`
-      : '<div class="empty-note">Esta serie no tiene imágenes asociadas todavía.</div>'}`;
-  $('#pickerSeriesBack').addEventListener('click', () => {
-    state.pickerSeriesId = '';
-    renderPickerSeries();
-  });
-  body.querySelectorAll('.pick[data-key]').forEach((p) => p.addEventListener('click', () => {
-    addRef(p.dataset.key);
-    $('#pickerModal').hidden = true;
-  }));
-}
-
-// tab Locaciones/Objetos del picker: mismo esquema en dos pasos que Personajes
-function renderPickerElements() {
-  sortEntities();
-  const body = $('#pickerBody');
-  const el = state.elements.find((x) => x.id === state.pickerElementId);
-
-  if (!el) {
-    body.innerHTML = state.elements.length
-      ? `<div class="picker-grid">${state.elements.map((item) => {
-          const versions = 1 + (item.variants || []).length;
-          const cover = item.photos[0] || (item.variants || []).find((v) => (v.photos || []).length)?.photos[0];
-          return `<div class="pick" data-el="${item.id}">${cover
+  if (!chosen) {
+    const items = cfg.items();
+    body.innerHTML = items.length
+      ? `<div class="picker-grid">${items.map((it) => {
+          const cover = cfg.cover(it);
+          return `<div class="pick" data-id="${it.id}">${cover
             ? `<img src="${fileUrl(cover)}" loading="lazy" alt="">`
-            : `<div class="pick-ph">${IC('globe', 'ic ic-lg')}</div>`}
-            <div class="p-label">${esc(item.name)} · ${ELEMENT_KIND_LABEL[item.kind] || ''}${versions > 1 ? ` · ${versions} versiones` : ''}</div></div>`;
+            : `<div class="pick-ph">${IC(cfg.icon, 'ic ic-lg')}</div>`}<div class="p-label">${esc(cfg.label(it))}</div></div>`;
         }).join('')}</div>`
-      : '<div class="empty-note">Todavía no hay locaciones ni objetos.</div>';
-    body.querySelectorAll('[data-el]').forEach((n) => n.addEventListener('click', () => {
-      state.pickerElementId = n.dataset.el;
-      state.pickerElementVariantId = '';
-      renderPickerElements();
+      : `<div class="empty-note">${cfg.empty}</div>`;
+    body.querySelectorAll('[data-id]').forEach((n) => n.addEventListener('click', () => {
+      state[cfg.idKey] = n.dataset.id;
+      if (cfg.variantKey) state[cfg.variantKey] = '';
+      cfg.render();
     }));
     return;
   }
 
-  const groups = [
-    { id: '', name: 'Original', photos: el.photos || [] },
-    ...(el.variants || []).map((v) => ({ id: v.id, name: v.name, photos: v.photos || [] }))
-  ];
-  const group = groups.find((g) => g.id === state.pickerElementVariantId) || groups[0];
+  const groups = cfg.groups(chosen);
+  const group = groups.find((g) => g.id === (cfg.variantKey ? state[cfg.variantKey] : '')) || groups[0];
   body.innerHTML = `
     <div class="picker-char-head">
-      <button class="mini-btn" id="pickerElementBack">← Locaciones y objetos</button>
-      <strong>${esc(el.name)}</strong>
-      <div class="chips">${groups.map((g) =>
-        `<button class="chip${g.id === group.id ? ' active' : ''}" data-evg="${esc(g.id)}">${esc(g.name)} (${g.photos.length})</button>`).join('')}</div>
+      <button class="mini-btn" id="pickerBack">← ${esc(cfg.backLabel)}</button>
+      <strong>${esc(cfg.title(chosen))}</strong>
+      ${groups.length > 1
+        ? `<div class="chips">${groups.map((g) => `<button class="chip${g.id === group.id ? ' active' : ''}" data-vg="${esc(g.id)}">${esc(g.name)} (${g.photos.length})</button>`).join('')}</div>`
+        : `<span class="hint">${group.photos.length} imagen${group.photos.length === 1 ? '' : 'es'}</span>`}
     </div>
     ${group.photos.length
       ? `<div class="picker-grid">${group.photos.map((ph) =>
-          `<div class="pick" data-key="${esc(ph)}"><img src="${fileUrl(ph)}" loading="lazy" alt=""><div class="p-label">${esc(el.name)} · ${esc(group.name)}</div></div>`).join('')}</div>`
-      : '<div class="empty-note">Esta versión todavía no tiene fotos.</div>'}`;
-  $('#pickerElementBack').addEventListener('click', () => {
-    state.pickerElementId = '';
-    state.pickerElementVariantId = '';
-    renderPickerElements();
+          `<div class="pick" data-key="${esc(ph)}"><img src="${fileUrl(ph)}" loading="lazy" alt=""><div class="p-label">${esc(cfg.photoLabel(chosen, group))}</div></div>`).join('')}</div>`
+      : `<div class="empty-note">${cfg.emptyPhotos}</div>`}`;
+  $('#pickerBack').addEventListener('click', () => {
+    state[cfg.idKey] = '';
+    if (cfg.variantKey) state[cfg.variantKey] = '';
+    cfg.render();
   });
-  body.querySelectorAll('[data-evg]').forEach((b) => b.addEventListener('click', () => {
-    state.pickerElementVariantId = b.dataset.evg;
-    renderPickerElements();
-  }));
-  body.querySelectorAll('.pick[data-key]').forEach((p) => p.addEventListener('click', () => {
-    addRef(p.dataset.key);
-    $('#pickerModal').hidden = true;
-  }));
+  if (cfg.variantKey) body.querySelectorAll('[data-vg]').forEach((b) =>
+    b.addEventListener('click', () => { state[cfg.variantKey] = b.dataset.vg; cfg.render(); }));
+  attachPick();
 }
 
-// tab Personajes del picker: primero se elige el personaje, después Original o variante
+const entityVariantGroups = (e) => [
+  { id: '', name: 'Original', photos: e.photos || [] },
+  ...(e.variants || []).map((v) => ({ id: v.id, name: v.name, photos: v.photos || [] }))
+];
+const firstPhoto = (e) => e.photos[0] || (e.variants || []).find((v) => (v.photos || []).length)?.photos[0];
+const seriesImages = (s) => (s.assetKeys || []).filter((k) => !/^(audio|video)\//.test(k));
+
 function renderPickerCharacters() {
-  sortEntities();
-  const body = $('#pickerBody');
-  const c = state.characters.find((x) => x.id === state.pickerCharacterId);
-
-  if (!c) {
-    body.innerHTML = state.characters.length
-      ? `<div class="picker-grid">${state.characters.map((ch) => {
-          const versions = 1 + (ch.variants || []).length;
-          const cover = ch.photos[0] || (ch.variants || []).find((v) => (v.photos || []).length)?.photos[0];
-          return `<div class="pick" data-char="${ch.id}">${cover
-            ? `<img src="${fileUrl(cover)}" loading="lazy" alt="">`
-            : `<div class="pick-ph">${IC('user', 'ic ic-lg')}</div>`}
-            <div class="p-label">${esc(ch.name)}${versions > 1 ? ` · ${versions} versiones` : ''}</div></div>`;
-        }).join('')}</div>`
-      : '<div class="empty-note">Todavía no hay personajes.</div>';
-    body.querySelectorAll('[data-char]').forEach((el) => el.addEventListener('click', () => {
-      state.pickerCharacterId = el.dataset.char;
-      state.pickerVariantId = '';
-      renderPickerCharacters();
-    }));
-    return;
-  }
-
-  const groups = [
-    { id: '', name: 'Original', photos: c.photos || [] },
-    ...(c.variants || []).map((v) => ({ id: v.id, name: v.name, photos: v.photos || [] }))
-  ];
-  const group = groups.find((g) => g.id === state.pickerVariantId) || groups[0];
-  body.innerHTML = `
-    <div class="picker-char-head">
-      <button class="mini-btn" id="pickerCharBack">← Personajes</button>
-      <strong>${esc(c.name)}</strong>
-      <div class="chips">${groups.map((g) =>
-        `<button class="chip${g.id === group.id ? ' active' : ''}" data-vg="${esc(g.id)}">${esc(g.name)} (${g.photos.length})</button>`).join('')}</div>
-    </div>
-    ${group.photos.length
-      ? `<div class="picker-grid">${group.photos.map((ph) =>
-          `<div class="pick" data-key="${esc(ph)}"><img src="${fileUrl(ph)}" loading="lazy" alt=""><div class="p-label">${esc(c.name)} · ${esc(group.name)}</div></div>`).join('')}</div>`
-      : '<div class="empty-note">Esta versión todavía no tiene fotos.</div>'}`;
-  $('#pickerCharBack').addEventListener('click', () => {
-    state.pickerCharacterId = '';
-    state.pickerVariantId = '';
-    renderPickerCharacters();
+  renderEntityPicker({
+    idKey: 'pickerCharacterId', variantKey: 'pickerVariantId', icon: 'user',
+    items: () => state.characters, cover: firstPhoto, groups: entityVariantGroups,
+    label: (c) => `${c.name}${(c.variants || []).length ? ` · ${1 + c.variants.length} versiones` : ''}`,
+    title: (c) => c.name, photoLabel: (c, g) => `${c.name} · ${g.name}`,
+    backLabel: 'Personajes', empty: 'Todavía no hay personajes.',
+    emptyPhotos: 'Esta versión todavía no tiene fotos.', render: renderPickerCharacters
   });
-  body.querySelectorAll('[data-vg]').forEach((b) => b.addEventListener('click', () => {
-    state.pickerVariantId = b.dataset.vg;
-    renderPickerCharacters();
-  }));
-  body.querySelectorAll('.pick[data-key]').forEach((p) => p.addEventListener('click', () => {
-    addRef(p.dataset.key);
-    $('#pickerModal').hidden = true;
-  }));
+}
+
+function renderPickerElements() {
+  renderEntityPicker({
+    idKey: 'pickerElementId', variantKey: 'pickerElementVariantId', icon: 'globe',
+    items: () => state.elements, cover: firstPhoto, groups: entityVariantGroups,
+    label: (el) => `${el.name} · ${ELEMENT_KIND_LABEL[el.kind] || ''}${(el.variants || []).length ? ` · ${1 + el.variants.length} versiones` : ''}`,
+    title: (el) => el.name, photoLabel: (el, g) => `${el.name} · ${g.name}`,
+    backLabel: 'Locaciones y objetos', empty: 'Todavía no hay locaciones ni objetos.',
+    emptyPhotos: 'Esta versión todavía no tiene fotos.', render: renderPickerElements
+  });
+}
+
+function renderPickerSeries() {
+  renderEntityPicker({
+    idKey: 'pickerSeriesId', variantKey: null, icon: 'layers',
+    items: () => state.series, cover: (s) => seriesImages(s)[0],
+    groups: (s) => [{ id: '', name: s.title, photos: seriesImages(s) }],
+    label: (s) => `${s.title} · ${seriesImages(s).length} img`,
+    title: (s) => s.title, photoLabel: (s) => s.title,
+    backLabel: 'Series', empty: 'Todavía no hay series.',
+    emptyPhotos: 'Esta serie no tiene imágenes asociadas todavía.', render: renderPickerSeries
+  });
 }
 
 async function uploadFiles(files, asRefs) {
