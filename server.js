@@ -147,18 +147,44 @@ async function recordCost(entry) {
   return recorded;
 }
 
+function metadataFromEntry(entry) {
+  return {
+    prompt: entry.prompt || '', type: entry.type, modelId: entry.modelId,
+    modelName: entry.modelName, characterId: entry.characterId || null,
+    characterVariantId: entry.characterVariantId || null, ts: entry.ts,
+    aspectRatio: entry.aspectRatio || null, resolution: entry.resolution || null,
+    batch: entry.batch || 1, refs: entry.refs || [], voiceId: entry.voiceId || null,
+    voiceName: entry.voiceName || null, cost: entry.cost || 0
+  };
+}
+
+// La metadata de cada asset se persiste al generarlo (acá). /api/assets solo la
+// lee, sin re-derivarla del historial en cada refresco.
 async function recordAssetMetadata(entry) {
   await updateJson('asset-metadata.json', {}, (metadata) => {
-    for (const key of entry.outputs || []) metadata[key] = {
-      prompt: entry.prompt || '', type: entry.type, modelId: entry.modelId,
-      modelName: entry.modelName, characterId: entry.characterId || null,
-      characterVariantId: entry.characterVariantId || null, ts: entry.ts,
-      aspectRatio: entry.aspectRatio || null, resolution: entry.resolution || null,
-      batch: entry.batch || 1, refs: entry.refs || [], voiceId: entry.voiceId || null,
-      voiceName: entry.voiceName || null, cost: entry.cost || 0
-    };
+    for (const key of entry.outputs || []) metadata[key] = metadataFromEntry(entry);
     return metadata;
   });
+}
+
+// Backfill de una sola vez por arranque: completa la metadata de assets viejos
+// (previos a que se persistiera al generar) leyendo el historial. Después de la
+// primera vez, /api/assets no vuelve a tocar el historial.
+let assetMetadataBackfilled = false;
+async function backfilledAssetMetadata() {
+  const metadata = await readJson('asset-metadata.json', {});
+  if (assetMetadataBackfilled) return metadata;
+  assetMetadataBackfilled = true;
+  const history = await readJson('history.json', []);
+  const missing = {};
+  for (const entry of history) for (const key of entry.outputs || []) {
+    if (!metadata[key]) missing[key] = metadataFromEntry(entry);
+  }
+  if (Object.keys(missing).length) {
+    await updateJson('asset-metadata.json', {}, (m) => ({ ...missing, ...m }));
+    return { ...missing, ...metadata };
+  }
+  return metadata;
 }
 
 // ZIP mínimo y portable (entradas almacenadas, sin dependencias externas).
@@ -1090,25 +1116,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/assets' && req.method === 'GET') {
-      const [generated, uploads, audio, video, savedMetadata, history] = await Promise.all([
+      const [generated, uploads, audio, video, metadata] = await Promise.all([
         listZone('generated'), listZone('uploads'), listZone('audio'), listZone('video'),
-        readJson('asset-metadata.json', {}), readJson('history.json', [])
+        backfilledAssetMetadata()
       ]);
-      const metadata = { ...savedMetadata };
-      let changed = false;
-      for (const entry of history) for (const key of entry.outputs || []) {
-        const fromHistory = {
-          prompt: entry.prompt || '', type: entry.type, modelId: entry.modelId, modelName: entry.modelName,
-          characterId: entry.characterId || null, characterVariantId: entry.characterVariantId || null, ts: entry.ts,
-          aspectRatio: entry.aspectRatio || null, resolution: entry.resolution || null, batch: entry.batch || 1,
-          refs: entry.refs || [], voiceId: entry.voiceId || null, voiceName: entry.voiceName || null, cost: entry.cost || 0
-        };
-        const before = metadata[key] || {};
-        const enriched = { ...fromHistory, ...before };
-        if (Object.keys(fromHistory).some((field) => before[field] === undefined)) changed = true;
-        metadata[key] = enriched;
-      }
-      if (changed) await writeJson('asset-metadata.json', metadata);
       for (const item of [...generated, ...uploads, ...audio, ...video]) Object.assign(item, metadata[item.key] || {});
       return send(res, 200, { generated, uploads, audio, video });
     }
