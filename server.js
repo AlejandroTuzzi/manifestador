@@ -690,6 +690,278 @@ function sanitizeScriptCast(list, characters) {
   })).filter((ch) => ch.name);
 }
 
+// ---------------------------------------------------------------------------
+// Entidades con fotos y variantes: personajes y "elementos" (locaciones/objetos)
+// comparten toda la lógica de fotos, variantes y vínculos. Solo cambian los
+// campos propios y el archivo de vínculos, definidos en el "meta" de cada uno.
+// Todo pasa por updateJson → escrituras atómicas y sin pisarse entre sí.
+// ---------------------------------------------------------------------------
+
+const ENTITY_META = {
+  characters: {
+    base: 'characters',
+    file: 'characters.json',
+    linksPath: '/api/asset-links',
+    linksFile: 'asset-links.json',
+    ownerField: 'characterId',
+    notFound: 'Personaje no encontrado',
+    allowReorder: true,
+    buildCreate: (body) => ({
+      name: String(body.name || '').trim() || 'Sin nombre',
+      description: String(body.description || ''),
+      voiceId: body.voiceId || '',
+      voiceName: body.voiceName || '',
+      arkAssetId: String(body.arkAssetId || '').trim().replace(/^asset:\/\//, '')
+    }),
+    applyUpdate: (e, body) => {
+      if (body.name !== undefined) e.name = String(body.name).trim() || e.name;
+      if (body.description !== undefined) e.description = String(body.description);
+      if (body.voiceId !== undefined) e.voiceId = body.voiceId;
+      if (body.voiceName !== undefined) e.voiceName = body.voiceName;
+      if (body.arkAssetId !== undefined) e.arkAssetId = String(body.arkAssetId).trim().replace(/^asset:\/\//, '');
+    },
+    onDelete: async (id) => {
+      await updateJson('asset-links.json', [], (links) => links.filter((l) => l.characterId !== id));
+      await updateJson('series.json', [], (all) => all.map((s) => ({
+        ...s, characterIds: (s.characterIds || []).filter((cid) => cid !== id)
+      })));
+    }
+  },
+  elements: {
+    base: 'elements',
+    file: 'elements.json',
+    linksPath: '/api/element-links',
+    linksFile: 'element-links.json',
+    ownerField: 'elementId',
+    notFound: 'Locación u objeto no encontrado',
+    allowReorder: false,
+    buildCreate: (body) => ({
+      kind: body.kind === 'object' ? 'object' : 'location',
+      name: String(body.name || '').trim() || 'Sin nombre',
+      category: String(body.category || '').trim().slice(0, 80),
+      description: String(body.description || '')
+    }),
+    applyUpdate: (e, body) => {
+      if (body.kind !== undefined) e.kind = body.kind === 'object' ? 'object' : 'location';
+      if (body.name !== undefined) e.name = String(body.name).trim() || e.name;
+      if (body.category !== undefined) e.category = String(body.category).trim().slice(0, 80);
+      if (body.description !== undefined) e.description = String(body.description);
+    },
+    onDelete: async (id) => {
+      await updateJson('element-links.json', [], (links) => links.filter((l) => l.elementId !== id));
+    }
+  }
+};
+
+// copia un asset (o guarda un dataUrl) como foto y devuelve el nombre de archivo
+async function saveEntityPhoto(destDir, body) {
+  await fs.mkdir(destDir, { recursive: true });
+  if (body.assetKey) {
+    const assetKey = String(body.assetKey);
+    if (!/^(generated|uploads)\//.test(assetKey)) throw new Error('Solo se pueden usar imágenes como foto.');
+    const source = await resolveAssetKey(assetKey);
+    const ext = path.extname(source).toLowerCase();
+    if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) throw new Error('Formato de imagen no admitido.');
+    const name = `${ts()}-asset-${newId()}${ext}`;
+    await fs.copyFile(source, path.join(destDir, name));
+    return name;
+  }
+  const { mime, buffer } = parseDataUrl(body.dataUrl);
+  const name = `${ts()}-${sanitizeName(body.name).replace(/\.[^.]+$/, '')}${extForMime(mime)}`;
+  await fs.writeFile(path.join(destDir, name), buffer);
+  return name;
+}
+
+// resuelve las rutas de una entidad; devuelve true si la manejó, false si no
+async function serveEntityRoutes(meta, { p, req, res, url }) {
+  const { base, file, linksPath, linksFile, ownerField, notFound } = meta;
+
+  // crear
+  if (p === `/api/${base}` && req.method === 'POST') {
+    const body = await readJsonBody(req);
+    const item = { id: newId(), ...meta.buildCreate(body), photos: [], variants: [], avatarPos: { x: 50, y: 50, zoom: 1 }, ts: Date.now() };
+    await updateJson(file, [], (all) => [item, ...all]);
+    send(res, 200, item);
+    return true;
+  }
+
+  // vínculos asset ↔ entidad
+  if (p === linksPath && req.method === 'POST') {
+    const body = await readJsonBody(req);
+    const key = String(body.key || '');
+    if (!/^(generated|uploads)\//.test(key)) throw new Error('Solo se pueden asociar imágenes.');
+    await fs.access(await resolveAssetKey(key));
+    const owner = (await readJson(file, [])).find((e) => e.id === body[ownerField]);
+    if (!owner) throw new Error(`${notFound}.`);
+    const variantId = body.variantId || null;
+    if (variantId && !(owner.variants || []).some((v) => v.id === variantId)) throw new Error('Variante no encontrada.');
+    const next = await updateJson(linksFile, [], (links) =>
+      [{ key, [ownerField]: owner.id, variantId, ts: Date.now() }, ...links.filter((l) => l.key !== key)].slice(0, 10000));
+    send(res, 200, { links: next });
+    return true;
+  }
+  if (p === linksPath && req.method === 'DELETE') {
+    const key = url.searchParams.get('key');
+    const next = await updateJson(linksFile, [], (links) => links.filter((l) => l.key !== key));
+    send(res, 200, { links: next });
+    return true;
+  }
+
+  // variantes: /api/{base}/:id/variants[/:vid][/photos]
+  const vm = new RegExp(`^/api/${base}/([a-z0-9]+)/variants(?:/([a-z0-9]+))?(/photos)?$`).exec(p);
+  if (vm) {
+    const [, id, variantId, isPhotos] = vm;
+
+    if (!variantId && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      let out = null;
+      await updateJson(file, [], (all) => {
+        const e = all.find((x) => x.id === id);
+        if (!e) return all;
+        e.variants = e.variants || [];
+        e.variants.push({ id: newId(), name: String(body.name || '').trim() || 'Nueva variante', description: String(body.description || ''), photos: [], ts: Date.now() });
+        out = e; return all;
+      });
+      return out ? (send(res, 200, out), true) : (send(res, 404, { error: notFound }), true);
+    }
+
+    if (variantId && isPhotos && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const destDir = path.join(DATA_DIR, base, id, 'variants', variantId);
+      const name = await saveEntityPhoto(destDir, body);
+      let out = null, bad = null;
+      await updateJson(file, [], (all) => {
+        const e = all.find((x) => x.id === id);
+        const v = e && (e.variants || []).find((x) => x.id === variantId);
+        if (!e) { bad = notFound; return all; }
+        if (!v) { bad = 'Variante no encontrada'; return all; }
+        v.photos.push(`${base}/${id}/variants/${variantId}/${name}`);
+        out = e; return all;
+      });
+      if (bad) { await fs.unlink(path.join(destDir, name)).catch(() => {}); return send(res, 404, { error: bad }), true; }
+      return send(res, 200, out), true;
+    }
+
+    if (variantId && !isPhotos && req.method === 'PUT') {
+      const body = await readJsonBody(req);
+      let out = null, bad = null;
+      await updateJson(file, [], (all) => {
+        const e = all.find((x) => x.id === id);
+        const v = e && (e.variants || []).find((x) => x.id === variantId);
+        if (!v) { bad = e ? 'Variante no encontrada' : notFound; return all; }
+        if (body.name !== undefined) v.name = String(body.name).trim() || v.name;
+        if (body.description !== undefined) v.description = String(body.description);
+        out = e; return all;
+      });
+      return bad ? (send(res, 404, { error: bad }), true) : (send(res, 200, out), true);
+    }
+
+    if (variantId && !isPhotos && req.method === 'DELETE') {
+      let out = null, found = false;
+      await updateJson(file, [], (all) => {
+        const e = all.find((x) => x.id === id);
+        if (!e) return all;
+        found = (e.variants || []).some((v) => v.id === variantId);
+        e.variants = (e.variants || []).filter((v) => v.id !== variantId);
+        out = e; return all;
+      });
+      if (!out) return send(res, 404, { error: notFound }), true;
+      if (found) {
+        await updateJson(linksFile, [], (links) => links.map((l) =>
+          l[ownerField] === id && l.variantId === variantId ? { ...l, variantId: null } : l));
+        await fs.rm(path.join(DATA_DIR, base, id, 'variants', variantId), { recursive: true, force: true }).catch(() => {});
+      }
+      return send(res, 200, out), true;
+    }
+
+    if (variantId && isPhotos && req.method === 'DELETE') {
+      const key = url.searchParams.get('key');
+      let out = null;
+      await updateJson(file, [], (all) => {
+        const e = all.find((x) => x.id === id);
+        const v = e && (e.variants || []).find((x) => x.id === variantId);
+        if (v) v.photos = v.photos.filter((k) => k !== key);
+        out = e; return all;
+      });
+      if (!out) return send(res, 404, { error: notFound }), true;
+      if (key) await fs.unlink(await resolveAssetKey(key)).catch(() => {});
+      return send(res, 200, out), true;
+    }
+  }
+
+  // entidad: /api/{base}/:id[/photos]
+  const em = new RegExp(`^/api/${base}/([a-z0-9]+)(/photos)?$`).exec(p);
+  if (em) {
+    const [, id, isPhotos] = em;
+
+    if (isPhotos && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const name = await saveEntityPhoto(path.join(DATA_DIR, base, id), body);
+      let out = null;
+      await updateJson(file, [], (all) => {
+        const e = all.find((x) => x.id === id);
+        if (e) e.photos.push(`${base}/${id}/${name}`);
+        out = e; return all;
+      });
+      if (!out) { await fs.unlink(path.join(DATA_DIR, base, id, name)).catch(() => {}); return send(res, 404, { error: notFound }), true; }
+      return send(res, 200, out), true;
+    }
+    if (isPhotos && req.method === 'DELETE') {
+      const key = url.searchParams.get('key');
+      let out = null;
+      await updateJson(file, [], (all) => {
+        const e = all.find((x) => x.id === id);
+        if (e) e.photos = e.photos.filter((k) => k !== key);
+        out = e; return all;
+      });
+      if (!out) return send(res, 404, { error: notFound }), true;
+      if (key) await fs.unlink(await resolveAssetKey(key)).catch(() => {});
+      return send(res, 200, out), true;
+    }
+    if (isPhotos && req.method === 'PUT' && meta.allowReorder) {
+      const body = await readJsonBody(req);
+      const order = Array.isArray(body.order) ? body.order.map(String) : [];
+      let out = null, mismatch = false;
+      await updateJson(file, [], (all) => {
+        const e = all.find((x) => x.id === id);
+        if (!e) return all;
+        const same = order.length === e.photos.length && new Set(order).size === order.length && order.every((k) => e.photos.includes(k));
+        if (!same) { mismatch = true; return all; }
+        e.photos = order; out = e; return all;
+      });
+      if (mismatch) return send(res, 400, { error: 'El orden no coincide con las fotos' }), true;
+      return out ? (send(res, 200, out), true) : (send(res, 404, { error: notFound }), true);
+    }
+    if (!isPhotos && req.method === 'PUT') {
+      const body = await readJsonBody(req);
+      let out = null;
+      await updateJson(file, [], (all) => {
+        const e = all.find((x) => x.id === id);
+        if (!e) return all;
+        meta.applyUpdate(e, body);
+        if (body.avatarPos !== undefined) e.avatarPos = sanitizeAvatarPos(body.avatarPos);
+        e.variants = e.variants || [];
+        out = e; return all;
+      });
+      return out ? (send(res, 200, out), true) : (send(res, 404, { error: notFound }), true);
+    }
+    if (!isPhotos && req.method === 'DELETE') {
+      let existed = false;
+      await updateJson(file, [], (all) => {
+        existed = all.some((x) => x.id === id);
+        return all.filter((x) => x.id !== id);
+      });
+      if (!existed) return send(res, 404, { error: notFound }), true;
+      await meta.onDelete(id);
+      await fs.rm(path.join(DATA_DIR, base, id), { recursive: true, force: true }).catch(() => {});
+      send(res, 200, { ok: true });
+      return true;
+    }
+  }
+
+  return false;
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const p = url.pathname;
@@ -1264,27 +1536,11 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, deleted: allowed.length, history: cleaned.slice(0, 200) });
     }
 
-    // --- personajes ---
-    if (p === '/api/characters' && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      const characters = await readJson('characters.json', []);
-      const item = {
-        id: newId(),
-        name: String(body.name || '').trim() || 'Sin nombre',
-        description: String(body.description || ''),
-        voiceId: body.voiceId || '',
-        voiceName: body.voiceName || '',
-        arkAssetId: String(body.arkAssetId || '').trim().replace(/^asset:\/\//, ''),
-        photos: [],
-        variants: [],
-        avatarPos: { x: 50, y: 50, zoom: 1 },
-        ts: Date.now()
-      };
-      characters.unshift(item);
-      await writeJson('characters.json', characters);
-      return send(res, 200, item);
-    }
+    // --- personajes y elementos: fotos, variantes, vínculos y CRUD compartidos ---
+    if (await serveEntityRoutes(ENTITY_META.characters, { p, req, res, url })) return;
+    if (await serveEntityRoutes(ENTITY_META.elements, { p, req, res, url })) return;
 
+    // import/export son exclusivos de personajes (ZIP con manifest)
     if (p === '/api/characters/import' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const zipBuffer = Buffer.from(String(body.zipBase64 || ''), 'base64');
@@ -1348,170 +1604,6 @@ const server = http.createServer(async (req, res) => {
       const zip = createZip(entries);
       const filename = `${sanitizeName(character.name || 'personaje').replace(/\.[^.]+$/, '')}.manifestador.zip`;
       return send(res, 200, zip, { mime: 'application/zip', extra: { 'Content-Disposition': `attachment; filename="${filename}"` } });
-    }
-
-    // --- locaciones y objetos ("elementos"): espejo de personajes ---
-    if (p === '/api/elements' && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      const item = {
-        id: newId(),
-        kind: body.kind === 'object' ? 'object' : 'location',
-        name: String(body.name || '').trim() || 'Sin nombre',
-        category: String(body.category || '').trim().slice(0, 80),
-        description: String(body.description || ''),
-        photos: [],
-        variants: [],
-        avatarPos: { x: 50, y: 50, zoom: 1 },
-        ts: Date.now()
-      };
-      await updateJson('elements.json', [], (all) => [item, ...all]);
-      return send(res, 200, item);
-    }
-
-    if (p === '/api/element-links' && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      const key = String(body.key || '');
-      if (!/^(generated|uploads)\//.test(key)) throw new Error('Solo se pueden asociar imágenes.');
-      await fs.access(await resolveAssetKey(key));
-      const elements = await readJson('elements.json', []);
-      const element = elements.find((el) => el.id === body.elementId);
-      if (!element) throw new Error('Locación u objeto no encontrado.');
-      const variantId = body.variantId || null;
-      if (variantId && !(element.variants || []).some((v) => v.id === variantId)) throw new Error('Variante no encontrada.');
-      const next = await updateJson('element-links.json', [], (links) =>
-        [{ key, elementId: element.id, variantId, ts: Date.now() }, ...links.filter((link) => link.key !== key)].slice(0, 10000));
-      return send(res, 200, { links: next });
-    }
-    if (p === '/api/element-links' && req.method === 'DELETE') {
-      const key = url.searchParams.get('key');
-      const next = await updateJson('element-links.json', [], (links) => links.filter((link) => link.key !== key));
-      return send(res, 200, { links: next });
-    }
-
-    const elVariantMatch = /^\/api\/elements\/([a-z0-9]+)\/variants(?:\/([a-z0-9]+))?(\/photos)?$/.exec(p);
-    if (elVariantMatch) {
-      const [, id, variantId, isPhotos] = elVariantMatch;
-      const elements = await readJson('elements.json', []);
-      const idx = elements.findIndex((el) => el.id === id);
-      if (idx === -1) return send(res, 404, { error: 'Locación u objeto no encontrado' });
-      const el = elements[idx];
-      el.variants = el.variants || [];
-
-      if (!variantId && req.method === 'POST') {
-        const body = await readJsonBody(req);
-        const variant = { id: newId(), name: String(body.name || '').trim() || 'Nueva variante', description: String(body.description || ''), photos: [], ts: Date.now() };
-        el.variants.push(variant);
-        await writeJson('elements.json', elements);
-        return send(res, 200, el);
-      }
-      const variant = el.variants.find((v) => v.id === variantId);
-      if (!variant) return send(res, 404, { error: 'Variante no encontrada' });
-      if (!isPhotos && req.method === 'PUT') {
-        const body = await readJsonBody(req);
-        if (body.name !== undefined) variant.name = String(body.name).trim() || variant.name;
-        if (body.description !== undefined) variant.description = String(body.description);
-        await writeJson('elements.json', elements);
-        return send(res, 200, el);
-      }
-      if (!isPhotos && req.method === 'DELETE') {
-        el.variants = el.variants.filter((v) => v.id !== variantId);
-        const links = await readJson('element-links.json', []);
-        await writeJson('element-links.json', links.map((link) =>
-          link.elementId === id && link.variantId === variantId ? { ...link, variantId: null } : link));
-        await writeJson('elements.json', elements);
-        await fs.rm(path.join(DATA_DIR, 'elements', id, 'variants', variantId), { recursive: true, force: true }).catch(() => {});
-        return send(res, 200, el);
-      }
-      if (isPhotos && req.method === 'POST') {
-        const body = await readJsonBody(req);
-        const dir = path.join(DATA_DIR, 'elements', id, 'variants', variantId);
-        await fs.mkdir(dir, { recursive: true });
-        let name;
-        if (body.assetKey) {
-          const assetKey = String(body.assetKey);
-          if (!/^(generated|uploads)\//.test(assetKey)) throw new Error('Solo se pueden usar imágenes como foto.');
-          const source = await resolveAssetKey(assetKey);
-          const ext = path.extname(source).toLowerCase();
-          if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) throw new Error('Formato de imagen no admitido.');
-          name = `${ts()}-asset-${newId()}${ext}`;
-          await fs.copyFile(source, path.join(dir, name));
-        } else {
-          const { mime, buffer } = parseDataUrl(body.dataUrl);
-          name = `${ts()}-${sanitizeName(body.name).replace(/\.[^.]+$/, '')}${extForMime(mime)}`;
-          await fs.writeFile(path.join(dir, name), buffer);
-        }
-        variant.photos.push(`elements/${id}/variants/${variantId}/${name}`);
-        await writeJson('elements.json', elements);
-        return send(res, 200, el);
-      }
-      if (isPhotos && req.method === 'DELETE') {
-        const key = url.searchParams.get('key');
-        variant.photos = variant.photos.filter((k) => k !== key);
-        if (key) await fs.unlink(await resolveAssetKey(key)).catch(() => {});
-        await writeJson('elements.json', elements);
-        return send(res, 200, el);
-      }
-    }
-
-    const elementMatch = /^\/api\/elements\/([a-z0-9]+)(\/photos)?$/.exec(p);
-    if (elementMatch) {
-      const [, id, isPhotos] = elementMatch;
-      const elements = await readJson('elements.json', []);
-      const idx = elements.findIndex((el) => el.id === id);
-      if (idx === -1) return send(res, 404, { error: 'Locación u objeto no encontrado' });
-      const el = elements[idx];
-
-      if (isPhotos && req.method === 'POST') {
-        const body = await readJsonBody(req);
-        const dir = path.join(DATA_DIR, 'elements', id);
-        await fs.mkdir(dir, { recursive: true });
-        let name;
-        if (body.assetKey) {
-          const assetKey = String(body.assetKey);
-          if (!/^(generated|uploads)\//.test(assetKey)) throw new Error('Solo se pueden usar imágenes como foto.');
-          const source = await resolveAssetKey(assetKey);
-          const ext = path.extname(source).toLowerCase();
-          if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) throw new Error('Formato de imagen no admitido.');
-          name = `${ts()}-asset-${newId()}${ext}`;
-          await fs.copyFile(source, path.join(dir, name));
-        } else {
-          const { mime, buffer } = parseDataUrl(body.dataUrl);
-          name = `${ts()}-${sanitizeName(body.name).replace(/\.[^.]+$/, '')}${extForMime(mime)}`;
-          await fs.writeFile(path.join(dir, name), buffer);
-        }
-        el.photos.push(`elements/${id}/${name}`);
-        await writeJson('elements.json', elements);
-        return send(res, 200, el);
-      }
-      if (isPhotos && req.method === 'DELETE') {
-        const key = url.searchParams.get('key');
-        el.photos = el.photos.filter((k) => k !== key);
-        if (key) await fs.unlink(await resolveAssetKey(key)).catch(() => {});
-        await writeJson('elements.json', elements);
-        return send(res, 200, el);
-      }
-      if (!isPhotos && req.method === 'PUT') {
-        const body = await readJsonBody(req);
-        elements[idx] = {
-          ...el,
-          kind: body.kind !== undefined ? (body.kind === 'object' ? 'object' : 'location') : el.kind,
-          name: body.name !== undefined ? (String(body.name).trim() || el.name) : el.name,
-          category: body.category !== undefined ? String(body.category).trim().slice(0, 80) : (el.category || ''),
-          description: body.description !== undefined ? String(body.description) : el.description,
-          avatarPos: body.avatarPos !== undefined ? sanitizeAvatarPos(body.avatarPos) : (el.avatarPos || { x: 50, y: 50 }),
-          variants: el.variants || []
-        };
-        await writeJson('elements.json', elements);
-        return send(res, 200, elements[idx]);
-      }
-      if (!isPhotos && req.method === 'DELETE') {
-        const links = await readJson('element-links.json', []);
-        await writeJson('element-links.json', links.filter((link) => link.elementId !== id));
-        elements.splice(idx, 1);
-        await writeJson('elements.json', elements);
-        await fs.rm(path.join(DATA_DIR, 'elements', id), { recursive: true, force: true }).catch(() => {});
-        return send(res, 200, { ok: true });
-      }
     }
 
     // --- Poser: modelos XNALara/XPS (carpetas en assets/poser) y poses ---
@@ -1660,148 +1752,6 @@ const server = http.createServer(async (req, res) => {
       const poses = await updateJson('poser-poses.json', [], (all) => all.filter((x) => x.id !== poserPoseMatch[1]));
       await fs.unlink(path.join(DATA_DIR, 'poser', 'thumbs', `${poserPoseMatch[1]}.png`)).catch(() => {});
       return send(res, 200, { poses });
-    }
-
-    const variantMatch = /^\/api\/characters\/([a-z0-9]+)\/variants(?:\/([a-z0-9]+))?(\/photos)?$/.exec(p);
-    if (variantMatch) {
-      const [, id, variantId, isPhotos] = variantMatch;
-      const characters = await readJson('characters.json', []);
-      const idx = characters.findIndex((c) => c.id === id);
-      if (idx === -1) return send(res, 404, { error: 'Personaje no encontrado' });
-      const ch = characters[idx];
-      ch.variants = ch.variants || [];
-
-      if (!variantId && req.method === 'POST') {
-        const body = await readJsonBody(req);
-        const variant = { id: newId(), name: String(body.name || '').trim() || 'Nueva variante', description: String(body.description || ''), photos: [], ts: Date.now() };
-        ch.variants.push(variant);
-        await writeJson('characters.json', characters);
-        return send(res, 200, ch);
-      }
-      const variant = ch.variants.find((v) => v.id === variantId);
-      if (!variant) return send(res, 404, { error: 'Variante no encontrada' });
-      if (!isPhotos && req.method === 'PUT') {
-        const body = await readJsonBody(req);
-        if (body.name !== undefined) variant.name = String(body.name).trim() || variant.name;
-        if (body.description !== undefined) variant.description = String(body.description);
-        await writeJson('characters.json', characters);
-        return send(res, 200, ch);
-      }
-      if (!isPhotos && req.method === 'DELETE') {
-        ch.variants = ch.variants.filter((v) => v.id !== variantId);
-        const links = await readJson('asset-links.json', []);
-        await writeJson('asset-links.json', links.map((link) =>
-          link.characterId === id && link.variantId === variantId ? { ...link, variantId: null } : link));
-        await writeJson('characters.json', characters);
-        await fs.rm(path.join(DATA_DIR, 'characters', id, 'variants', variantId), { recursive: true, force: true }).catch(() => {});
-        return send(res, 200, ch);
-      }
-      if (isPhotos && req.method === 'POST') {
-        const body = await readJsonBody(req);
-        const dir = path.join(DATA_DIR, 'characters', id, 'variants', variantId);
-        await fs.mkdir(dir, { recursive: true });
-        let name;
-        if (body.assetKey) {
-          const assetKey = String(body.assetKey);
-          if (!/^(generated|uploads)\//.test(assetKey)) throw new Error('Solo se pueden usar imágenes como foto de variante.');
-          const source = await resolveAssetKey(assetKey);
-          const ext = path.extname(source).toLowerCase();
-          if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) throw new Error('Formato de imagen no admitido.');
-          name = `${ts()}-asset-${newId()}${ext}`;
-          await fs.copyFile(source, path.join(dir, name));
-        } else {
-          const { mime, buffer } = parseDataUrl(body.dataUrl);
-          name = `${ts()}-${sanitizeName(body.name).replace(/\.[^.]+$/, '')}${extForMime(mime)}`;
-          await fs.writeFile(path.join(dir, name), buffer);
-        }
-        variant.photos.push(`characters/${id}/variants/${variantId}/${name}`);
-        await writeJson('characters.json', characters);
-        return send(res, 200, ch);
-      }
-      if (isPhotos && req.method === 'DELETE') {
-        const key = url.searchParams.get('key');
-        variant.photos = variant.photos.filter((k) => k !== key);
-        if (key) await fs.unlink(await resolveAssetKey(key)).catch(() => {});
-        await writeJson('characters.json', characters);
-        return send(res, 200, ch);
-      }
-    }
-
-    const charMatch = /^\/api\/characters\/([a-z0-9]+)(\/photos)?$/.exec(p);
-    if (charMatch) {
-      const [, id, isPhotos] = charMatch;
-      const characters = await readJson('characters.json', []);
-      const idx = characters.findIndex((c) => c.id === id);
-      if (idx === -1) return send(res, 404, { error: 'Personaje no encontrado' });
-      const ch = characters[idx];
-
-      if (isPhotos && req.method === 'POST') {
-        const body = await readJsonBody(req);
-        const dir = path.join(DATA_DIR, 'characters', id);
-        await fs.mkdir(dir, { recursive: true });
-        let name;
-        if (body.assetKey) {
-          const assetKey = String(body.assetKey);
-          if (!/^(generated|uploads)\//.test(assetKey)) throw new Error('Solo se pueden usar imágenes como foto de personaje.');
-          const source = await resolveAssetKey(assetKey);
-          const ext = path.extname(source).toLowerCase();
-          if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) throw new Error('Formato de imagen no admitido.');
-          name = `${ts()}-asset-${newId()}${ext}`;
-          await fs.copyFile(source, path.join(dir, name));
-        } else {
-          const { mime, buffer } = parseDataUrl(body.dataUrl);
-          name = `${ts()}-${sanitizeName(body.name).replace(/\.[^.]+$/, '')}${extForMime(mime)}`;
-          await fs.writeFile(path.join(dir, name), buffer);
-        }
-        ch.photos.push(`characters/${id}/${name}`);
-        await writeJson('characters.json', characters);
-        return send(res, 200, ch);
-      }
-      if (isPhotos && req.method === 'DELETE') {
-        const key = url.searchParams.get('key');
-        ch.photos = ch.photos.filter((k) => k !== key);
-        if (key) await fs.unlink(await resolveAssetKey(key)).catch(() => {});
-        await writeJson('characters.json', characters);
-        return send(res, 200, ch);
-      }
-      if (isPhotos && req.method === 'PUT') {
-        const body = await readJsonBody(req);
-        const order = Array.isArray(body.order) ? body.order.map(String) : [];
-        const sameSet = order.length === ch.photos.length
-          && new Set(order).size === order.length
-          && order.every((k) => ch.photos.includes(k));
-        if (!sameSet) return send(res, 400, { error: 'El orden no coincide con las fotos del personaje' });
-        ch.photos = order;
-        await writeJson('characters.json', characters);
-        return send(res, 200, ch);
-      }
-      if (!isPhotos && req.method === 'PUT') {
-        const body = await readJsonBody(req);
-        characters[idx] = {
-          ...ch,
-          name: body.name !== undefined ? String(body.name).trim() : ch.name,
-          description: body.description !== undefined ? String(body.description) : ch.description,
-          voiceId: body.voiceId !== undefined ? body.voiceId : ch.voiceId,
-          voiceName: body.voiceName !== undefined ? body.voiceName : ch.voiceName,
-          arkAssetId: body.arkAssetId !== undefined ? String(body.arkAssetId).trim().replace(/^asset:\/\//, '') : (ch.arkAssetId || ''),
-          avatarPos: body.avatarPos !== undefined ? sanitizeAvatarPos(body.avatarPos) : (ch.avatarPos || { x: 50, y: 50 }),
-          variants: ch.variants || []
-        };
-        await writeJson('characters.json', characters);
-        return send(res, 200, characters[idx]);
-      }
-      if (!isPhotos && req.method === 'DELETE') {
-        const links = await readJson('asset-links.json', []);
-        await writeJson('asset-links.json', links.filter((link) => link.characterId !== id));
-        await updateJson('series.json', [], (all) => all.map((s) => ({
-          ...s,
-          characterIds: (s.characterIds || []).filter((cid) => cid !== id)
-        })));
-        characters.splice(idx, 1);
-        await writeJson('characters.json', characters);
-        await fs.rm(path.join(DATA_DIR, 'characters', id), { recursive: true, force: true }).catch(() => {});
-        return send(res, 200, { ok: true });
-      }
     }
 
     // --- estáticos ---
