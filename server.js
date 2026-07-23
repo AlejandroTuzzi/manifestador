@@ -37,7 +37,7 @@ const LABELED_REFS_PROMPT = 'The reference images are annotated working proofs: 
 const DEFAULT_CONFIG = {
   poserPrompt: DEFAULT_POSER_PROMPT,
   photoshopPath: '',
-  keys: { gemini: '', googleTranslate: '', ark: '', fal: '', elevenlabs: '', openai: '' },
+  keys: { gemini: '', googleTranslate: '', ark: '', elevenlabs: '', openai: '' },
   openaiModel: 'gpt-5-mini',
   paths: {
     poser: 'assets/poser',
@@ -70,7 +70,13 @@ async function readJson(file, fallback) {
 
 async function writeJson(file, value) {
   await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(path.join(DATA_DIR, file), JSON.stringify(value, null, 2), 'utf8');
+  const dest = path.join(DATA_DIR, file);
+  // escritura atómica: si el proceso muere a mitad, el archivo original queda
+  // intacto (nunca un JSON a medio escribir). El rename es atómico en el mismo
+  // volumen; el tmp lleva el pid para no chocar entre escrituras simultáneas.
+  const tmp = `${dest}.${process.pid}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(value, null, 2), 'utf8');
+  await fs.rename(tmp, dest);
 }
 
 const jsonLocks = new Map();

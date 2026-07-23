@@ -4152,7 +4152,6 @@ function fillConfigForm() {
   f.key_gemini.value = c.keys.gemini || '';
   f.key_googleTranslate.value = c.keys.googleTranslate || '';
   f.key_ark.value = c.keys.ark || '';
-  f.key_fal.value = c.keys.fal || '';
   f.key_elevenlabs.value = c.keys.elevenlabs || '';
   f.key_openai.value = c.keys.openai || '';
   f.openaiModel.value = c.openaiModel || 'gpt-5-mini';
@@ -4235,7 +4234,6 @@ $('#configForm').addEventListener('submit', async (e) => {
           gemini: f.key_gemini.value.trim(),
           googleTranslate: f.key_googleTranslate.value.trim(),
           ark: f.key_ark.value.trim(),
-          fal: f.key_fal.value.trim(),
           elevenlabs: f.key_elevenlabs.value.trim(),
           openai: f.key_openai.value.trim()
         },
