@@ -200,15 +200,20 @@ h3 { font-size: 15px; }
   width: 100%;
   min-height: 110px;
   font: 15px/1.55 "Segoe UI", system-ui, sans-serif;
+  font-weight: 400;
+  letter-spacing: normal;
   padding: 12px 14px;
   border-radius: 0;
+  box-sizing: border-box;
   white-space: pre-wrap;
   word-wrap: break-word;
   overflow-wrap: break-word;
-  /* reserva el ancho de la barra de scroll en ambas capas para que las
-     líneas quiebren igual y el cursor no se desfase del texto pintado */
-  scrollbar-gutter: stable;
+  /* ambas capas ocultan la barra de scroll (ancho 0): así reservan el MISMO
+     ancho y las líneas quiebran idénticas, sin desfasar el cursor del texto.
+     Se sigue pudiendo scrollear con rueda/teclas. */
+  scrollbar-width: none;
 }
+#promptBox::-webkit-scrollbar, .highlighter::-webkit-scrollbar { width: 0; height: 0; }
 
 #promptBox {
   position: relative;
@@ -237,24 +242,19 @@ h3 { font-size: 15px; }
   pointer-events: none;
   border: 1px solid transparent;
   color: var(--text);
-  /* overflow-y: scroll (con la barra oculta) reserva el MISMO hueco que el
-     textarea, así las líneas quiebran igual y el cursor no se desfasa;
-     con overflow:hidden el scrollbar-gutter no aplicaba y se corría */
-  overflow-y: scroll;
-  overflow-x: hidden;
-  scrollbar-width: none;
+  overflow: hidden;   /* se sincroniza el scrollTop por JS con el textarea */
   display: none;
 }
-.highlighter::-webkit-scrollbar { width: 0; height: 0; }
 .editor-wrap.tags-on .highlighter { display: block; }
 
 .highlighter .tag {
   background: var(--grad);
   color: white;
   border-radius: 0;
-  padding: 0 2px;
-  margin: 0 -2px;
-  font-weight: 600;
+  /* mismo peso que el textarea: en negrita los glifos son más anchos y el
+     texto posterior a cada [tag] se desfasaba de a poco */
+  font-weight: 400;
+  /* sin padding/margin que altere el avance: el resaltado no debe mover el texto */
 }
 
 /* ---------- paleta de tags ---------- */
@@ -604,12 +604,13 @@ audio { width: 100%; margin-top: 6px; }
 }
 .asset-card:hover { border-color: var(--pink); }
 .asset-card.selected { border-color: var(--pink); outline: 2px solid rgba(236,72,153,.35); outline-offset: -3px; }
-.asset-check, .asset-series, .asset-info, .asset-copy, .asset-delete { position: absolute; z-index: 3; top: 7px; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.25); background: rgba(8,4,14,.82); color: white; cursor: pointer; }
+.asset-check, .asset-series, .asset-download, .asset-info, .asset-copy, .asset-delete { position: absolute; z-index: 3; top: 7px; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.25); background: rgba(8,4,14,.82); color: white; cursor: pointer; }
 .asset-check { left: 7px; font-size: 16px; }
+.asset-download { left: 7px; top: 77px; color: #a7f3d0; opacity: 0; transition: opacity .12s; }
 .asset-info { right: 77px; color: #d8ccf5; opacity: 0; transition: opacity .12s; }
 .asset-copy { right: 42px; color: #c4b5fd; opacity: 0; transition: opacity .12s; }
 .asset-delete { right: 7px; color: #fda4af; opacity: 0; transition: opacity .12s; }
-.asset-card:hover .asset-delete, .asset-card.selected .asset-delete, .asset-card:hover .asset-copy, .asset-card.selected .asset-copy, .asset-card:hover .asset-info, .asset-card.selected .asset-info { opacity: 1; }
+.asset-card:hover .asset-delete, .asset-card.selected .asset-delete, .asset-card:hover .asset-copy, .asset-card.selected .asset-copy, .asset-card:hover .asset-info, .asset-card.selected .asset-info, .asset-card:hover .asset-download, .asset-card.selected .asset-download { opacity: 1; }
 .asset-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .asset-card .audio-tile { height: 100%; display: grid; place-items: center; font-size: 34px; background: var(--grad-soft); }
 .asset-card .a-name {
@@ -1135,6 +1136,23 @@ input[type="number"] { -moz-appearance: textfield; }
 .shot-asset-cell:hover { border-color: var(--violet); }
 .shot-asset-cell.selected { border-color: var(--pink); outline: 1.5px solid var(--pink); }
 .shot-asset-check { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; display: grid; place-items: center; background: var(--pink); color: white; }
+/* lista de audios: fila con play + nombre + tilde, para identificar cada uno */
+.shot-audio-list { display: flex; flex-direction: column; gap: 6px; max-height: 52vh; overflow-y: auto; }
+.shot-audio-cell { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); background: rgba(139,92,246,.05); padding: 8px 10px; cursor: pointer; }
+.shot-audio-cell:hover { border-color: var(--violet); }
+.shot-audio-cell.selected { border-color: var(--pink); background: rgba(236,72,153,.1); }
+.shot-audio-play { flex-shrink: 0; width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--border-soft); background: rgba(10,5,18,.5); color: var(--pink); cursor: pointer; }
+.shot-audio-play:hover { border-color: var(--pink); }
+.shot-audio-play.playing { background: var(--pink); color: white; }
+.shot-audio-cell-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text); }
+.shot-audio-cell-check { flex-shrink: 0; width: 20px; height: 20px; display: grid; place-items: center; color: var(--pink); }
+/* duración de audio (chips, lista del modal y tarjetas de Assets) */
+.audio-dur { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.audio-dur:not(:empty) { margin-left: 4px; }
+.shot-audio-cell-dur { flex-shrink: 0; }
+.audio-tile { position: relative; }
+.audio-tile-dur { position: absolute; bottom: 6px; right: 8px; background: rgba(10,5,18,.7); padding: 1px 5px; color: #d8ccf5; }
+.sb-audio-chip .audio-dur { color: inherit; opacity: .7; }
 @media (max-width: 900px) {
   .script-meta-grid, .script-cast-row, .script-slug-row, .script-camera-row, .script-item.dialogue, .script-item.action { grid-template-columns: 1fr; }
 }

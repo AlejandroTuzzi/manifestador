@@ -471,7 +471,8 @@ async function buildLabeledRefs(refItems) {
 async function loadVoices(showErrors = true) {
   try {
     const { voices } = await api('/api/voices');
-    state.voices = voices;
+    // alfabético por nombre, para encontrarlas más fácil en el selector
+    state.voices = (voices || []).sort((a, b) => byName(a.name, b.name));
   } catch (e) {
     state.voices = [];
     $('#voiceHint').textContent = 'No pude cargar voces — revisá la key de ElevenLabs en Configuración';
@@ -725,6 +726,23 @@ function shotPanelScripts() {
   return state.scripts.filter((sc) => sc.seriesId === $('#shotPanelSeries').value);
 }
 
+// recuerda en qué serie/guion/toma quedó el panel, para no re-navegar cada vez
+function loadShotPanel() {
+  try { return JSON.parse(localStorage.getItem('shotPanelState') || '{}'); } catch { return {}; }
+}
+function saveShotPanel() {
+  try {
+    localStorage.setItem('shotPanelState', JSON.stringify({
+      seriesId: $('#shotPanelSeries').value,
+      scriptId: $('#shotPanelScript').value,
+      shot: $('#shotPanelShot').value
+    }));
+  } catch { /* localStorage no disponible */ }
+}
+function restoreSelect(sel, value) {
+  if (value && [...sel.options].some((o) => o.value === value)) sel.value = value;
+}
+
 function shotPanelCurrent() {
   const sc = state.scripts.find((x) => x.id === $('#shotPanelScript').value);
   if (!sc) return null;
@@ -739,12 +757,14 @@ function renderShotPanelSeries() {
   const sel = $('#shotPanelSeries');
   const withScripts = state.series.filter((s) => state.scripts.some((sc) => sc.seriesId === s.id));
   sel.innerHTML = withScripts.map((s) => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
+  restoreSelect(sel, loadShotPanel().seriesId);
   renderShotPanelScripts();
 }
 
 function renderShotPanelScripts() {
   const sel = $('#shotPanelScript');
   sel.innerHTML = shotPanelScripts().map((sc) => `<option value="${sc.id}">${esc(sc.title)}</option>`).join('');
+  restoreSelect(sel, loadShotPanel().scriptId);
   renderShotPanelShots();
 }
 
@@ -755,6 +775,7 @@ function renderShotPanelShots() {
     options.push(`<option value="${si}:${hi}">Plano ${si + 1}.${hi + 1} — ${esc((scene.location || 'Sin locación').slice(0, 40))}</option>`);
   }));
   $('#shotPanelShot').innerHTML = options.join('');
+  restoreSelect($('#shotPanelShot'), loadShotPanel().shot);
   renderShotPanelBody();
 }
 
@@ -766,6 +787,7 @@ function renderShotPanelBody() {
     return;
   }
   const { script, scene, shot, si, hi } = current;
+  saveShotPanel(); // recuerda esta serie/guion/toma para la próxima vez
   const serie = state.series.find((s) => s.id === script.seriesId);
   body.innerHTML = `
     <div class="shot-panel-head">
@@ -1513,9 +1535,9 @@ function renderAssetsGrid() {
     for (const a of group) {
       const card = document.createElement('div');
       card.className = `asset-card${state.selectedAssets.has(a.key) ? ' selected' : ''}`;
-      card.innerHTML = `<button class="asset-check" title="Seleccionar">${state.selectedAssets.has(a.key) ? '✓' : ''}</button><button class="asset-series" title="Asociar a serie">${IC('layers')}</button><button class="asset-info" title="Información">${IC('info')}</button>${a.prompt ? `<button class="asset-copy" title="Copiar prompt">${IC('copy')}</button>` : ''}<button class="asset-delete" title="Borrar">${IC('trash')}</button>`;
+      card.innerHTML = `<button class="asset-check" title="Seleccionar">${state.selectedAssets.has(a.key) ? '✓' : ''}</button><button class="asset-series" title="Asociar a serie">${IC('layers')}</button><a class="asset-download" href="${fileUrl(a.key)}" download="${esc(a.name)}" title="Descargar">${IC('download')}</a><button class="asset-info" title="Información">${IC('info')}</button>${a.prompt ? `<button class="asset-copy" title="Copiar prompt">${IC('copy')}</button>` : ''}<button class="asset-delete" title="Borrar">${IC('trash')}</button>`;
       if (state.assetsZone === 'audio') {
-        card.insertAdjacentHTML('beforeend', `<div class="audio-tile">${IC('play', 'ic ic-lg')}</div><div class="a-name">${esc(a.name)}</div>`);
+        card.insertAdjacentHTML('beforeend', `<div class="audio-tile"><span class="audio-tile-icon">${IC('play', 'ic ic-lg')}</span><span class="audio-dur audio-tile-dur" data-durkey="${esc(a.key)}"></span></div><div class="a-name">${esc(a.name)}</div>`);
         card.querySelector('.audio-tile').addEventListener('click', () => toggleAudioPlay(card, a.key));
       } else if (state.assetsZone === 'video') {
         card.insertAdjacentHTML('beforeend', `<video src="${fileUrl(a.key)}" preload="metadata" muted></video><div class="a-name">${esc(a.name)}</div>`);
@@ -1533,6 +1555,7 @@ function renderAssetsGrid() {
     }
     grid.appendChild(section);
   }
+  if (state.assetsZone === 'audio') fillAudioDurations(grid);
 }
 
 function usePrompt(pr) {
@@ -1707,11 +1730,39 @@ function toggleAssetSelection(key) {
 }
 
 function updateAssetSelection() {
-  $('#selectedCount').textContent = state.selectedAssets.size;
-  $('#btnDeleteSelected').disabled = !state.selectedAssets.size;
-  $('#seriesSelectedCount').textContent = state.selectedAssets.size;
-  $('#btnSeriesSelected').disabled = !state.selectedAssets.size;
+  const n = state.selectedAssets.size;
+  $('#selectedCount').textContent = n;
+  $('#btnDeleteSelected').disabled = !n;
+  $('#seriesSelectedCount').textContent = n;
+  $('#btnSeriesSelected').disabled = !n;
+  $('#downloadSelectedCount').textContent = n;
+  $('#btnDownloadSelected').disabled = !n;
 }
+
+// descarga en lote: pide el ZIP y lo baja vía blob (el POST no puede ser un link)
+async function downloadAssets(keys) {
+  if (!keys.length) return;
+  const btn = $('#btnDownloadSelected');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/assets/zip', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys })
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `manifestador-${keys.length}-assets.zip`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast(`${keys.length} asset${keys.length === 1 ? '' : 's'} descargado${keys.length === 1 ? '' : 's'} en un ZIP`);
+  } catch (err) {
+    toast(err.message, 'err');
+  } finally {
+    updateAssetSelection();
+  }
+}
+$('#btnDownloadSelected').addEventListener('click', () => downloadAssets([...state.selectedAssets]));
 
 async function deleteAssets(keys) {
   if (!keys.length) return;
@@ -1767,14 +1818,16 @@ let playingAudio = null;
 function toggleAudioPlay(card, key) {
   if (playingAudio) { playingAudio.pause(); playingAudio = null; }
   const tile = card.querySelector('.audio-tile');
+  const icon = tile.querySelector('.audio-tile-icon');
   const wasPlaying = tile.dataset.playing === '1';
-  $$('.audio-tile').forEach((t) => { t.innerHTML = IC('play', 'ic ic-lg'); t.dataset.playing = ''; });
+  // solo se cambia el ícono, no todo el tile, para no borrar la duración
+  $$('.audio-tile').forEach((t) => { t.querySelector('.audio-tile-icon').innerHTML = IC('play', 'ic ic-lg'); t.dataset.playing = ''; });
   if (wasPlaying) return;
   playingAudio = new Audio(fileUrl(key));
   playingAudio.play();
-  tile.innerHTML = IC('pause', 'ic ic-lg');
+  icon.innerHTML = IC('pause', 'ic ic-lg');
   tile.dataset.playing = '1';
-  playingAudio.onended = () => { tile.innerHTML = IC('play', 'ic ic-lg'); tile.dataset.playing = ''; };
+  playingAudio.onended = () => { icon.innerHTML = IC('play', 'ic ic-lg'); tile.dataset.playing = ''; };
 }
 
 // ---------------------------------------------------------------------------
@@ -1940,6 +1993,7 @@ function openAssetInfo(asset) {
   const rows = [
     ['Modelo', asset.modelName || asset.modelId || 'Sin información'],
     ['Tipo', asset.type || (asset.key?.startsWith('audio/') ? 'audio' : 'imagen')],
+    ...(asset.key?.startsWith('audio/') ? [['Duración', '__DUR__']] : []),
     ['Proporción', asset.aspectRatio || '—'], ['Resolución', asset.resolution || '—'],
     ['Lote', asset.batch || 1], ['Referencias', (asset.refs || []).length],
     ['Personaje', character ? `${character.name} · ${variant?.name || 'Original'}` : '—'],
@@ -1953,8 +2007,9 @@ function openAssetInfo(asset) {
       <span>Nombre del archivo</span>
       <div><input id="assetRenameInput" type="text" maxlength="80" value="${esc(baseName)}"><span class="asset-info-ext">${esc(ext)}</span><button class="mini-btn" id="assetRenameBtn">Renombrar</button></div>
     </div>
-    <div class="asset-info-grid">${rows.map(([label, value]) => `<div><span>${label}</span><strong>${esc(value)}</strong></div>`).join('')}</div>
+    <div class="asset-info-grid">${rows.map(([label, value]) => `<div><span>${label}</span><strong>${value === '__DUR__' ? `<span class="audio-dur" data-durkey="${esc(asset.key)}">…</span>` : esc(value)}</strong></div>`).join('')}</div>
     <div class="asset-info-prompt"><div><span>Prompt utilizado</span>${asset.prompt ? `<button class="mini-btn" id="assetInfoCopy">${IC('copy')} Copiar</button>` : ''}</div><pre>${esc(asset.prompt || 'No hay prompt guardado para este asset.')}</pre></div>`;
+  fillAudioDurations($('#assetInfoBody'));
   $('#assetInfoCopy')?.addEventListener('click', () => copyPrompt(asset.prompt));
   $('#assetRenameBtn').addEventListener('click', () => renameAsset(asset.key, $('#assetRenameInput').value));
   $('#assetRenameInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); renameAsset(asset.key, e.target.value); } });
@@ -2745,7 +2800,45 @@ function sbAudioName(key) {
   return decodeURIComponent(key.split('/').pop() || key).replace(/\.[^.]+$/, '');
 }
 function audioChipHtml(key) {
-  return `<button class="sb-audio-chip" data-audiokey="${esc(key)}" title="${esc(key)}">${IC('play')} ${esc(sbAudioName(key))}</button>`;
+  return `<button class="sb-audio-chip" data-audiokey="${esc(key)}" title="${esc(key)}">${IC('play')} ${esc(sbAudioName(key))}<span class="audio-dur" data-durkey="${esc(key)}"></span></button>`;
+}
+
+// duración de un audio, leída en el cliente (con caché) y rellenada donde
+// aparezca un <span class="audio-dur" data-durkey="...">
+const audioDurCache = new Map();
+function fmtDuration(sec) {
+  if (!isFinite(sec) || sec <= 0) return '';
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+function fillAudioDurations(root = document) {
+  root.querySelectorAll('[data-durkey]').forEach((el) => {
+    if (el.dataset.filled) return;
+    const key = el.dataset.durkey;
+    if (audioDurCache.has(key)) { el.textContent = audioDurCache.get(key); el.dataset.filled = '1'; return; }
+    const a = new Audio();
+    a.preload = 'metadata';
+    let done = false;
+    const finalize = () => {
+      if (done || !isFinite(a.duration) || a.duration <= 0) return;
+      done = true;
+      const d = fmtDuration(a.duration);
+      audioDurCache.set(key, d);
+      el.textContent = d;
+      el.dataset.filled = '1';
+      a.removeAttribute('src');
+    };
+    a.addEventListener('loadedmetadata', () => {
+      // muchos mp3 (VBR sin header) reportan duración Infinity hasta que se
+      // busca hasta el final; ese seek fuerza al navegador a calcularla
+      if (isFinite(a.duration) && a.duration > 0) finalize();
+      else { try { a.currentTime = 1e101; } catch { /* seek no soportado */ } }
+    });
+    a.addEventListener('durationchange', finalize);
+    a.addEventListener('error', () => { el.dataset.filled = '1'; });
+    a.src = fileUrl(key);
+  });
 }
 let sbAudioEl = null;
 function playAudioChip(btn) {
@@ -2840,6 +2933,7 @@ function renderStoryboard() {
     const [si, hi] = b.dataset.sbcopy.split(':').map(Number);
     copyPrompt(sb.scenes[si].shots[hi].prompt || '');
   }));
+  fillAudioDurations(root);
 }
 
 // --- Ver guion: lectura completa (guion + prompts + assets por plano) ---
@@ -2897,6 +2991,7 @@ function renderScriptView() {
     if (!key.startsWith('audio/')) openLightbox(key, keys);
   }));
   root.querySelectorAll('[data-audiokey]').forEach((b) => b.addEventListener('click', () => playAudioChip(b)));
+  fillAudioDurations(root);
 }
 
 // --- picker de prompts de la biblioteca para un plano ---
@@ -3004,19 +3099,32 @@ function renderShotAssetsGrid() {
     ? (serie?.assetKeys || []).filter((k) => audioMode ? isAudio(k) : !isAudio(k))
     : (state.assets[state.shotAssetsZone] || []).map((a) => a.key);
   const selected = shot[field] || [];
-  $('#shotAssetsGrid').innerHTML = keys.length ? keys.map((k) => `
-    <button class="shot-asset-cell${selected.includes(k) ? ' selected' : ''}" data-k="${esc(k)}" title="${esc(k)}">
-      ${seriesAssetThumb(k)}${selected.includes(k) ? `<span class="shot-asset-check">${IC('check')}</span>` : ''}
-    </button>`).join('')
+  $('#shotAssetsGrid').className = audioMode ? 'shot-audio-list' : 'shot-assets-grid';
+  $('#shotAssetsGrid').innerHTML = keys.length ? keys.map((k) => audioMode
+    ? `<div class="shot-audio-cell${selected.includes(k) ? ' selected' : ''}" data-k="${esc(k)}" title="${esc(k)}">
+        <button class="shot-audio-play" data-audiokey="${esc(k)}" title="Reproducir">${IC('play')}</button>
+        <span class="shot-audio-cell-name">${esc(sbAudioName(k))}</span>
+        <span class="audio-dur shot-audio-cell-dur" data-durkey="${esc(k)}"></span>
+        <span class="shot-audio-cell-check">${selected.includes(k) ? IC('check') : ''}</span>
+      </div>`
+    : `<button class="shot-asset-cell${selected.includes(k) ? ' selected' : ''}" data-k="${esc(k)}" title="${esc(k)}">
+        ${seriesAssetThumb(k)}${selected.includes(k) ? `<span class="shot-asset-check">${IC('check')}</span>` : ''}
+      </button>`).join('')
     : `<div class="hint">${state.shotAssetsZone === 'series'
       ? `La serie no tiene ${audioMode ? 'audios' : 'assets'} asociados — asocialos desde la sección Assets.`
-      : 'No hay assets en esta zona.'}</div>`;
+      : 'No hay audios en esta zona todavía. Generá voces en Crear → Audio.'}</div>`;
   $('#shotAssetsGrid').querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => {
     const k = b.dataset.k;
     shot[field] = shot[field] || [];
     shot[field] = shot[field].includes(k) ? shot[field].filter((x) => x !== k) : [...shot[field], k];
     renderShotAssetsGrid();
   }));
+  // el play no debe alternar la selección de la celda
+  $('#shotAssetsGrid').querySelectorAll('.shot-audio-play').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    playAudioChip(b);
+  }));
+  fillAudioDurations($('#shotAssetsGrid'));
 }
 
 $$('#shotAssetsTabs .tab').forEach((t) => t.addEventListener('click', () => {

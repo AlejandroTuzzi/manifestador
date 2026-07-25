@@ -321,6 +321,16 @@ function textSlug(text) {
     .toLowerCase();
 }
 
+// nombre de voz apto para archivo, legible (conserva mayúsculas y espacios)
+function voiceNameForFile(name) {
+  return String(name || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9 _-]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 40);
+}
+
 // encuadre de la portada: posición (0–100 por eje) y zoom (1–4)
 function sanitizeAvatarPos(pos) {
   const clamp = (v) => Math.max(0, Math.min(100, Math.round(Number(v))));
@@ -564,15 +574,17 @@ async function runAudioGeneration(req) {
     modelId: AUDIO_MODEL.apiModel,
     stability: req.stability
   });
-  // nombre a partir del texto (sin [corchetes] ni su interior), corto e
-  // incremental si ya existe uno igual: "hola-como-estas.mp3", "…-2.mp3"
+  // nombre: "<voz> - <texto>", el texto sin [corchetes] ni su interior, corto e
+  // incremental si ya existe uno igual: "Alejandro - hola-como-estas.mp3", "…-2.mp3"
   const ext = extForMime(mime);
   const slug = textSlug(text) || 'voz';
+  const voice = voiceNameForFile(req.voiceName);
+  const base = voice ? `${voice} - ${slug}` : slug;
   const audioDir = resolveDir(cfg.paths.audio);
   await fs.mkdir(audioDir, { recursive: true });
   const existing = new Set(await fs.readdir(audioDir).catch(() => []));
-  let name = `${slug}${ext}`;
-  for (let n = 2; existing.has(name); n++) name = `${slug}-${n}${ext}`;
+  let name = `${base}${ext}`;
+  for (let n = 2; existing.has(name); n++) name = `${base}-${n}${ext}`;
   const key = await saveBuffer('audio', name, buffer);
 
   const pricing = await getPricing();
@@ -1062,7 +1074,26 @@ const server = http.createServer(async (req, res) => {
         || (abs.endsWith('.mp3') ? 'audio/mpeg' : abs.endsWith('.mp4') ? 'video/mp4'
         : abs.endsWith('.webm') ? 'video/webm' : abs.endsWith('.jpg') || abs.endsWith('.jpeg') ? 'image/jpeg'
         : abs.endsWith('.webp') ? 'image/webp' : 'image/png');
-      return send(res, 200, buf, { mime });
+      // Soporte de rangos: el navegador lo necesita para saber la duración de
+      // audios/videos VBR (busca hasta el final) y para hacer scrubbing.
+      const range = req.headers.range;
+      const m = range && /^bytes=(\d*)-(\d*)$/.exec(range);
+      if (m) {
+        const start = m[1] ? Number(m[1]) : 0;
+        const end = m[2] ? Math.min(Number(m[2]), buf.length - 1) : buf.length - 1;
+        if (start > end || start >= buf.length) {
+          res.writeHead(416, { 'Content-Range': `bytes */${buf.length}` });
+          return res.end();
+        }
+        res.writeHead(206, {
+          'Content-Type': mime,
+          'Accept-Ranges': 'bytes',
+          'Content-Range': `bytes ${start}-${end}/${buf.length}`,
+          'Content-Length': end - start + 1
+        });
+        return res.end(buf.subarray(start, end + 1));
+      }
+      return send(res, 200, buf, { mime, extra: { 'Accept-Ranges': 'bytes' } });
     }
 
     // --- API ---
@@ -1589,6 +1620,33 @@ const server = http.createServer(async (req, res) => {
         ...e, outputs: (e.outputs || []).map(swap), refs: (e.refs || []).map(swap)
       })));
       return send(res, 200, { oldKey, newKey, name: newName });
+    }
+
+    // descarga en lote: ZIP con los assets seleccionados (nombres únicos)
+    if (p === '/api/assets/zip' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const keys = [...new Set(Array.isArray(body.keys) ? body.keys.map(String) : [])]
+        .filter((key) => /^(generated|uploads|audio|video)\//.test(key));
+      if (!keys.length) throw new Error('No se seleccionaron assets.');
+      if (keys.length > 2000) throw new Error('Demasiados assets en una sola descarga.');
+      const used = new Set();
+      const entries = [];
+      for (const key of keys) {
+        const buf = await fs.readFile(await resolveAssetKey(key)).catch(() => null);
+        if (!buf) continue;
+        let name = decodeURIComponent(key.split('/').pop());
+        if (used.has(name)) {
+          const ext = path.extname(name); const base = name.slice(0, -ext.length || undefined);
+          let n = 2; while (used.has(`${base}-${n}${ext}`)) n++;
+          name = `${base}-${n}${ext}`;
+        }
+        used.add(name);
+        entries.push({ name, data: buf });
+      }
+      if (!entries.length) throw new Error('No se encontró ninguno de los archivos.');
+      const zip = createZip(entries);
+      const filename = `manifestador-${entries.length}-assets.zip`;
+      return send(res, 200, zip, { mime: 'application/zip', extra: { 'Content-Disposition': `attachment; filename="${filename}"` } });
     }
 
     if (p === '/api/assets/delete' && req.method === 'POST') {
