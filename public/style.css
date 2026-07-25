@@ -237,9 +237,15 @@ h3 { font-size: 15px; }
   pointer-events: none;
   border: 1px solid transparent;
   color: var(--text);
-  overflow: hidden;
+  /* overflow-y: scroll (con la barra oculta) reserva el MISMO hueco que el
+     textarea, así las líneas quiebran igual y el cursor no se desfasa;
+     con overflow:hidden el scrollbar-gutter no aplicaba y se corría */
+  overflow-y: scroll;
+  overflow-x: hidden;
+  scrollbar-width: none;
   display: none;
 }
+.highlighter::-webkit-scrollbar { width: 0; height: 0; }
 .editor-wrap.tags-on .highlighter { display: block; }
 
 .highlighter .tag {
@@ -858,6 +864,12 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .asset-info-grid > div { padding: 10px; border-right: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
 .asset-info-grid span, .asset-info-prompt span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .7px; margin-bottom: 4px; }
 .asset-info-grid strong { font-size: 12px; font-weight: 600; }
+.asset-info-rename { margin-bottom: 14px; }
+.asset-info-rename > span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .7px; margin-bottom: 5px; }
+.asset-info-rename > div { display: flex; align-items: center; gap: 6px; }
+.asset-info-rename input { flex: 1; min-width: 0; background: rgba(10,5,18,.7); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; font: inherit; }
+.asset-info-rename input:focus { outline: none; border-color: var(--violet); }
+.asset-info-ext { color: var(--muted); font-size: 12px; }
 .asset-info-prompt { margin-top: 14px; }
 .asset-info-prompt > div { display: flex; align-items: center; justify-content: space-between; }
 .asset-info-prompt pre { white-space: pre-wrap; word-break: break-word; color: #d9ccef; background: rgba(10,5,18,.65); border: 1px solid var(--border-soft); padding: 12px; max-height: 220px; overflow: auto; font: 12px/1.5 inherit; }
@@ -1140,6 +1152,18 @@ input[type="number"] { -moz-appearance: textfield; }
 .sb-items .sb-action { color: var(--muted); }
 .sb-items .sb-dialogue strong { display: block; color: var(--pink); font-weight: 700; margin-bottom: 2px; text-transform: uppercase; font-size: 11.5px; letter-spacing: .5px; }
 .sb-assets { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.sb-audio-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.sb-audios { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; color: var(--muted); }
+.sb-audios .ic { flex-shrink: 0; }
+.sb-audio-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--border-soft); background: rgba(139,92,246,.08);
+  color: var(--text); font: inherit; font-size: 12px; padding: 4px 9px; cursor: pointer;
+  max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sb-audio-chip .ic { width: 12px; height: 12px; color: var(--pink); }
+.sb-audio-chip:hover { border-color: var(--violet); }
+.sb-audio-chip.playing { border-color: var(--pink); color: var(--pink); }
 .sb-prompt { display: flex; flex-direction: column; gap: 5px; }
 .sb-prompt-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; min-height: 22px; }
 .sb-prompt-head span { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .7px; }

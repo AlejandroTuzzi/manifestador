@@ -1945,12 +1945,40 @@ function openAssetInfo(asset) {
     ['Personaje', character ? `${character.name} · ${variant?.name || 'Original'}` : '—'],
     ['Fecha', asset.ts ? fmtDate(asset.ts) : '—'], ['Costo estimado', asset.cost ? `$${Number(asset.cost).toFixed(4)}` : '—']
   ];
+  const baseName = decodeURIComponent(asset.key.split('/').pop() || '').replace(/\.[^.]+$/, '');
+  const ext = (asset.key.match(/\.[^.]+$/) || [''])[0];
   $('#assetInfoBody').innerHTML = `
     ${asset.key && !asset.key.startsWith('audio/') ? `<img class="asset-info-preview" src="${fileUrl(asset.key)}" alt="">` : ''}
+    <div class="asset-info-rename">
+      <span>Nombre del archivo</span>
+      <div><input id="assetRenameInput" type="text" maxlength="80" value="${esc(baseName)}"><span class="asset-info-ext">${esc(ext)}</span><button class="mini-btn" id="assetRenameBtn">Renombrar</button></div>
+    </div>
     <div class="asset-info-grid">${rows.map(([label, value]) => `<div><span>${label}</span><strong>${esc(value)}</strong></div>`).join('')}</div>
     <div class="asset-info-prompt"><div><span>Prompt utilizado</span>${asset.prompt ? `<button class="mini-btn" id="assetInfoCopy">${IC('copy')} Copiar</button>` : ''}</div><pre>${esc(asset.prompt || 'No hay prompt guardado para este asset.')}</pre></div>`;
   $('#assetInfoCopy')?.addEventListener('click', () => copyPrompt(asset.prompt));
+  $('#assetRenameBtn').addEventListener('click', () => renameAsset(asset.key, $('#assetRenameInput').value));
+  $('#assetRenameInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); renameAsset(asset.key, e.target.value); } });
   $('#assetInfoModal').hidden = false;
+}
+
+// renombra el archivo del asset y recarga las colecciones que lo referencian
+async function renameAsset(oldKey, name) {
+  const clean = String(name || '').trim();
+  if (!clean) return toast('Poné un nombre', 'err');
+  try {
+    const res = await api('/api/assets/rename', { method: 'POST', body: { key: oldKey, name: clean } });
+    const s = await api('/api/state');
+    state.assetLinks = s.assetLinks || [];
+    state.elementLinks = s.elementLinks || [];
+    state.series = s.series || [];
+    state.scripts = s.scripts || [];
+    state.history = s.history || [];
+    await refreshAssets();
+    $('#assetInfoModal').hidden = true;
+    toast(`Renombrado a “${res.name}”`);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
 }
 $('#assetInfoClose').addEventListener('click', () => { $('#assetInfoModal').hidden = true; });
 $('#assetInfoModal').addEventListener('click', (e) => { if (e.target.id === 'assetInfoModal') $('#assetInfoModal').hidden = true; });
@@ -2340,7 +2368,7 @@ function openSeriesScripts(seriesId) {
     </div>
     ${scripts.length ? scripts.map((sc) => {
       const shots = scriptShotCount(sc);
-      const assetCount = (sc.scenes || []).reduce((n, s) => n + (s.shots || []).reduce((m, sh) => m + (sh.assetKeys || []).length, 0), 0);
+      const assetCount = (sc.scenes || []).reduce((n, s) => n + (s.shots || []).reduce((m, sh) => m + (sh.assetKeys || []).length + (sh.audioKeys || []).length, 0), 0);
       return `<div class="script-row" data-script="${sc.id}">
         <div>
           <strong>${esc(sc.title)}</strong>
@@ -2712,6 +2740,27 @@ function sbItemLine(item) {
     : `<div class="sb-action">${esc(item.text)}</div>`;
 }
 
+// chip de audio reproducible (storyboard y Ver guion)
+function sbAudioName(key) {
+  return decodeURIComponent(key.split('/').pop() || key).replace(/\.[^.]+$/, '');
+}
+function audioChipHtml(key) {
+  return `<button class="sb-audio-chip" data-audiokey="${esc(key)}" title="${esc(key)}">${IC('play')} ${esc(sbAudioName(key))}</button>`;
+}
+let sbAudioEl = null;
+function playAudioChip(btn) {
+  const key = btn.dataset.audiokey;
+  const wasThis = sbAudioEl && sbAudioEl.dataset?.key === key && !sbAudioEl.paused;
+  if (sbAudioEl) { sbAudioEl.pause(); sbAudioEl = null; }
+  document.querySelectorAll('.sb-audio-chip.playing').forEach((c) => c.classList.remove('playing'));
+  if (wasThis) return;
+  sbAudioEl = new Audio(fileUrl(key));
+  sbAudioEl.dataset.key = key;
+  sbAudioEl.play().catch(() => {});
+  btn.classList.add('playing');
+  sbAudioEl.onended = () => btn.classList.remove('playing');
+}
+
 // bloque colapsable del prompt asignado a un plano — se usa en el storyboard
 // y en "Ver guion"; arranca cerrado para no alargar la lectura del guion
 function sbPromptView(shot) {
@@ -2748,6 +2797,10 @@ function renderStoryboard() {
           ${shot.camera ? `<div class="sb-camera">${esc(shot.camera)}</div>` : ''}
           ${shot.items.length ? `<div class="sb-items">${shot.items.map(sbItemLine).join('')}</div>` : ''}
           <div class="sb-assets" data-sbstrip="${si}:${hi}">${(shot.assetKeys || []).map((k) => `<button class="script-asset-thumb" data-k="${esc(k)}" title="${esc(k)}">${seriesAssetThumb(k)}</button>`).join('')}</div>
+          <div class="sb-audio-row">
+            <button class="mini-btn" data-sbaudio="${si}:${hi}">${IC('mic')} Asignar audio${(shot.audioKeys || []).length ? ` (${shot.audioKeys.length})` : ''}</button>
+            <div class="sb-audios" data-sbaudiostrip="${si}:${hi}">${(shot.audioKeys || []).map(audioChipHtml).join('')}</div>
+          </div>
           <div class="sb-prompt">
             <div class="sb-prompt-head"><span>Prompt del plano</span><div class="sb-prompt-actions">
               ${shot.prompt ? `<button class="mini-btn" data-sbcopy="${si}:${hi}">${IC('copy')} Copiar</button><button class="mini-btn danger" data-sbclearprompt="${si}:${hi}">Quitar</button>` : ''}
@@ -2767,6 +2820,11 @@ function renderStoryboard() {
     const keys = (sb.scenes[si].shots[hi].assetKeys || []).filter((x) => !x.startsWith('audio/'));
     if (!key.startsWith('audio/')) openLightbox(key, keys);
   }));
+  root.querySelectorAll('[data-sbaudio]').forEach((b) => b.addEventListener('click', () => {
+    const [si, hi] = b.dataset.sbaudio.split(':').map(Number);
+    openShotAssets(si, hi, 'audioKeys');
+  }));
+  root.querySelectorAll('[data-audiokey]').forEach((b) => b.addEventListener('click', () => playAudioChip(b)));
   root.querySelectorAll('[data-sbpickprompt]').forEach((b) => b.addEventListener('click', () => {
     const [si, hi] = b.dataset.sbpickprompt.split(':').map(Number);
     openShotPromptPicker(si, hi);
@@ -2829,6 +2887,7 @@ function renderScriptView() {
             ${sbPromptView(shot)}
             ${(shot.assetKeys || []).length ? `<div class="sb-assets" data-vgstrip="${si}:${hi}">${shot.assetKeys.map((k) =>
               `<button class="script-asset-thumb" data-k="${esc(k)}" title="${esc(k)}">${seriesAssetThumb(k)}</button>`).join('')}</div>` : ''}
+            ${(shot.audioKeys || []).length ? `<div class="sb-audios">${IC('mic')} ${shot.audioKeys.map(audioChipHtml).join('')}</div>` : ''}
           </div>`).join('')}
       </article>`).join('') : '<p class="hint">Este guion todavía no tiene escenas.</p>'}`;
   root.querySelectorAll('.script-asset-thumb').forEach((b) => b.addEventListener('click', () => {
@@ -2837,6 +2896,7 @@ function renderScriptView() {
     const keys = (sc.scenes[si].shots[hi].assetKeys || []).filter((x) => !x.startsWith('audio/'));
     if (!key.startsWith('audio/')) openLightbox(key, keys);
   }));
+  root.querySelectorAll('[data-audiokey]').forEach((b) => b.addEventListener('click', () => playAudioChip(b)));
 }
 
 // --- picker de prompts de la biblioteca para un plano ---
@@ -2908,18 +2968,26 @@ function currentShotAssetsShot() {
   return sb.scenes[target.si]?.shots[target.hi] || null;
 }
 
-async function openShotAssets(si, hi) {
+// field: 'assetKeys' (imágenes y video) o 'audioKeys' (audio, espacio separado)
+async function openShotAssets(si, hi, field = 'assetKeys') {
   const sb = state.storyboardScript;
   const shot = sb?.scenes[si]?.shots[hi];
   if (!shot) return;
+  const audioMode = field === 'audioKeys';
   state.shotAssetsTarget = { si, hi };
-  state.shotAssetsZone = 'series';
+  state.shotAssetsField = field;
+  state.shotAssetsZone = audioMode ? 'audio' : 'series';
   const zonesEmpty = !state.assets.generated.length && !state.assets.uploads.length
     && !state.assets.video.length && !state.assets.audio.length;
   if (zonesEmpty) {
     try { state.assets = await api('/api/assets'); } catch { /* sin assets no bloqueamos el modal */ }
   }
-  $('#shotAssetsTitle').textContent = `Assets del plano ${si + 1}.${hi + 1}`;
+  // solo se muestran las pestañas que corresponden al tipo
+  $$('#shotAssetsTabs .tab').forEach((t) => {
+    const z = t.dataset.szone;
+    t.hidden = !(z === 'series' || (audioMode ? z === 'audio' : z !== 'audio'));
+  });
+  $('#shotAssetsTitle').textContent = `${audioMode ? 'Audio' : 'Assets'} del plano ${si + 1}.${hi + 1}`;
   renderShotAssetsGrid();
   $('#shotAssetsModal').hidden = false;
 }
@@ -2927,23 +2995,26 @@ async function openShotAssets(si, hi) {
 function renderShotAssetsGrid() {
   const shot = currentShotAssetsShot();
   if (!shot) return;
+  const field = state.shotAssetsField || 'assetKeys';
+  const audioMode = field === 'audioKeys';
   $$('#shotAssetsTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.szone === state.shotAssetsZone));
   const serie = state.series.find((s) => s.id === state.storyboardScript.seriesId);
-  const keys = state.shotAssetsZone === 'series'
-    ? (serie?.assetKeys || [])
+  const isAudio = (k) => k.startsWith('audio/');
+  let keys = state.shotAssetsZone === 'series'
+    ? (serie?.assetKeys || []).filter((k) => audioMode ? isAudio(k) : !isAudio(k))
     : (state.assets[state.shotAssetsZone] || []).map((a) => a.key);
-  const selected = shot.assetKeys || [];
+  const selected = shot[field] || [];
   $('#shotAssetsGrid').innerHTML = keys.length ? keys.map((k) => `
     <button class="shot-asset-cell${selected.includes(k) ? ' selected' : ''}" data-k="${esc(k)}" title="${esc(k)}">
       ${seriesAssetThumb(k)}${selected.includes(k) ? `<span class="shot-asset-check">${IC('check')}</span>` : ''}
     </button>`).join('')
     : `<div class="hint">${state.shotAssetsZone === 'series'
-      ? 'La serie todavía no tiene assets asociados — asociale assets desde la sección Assets.'
+      ? `La serie no tiene ${audioMode ? 'audios' : 'assets'} asociados — asocialos desde la sección Assets.`
       : 'No hay assets en esta zona.'}</div>`;
   $('#shotAssetsGrid').querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => {
     const k = b.dataset.k;
-    shot.assetKeys = shot.assetKeys || [];
-    shot.assetKeys = shot.assetKeys.includes(k) ? shot.assetKeys.filter((x) => x !== k) : [...shot.assetKeys, k];
+    shot[field] = shot[field] || [];
+    shot[field] = shot[field].includes(k) ? shot[field].filter((x) => x !== k) : [...shot[field], k];
     renderShotAssetsGrid();
   }));
 }

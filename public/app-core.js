@@ -45,6 +45,7 @@ const state = {
   storyboardScript: null,    // copia de trabajo en el área de asignación de assets (guion solo lectura)
   shotAssetsTarget: null,    // { si, hi } índice del plano cuyo modal de assets está abierto
   shotAssetsZone: 'series',
+  shotAssetsField: 'assetKeys',   // 'assetKeys' (imágenes/video) o 'audioKeys'
   pickerTab: 'upload',
   replaceRefIndex: null,     // índice de la ref que el picker va a reemplazar (null = agregar)
   pickerCharacterId: '',     // drill-down del tab Personajes del picker

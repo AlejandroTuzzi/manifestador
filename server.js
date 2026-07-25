@@ -306,6 +306,21 @@ function sanitizeName(name) {
   return String(name || 'archivo').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80);
 }
 
+// slug legible a partir de un texto: quita [tags] y su interior, deja pocas
+// palabras. Sirve para nombrar el audio con una pista de lo que dice.
+function textSlug(text) {
+  return String(text || '')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 6)
+    .join('-')
+    .slice(0, 48)
+    .toLowerCase();
+}
+
 // encuadre de la portada: posición (0–100 por eje) y zoom (1–4)
 function sanitizeAvatarPos(pos) {
   const clamp = (v) => Math.max(0, Math.min(100, Math.round(Number(v))));
@@ -549,7 +564,15 @@ async function runAudioGeneration(req) {
     modelId: AUDIO_MODEL.apiModel,
     stability: req.stability
   });
-  const name = `${ts()}-voz-${newId()}${extForMime(mime)}`;
+  // nombre a partir del texto (sin [corchetes] ni su interior), corto e
+  // incremental si ya existe uno igual: "hola-como-estas.mp3", "…-2.mp3"
+  const ext = extForMime(mime);
+  const slug = textSlug(text) || 'voz';
+  const audioDir = resolveDir(cfg.paths.audio);
+  await fs.mkdir(audioDir, { recursive: true });
+  const existing = new Set(await fs.readdir(audioDir).catch(() => []));
+  let name = `${slug}${ext}`;
+  for (let n = 2; existing.has(name); n++) name = `${slug}-${n}${ext}`;
   const key = await saveBuffer('audio', name, buffer);
 
   const pricing = await getPricing();
@@ -700,8 +723,14 @@ function sanitizeScriptScenes(scenes) {
         character: String(item.character || '').slice(0, 80),
         text: String(item.text || '').slice(0, 1500)
       })),
+      // los audios van en su propio espacio (audioKeys); si algún audio venía
+      // en assetKeys de un guion viejo, se migra acá
       assetKeys: [...new Set((Array.isArray(shot.assetKeys) ? shot.assetKeys : []).map(String))]
-        .filter((key) => /^(generated|uploads|video|audio)\//.test(key)).slice(0, 200),
+        .filter((key) => /^(generated|uploads|video)\//.test(key)).slice(0, 200),
+      audioKeys: [...new Set([
+        ...(Array.isArray(shot.audioKeys) ? shot.audioKeys : []),
+        ...(Array.isArray(shot.assetKeys) ? shot.assetKeys : [])
+      ].map(String))].filter((key) => /^audio\//.test(key)).slice(0, 200),
       prompt: String(shot.prompt || '').slice(0, 5000),
       promptId: String(shot.promptId || ''),
       promptTitle: String(shot.promptTitle || '').slice(0, 120)
@@ -1518,6 +1547,50 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- borrado de assets (los archivos se eliminan de disco) ---
+    // renombrar un asset: renombra el archivo y actualiza TODAS las referencias
+    // (metadata, vínculos, series, guiones, historial) para no romper nada.
+    if (p === '/api/assets/rename' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const oldKey = String(body.key || '');
+      if (!/^(generated|uploads|audio|video)\//.test(oldKey)) throw new Error('Ese asset no se puede renombrar.');
+      const zone = oldKey.split('/')[0];
+      const ext = path.extname(oldKey);
+      const base = sanitizeName(body.name || '').replace(/\.[^.]+$/, '').replace(/^[.\-_]+/, '') || 'archivo';
+      const abs = await resolveAssetKey(oldKey);
+      const dir = path.dirname(abs);
+      const existing = new Set(await fs.readdir(dir).catch(() => []));
+      const oldName = path.basename(abs);
+      existing.delete(oldName);
+      let newName = `${base}${ext}`;
+      for (let n = 2; existing.has(newName); n++) newName = `${base}-${n}${ext}`;
+      const newKey = `${zone}/${newName}`;
+      if (newKey === oldKey) return send(res, 200, { oldKey, newKey });
+      await fs.rename(abs, path.join(dir, newName));
+      const swap = (k) => (k === oldKey ? newKey : k);
+      await updateJson('asset-metadata.json', {}, (m) => {
+        if (m[oldKey]) { m[newKey] = m[oldKey]; delete m[oldKey]; }
+        return m;
+      });
+      await updateJson('asset-links.json', [], (links) => links.map((l) => l.key === oldKey ? { ...l, key: newKey } : l));
+      await updateJson('element-links.json', [], (links) => links.map((l) => l.key === oldKey ? { ...l, key: newKey } : l));
+      await updateJson('series.json', [], (all) => all.map((s) => ({ ...s, assetKeys: (s.assetKeys || []).map(swap) })));
+      await updateJson('scripts.json', [], (all) => all.map((sc) => ({
+        ...sc,
+        scenes: (sc.scenes || []).map((scene) => ({
+          ...scene,
+          shots: (scene.shots || []).map((shot) => ({
+            ...shot,
+            assetKeys: (shot.assetKeys || []).map(swap),
+            audioKeys: (shot.audioKeys || []).map(swap)
+          }))
+        }))
+      })));
+      await updateJson('history.json', [], (all) => all.map((e) => ({
+        ...e, outputs: (e.outputs || []).map(swap), refs: (e.refs || []).map(swap)
+      })));
+      return send(res, 200, { oldKey, newKey, name: newName });
+    }
+
     if (p === '/api/assets/delete' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const keys = [...new Set(Array.isArray(body.keys) ? body.keys.map(String) : [])];
@@ -1659,6 +1732,14 @@ const server = http.createServer(async (req, res) => {
             const file = `${folder}/E${SS}_P${SS}.${HH}_${pad(ai + 1)}${ext}`;
             entries.push({ name: file, data: buf });
             lines.push(`      → ${file}`);
+          }
+          for (const [ai, key] of (shot.audioKeys || []).entries()) {
+            const buf = await fs.readFile(await resolveAssetKey(key)).catch(() => null);
+            if (!buf) continue;
+            const ext = path.extname(key).toLowerCase() || '.mp3';
+            const file = `${folder}/E${SS}_P${SS}.${HH}_audio${pad(ai + 1)}${ext}`;
+            entries.push({ name: file, data: buf });
+            lines.push(`      ♪ ${file}`);
           }
           lines.push('');
         }
