@@ -1629,6 +1629,46 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, zip, { mime: 'application/zip', extra: { 'Content-Disposition': `attachment; filename="${filename}"` } });
     }
 
+    // export de guion: ZIP con los assets asignados a cada plano, nombrados por
+    // escena y plano (E01_P01.02_01.jpg) y agrupados en carpetas por escena,
+    // listos para ordenar en el programa de animación.
+    const scriptExportMatch = /^\/api\/scripts\/([a-z0-9]+)\/export$/.exec(p);
+    if (scriptExportMatch && req.method === 'GET') {
+      const scripts = await readJson('scripts.json', []);
+      const script = scripts.find((s) => s.id === scriptExportMatch[1]);
+      if (!script) return send(res, 404, { error: 'Guion no encontrado' });
+      const pad = (n) => String(n).padStart(2, '0');
+      const entries = [];
+      const lines = [`${script.title}`, `${script.format || ''}`.trim(), ''];
+      for (const [si, scene] of (script.scenes || []).entries()) {
+        const SS = pad(si + 1);
+        const slug = `${scene.intExt}. ${(scene.location || '').toUpperCase()} — ${scene.timeOfDay}`;
+        const folder = `Escena ${SS}${scene.location ? ' - ' + sanitizeName(scene.location).slice(0, 40) : ''}`;
+        lines.push(`ESCENA ${si + 1} · ${slug}`);
+        for (const [hi, shot] of (scene.shots || []).entries()) {
+          const HH = pad(hi + 1);
+          lines.push(`  Plano ${si + 1}.${hi + 1} · ${shot.size} · ${shot.lens}${shot.camera ? ` · ${shot.camera}` : ''}`);
+          for (const item of shot.items || []) {
+            lines.push(item.kind === 'dialogue' ? `    ${item.character}: ${item.text}` : `    ${item.text}`);
+          }
+          if (shot.prompt) lines.push(`    [prompt] ${shot.promptTitle ? shot.promptTitle + ': ' : ''}${shot.prompt}`);
+          for (const [ai, key] of (shot.assetKeys || []).entries()) {
+            const buf = await fs.readFile(await resolveAssetKey(key)).catch(() => null);
+            if (!buf) continue;
+            const ext = path.extname(key).toLowerCase() || '.jpg';
+            const file = `${folder}/E${SS}_P${SS}.${HH}_${pad(ai + 1)}${ext}`;
+            entries.push({ name: file, data: buf });
+            lines.push(`      → ${file}`);
+          }
+          lines.push('');
+        }
+      }
+      entries.unshift({ name: 'guion.txt', data: Buffer.from(lines.join('\n'), 'utf8') });
+      const zip = createZip(entries);
+      const filename = `${sanitizeName(script.title || 'guion').replace(/\.[^.]+$/, '')}.assets.zip`;
+      return send(res, 200, zip, { mime: 'application/zip', extra: { 'Content-Disposition': `attachment; filename="${filename}"` } });
+    }
+
     // --- Poser: modelos XNALara/XPS (carpetas en assets/poser) y poses ---
     if (p === '/api/poser' && req.method === 'GET') {
       const cfg = await getConfig();

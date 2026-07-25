@@ -354,12 +354,13 @@ function renderRefs() {
       : '';
     d.innerHTML = isAsset
       ? `<div class="asset-face" title="${esc(r.key)}">${IC('user', 'ic ic-lg')}<span>verificado</span></div>${badge}<button class="rm" title="Quitar">×</button>`
-      : `<img src="${fileUrl(r.key)}" alt="">${r.label ? `<span class="ref-label-tag" title="La IA verá este texto sobre la imagen">${esc(r.label)}</span>` : ''}${badge}<button class="rm" title="Quitar">×</button><button class="ref-label-btn${r.label ? ' on' : ''}" title="${r.label ? `Etiqueta: ${esc(r.label)}` : 'Etiquetar para la IA (quién es quién)'}">T</button>`;
+      : `<img src="${fileUrl(r.key)}" alt="">${r.label ? `<span class="ref-label-tag" title="La IA verá este texto sobre la imagen">${esc(r.label)}</span>` : ''}${badge}<button class="rm" title="Quitar">×</button><button class="ref-replace" title="Reemplazar imagen (conserva su posición y cita)">${IC('refresh')}</button><button class="ref-label-btn${r.label ? ' on' : ''}" title="${r.label ? `Etiqueta: ${esc(r.label)}` : 'Etiquetar para la IA (quién es quién)'}">T</button>`;
     d.querySelector('.rm').addEventListener('click', () => {
       state.refs.splice(i, 1);
       renderRefs();
       renderHighlight();
     });
+    d.querySelector('.ref-replace')?.addEventListener('click', () => openPicker(i));
     d.querySelector('.ref-label-btn')?.addEventListener('click', () => {
       const value = window.prompt(
         'Texto que la IA verá sobreimpreso en esta referencia (solo en la petición, la imagen no se modifica). Vacío = sin etiqueta:',
@@ -1201,12 +1202,34 @@ function renderPromptsPanel() {
 // selector de referencias (picker)
 // ---------------------------------------------------------------------------
 
-function openPicker() {
+// replaceIndex null = agregar una referencia nueva; un índice = reemplazar esa
+// referencia in-place (conserva posición, cita y etiqueta)
+function openPicker(replaceIndex = null) {
+  state.replaceRefIndex = replaceIndex;
+  $('#pickerTitle').textContent = replaceIndex != null ? 'Reemplazar imagen de referencia' : 'Elegir imagen de referencia';
   $('#pickerModal').hidden = false;
   setPickerTab(state.pickerTab || 'upload');
 }
 
-$('#pickerClose').addEventListener('click', () => { $('#pickerModal').hidden = true; });
+// una selección del picker: reemplaza si estamos en ese modo, o agrega
+function pickRef(key) {
+  if (state.replaceRefIndex != null) return replaceRef(state.replaceRefIndex, key);
+  addRef(key);
+}
+
+function replaceRef(i, key) {
+  if (i < 0 || i >= state.refs.length) { state.replaceRefIndex = null; return; }
+  if (state.refs.some((r, j) => j !== i && r.key === key)) return toast('Esa imagen ya está en las referencias', 'err');
+  const prev = state.refs[i];
+  // conserva la etiqueta (y por lo tanto la cita @Etiqueta); si no tenía, sugiere una
+  state.refs[i] = { key, fromChar: false, label: prev.label || refLabelSuggestion(key) };
+  state.replaceRefIndex = null;
+  renderRefs();
+  renderHighlight();
+  toast('Referencia reemplazada — el orden y la cita se mantienen');
+}
+
+$('#pickerClose').addEventListener('click', () => { $('#pickerModal').hidden = true; state.replaceRefIndex = null; });
 $$('#pickerTabs .tab').forEach((t) => {
   t.addEventListener('click', () => setPickerTab(t.dataset.src));
 });
@@ -1262,7 +1285,7 @@ async function setPickerTab(src) {
 
   $$('#pickerBody .pick').forEach((p) => {
     p.addEventListener('click', () => {
-      addRef(p.dataset.key);
+      pickRef(p.dataset.key);
       $('#pickerModal').hidden = true;
     });
   });
@@ -1276,15 +1299,18 @@ function renderEntityPicker(cfg) {
   const body = $('#pickerBody');
   const chosen = cfg.items().find((x) => x.id === state[cfg.idKey]);
   const attachPick = () => body.querySelectorAll('.pick[data-key]').forEach((p) =>
-    p.addEventListener('click', () => { addRef(p.dataset.key); $('#pickerModal').hidden = true; }));
+    p.addEventListener('click', () => { pickRef(p.dataset.key); $('#pickerModal').hidden = true; }));
 
   if (!chosen) {
     const items = cfg.items();
     body.innerHTML = items.length
       ? `<div class="picker-grid">${items.map((it) => {
           const cover = cfg.cover(it);
+          // respeta el encuadre de portada (avatarPos) igual que la tarjeta,
+          // solo cuando la miniatura es la foto de portada del personaje/elemento
+          const style = it.avatarPos && cover === it.photos?.[0] ? ` style="${avatarStyle(it)}"` : '';
           return `<div class="pick" data-id="${it.id}">${cover
-            ? `<img src="${fileUrl(cover)}" loading="lazy" alt="">`
+            ? `<img src="${fileUrl(cover)}"${style} loading="lazy" alt="">`
             : `<div class="pick-ph">${IC(cfg.icon, 'ic ic-lg')}</div>`}<div class="p-label">${esc(cfg.label(it))}</div></div>`;
         }).join('')}</div>`
       : `<div class="empty-note">${cfg.empty}</div>`;
@@ -1363,7 +1389,10 @@ function renderPickerSeries() {
 
 async function uploadFiles(files, asRefs) {
   if (!files.length) return;
-  for (const f of files) {
+  // en modo reemplazo solo tiene sentido una imagen: se usa la primera
+  const replacing = asRefs && state.replaceRefIndex != null;
+  const list = replacing ? files.slice(0, 1) : files;
+  for (const f of list) {
     try {
       // el cuerpo de la petición admite 150 MB y el base64 infla ~33%
       if (f.size > 100 * 1024 * 1024) {
@@ -1372,14 +1401,14 @@ async function uploadFiles(files, asRefs) {
       }
       const dataUrl = await readFileAsDataUrl(f);
       const { key } = await api('/api/upload', { method: 'POST', body: { name: f.name, dataUrl } });
-      if (asRefs) addRef(key);
+      if (asRefs) pickRef(key);
     } catch (e) {
       toast(`${f.name}: ${e.message}`, 'err');
     }
   }
   if (asRefs) {
     $('#pickerModal').hidden = true;
-    toast(`${files.length} imagen(es) subida(s) y agregada(s) como referencia`);
+    if (!replacing) toast(`${list.length} imagen(es) subida(s) y agregada(s) como referencia`);
   } else {
     toast(`${files.length} imagen(es) subida(s)`);
   }
@@ -2311,6 +2340,7 @@ function openSeriesScripts(seriesId) {
     </div>
     ${scripts.length ? scripts.map((sc) => {
       const shots = scriptShotCount(sc);
+      const assetCount = (sc.scenes || []).reduce((n, s) => n + (s.shots || []).reduce((m, sh) => m + (sh.assetKeys || []).length, 0), 0);
       return `<div class="script-row" data-script="${sc.id}">
         <div>
           <strong>${esc(sc.title)}</strong>
@@ -2320,6 +2350,7 @@ function openSeriesScripts(seriesId) {
           <button class="mini-btn accent" data-sact="view">${IC('eye')} Ver</button>
           <button class="mini-btn" data-sact="open">${IC('edit')} Editar guion</button>
           <button class="mini-btn" data-sact="assign">${IC('image')} Asignar assets</button>
+          ${assetCount ? `<a class="mini-btn" href="/api/scripts/${sc.id}/export" download title="ZIP con los ${assetCount} assets asignados, nombrados por escena y plano">${IC('download')} Exportar assets (${assetCount})</a>` : ''}
           <button class="mini-btn danger" data-sact="del" title="Eliminar">${IC('trash')}</button>
         </div>
       </div>`;

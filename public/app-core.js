@@ -46,6 +46,7 @@ const state = {
   shotAssetsTarget: null,    // { si, hi } índice del plano cuyo modal de assets está abierto
   shotAssetsZone: 'series',
   pickerTab: 'upload',
+  replaceRefIndex: null,     // índice de la ref que el picker va a reemplazar (null = agregar)
   pickerCharacterId: '',     // drill-down del tab Personajes del picker
   pickerVariantId: '',
   charAssetPicker: null,     // { entity, ownerId, variantId, zone, added } al elegir un asset como foto
