@@ -338,6 +338,14 @@ h3 { font-size: 15px; }
   backdrop-filter: blur(10px);
 }
 .control-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+/* inputs de los controles de música (estilo/título): al tono del tema */
+#musicControls .text-input {
+  flex: 1; min-width: 200px;
+  background: rgba(10, 5, 18, 0.7); border: 1px solid var(--border);
+  color: var(--text); padding: 9px 12px; font: inherit;
+}
+#musicControls .text-input:focus { outline: none; border-color: var(--violet); }
+#musicControls .text-input::placeholder { color: #6b5a87; }
 .control-row > label {
   width: 92px; flex-shrink: 0;
   font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;

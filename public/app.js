@@ -37,9 +37,11 @@ function setMode(mode) {
   $('#modeImage').classList.toggle('active', mode === 'image');
   $('#modeVideo').classList.toggle('active', mode === 'video');
   $('#modeAudio').classList.toggle('active', mode === 'audio');
+  $('#modeMusic').classList.toggle('active', mode === 'music');
   $('#imageControls').hidden = mode !== 'image';
   $('#videoControls').hidden = mode !== 'video';
   $('#audioControls').hidden = mode !== 'audio';
+  $('#musicControls').hidden = mode !== 'music';
   $('#tagPalette').hidden = mode !== 'audio';
   // el armador de tomas es propio del video
   $('#btnShotList').hidden = mode !== 'video';
@@ -49,10 +51,13 @@ function setMode(mode) {
     ? 'Escribí el texto a locutar… usá [risas] o [whispers] para expresiones'
     : mode === 'video'
     ? 'Describí la escena en movimiento: acción, cámara, ambiente…'
+    : mode === 'music'
+    ? (state.music.customMode ? 'Escribí la LETRA de la canción (versos, estribillo)…' : 'Describí la canción: género, ánimo, instrumentos, tema…')
     : 'Escribí lo que querés manifestar…';
-  $('#btnGenerate').innerHTML = mode === 'audio' ? `${IC('mic')} Dar voz` : mode === 'video' ? `${IC('film')} Manifestar video` : `${IC('spark')} Manifestar`;
+  $('#btnGenerate').innerHTML = mode === 'audio' ? `${IC('mic')} Dar voz` : mode === 'video' ? `${IC('film')} Manifestar video` : mode === 'music' ? `${IC('music')} Componer` : `${IC('spark')} Manifestar`;
   if (mode === 'audio' && state.voices === null) loadVoices(false);
   if (mode === 'video') renderVideoControls();
+  if (mode === 'music') renderMusicControls();
   if (mode === 'image') renderRefs();
   renderHighlight();
   renderPinnedHint();
@@ -62,6 +67,35 @@ function setMode(mode) {
 $('#modeImage').addEventListener('click', () => setMode('image'));
 $('#modeVideo').addEventListener('click', () => setMode('video'));
 $('#modeAudio').addEventListener('click', () => setMode('audio'));
+$('#modeMusic').addEventListener('click', () => setMode('music'));
+
+// ---------------------------------------------------------------------------
+// controles de música (Suno)
+// ---------------------------------------------------------------------------
+
+function renderMusicControls() {
+  const m = state.musicModel;
+  if (!m) return;
+  chipRow($('#musicModelChips'), m.versions, state.music.version, (v) => { state.music.version = v; renderMusicControls(); });
+  $('#musicCustom').checked = state.music.customMode;
+  $('#musicInstrumental').checked = state.music.instrumental;
+  $('#musicStyle').value = state.music.style;
+  $('#musicTitle').value = state.music.title;
+  // en modo simple no hay estilo/título; en instrumental no hay letra en la caja
+  $('#musicStyleRow').hidden = !state.music.customMode;
+  $('#musicTitleRow').hidden = !state.music.customMode;
+  $('#musicHint').textContent = state.music.customMode
+    ? (state.music.instrumental ? 'Instrumental: la caja de arriba se ignora; definí estilo y título.' : 'La caja de arriba es la LETRA. Estilo y título son obligatorios.')
+    : 'Modo simple: la caja de arriba es una descripción; Suno inventa letra y estilo.';
+  $('#promptBox').placeholder = state.music.customMode
+    ? 'Escribí la LETRA de la canción (versos, estribillo)…'
+    : 'Describí la canción: género, ánimo, instrumentos, tema…';
+}
+
+$('#musicCustom').addEventListener('change', (e) => { state.music.customMode = e.target.checked; renderMusicControls(); updateEstimate(); });
+$('#musicInstrumental').addEventListener('change', (e) => { state.music.instrumental = e.target.checked; renderMusicControls(); });
+$('#musicStyle').addEventListener('input', (e) => { state.music.style = e.target.value; });
+$('#musicTitle').addEventListener('input', (e) => { state.music.title = e.target.value; });
 
 // ---------------------------------------------------------------------------
 // resaltado de corchetes (modo audio)
@@ -851,12 +885,22 @@ $('#shotPanelNext').addEventListener('click', () => moveShotPanel(1));
 
 async function generate() {
   const prompt = promptBox.value.trim();
-  if (!prompt) return toast('Escribí un prompt primero', 'err');
+  const isImage = state.mode === 'image';
+  const isVideo = state.mode === 'video';
+  const isMusic = state.mode === 'music';
+  // validación del prompt según el modo (en música instrumental no hay letra)
+  if (isMusic) {
+    const mm = state.music;
+    if (mm.customMode && !mm.style.trim()) return toast('Poné un estilo/género para la canción', 'err');
+    if (mm.customMode && !mm.title.trim()) return toast('Poné un título para la canción', 'err');
+    if (mm.customMode && !mm.instrumental && !prompt) return toast('Escribí la letra (o activá instrumental)', 'err');
+    if (!mm.customMode && !prompt) return toast('Describí la canción', 'err');
+  } else if (!prompt) {
+    return toast('Escribí un prompt primero', 'err');
+  }
   const pc = pinnedChar();
   const voiceId = state.voiceId || pc?.voiceId;
   const voice = (state.voices || []).find((v) => v.id === voiceId);
-  const isImage = state.mode === 'image';
-  const isVideo = state.mode === 'video';
   const model = isVideo ? currentVideoModel() : currentModel();
   // las etiquetas se estampan acá, sobre copias: el asset guardado queda limpio
   const refsUsed = isImage ? state.refs : isVideo ? state.refs.slice(0, activeRefLimit()) : [];
@@ -866,8 +910,9 @@ async function generate() {
     status: 'queued', prompt, createdAt: Date.now(),
     label: isImage ? `${model.name} · ${state.resolution} · ×${state.batch}`
       : isVideo ? `${model.name} · ${state.video.resolution} · ${state.video.duration}s`
+      : isMusic ? `Suno ${state.music.version}${state.music.instrumental ? ' · instrumental' : ''}`
       : `Eleven v3 · ${voice?.name || pc?.voiceName || 'voz'}`,
-    path: isImage ? '/api/generate/image' : isVideo ? '/api/generate/video' : '/api/generate/audio',
+    path: isImage ? '/api/generate/image' : isVideo ? '/api/generate/video' : isMusic ? '/api/generate/music' : '/api/generate/audio',
     body: isImage ? {
       modelId: state.modelId, prompt, aspectRatio: state.aspectRatio,
       resolution: state.resolution, batch: state.batch,
@@ -879,6 +924,10 @@ async function generate() {
       duration: state.video.duration, audio: state.video.audio,
       refs: state.refs.slice(0, activeRefLimit()).map((r) => r.key), labeledRefs,
       characterId: state.pinnedId || null
+    } : isMusic ? {
+      model: state.music.version, prompt,
+      style: state.music.style, title: state.music.title,
+      instrumental: state.music.instrumental, customMode: state.music.customMode
     } : { text: prompt, voiceId, voiceName: voice?.name || pc?.voiceName || '', characterId: state.pinnedId || null }
   };
   state.generationJobs.unshift(job);
@@ -3933,6 +3982,9 @@ function updateEstimate() {
     const perSec = t[state.video.resolution] ?? Object.values(t)[0] ?? 0;
     const p = perSec * state.video.duration;
     el.textContent = p ? `≈ $${p.toFixed(3)} (${state.video.duration}s)` : '';
+  } else if (state.mode === 'music') {
+    const perTrack = state.pricing.music?.perTrack ?? 0;
+    el.textContent = perTrack ? `≈ $${(perTrack * 2).toFixed(3)} (2 variantes)` : '';
   } else {
     const per1k = state.pricing.audio?.['eleven-v3']?.per1kChars ?? 0;
     const chars = promptBox.value.length;
@@ -4074,6 +4126,7 @@ function fillConfigForm() {
   f.key_ark.value = c.keys.ark || '';
   f.key_elevenlabs.value = c.keys.elevenlabs || '';
   f.key_openai.value = c.keys.openai || '';
+  f.key_suno.value = c.keys.suno || '';
   f.openaiModel.value = c.openaiModel || 'gpt-5-mini';
   f.path_generated.value = c.paths.generated || '';
   f.path_uploads.value = c.paths.uploads || '';
@@ -4082,7 +4135,9 @@ function fillConfigForm() {
   f.seedreamModelId.value = c.seedreamModelId || '';
   f.seedanceModelId.value = c.seedanceModelId || '';
   f.seedanceMiniModelId.value = c.seedanceMiniModelId || '';
+  f.sunoModelId.value = c.sunoModelId || 'V5_5';
   f.endpoint_ark.value = c.endpoints.ark || '';
+  f.endpoint_suno.value = c.endpoints.suno || '';
   f.poserPrompt.value = c.poserPrompt || '';
   f.photoshopPath.value = c.photoshopPath || '';
   renderConfigAudioTags();
@@ -4107,6 +4162,7 @@ $$('.test-btn').forEach((btn) => {
         body.endpoint = f.endpoint_ark.value.trim();
         body.seedreamModelId = f.seedreamModelId.value.trim();
       }
+      if (service === 'suno') body.endpoint = f.endpoint_suno.value.trim();
       const r = await api('/api/test', { method: 'POST', body });
       out.className = `test-result ${r.ok ? 'ok' : 'err'}`;
       out.textContent = `${r.ok ? '✓' : '✗'} ${r.detail}`;
@@ -4155,7 +4211,8 @@ $('#configForm').addEventListener('submit', async (e) => {
           googleTranslate: f.key_googleTranslate.value.trim(),
           ark: f.key_ark.value.trim(),
           elevenlabs: f.key_elevenlabs.value.trim(),
-          openai: f.key_openai.value.trim()
+          openai: f.key_openai.value.trim(),
+          suno: f.key_suno.value.trim()
         },
         openaiModel: f.openaiModel.value.trim() || 'gpt-5-mini',
         paths: {
@@ -4165,11 +4222,13 @@ $('#configForm').addEventListener('submit', async (e) => {
           video: f.path_video.value.trim()
         },
         endpoints: {
-          ark: f.endpoint_ark.value.trim()
+          ark: f.endpoint_ark.value.trim(),
+          suno: f.endpoint_suno.value.trim()
         },
         seedreamModelId: f.seedreamModelId.value.trim(),
         seedanceModelId: f.seedanceModelId.value.trim(),
         seedanceMiniModelId: f.seedanceMiniModelId.value.trim(),
+        sunoModelId: f.sunoModelId.value.trim() || 'V5_5',
         poserPrompt: f.poserPrompt.value.trim(),
         photoshopPath: f.photoshopPath.value.trim(),
         accessPassword: f.accessPassword.value
@@ -4196,6 +4255,8 @@ async function init() {
     state.config = s.config;
     state.models = s.models;
     state.videoModels = s.videoModels || [];
+    state.musicModel = s.musicModel || null;
+    if (s.musicModel?.defaultVersion) state.music.version = s.config?.sunoModelId || s.musicModel.defaultVersion;
     state.characters = s.characters;
     state.prompts = s.prompts;
     state.promptCategoriesExtra = s.promptCategories || {};

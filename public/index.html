@@ -46,6 +46,7 @@
     <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 2l10 5-10 5L2 7l10-5z"/><path d="M2 12l10 5 10-5"/><path d="M2 17l10 5 10-5"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
     <symbol id="i-clapper" viewBox="0 0 24 24"><rect x="2" y="8" width="20" height="13"/><path d="M2 8l2-5 20 3-2 5"/><path d="M8 3.9L6 8.8M13 4.6l-2 4.9M18 5.4l-2 4.9"/></symbol>
+    <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
   </defs>
 </svg>
 
@@ -84,6 +85,7 @@
           <button id="modeImage" class="mode-btn active"><svg class="ic"><use href="#i-image"/></svg> Imagen</button>
           <button id="modeVideo" class="mode-btn"><svg class="ic"><use href="#i-film"/></svg> Video</button>
           <button id="modeAudio" class="mode-btn"><svg class="ic"><use href="#i-mic"/></svg> Audio</button>
+          <button id="modeMusic" class="mode-btn"><svg class="ic"><use href="#i-music"/></svg> Música</button>
         </div>
         <div id="pinnedHint" class="pinned-hint" hidden></div>
         <button id="btnShotPanel" class="mode-btn shot-tab"><svg class="ic"><use href="#i-clapper"/></svg> Toma del guion</button>
@@ -224,6 +226,30 @@
           <label>Modelo</label>
           <span class="static-value">Eleven v3 — usá <b>[corchetes]</b> para expresiones: se pintan en la caja</span>
         </div>
+      </div>
+
+      <div id="musicControls" class="controls-card" hidden>
+        <div class="control-row">
+          <label>Modelo</label>
+          <div id="musicModelChips" class="chips"></div>
+        </div>
+        <div class="control-row">
+          <label>Modo</label>
+          <label class="poser-toggle"><input type="checkbox" id="musicCustom" checked> personalizado (letra + estilo + título)</label>
+        </div>
+        <div class="control-row">
+          <label>Instrumental</label>
+          <label class="poser-toggle"><input type="checkbox" id="musicInstrumental"> sin voces (solo música)</label>
+        </div>
+        <div class="control-row" id="musicStyleRow">
+          <label>Estilo / género</label>
+          <input id="musicStyle" class="text-input" placeholder="ej: synthwave, 120 BPM, bajo agresivo, voz masculina" maxlength="200">
+        </div>
+        <div class="control-row" id="musicTitleRow">
+          <label>Título</label>
+          <input id="musicTitle" class="text-input" placeholder="ej: Luces de neón" maxlength="80">
+        </div>
+        <span class="hint" id="musicHint"></span>
       </div>
 
       <!-- Resultados -->
@@ -537,6 +563,10 @@
             <span class="key-row"><input type="password" name="key_openai" placeholder="sk-…"><button type="button" class="tool-btn test-btn" data-service="openai">Probar</button></span>
             <span class="test-result" data-result="openai"></span>
           </label>
+          <label>Suno (música)
+            <span class="key-row"><input type="password" name="key_suno" placeholder="key del proveedor de Suno"><button type="button" class="tool-btn test-btn" data-service="suno">Probar</button></span>
+            <span class="test-result" data-result="suno"></span>
+          </label>
         </div>
         <h3>Carpetas</h3>
         <div class="cfg-grid">
@@ -581,6 +611,8 @@
           <label>ID de modelo Seedance 2.0 <input type="text" name="seedanceModelId" placeholder="dreamina-seedance-2-0"></label>
           <label>ID de modelo Seedance 2.0 Mini <input type="text" name="seedanceMiniModelId" placeholder="dreamina-seedance-2-0-mini-260615"></label>
           <label>Endpoint Ark <input type="text" name="endpoint_ark"></label>
+          <label>Endpoint Suno <input type="text" name="endpoint_suno" placeholder="https://api.sunoapi.org"></label>
+          <label>Modelo Suno por defecto <input type="text" name="sunoModelId" placeholder="V5_5"></label>
           <label>Modelo de OpenAI (precios) <input type="text" name="openaiModel" placeholder="gpt-5-mini"></label>
         </div>
         <button type="submit" class="generate-btn">Guardar configuración</button>

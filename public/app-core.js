@@ -25,6 +25,8 @@ const state = {
   batch: 1,
   videoModels: [],
   video: { modelId: null, mode: 'reference', aspectRatio: '16:9', resolution: '720p', duration: 5, audio: false },
+  musicModel: null,
+  music: { version: 'V5_5', customMode: true, instrumental: false, style: '', title: '' },
   refs: [],              // [{ key, fromChar, label }]
   voiceId: '',
   currentEntry: null,

@@ -8,12 +8,12 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFile } from 'node:child_process';
 
-import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODEL, getImageModel, getVideoModel } from './lib/models.js';
+import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel } from './lib/models.js';
 import {
   generateGemini, generateSeedream, generateOpenAIImage, generateSeedanceVideo, generateScreenplay,
-  listVoices, generateSpeech, translateText, searchUpdatedPricing, testService
+  listVoices, generateSpeech, generateMusic, translateText, searchUpdatedPricing, testService
 } from './lib/providers.js';
-import { mergePricing, imagePrice, videoPrice, audioPrice, translatePrice, scriptPrice } from './lib/pricing.js';
+import { mergePricing, imagePrice, videoPrice, audioPrice, musicPrice, translatePrice, scriptPrice } from './lib/pricing.js';
 import { POSER_BODY_PARTS } from './public/poser-bodyparts.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -37,7 +37,7 @@ const LABELED_REFS_PROMPT = 'The reference images are annotated working proofs: 
 const DEFAULT_CONFIG = {
   poserPrompt: DEFAULT_POSER_PROMPT,
   photoshopPath: '',
-  keys: { gemini: '', googleTranslate: '', ark: '', elevenlabs: '', openai: '' },
+  keys: { gemini: '', googleTranslate: '', ark: '', elevenlabs: '', openai: '', suno: '' },
   openaiModel: 'gpt-5-mini',
   paths: {
     poser: 'assets/poser',
@@ -47,11 +47,13 @@ const DEFAULT_CONFIG = {
     audio: 'assets/audio'
   },
   endpoints: {
-    ark: 'https://ark.ap-southeast.bytepluses.com/api/v3'
+    ark: 'https://ark.ap-southeast.bytepluses.com/api/v3',
+    suno: 'https://api.sunoapi.org'
   },
   seedreamModelId: 'seedream-5-0-lite',
   seedanceModelId: '',
   seedanceMiniModelId: '',
+  sunoModelId: 'V5_5',
   customAudioTags: [],
   accessPasswordHash: ''
 };
@@ -613,6 +615,59 @@ async function runAudioGeneration(req) {
   return entry;
 }
 
+async function runMusicGeneration(req) {
+  const cfg = await getConfig();
+  const customMode = Boolean(req.customMode);
+  const instrumental = Boolean(req.instrumental);
+  const model = MUSIC_MODEL.versions.includes(req.model) ? req.model : (cfg.sunoModelId || MUSIC_MODEL.defaultVersion);
+  const prompt = String(req.prompt || '').trim();
+  const style = String(req.style || '').trim();
+  const title = String(req.title || '').trim();
+
+  const tracks = await generateMusic({
+    apiKey: cfg.keys.suno, endpoint: cfg.endpoints.suno,
+    model, prompt, style, title, instrumental, customMode
+  });
+
+  // las 2 variantes se guardan como audios: "<título> - 1.mp3", "… - 2.mp3"
+  const slug = textSlug(title || style || prompt) || 'cancion';
+  const audioDir = resolveDir(cfg.paths.audio);
+  await fs.mkdir(audioDir, { recursive: true });
+  const existing = new Set(await fs.readdir(audioDir).catch(() => []));
+  const outputs = [];
+  for (const [i, track] of tracks.entries()) {
+    let name = `${slug}-${i + 1}.mp3`;
+    for (let n = 2; existing.has(name); n++) name = `${slug}-${i + 1}-${n}.mp3`;
+    existing.add(name);
+    outputs.push(await saveBuffer('audio', name, track.buffer));
+  }
+
+  const pricing = await getPricing();
+  const cost = musicPrice(pricing) * outputs.length;
+  await recordCost({
+    type: 'music', modelId: `suno-${model}`, label: `Suno ${model}`,
+    units: outputs.length, unitLabel: 'pista(s)', cost
+  });
+
+  const entry = {
+    id: newId(),
+    ts: Date.now(),
+    type: 'audio',
+    modelId: MUSIC_MODEL.id,
+    modelName: `Suno ${model}`,
+    prompt: [title, style, prompt].filter(Boolean).join(' · ') || prompt,
+    voiceId: null,
+    voiceName: '',
+    characterId: null,
+    outputs,
+    errors: [],
+    cost: Number(cost.toFixed(6))
+  };
+  await updateJson('history.json', [], (history) => [entry, ...history].slice(0, 1000));
+  await recordAssetMetadata(entry);
+  return entry;
+}
+
 // ---------------------------------------------------------------------------
 // Listado de assets
 // ---------------------------------------------------------------------------
@@ -1116,6 +1171,7 @@ const server = http.createServer(async (req, res) => {
         models: IMAGE_MODELS,
         videoModels: VIDEO_MODELS,
         audioModel: AUDIO_MODEL,
+        musicModel: MUSIC_MODEL,
         characters,
         prompts,
         promptCategories,
@@ -1155,6 +1211,7 @@ const server = http.createServer(async (req, res) => {
         seedreamModelId: body.seedreamModelId ?? cfg.seedreamModelId,
         seedanceModelId: body.seedanceModelId ?? cfg.seedanceModelId,
         seedanceMiniModelId: body.seedanceMiniModelId ?? cfg.seedanceMiniModelId,
+        sunoModelId: body.sunoModelId ?? cfg.sunoModelId,
         openaiModel: body.openaiModel ?? cfg.openaiModel,
         poserPrompt: body.poserPrompt !== undefined ? String(body.poserPrompt) : cfg.poserPrompt,
         photoshopPath: body.photoshopPath !== undefined ? String(body.photoshopPath).trim() : cfg.photoshopPath,
@@ -1435,6 +1492,12 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, entry);
     }
 
+    if (p === '/api/generate/music' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const entry = await runMusicGeneration(body);
+      return send(res, 200, entry);
+    }
+
     if (p === '/api/translate' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const cfg = await getConfig();
@@ -1511,7 +1574,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const cfg = await getConfig();
       const service = String(body.service || '');
-      const endpoint = body.endpoint || (service === 'ark' ? cfg.endpoints.ark : '');
+      const endpoint = body.endpoint || (service === 'ark' ? cfg.endpoints.ark : service === 'suno' ? cfg.endpoints.suno : '');
       const result = await testService({
         service,
         key: body.key || cfg.keys[service] || '',
