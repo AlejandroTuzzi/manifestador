@@ -13,6 +13,7 @@ $$('.nav-btn').forEach((btn) => {
     if (view === 'assets') refreshAssets();
     if (view === 'characters') renderCharacters();
     if (view === 'series') renderSeries();
+    if (view === 'automatizador') renderAutomations();
     if (view === 'elements') renderElements();
     if (view === 'poser') window.poserEnter?.();
     if (view === 'prompts') renderPromptLibrary();
@@ -1284,6 +1285,13 @@ function openPicker(replaceIndex = null) {
 
 // una selección del picker: reemplaza si estamos en ese modo, o agrega
 function pickRef(key) {
+  if (state.overlayBgPick) {
+    state.overlayBgPick = false;
+    $('#pickerModal').hidden = true;
+    const pr = currentAutomation();
+    if (pr) saveAutomation({ config: { overlay: { previewBg: key } } }).then(() => renderAutomationProject());
+    return;
+  }
   if (state.replaceRefIndex != null) return replaceRef(state.replaceRefIndex, key);
   addRef(key);
 }
@@ -1300,7 +1308,7 @@ function replaceRef(i, key) {
   toast('Referencia reemplazada — el orden y la cita se mantienen');
 }
 
-$('#pickerClose').addEventListener('click', () => { $('#pickerModal').hidden = true; state.replaceRefIndex = null; });
+$('#pickerClose').addEventListener('click', () => { $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.overlayBgPick = false; });
 $$('#pickerTabs .tab').forEach((t) => {
   t.addEventListener('click', () => setPickerTab(t.dataset.src));
 });
@@ -3363,7 +3371,7 @@ function renderCharModal() {
     <div><label>Fotos (${c.photos.length})</label>
       ${c.photos.length > 1 ? '<div class="hint" style="margin-bottom:6px">Arrastrá para ordenar — la primera es la foto de perfil</div>' : ''}
       <div class="char-photos-grid" id="chPhotos">
-        ${c.photos.map((p, pi) => `<div class="ref-thumb${pi === 0 ? ' is-profile' : ''}" draggable="true" data-photo="${esc(p)}"><img src="${fileUrl(p)}" draggable="false" alt=""><button class="rm" data-key="${esc(p)}">×</button></div>`).join('')}
+        ${c.photos.map((p, pi) => `<div class="ref-thumb${pi === 0 ? ' is-profile' : ''}${p === c.sheet ? ' is-sheet' : ''}" draggable="true" data-photo="${esc(p)}"><img src="${fileUrl(p)}" draggable="false" alt=""><button class="ficha-btn" data-ficha="${esc(p)}" title="${p === c.sheet ? 'Ficha del personaje (clic para quitar)' : 'Marcar como ficha de personaje'}">${IC('star')}</button><button class="rm" data-key="${esc(p)}">×</button></div>`).join('')}
         <button class="ref-add" id="chAddPhoto">+</button>
       </div>
     </div>
@@ -3378,7 +3386,7 @@ function renderCharModal() {
             <button type="button" class="mini-btn danger" data-vact="delete">${IC('trash')}</button>
           </div></div>
           ${v.description ? `<div class="hint">${esc(v.description)}</div>` : ''}
-          <div class="variant-photos">${v.photos.map((p) => `<span class="ref-thumb"><img src="${fileUrl(p)}" alt=""><button class="rm" data-vphoto="${esc(p)}">×</button></span>`).join('') || '<span class="hint">Sin fotos todavía</span>'}</div>
+          <div class="variant-photos">${v.photos.map((p) => `<span class="ref-thumb${p === v.sheet ? ' is-sheet' : ''}"><img src="${fileUrl(p)}" alt=""><button class="ficha-btn" data-vficha="${esc(p)}" title="${p === v.sheet ? 'Ficha de la variante (clic para quitar)' : 'Marcar como ficha de la variante'}">${IC('star')}</button><button class="rm" data-vphoto="${esc(p)}">×</button></span>`).join('') || '<span class="hint">Sin fotos todavía</span>'}</div>
         </div>`).join('')}</div>
     </div>` : '<p class="hint">Guardá el personaje primero y después subile fotos y variantes.</p>'}
     <button class="generate-btn small" id="chSave">${id ? 'Guardar cambios' : 'Crear personaje'}</button>`;
@@ -3486,6 +3494,14 @@ function renderCharModal() {
       if (state.pinnedId === id && state.characterVariantId === variantId) { applyPinnedCharacterPhotos(); renderRefs(); }
       renderCharModal(); renderCharacters(); renderCharacterVariantControl();
     }));
+    // ficha de la variante: marca/quita esta foto como imagen canónica
+    item.querySelectorAll('[data-vficha]').forEach((button) => button.addEventListener('click', async () => {
+      const key = button.dataset.vficha;
+      const sheet = variant.sheet === key ? '' : key;
+      const updated = await api(`/api/characters/${id}/variants/${variantId}`, { method: 'PUT', body: { sheet } });
+      state.characters[state.characters.findIndex((x) => x.id === id)] = updated;
+      renderCharModal();
+    }));
   });
 
   $$('#chPhotos .rm').forEach((b) => {
@@ -3496,6 +3512,17 @@ function renderCharModal() {
       renderCharModal();
       renderCharacters();
       renderPinned();
+    });
+  });
+
+  // ficha del Original: marca/quita esta foto como imagen canónica
+  $$('#chPhotos [data-ficha]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const key = b.dataset.ficha;
+      const sheet = c.sheet === key ? '' : key;
+      const updated = await api(`/api/characters/${id}`, { method: 'PUT', body: { sheet } });
+      state.characters[state.characters.findIndex((x) => x.id === id)] = updated;
+      renderCharModal();
     });
   });
 
@@ -3963,6 +3990,507 @@ function openElementAssets(id) {
 }
 
 // ---------------------------------------------------------------------------
+// Automatizador: proyectos con guion de bloques (prompt+texto), asignación de
+// roles a personajes/locaciones/objetos y config de imagen/voz/texto.
+// ---------------------------------------------------------------------------
+
+// roles sin asignar (personajes y locaciones obligatorios; objetos también si se declararon)
+function automationMissing(pr) {
+  const miss = [];
+  for (const r of pr.requirements.characters) if (!pr.assignments.characters?.[r.role]) miss.push(`personaje ${r.role}`);
+  for (const r of pr.requirements.locations) if (!pr.assignments.locations?.[r.role]) miss.push(`locación ${r.role}`);
+  for (const r of pr.requirements.objects) if (!pr.assignments.objects?.[r.role]) miss.push(`objeto ${r.role}`);
+  return miss;
+}
+
+function renderAutomations() {
+  const grid = $('#automationsGrid');
+  if (!state.automations.length) {
+    grid.innerHTML = '<div class="empty-note">Todavía no hay proyectos. Importá un guion JSON de Controversy Tracker o creá un proyecto vacío.</div>';
+    return;
+  }
+  grid.innerHTML = '';
+  for (const pr of state.automations) {
+    const missing = automationMissing(pr).length;
+    const card = document.createElement('div');
+    card.className = 'char-card';
+    card.innerHTML = `
+      <div class="char-name">${esc(pr.name)}</div>
+      <div class="hint" style="margin-bottom:8px">${pr.blocks.length} bloque${pr.blocks.length === 1 ? '' : 's'} · ${pr.requirements.characters.length} personaje(s), ${pr.requirements.locations.length} locación(es), ${pr.requirements.objects.length} objeto(s)</div>
+      <div class="automation-status ${missing ? 'pending' : 'ready'}">${missing ? `Faltan asignar ${missing} rol${missing === 1 ? '' : 'es'}` : 'Todo asignado ✓'}</div>
+      <div class="char-actions">
+        <button class="mini-btn accent" data-aact="open">${IC('edit')} Abrir</button>
+        <button class="mini-btn danger" data-aact="del">${IC('trash')}</button>
+      </div>`;
+    card.querySelector('[data-aact="open"]').addEventListener('click', () => openAutomation(pr.id));
+    card.querySelector('[data-aact="del"]').addEventListener('click', async () => {
+      if (!confirm(`¿Eliminar el proyecto “${pr.name}”?`)) return;
+      await api(`/api/automations/${pr.id}`, { method: 'DELETE' });
+      state.automations = state.automations.filter((x) => x.id !== pr.id);
+      renderAutomations();
+    });
+    grid.appendChild(card);
+  }
+}
+
+$('#btnNewAutomation').addEventListener('click', async () => {
+  const name = window.prompt('Nombre del proyecto:', 'Nuevo proyecto');
+  if (name === null) return;
+  try {
+    const created = await api('/api/automations', { method: 'POST', body: { name: name.trim() || 'Nuevo proyecto' } });
+    state.automations.unshift(created);
+    openAutomation(created.id);
+  } catch (err) { toast(err.message, 'err'); }
+});
+
+$('#btnImportAutomation').addEventListener('click', () => $('#automationImportInput').click());
+$('#automationImportInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    const created = await api('/api/automations', { method: 'POST', body: { data } });
+    state.automations.unshift(created);
+    toast(`“${created.name}” importado — ${created.blocks.length} bloques`);
+    openAutomation(created.id);
+  } catch (err) { toast(`No se pudo importar: ${err.message}`, 'err'); }
+});
+
+function currentAutomation() {
+  return state.automations.find((x) => x.id === state.openAutomationId) || null;
+}
+
+function openAutomation(id) {
+  state.openAutomationId = id;
+  $$('.nav-btn').forEach((b) => b.classList.remove('active'));
+  $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-automation'));
+  renderAutomationProject();
+  window.scrollTo(0, 0);
+}
+$('#automationBack').addEventListener('click', () => {
+  state.openAutomationId = null;
+  $('.nav-btn[data-view="automatizador"]').click();
+});
+$('#automationDelete').addEventListener('click', async () => {
+  const pr = currentAutomation();
+  if (!pr || !confirm(`¿Eliminar el proyecto “${pr.name}”?`)) return;
+  await api(`/api/automations/${pr.id}`, { method: 'DELETE' });
+  state.automations = state.automations.filter((x) => x.id !== pr.id);
+  state.openAutomationId = null;
+  $('.nav-btn[data-view="automatizador"]').click();
+});
+
+async function saveAutomation(patch) {
+  const pr = currentAutomation();
+  if (!pr) return;
+  try {
+    const updated = await api(`/api/automations/${pr.id}`, { method: 'PUT', body: patch });
+    state.automations[state.automations.findIndex((x) => x.id === pr.id)] = updated;
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+function renderAutomationProject() {
+  const pr = currentAutomation();
+  if (!pr) return;
+  sortEntities();
+  $('#automationTitle').textContent = pr.name;
+  const missing = automationMissing(pr);
+  $('#automationMeta').textContent = `${pr.blocks.length} bloques · ${missing.length ? `faltan ${missing.length} asignaciones` : 'listo para automatizar'}`;
+  const models = state.models || [];
+  const model = models.find((m) => m.id === pr.config.imageModelId) || models[0];
+  const chars = state.characters;
+  const locs = state.elements.filter((e) => e.kind === 'location');
+  const objs = state.elements.filter((e) => e.kind === 'object');
+
+  const assignRow = (kind, r, options) => {
+    const cur = pr.assignments[kind]?.[r.role] || '';
+    return `<div class="assign-row">
+      <span class="assign-role">${esc(r.role)}</span>
+      <span class="assign-desc hint">${esc(r.description || '')}</span>
+      <select class="select" data-assign="${kind}:${esc(r.role)}">
+        <option value="">— sin asignar —</option>
+        ${options.map((o) => `<option value="${o.id}"${o.id === cur ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}
+      </select>
+    </div>`;
+  };
+
+  $('#automationRoot').innerHTML = `
+    <div class="automation-panel">
+      <h3>Asignación de roles</h3>
+      ${pr.requirements.characters.length ? `<div class="assign-group"><h4>Personajes</h4>${pr.requirements.characters.map((r) => assignRow('characters', r, chars)).join('')}</div>` : ''}
+      ${pr.requirements.locations.length ? `<div class="assign-group"><h4>Locaciones</h4>${pr.requirements.locations.map((r) => assignRow('locations', r, locs)).join('')}</div>` : ''}
+      ${pr.requirements.objects.length ? `<div class="assign-group"><h4>Objetos</h4>${pr.requirements.objects.map((r) => assignRow('objects', r, objs)).join('')}</div>` : ''}
+      ${!pr.requirements.characters.length && !pr.requirements.locations.length && !pr.requirements.objects.length ? '<p class="hint">Este proyecto no declara requisitos. Importá un guion de Controversy Tracker para tenerlos.</p>' : ''}
+    </div>
+
+    <div class="automation-panel">
+      <h3>Configuración</h3>
+      <div class="control-row"><label>Modelo de imagen</label>
+        <select class="select" id="autoModel">${models.map((m) => `<option value="${m.id}"${m.id === model?.id ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div>
+      <div class="control-row"><label>Proporción</label>
+        <select class="select" id="autoAr">${(model?.aspectRatios || []).map((a) => `<option${a === pr.config.aspectRatio ? ' selected' : ''}>${a}</option>`).join('')}</select>
+        <label>Resolución</label>
+        <select class="select" id="autoRes">${(model?.resolutions || []).map((r) => `<option${r === pr.config.resolution ? ' selected' : ''}>${r}</option>`).join('')}</select></div>
+      <div class="control-row"><label>Voz del narrador</label>
+        <select class="select" id="autoVoice"><option value="">— elegí una voz —</option>${(state.voices || []).map((v) => `<option value="${v.id}"${v.id === pr.config.narratorVoiceId ? ' selected' : ''}>${esc(v.name)}</option>`).join('')}</select>
+        <span class="hint">Los diálogos usan la voz del personaje asignado (si tiene); si no, la del narrador.</span>
+      </div>
+      <h4>Texto sobreimpreso</h4>
+      <div class="control-row">
+        <label>Fuente</label><select class="select" id="ovFont">${['sans-serif', 'serif', 'monospace', 'Impact', 'Georgia', 'Arial Black'].map((f) => `<option${f === pr.config.overlay.font ? ' selected' : ''}>${f}</option>`).join('')}</select>
+        <label>Tamaño %</label><input type="number" id="ovSize" min="2" max="30" step="0.5" value="${pr.config.overlay.fontSizePct}" style="width:70px">
+        <label>Posición</label><select class="select" id="ovPos">${[['top', 'Arriba'], ['center', 'Centro'], ['bottom', 'Abajo']].map(([v, l]) => `<option value="${v}"${v === pr.config.overlay.position ? ' selected' : ''}>${l}</option>`).join('')}</select>
+      </div>
+      <div class="control-row">
+        <label>Color</label><input type="color" id="ovColor" value="${pr.config.overlay.color}">
+        <label>Borde</label><input type="color" id="ovStroke" value="${pr.config.overlay.strokeColor}">
+        <label>Grosor %</label><input type="number" id="ovStrokeW" min="0" max="3" step="0.1" value="${pr.config.overlay.strokeWidthPct}" style="width:70px">
+        <label>Highlight</label><input type="color" id="ovHl" value="${pr.config.overlay.highlightColor || '#fbbf24'}" title="Color de las palabras dramáticas">
+        <label class="poser-toggle"><input type="checkbox" id="ovBg" ${pr.config.overlay.bg ? 'checked' : ''}> caja de fondo</label>
+      </div>
+      <div class="ov-preview-tools">
+        <button type="button" class="mini-btn" id="ovPickBg">${IC('image')} Fondo de referencia</button>
+        ${pr.config.overlay.previewBg ? `<button type="button" class="mini-btn" id="ovClearBg">Quitar fondo</button>` : ''}
+        <span class="hint">Arrastrá el texto en la vista para ubicarlo</span>
+      </div>
+      <div class="ov-preview" id="ovPreview" style="aspect-ratio:${(pr.config.aspectRatio || '9:16').replace(':', '/')}">
+        ${pr.config.overlay.previewBg ? `<img class="ov-preview-bg" src="${fileUrl(pr.config.overlay.previewBg)}" alt="">` : ''}
+        <div class="ov-text" id="ovText"><span>Un texto de </span><span class="ov-hl">ejemplo</span><span> dramático acá</span></div>
+      </div>
+    </div>
+
+    <div class="automation-panel">
+      <h3>Guion (${pr.blocks.length} bloques)</h3>
+      ${pr.blocks.length ? pr.blocks.map((b, i) => {
+        const out = pr.outputs?.[b.id];
+        const done = out && out.videoKey;
+        return `
+        <div class="auto-block${done ? ' is-done' : ''}" data-block="${b.id}">
+          <div class="auto-block-head">
+            <strong>Bloque ${i + 1}</strong> <span class="hint">${esc([b.characters.join(', '), b.location, b.prop].filter(Boolean).join(' · '))}</span>
+            <span class="auto-block-btns">
+              <button class="mini-btn" data-genblock="${b.id}"${missing.length ? ' disabled' : ''}>${IC('spark')} ${done ? 'Regenerar' : 'Generar'}</button>
+            </span>
+          </div>
+          <div class="auto-block-line"><span>Prompt</span>${esc(b.imagePrompt)}</div>
+          ${(b.items || []).map((it) => `<div class="auto-block-line"><span>${it.kind === 'dialogue' ? esc(it.character || 'diálogo') : 'narra'}</span>${esc(it.text)}</div>`).join('')}
+          <div class="auto-block-out" data-out="${b.id}">${automationBlockOutHtml(out)}</div>
+        </div>`;
+      }).join('') : '<p class="hint">Sin bloques. Importá un guion.</p>'}
+    </div>
+
+    <div class="automation-actions">
+      ${missing.length ? `<span class="hint warn">No se puede automatizar: faltan ${missing.map(esc).join(', ')}.</span>` : `<span class="hint">Todo asignado · ${Object.values(pr.outputs || {}).filter((o) => o?.videoKey).length}/${pr.blocks.length} bloques generados.</span>`}
+      <select class="select" id="autoMode"${missing.length ? ' disabled' : ''}>
+        <option value="missing">Generar sólo los faltantes</option>
+        <option value="all">Regenerar todos</option>
+      </select>
+      <button class="generate-btn" id="autoStart"${missing.length ? ' disabled' : ''}>${IC('spark')} Automatizar</button>
+    </div>`;
+
+  $('#automationRoot').querySelectorAll('[data-assign]').forEach((sel) => sel.addEventListener('change', async () => {
+    const [kind, role] = sel.dataset.assign.split(':');
+    const a = { characters: { ...pr.assignments.characters }, locations: { ...pr.assignments.locations }, objects: { ...pr.assignments.objects } };
+    if (sel.value) a[kind][role] = sel.value; else delete a[kind][role];
+    await saveAutomation({ assignments: a });
+    renderAutomationProject();
+  }));
+
+  // El overlay vive en un objeto de trabajo local; los controles y el arrastre lo
+  // mutan y actualizan el preview en vivo, y se persiste con saveAll().
+  const ov = { ...pr.config.overlay };
+  const saveAll = () => saveAutomation({ config: {
+    imageModelId: $('#autoModel').value,
+    aspectRatio: $('#autoAr').value,
+    resolution: $('#autoRes').value,
+    narratorVoiceId: $('#autoVoice').value,
+    narratorVoiceName: (state.voices || []).find((v) => v.id === $('#autoVoice').value)?.name || '',
+    overlay: ov
+  } });
+  $('#autoModel').addEventListener('change', async () => { await saveAll(); renderAutomationProject(); });
+  $('#autoAr').addEventListener('change', async () => { await saveAll(); renderAutomationProject(); });
+  ['autoRes', 'autoVoice'].forEach((id) => $('#' + id).addEventListener('change', saveAll));
+
+  // --- visualizador del texto sobreimpreso ---
+  const preview = $('#ovPreview'), text = $('#ovText');
+  const styleText = () => {
+    const h = preview.clientHeight || 320;
+    Object.assign(text.style, {
+      fontFamily: ov.font,
+      fontSize: Math.max(8, h * ((ov.fontSizePct || 6) / 100)) + 'px',
+      color: ov.color,
+      webkitTextStroke: `${Math.max(0, h * ((ov.strokeWidthPct || 0) / 100))}px ${ov.strokeColor}`,
+      left: (ov.x ?? 50) + '%',
+      top: (ov.y ?? 88) + '%',
+      maxWidth: (ov.maxWidthPct || 88) + '%',
+      textAlign: ov.align || 'center'
+    });
+    text.querySelector('.ov-hl').style.color = ov.highlightColor || '#fbbf24';
+    text.classList.toggle('has-bg', !!ov.bg);
+  };
+  const bindOv = (id, prop, transform = (v) => v) => {
+    const el = $('#' + id);
+    el.addEventListener('input', () => { ov[prop] = transform(el.type === 'checkbox' ? el.checked : el.value); styleText(); });
+    el.addEventListener('change', saveAll);
+  };
+  bindOv('ovFont', 'font'); bindOv('ovSize', 'fontSizePct', Number); bindOv('ovColor', 'color');
+  bindOv('ovStroke', 'strokeColor'); bindOv('ovStrokeW', 'strokeWidthPct', Number);
+  bindOv('ovHl', 'highlightColor'); bindOv('ovBg', 'bg');
+  $('#ovPos').addEventListener('change', () => {
+    ov.position = $('#ovPos').value;
+    ov.y = ov.position === 'top' ? 12 : ov.position === 'center' ? 50 : 88;
+    ov.x = 50;
+    styleText(); saveAll();
+  });
+
+  // arrastrar el texto para ubicarlo libremente (setea x/y en %)
+  let dragging = false;
+  text.addEventListener('pointerdown', (e) => { dragging = true; text.setPointerCapture(e.pointerId); text.classList.add('dragging'); e.preventDefault(); });
+  text.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const r = preview.getBoundingClientRect();
+    ov.x = Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100));
+    ov.y = Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100));
+    styleText();
+  });
+  const endDrag = () => { if (!dragging) return; dragging = false; text.classList.remove('dragging'); saveAll(); };
+  text.addEventListener('pointerup', endDrag);
+  text.addEventListener('pointercancel', endDrag);
+  requestAnimationFrame(styleText);
+  if (window.ResizeObserver) new ResizeObserver(styleText).observe(preview);
+
+  // fondo de referencia (solo para previsualizar; no se usa al generar)
+  $('#ovPickBg').addEventListener('click', () => { state.overlayBgPick = true; openPicker(); $('#pickerTitle').textContent = 'Elegir fondo de referencia'; });
+  $('#ovClearBg')?.addEventListener('click', () => { ov.previewBg = ''; saveAll().then(() => renderAutomationProject()); });
+
+  $('#automationRoot').querySelectorAll('[data-genblock]').forEach((btn) => btn.addEventListener('click', async () => {
+    const block = pr.blocks.find((b) => b.id === btn.dataset.genblock);
+    if (block) await runAutomationBlock(pr.id, block, btn.closest('.auto-block'));
+  }));
+  $('#autoStart').addEventListener('click', () => runAutomationAll(pr.id, $('#autoMode').value));
+  if (state.voices === null) loadVoices(false).then(() => { if (currentAutomation()) renderAutomationProject(); });
+}
+
+// ---------------------------------------------------------------------------
+// Automatizador · pipeline por bloque: imagen (con fichas) → texto quemado por
+// canvas (WYSIWYG con el visualizador) → audio (narrador/personaje con tags de
+// emoción que yo genero) → mp4 con ffmpeg. Todo se guarda categorizado.
+// ---------------------------------------------------------------------------
+
+// palabras dramáticas que reciben el estilo highlight en el texto sobreimpreso.
+const DRAMATIC_WORDS = /^(nunca|jamás|jamas|siempre|todo|nada|nadie|muerte|morir|matar|sangre|traición|traicion|mentira|mentís|mentira|verdad|secreto|amor|odio|miedo|terror|adiós|adios|basta|ahora|nunca más|peligro|final|fin|último|ultimo|solo|sola|imposible|destruir|guerra|víctima|victima|culpa|perdón|perdon)$/i;
+
+// elige los índices de palabras a resaltar: las del léxico dramático y las que
+// están en MAYÚSCULAS o cerradas con signo de exclamación.
+function pickHighlightWords(text) {
+  const words = text.split(/\s+/);
+  const idx = new Set();
+  words.forEach((w, i) => {
+    const clean = w.replace(/[^\p{L}]/gu, '');
+    if (!clean) return;
+    if (DRAMATIC_WORDS.test(clean)) idx.add(i);
+    else if (clean.length > 2 && clean === clean.toUpperCase() && /\p{Lu}/u.test(clean)) idx.add(i);
+    else if (/[!¡]/.test(w)) idx.add(i);
+  });
+  return idx;
+}
+
+// tags de emoción de ElevenLabs (invisibles en la imagen; sólo van al audio),
+// elegidos por heurística simple sobre el texto para darle dinamismo.
+function emotionTagFor(text) {
+  const t = text.trim();
+  if (/[!¡]/.test(t) && t === t.toUpperCase()) return '[shouting]';
+  if (/[!¡]/.test(t)) return '[excited]';
+  if (/\?/.test(t)) return '[curious]';
+  if (/\.\.\.$|…$/.test(t)) return '[sighs]';
+  if (/(triste|llor|adiós|adios|perdón|perdon|muerte)/i.test(t)) return '[sad]';
+  if (/(nunca|jamás|jamas|odio|basta|traición|traicion)/i.test(t)) return '[angry]';
+  return '';
+}
+
+function fichaKeyForEntity(entity) {
+  if (!entity) return null;
+  return entity.sheet || (entity.photos && entity.photos[0]) || null;
+}
+
+// resuelve refs (fichas etiquetadas) y expande @ROL → nombre en el prompt.
+async function automationRefsAndPrompt(pr, block) {
+  const refItems = [];
+  const names = {};
+  const addChar = (role) => {
+    const id = pr.assignments.characters?.[role];
+    const c = state.characters.find((x) => x.id === id);
+    const key = fichaKeyForEntity(c);
+    if (c) names[role] = c.name;
+    if (key) refItems.push({ key, label: c?.name || role });
+  };
+  const addEl = (kind, role) => {
+    if (!role) return;
+    const id = pr.assignments[kind]?.[role];
+    const e = state.elements.find((x) => x.id === id);
+    const key = fichaKeyForEntity(e);
+    if (e) names[role] = e.name;
+    if (key) refItems.push({ key, label: e?.name || role });
+  };
+  block.characters.forEach(addChar);
+  addEl('locations', block.location);
+  addEl('objects', block.prop);
+  // dedup por key conservando el primer label
+  const seen = new Set();
+  const refs = refItems.filter((r) => !seen.has(r.key) && seen.add(r.key));
+  const labeledRefs = await buildLabeledRefs(refs);
+  let prompt = block.imagePrompt.replace(/@([A-Z0-9_]+)/g, (m, r) => names[r] || m.replace('@', ''));
+  return { refs: refs.map((r) => r.key), labeledRefs, prompt };
+}
+
+// quema el texto del bloque sobre la imagen por canvas, replicando el
+// visualizador (posición x/y, borde, highlights, caja). Sube el resultado.
+function burnOverlayText(imageKey, caption, ov) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = async () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const H = canvas.height, W = canvas.width;
+        const fontPx = Math.max(10, H * ((ov.fontSizePct || 6) / 100));
+        const strokePx = Math.max(0, H * ((ov.strokeWidthPct || 0) / 100));
+        const lineH = fontPx * 1.2;
+        const maxW = W * ((ov.maxWidthPct || 88) / 100);
+        ctx.font = `700 ${fontPx}px ${ov.font || 'sans-serif'}`;
+        ctx.textBaseline = 'middle';
+        // envolver en líneas respetando maxW, conservando el índice de palabra
+        const words = caption.split(/\s+/).filter(Boolean);
+        const hi = pickHighlightWords(caption);
+        const lines = []; let cur = []; let wi = 0; let idxLine = [];
+        for (const w of words) {
+          const test = [...cur, w].join(' ');
+          if (cur.length && ctx.measureText(test).width > maxW) { lines.push({ words: cur, idx: idxLine }); cur = [w]; idxLine = [wi]; }
+          else { cur.push(w); idxLine.push(wi); }
+          wi++;
+        }
+        if (cur.length) lines.push({ words: cur, idx: idxLine });
+        const blockH = lines.length * lineH;
+        let cy = (H * ((ov.y ?? 88) / 100)) - blockH / 2 + lineH / 2;
+        const cx = W * ((ov.x ?? 50) / 100);
+        // caja de fondo opcional
+        if (ov.bg) {
+          const pad = fontPx * 0.4;
+          let boxW = 0;
+          for (const ln of lines) boxW = Math.max(boxW, ctx.measureText(ln.words.join(' ')).width);
+          ctx.globalAlpha = ov.bgOpacity ?? 0.45; ctx.fillStyle = ov.bgColor || '#000';
+          ctx.fillRect(cx - boxW / 2 - pad, cy - lineH / 2 - pad, boxW + pad * 2, blockH + pad * 2);
+          ctx.globalAlpha = 1;
+        }
+        ctx.textAlign = 'left';
+        for (const ln of lines) {
+          const full = ln.words.join(' ');
+          const lineW = ctx.measureText(full).width;
+          let x = cx - lineW / 2; // centrado
+          ln.words.forEach((w, k) => {
+            const isHi = hi.has(ln.idx[k]);
+            const piece = w + (k < ln.words.length - 1 ? ' ' : '');
+            if (strokePx > 0) { ctx.lineWidth = strokePx * 2; ctx.strokeStyle = ov.strokeColor || '#000'; ctx.lineJoin = 'round'; ctx.strokeText(piece, x, cy); }
+            ctx.fillStyle = isHi ? (ov.highlightColor || '#fbbf24') : (ov.color || '#fff');
+            ctx.fillText(piece, x, cy);
+            x += ctx.measureText(piece).width;
+          });
+          cy += lineH;
+        }
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        const up = await api('/api/upload', { method: 'POST', body: { dataUrl, name: 'auto-texto' } });
+        resolve(up.key);
+      } catch (e) { reject(e); }
+    };
+    img.onerror = () => reject(new Error('No se pudo leer la imagen para sobreimprimir el texto'));
+    img.src = fileUrl(imageKey);
+  });
+}
+
+function automationBlockOutHtml(out) {
+  if (!out || !out.videoKey) return '';
+  return `
+    ${out.imageKey ? `<a href="${fileUrl(out.imageKey)}" target="_blank"><img src="${fileUrl(out.imageKey)}" alt="imagen"></a>` : ''}
+    ${out.textImageKey ? `<a href="${fileUrl(out.textImageKey)}" target="_blank"><img src="${fileUrl(out.textImageKey)}" alt="con texto"></a>` : ''}
+    ${out.videoKey ? `<video src="${fileUrl(out.videoKey)}" controls preload="metadata"></video>` : ''}`;
+}
+
+async function runAutomationBlock(projectId, block, blockEl) {
+  const pr = state.automations.find((x) => x.id === projectId);
+  if (!pr) return;
+  const outEl = blockEl?.querySelector('[data-out]');
+  const setStatus = (msg) => { if (outEl) outEl.innerHTML = `<span class="hint">${esc(msg)}</span>`; };
+  try {
+    if (blockEl) blockEl.classList.add('is-working');
+    setStatus('Generando imagen…');
+    const { refs, labeledRefs, prompt } = await automationRefsAndPrompt(pr, block);
+    if (!refs.length) throw new Error('El bloque no tiene fichas asignadas para las referencias.');
+    const img = await api('/api/generate/image', { method: 'POST', body: {
+      modelId: pr.config.imageModelId, prompt, refs, labeledRefs,
+      aspectRatio: pr.config.aspectRatio, resolution: pr.config.resolution, batch: 1
+    } });
+    const imageKey = img.outputs[0];
+
+    setStatus('Sobreimprimiendo el texto…');
+    const caption = block.items.map((it) => it.text).join(' ');
+    const textImageKey = await burnOverlayText(imageKey, caption, pr.config.overlay);
+
+    setStatus('Generando el audio…');
+    const audioKeys = [];
+    for (const it of block.items) {
+      const isDialog = it.kind === 'dialogue';
+      const ch = isDialog ? state.characters.find((c) => c.id === pr.assignments.characters?.[it.character]) : null;
+      const voiceId = (ch && ch.voiceId) || pr.config.narratorVoiceId;
+      const voiceName = (ch && ch.voiceName) || pr.config.narratorVoiceName;
+      if (!voiceId) throw new Error('Falta la voz del narrador (o del personaje del diálogo).');
+      const tag = emotionTagFor(it.text);
+      const a = await api('/api/generate/audio', { method: 'POST', body: {
+        text: tag ? `${tag} ${it.text}` : it.text, voiceId, voiceName
+      } });
+      audioKeys.push(a.outputs[0]);
+    }
+
+    setStatus('Armando el video…');
+    const category = `Auto: ${pr.name}`;
+    const v = await api(`/api/automations/${pr.id}/video`, { method: 'POST', body: {
+      blockId: block.id, imageKey: textImageKey, audioKeys, category
+    } });
+
+    await api('/api/assets/tag', { method: 'POST', body: {
+      keys: [imageKey, textImageKey, ...audioKeys], category, automationId: pr.id, blockId: block.id
+    } });
+    await saveAutomation({ outputs: { [block.id]: { imageKey, textImageKey, audioKeys, videoKey: v.videoKey, ts: Date.now() } } });
+    renderAutomationProject();
+    return true;
+  } catch (err) {
+    toast(err.message, 'err');
+    if (outEl) outEl.innerHTML = `<span class="hint warn">Falló: ${esc(err.message)}</span>`;
+    return false;
+  } finally {
+    if (blockEl) blockEl.classList.remove('is-working');
+  }
+}
+
+async function runAutomationAll(projectId, mode) {
+  const pr = state.automations.find((x) => x.id === projectId);
+  if (!pr) return;
+  const targets = pr.blocks.filter((b) => mode === 'all' || !(pr.outputs?.[b.id]?.videoKey));
+  if (!targets.length) return toast('No hay bloques para generar con esa opción', 'ok');
+  if (mode === 'all' && !confirm(`¿Regenerar los ${targets.length} bloques? Se crean assets nuevos.`)) return;
+  const btn = $('#autoStart');
+  if (btn) { btn.disabled = true; }
+  let ok = 0;
+  for (const block of targets) {
+    const blockEl = $('#automationRoot')?.querySelector(`.auto-block[data-block="${block.id}"]`);
+    const r = await runAutomationBlock(projectId, block, blockEl);
+    if (r) ok++; else break; // si uno falla, freno para no encadenar errores
+  }
+  toast(`Automatización: ${ok}/${targets.length} bloques generados`, ok === targets.length ? 'ok' : 'err');
+}
+
+// ---------------------------------------------------------------------------
 // consumo y precios
 // ---------------------------------------------------------------------------
 
@@ -4140,6 +4668,7 @@ function fillConfigForm() {
   f.endpoint_suno.value = c.endpoints.suno || '';
   f.poserPrompt.value = c.poserPrompt || '';
   f.photoshopPath.value = c.photoshopPath || '';
+  f.ffmpegPath.value = c.ffmpegPath || '';
   renderConfigAudioTags();
   $('#accessStatus').textContent = c.accessProtected
     ? 'La aplicación está protegida. Escribí una nueva clave solo si querés cambiarla.'
@@ -4231,6 +4760,7 @@ $('#configForm').addEventListener('submit', async (e) => {
         sunoModelId: f.sunoModelId.value.trim() || 'V5_5',
         poserPrompt: f.poserPrompt.value.trim(),
         photoshopPath: f.photoshopPath.value.trim(),
+        ffmpegPath: f.ffmpegPath.value.trim(),
         accessPassword: f.accessPassword.value
       }
     });
@@ -4265,6 +4795,7 @@ async function init() {
     state.scripts = s.scripts || [];
     state.elements = s.elements || [];
     state.elementLinks = s.elementLinks || [];
+    state.automations = s.automations || [];
     state.history = s.history;
     state.pricing = s.pricing;
     state.modelId = s.models[0]?.id;

@@ -37,6 +37,7 @@ const LABELED_REFS_PROMPT = 'The reference images are annotated working proofs: 
 const DEFAULT_CONFIG = {
   poserPrompt: DEFAULT_POSER_PROMPT,
   photoshopPath: '',
+  ffmpegPath: '',
   keys: { gemini: '', googleTranslate: '', ark: '', elevenlabs: '', openai: '', suno: '' },
   openaiModel: 'gpt-5-mini',
   paths: {
@@ -302,6 +303,18 @@ function parseDataUrl(dataUrl) {
   const mime = m[1] || 'application/octet-stream';
   const buffer = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]), 'utf8');
   return { mime, buffer };
+}
+
+// ffmpeg como binario externo (config.ffmpegPath), igual que Photoshop: mantiene
+// la app sin dependencias npm. Devuelve el stderr para diagnosticar si falla.
+function runFfmpeg(bin, args) {
+  return new Promise((resolve, reject) => {
+    const ps = spawn(bin, args, { windowsHide: true });
+    let err = '';
+    ps.stderr.on('data', (d) => { err += d.toString(); });
+    ps.on('error', (e) => reject(new Error(`No se pudo ejecutar ffmpeg: ${e.message}`)));
+    ps.on('close', (code) => code === 0 ? resolve(err) : reject(new Error(`ffmpeg falló (código ${code}): ${err.slice(-600)}`)));
+  });
 }
 
 function sanitizeName(name) {
@@ -805,6 +818,105 @@ function sanitizeScriptScenes(scenes) {
   }));
 }
 
+// ---------------------------------------------------------------------------
+// Automatizador: proyectos con guion propio (bloques prompt+texto), asignación
+// de roles a personajes/locaciones/objetos, y config de imagen/voz/texto.
+// El guion llega de Controversy Tracker como JSON con roles en MAYÚSCULAS.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_OVERLAY = {
+  font: 'sans-serif',
+  fontSizePct: 6,          // alto de letra como % del alto de la imagen
+  color: '#ffffff',
+  strokeColor: '#000000',
+  strokeWidthPct: 0.5,     // grosor del borde como % del alto
+  position: 'bottom',      // preset rápido: top | center | bottom (setea y)
+  x: 50,                   // centro del texto, % del ancho (arrastrable)
+  y: 88,                   // centro del texto, % del alto (arrastrable)
+  align: 'center',         // left | center | right
+  maxWidthPct: 88,         // ancho máximo del texto como % del ancho
+  bg: false,               // caja semitransparente detrás del texto
+  bgColor: '#000000',
+  bgOpacity: 0.45,
+  highlightColor: '#fbbf24', // color de las palabras dramáticas (highlights)
+  previewBg: ''            // asset de fondo SOLO para previsualizar (no se usa al generar)
+};
+
+// La voz del narrador es del proyecto; los diálogos usan la voz del personaje
+// asignado (si tiene), con la del narrador como respaldo.
+const DEFAULT_AUTOMATION_CONFIG = {
+  imageModelId: 'nano-banana-pro',
+  aspectRatio: '9:16',
+  resolution: '2K',
+  narratorVoiceId: '',
+  narratorVoiceName: '',
+  overlay: { ...DEFAULT_OVERLAY }
+};
+
+const stripTags = (s) => String(s || '').replace(/\[[^\]]*\]/g, '').replace(/\s+/g, ' ').trim();
+const roleId = (r) => String(r || '').trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+
+// normaliza un proyecto (importado o editado); conserva lo previo (asignaciones,
+// config, outputs) al re-guardar
+function sanitizeAutomation(src, prev = {}) {
+  const reqList = (arr, withVoice) => (Array.isArray(arr) ? arr : []).slice(0, 50).map((x) => {
+    const role = roleId(x.role);
+    if (!role) return null;
+    const o = { role, description: String(x.description || '').slice(0, 800) };
+    if (withVoice) o.voice = String(x.voice || '');
+    return o;
+  }).filter(Boolean);
+
+  const requirements = {
+    characters: reqList(src.requirements?.characters, true),
+    locations: reqList(src.requirements?.locations, false),
+    objects: reqList(src.requirements?.objects, false)
+  };
+
+  const blocks = (Array.isArray(src.blocks) ? src.blocks : []).slice(0, 500).map((b, i) => {
+    // items: narración (voz del narrador) o diálogo (voz del personaje). El
+    // texto llega LIMPIO de Controversy Tracker; los tags de emoción para el
+    // audio y los highlights los agrega el automatizador. Compatible con los
+    // items de los guiones de series (kind + character + text).
+    const raw = Array.isArray(b.items) ? b.items : Array.isArray(b.segments) ? b.segments : null;
+    let items;
+    if (raw) {
+      items = raw.slice(0, 60).map((it) => ({
+        kind: (/^dialog/i.test(it.kind) || it.character) ? 'dialogue' : 'narration',
+        character: roleId(it.character),
+        text: stripTags(String(it.text || '')).slice(0, 2000)
+      })).filter((it) => it.text);
+    } else {
+      const t = stripTags(String(b.narration ?? b.text ?? b.caption ?? '')).slice(0, 4000);
+      items = t ? [{ kind: 'narration', character: '', text: t }] : [];
+    }
+    const characters = [...new Set([
+      ...(Array.isArray(b.characters) ? b.characters : []).map(roleId),
+      ...items.filter((it) => it.kind === 'dialogue').map((it) => it.character)
+    ].filter(Boolean))];
+    return {
+      id: String(b.id || `b${i + 1}`).slice(0, 40),
+      imagePrompt: String(b.imagePrompt ?? b.prompt ?? '').slice(0, 4000),
+      items,
+      characters,
+      location: roleId(b.location),
+      prop: roleId(b.prop)
+    };
+  });
+
+  return {
+    id: prev.id || newId(),
+    name: String(src.project ?? src.name ?? prev.name ?? 'Proyecto').trim().slice(0, 120) || 'Proyecto',
+    requirements,
+    blocks,
+    assignments: prev.assignments || { characters: {}, locations: {}, objects: {} },
+    config: prev.config || { ...DEFAULT_AUTOMATION_CONFIG },
+    outputs: prev.outputs || {},
+    ts: prev.ts || Date.now(),
+    updatedAt: Date.now()
+  };
+}
+
 function sanitizeScriptCast(list, characters) {
   return (Array.isArray(list) ? list : []).slice(0, 50).map((ch) => ({
     id: newId(),
@@ -975,6 +1087,8 @@ async function serveEntityRoutes(meta, { p, req, res, url }) {
         if (!v) { bad = e ? 'Variante no encontrada' : notFound; return all; }
         if (body.name !== undefined) v.name = String(body.name).trim() || v.name;
         if (body.description !== undefined) v.description = String(body.description);
+        // ficha de personaje: una foto de la variante como imagen canónica
+        if (body.sheet !== undefined) v.sheet = (v.photos || []).includes(body.sheet) ? body.sheet : '';
         out = e; return all;
       });
       return bad ? (send(res, 404, { error: bad }), true) : (send(res, 200, out), true);
@@ -1004,7 +1118,7 @@ async function serveEntityRoutes(meta, { p, req, res, url }) {
       await updateJson(file, [], (all) => {
         const e = all.find((x) => x.id === id);
         const v = e && (e.variants || []).find((x) => x.id === variantId);
-        if (v) v.photos = v.photos.filter((k) => k !== key);
+        if (v) { v.photos = v.photos.filter((k) => k !== key); if (v.sheet === key) v.sheet = ''; }
         out = e; return all;
       });
       if (!out) return send(res, 404, { error: notFound }), true;
@@ -1035,7 +1149,7 @@ async function serveEntityRoutes(meta, { p, req, res, url }) {
       let out = null;
       await updateJson(file, [], (all) => {
         const e = all.find((x) => x.id === id);
-        if (e) e.photos = e.photos.filter((k) => k !== key);
+        if (e) { e.photos = e.photos.filter((k) => k !== key); if (e.sheet === key) e.sheet = ''; }
         out = e; return all;
       });
       if (!out) return send(res, 404, { error: notFound }), true;
@@ -1064,6 +1178,8 @@ async function serveEntityRoutes(meta, { p, req, res, url }) {
         if (!e) return all;
         meta.applyUpdate(e, body);
         if (body.avatarPos !== undefined) e.avatarPos = sanitizeAvatarPos(body.avatarPos);
+        // ficha del Original: una de sus fotos como imagen canónica
+        if (body.sheet !== undefined) e.sheet = (e.photos || []).includes(body.sheet) ? body.sheet : '';
         e.variants = e.variants || [];
         out = e; return all;
       });
@@ -1153,7 +1269,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks] = await Promise.all([
+      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
@@ -1164,7 +1280,8 @@ const server = http.createServer(async (req, res) => {
         readJson('series.json', []),
         readJson('scripts.json', []),
         readJson('elements.json', []),
-        readJson('element-links.json', [])
+        readJson('element-links.json', []),
+        readJson('automations.json', [])
       ]);
       return send(res, 200, {
         config: publicConfig(cfg),
@@ -1181,7 +1298,8 @@ const server = http.createServer(async (req, res) => {
         series,
         scripts,
         elements,
-        elementLinks
+        elementLinks,
+        automations
       });
     }
 
@@ -1215,6 +1333,7 @@ const server = http.createServer(async (req, res) => {
         openaiModel: body.openaiModel ?? cfg.openaiModel,
         poserPrompt: body.poserPrompt !== undefined ? String(body.poserPrompt) : cfg.poserPrompt,
         photoshopPath: body.photoshopPath !== undefined ? String(body.photoshopPath).trim() : cfg.photoshopPath,
+        ffmpegPath: body.ffmpegPath !== undefined ? String(body.ffmpegPath).trim() : cfg.ffmpegPath,
         customAudioTags: Array.isArray(body.customAudioTags)
           ? [...new Set(body.customAudioTags.map((tag) => String(tag).trim().replace(/^\[|\]$/g, '')).filter(Boolean))].slice(0, 100)
           : (cfg.customAudioTags || []),
@@ -1472,6 +1591,110 @@ const server = http.createServer(async (req, res) => {
         });
         return out ? send(res, 200, out) : send(res, 404, { error: 'Guion no encontrado' });
       }
+    }
+
+    // --- automatizaciones ---
+    if (p === '/api/automations' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      // { data } = importar de Controversy Tracker; si no, proyecto vacío con { name }
+      const source = body.data && typeof body.data === 'object' ? body.data : { name: body.name };
+      const item = sanitizeAutomation(source);
+      await updateJson('automations.json', [], (all) => [item, ...all]);
+      return send(res, 200, item);
+    }
+
+    const automationMatch = /^\/api\/automations\/([a-z0-9]+)$/.exec(p);
+    if (automationMatch) {
+      const projectId = automationMatch[1];
+      if (req.method === 'PUT') {
+        const body = await readJsonBody(req);
+        let out = null;
+        await updateJson('automations.json', [], (all) => {
+          const i = all.findIndex((x) => x.id === projectId);
+          if (i === -1) return all;
+          const prev = all[i];
+          // se puede actualizar nombre, asignaciones, config y (al reimportar) el guion
+          const next = { ...prev };
+          if (body.name !== undefined) next.name = String(body.name).trim().slice(0, 120) || prev.name;
+          if (body.assignments !== undefined) next.assignments = {
+            characters: { ...(body.assignments.characters || {}) },
+            locations: { ...(body.assignments.locations || {}) },
+            objects: { ...(body.assignments.objects || {}) }
+          };
+          if (body.config !== undefined) next.config = { ...prev.config, ...body.config, overlay: { ...prev.config.overlay, ...(body.config.overlay || {}) } };
+          // outputs por bloque (imagen, imagen+texto, audios, video) — se mergea por id de bloque
+          if (body.outputs !== undefined && body.outputs && typeof body.outputs === 'object') next.outputs = { ...prev.outputs, ...body.outputs };
+          if (body.data !== undefined) {
+            const re = sanitizeAutomation(body.data, prev);
+            next.requirements = re.requirements; next.blocks = re.blocks; next.name = re.name;
+          }
+          next.updatedAt = Date.now();
+          all[i] = next; out = next; return all;
+        });
+        return out ? send(res, 200, out) : send(res, 404, { error: 'Proyecto no encontrado' });
+      }
+      if (req.method === 'DELETE') {
+        await updateJson('automations.json', [], (all) => all.filter((x) => x.id !== projectId));
+        return send(res, 200, { ok: true });
+      }
+    }
+
+    // Muxea el video de un bloque: imagen fija (ya con el texto quemado) + audio(s)
+    // en secuencia → mp4 que dura lo que el audio. El overlay lo quema el cliente
+    // por canvas (WYSIWYG con el visualizador); acá solo se arma el video.
+    const automationVideoMatch = /^\/api\/automations\/([a-z0-9]+)\/video$/.exec(p);
+    if (automationVideoMatch && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const cfg = await getConfig();
+      if (!cfg.ffmpegPath) return send(res, 400, { error: 'Configurá la ruta de ffmpeg en Configuración para armar el video.' });
+      const imageKey = String(body.imageKey || '');
+      const audioKeys = (Array.isArray(body.audioKeys) ? body.audioKeys : []).map(String).filter((k) => /^audio\//.test(k));
+      if (!/^(generated|uploads)\//.test(imageKey)) return send(res, 400, { error: 'Falta la imagen del bloque.' });
+      if (!audioKeys.length) return send(res, 400, { error: 'Falta el audio del bloque.' });
+      const imgPath = await resolveAssetKey(imageKey);
+      const audioPaths = [];
+      for (const k of audioKeys) audioPaths.push(await resolveAssetKey(k));
+      const name = `${ts()}-auto-${newId()}.mp4`;
+      const outDir = resolveDir(cfg.paths.video);
+      await fs.mkdir(outDir, { recursive: true });
+      const outPath = path.join(outDir, name);
+      const args = ['-y', '-loop', '1', '-i', imgPath];
+      for (const a of audioPaths) args.push('-i', a);
+      if (audioPaths.length > 1) {
+        const inputs = audioPaths.map((_, i) => `[${i + 1}:a]`).join('');
+        args.push('-filter_complex', `${inputs}concat=n=${audioPaths.length}:v=0:a=1[a]`, '-map', '0:v', '-map', '[a]');
+      } else {
+        args.push('-map', '0:v', '-map', '1:a');
+      }
+      // dimensiones pares (requisito de yuv420p) y cierre al terminar el audio
+      args.push('-c:v', 'libx264', '-tune', 'stillimage', '-pix_fmt', 'yuv420p',
+        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-r', '25',
+        '-c:a', 'aac', '-b:a', '192k', '-shortest', outPath);
+      await runFfmpeg(cfg.ffmpegPath, args);
+      const key = `video/${name}`;
+      const category = String(body.category || '').slice(0, 80);
+      await updateJson('asset-metadata.json', {}, (m) => {
+        m[key] = { type: 'video', modelId: 'ffmpeg', modelName: 'Automatizador', ts: Date.now(), category, automationId: automationVideoMatch[1], blockId: String(body.blockId || '') };
+        return m;
+      });
+      return send(res, 200, { videoKey: key });
+    }
+
+    // Etiqueta assets con la categoría del proyecto (y bloque) para agruparlos en Assets.
+    if (p === '/api/assets/tag' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const keys = (Array.isArray(body.keys) ? body.keys : []).map(String).filter(Boolean);
+      await updateJson('asset-metadata.json', {}, (m) => {
+        for (const k of keys) m[k] = {
+          ...(m[k] || {}),
+          category: body.category !== undefined ? String(body.category).slice(0, 80) : m[k]?.category,
+          automationId: body.automationId !== undefined ? String(body.automationId) : m[k]?.automationId,
+          blockId: body.blockId !== undefined ? String(body.blockId) : m[k]?.blockId,
+          autoKind: body.autoKind !== undefined ? String(body.autoKind) : m[k]?.autoKind
+        };
+        return m;
+      });
+      return send(res, 200, { ok: true });
     }
 
     if (p === '/api/generate/image' && req.method === 'POST') {

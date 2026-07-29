@@ -57,6 +57,9 @@ const state = {
   scriptViewId: null,        // guion abierto en la vista de lectura "Ver guion"
   elements: [],              // locaciones y objetos
   elementLinks: [],
+  automations: [],           // proyectos del automatizador
+  openAutomationId: null,    // proyecto abierto en la vista de detalle
+  overlayBgPick: false,      // el picker está eligiendo fondo de referencia del overlay
   editingElementId: null,
   elementKindFilter: '',
   elementCategoryFilter: '',

@@ -47,6 +47,7 @@
     <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
     <symbol id="i-clapper" viewBox="0 0 24 24"><rect x="2" y="8" width="20" height="13"/><path d="M2 8l2-5 20 3-2 5"/><path d="M8 3.9L6 8.8M13 4.6l-2 4.9M18 5.4l-2 4.9"/></symbol>
     <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></symbol>
   </defs>
 </svg>
 
@@ -60,6 +61,7 @@
       <button class="nav-btn" data-view="characters"><svg class="ic"><use href="#i-user"/></svg> Personajes</button>
       <button class="nav-btn" data-view="elements"><svg class="ic"><use href="#i-globe"/></svg> Locaciones y objetos</button>
       <button class="nav-btn" data-view="series"><svg class="ic"><use href="#i-layers"/></svg> Series</button>
+      <button class="nav-btn" data-view="automatizador"><svg class="ic"><use href="#i-spark"/></svg> Automatizador</button>
       <button class="nav-btn" data-view="poser"><svg class="ic"><use href="#i-cube"/></svg> Poser</button>
       <button class="nav-btn" data-view="prompts"><svg class="ic"><use href="#i-book"/></svg> Prompts</button>
       <button class="nav-btn" data-view="costs"><svg class="ic"><use href="#i-dollar"/></svg> Consumo</button>
@@ -463,6 +465,35 @@
       <div id="seriesGrid" class="chars-grid"></div>
     </section>
 
+    <!-- ==================== AUTOMATIZADOR ==================== -->
+    <section id="view-automatizador" class="view">
+      <div class="chars-head">
+        <h2>Automatizador</h2>
+        <div>
+          <button id="btnImportAutomation" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> Importar guion (JSON)</button>
+          <button id="btnNewAutomation" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Proyecto vacío</button>
+        </div>
+      </div>
+      <div id="automationsGrid" class="chars-grid"></div>
+    </section>
+
+    <!-- Vista de proyecto de automatización (se abre desde Automatizador) -->
+    <section id="view-automation" class="view">
+      <div class="chars-head script-head">
+        <div class="script-head-left">
+          <button id="automationBack" class="mini-btn">← Automatizador</button>
+          <div>
+            <h2 id="automationTitle">Proyecto</h2>
+            <span id="automationMeta" class="hint"></span>
+          </div>
+        </div>
+        <button id="automationDelete" class="mini-btn danger"><svg class="ic"><use href="#i-trash"/></svg> Borrar proyecto</button>
+      </div>
+      <div id="automationRoot"></div>
+    </section>
+
+    <input type="file" id="automationImportInput" accept=".json,application/json" hidden>
+
     <!-- ==================== GUION (se abre desde Series) ==================== -->
     <section id="view-script" class="view">
       <div class="chars-head script-head">
@@ -581,6 +612,12 @@
           <label>Ruta de Photoshop.exe <input type="text" name="photoshopPath" placeholder="C:\Program Files\Adobe\Adobe Photoshop 2025\Photoshop.exe"></label>
         </div>
         <p class="hint"><button type="button" id="psDetectBtn" class="mini-btn">Detectar automáticamente</button> Busca tu instalación (registro de Windows y carpetas de Adobe) y la vincula. Si no la encuentra, pegá la ruta a mano.</p>
+
+        <h3>ffmpeg</h3>
+        <div class="cfg-grid">
+          <label>Ruta de ffmpeg.exe <input type="text" name="ffmpegPath" placeholder="C:\ffmpeg\bin\ffmpeg.exe"></label>
+        </div>
+        <p class="hint">El Automatizador lo usa para armar el video mp4 de cada bloque (imagen + audio). Descargá ffmpeg y pegá la ruta al ejecutable.</p>
 
         <h3>Prompt de pose (Poser)</h3>
         <textarea name="poserPrompt" class="cfg-textarea" rows="4" spellcheck="false"></textarea>
