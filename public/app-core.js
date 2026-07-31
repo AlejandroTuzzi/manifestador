@@ -18,6 +18,8 @@ const state = {
   promptQuickSearch: '',
   history: [],
   voices: null,          // null = aún no cargadas
+  audioModels: [],
+  audioModelId: 'eleven-v3',
   assets: { generated: [], uploads: [], audio: [], video: [] },
   mode: 'image',
   modelId: null,
@@ -28,11 +30,14 @@ const state = {
   video: { modelId: null, mode: 'reference', aspectRatio: '16:9', resolution: '720p', duration: 5, audio: false },
   musicModel: null,
   music: { version: 'V5_5', customMode: true, instrumental: false, style: '', title: '' },
+  transitionSounds: [],   // catálogo local, agrupado por las carpetas de public/sounds
   refs: [],              // [{ key, fromChar, label }]
   voiceId: '',
   currentEntry: null,
   currentOutput: 0,
   assetsZone: 'generated',
+  assetAudioKind: 'all',
+  audioUploadAutomationId: null,
   selectedAssets: new Set(),
   assetRange: { from: null, to: null },
   assetFilterCharacterId: '',

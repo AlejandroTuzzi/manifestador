@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFile } from 'node:child_process';
 
-import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel } from './lib/models.js';
+import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel, getAudioModel } from './lib/models.js';
 import {
   generateGemini, generateSeedream, generateOpenAIImage, generateSeedanceVideo, generateScreenplay,
   listVoices, generateSpeech, generateMusic, translateText, searchUpdatedPricing, testService
@@ -19,6 +19,13 @@ import { POSER_BODY_PARTS } from './public/poser-bodyparts.js';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(ROOT, 'data');
 const PUBLIC_DIR = path.join(ROOT, 'public');
+const AUTOMATION_LOGO_DIR = path.join(PUBLIC_DIR, 'logos');
+const AUTOMATION_SOUND_DIR = path.join(PUBLIC_DIR, 'sounds');
+const AUTOMATION_LOGOS = {
+  horizontal: 'logo-controversy-tracker-horizontal.mp4',
+  vertical: 'logo-controversy-tracker-vertical.mp4'
+};
+const AUTOMATION_LOGO_FADE_SECONDS = 0.75;
 const PORT = process.env.PORT ? Number(process.env.PORT) : 7777;
 const sessions = new Map();
 
@@ -40,6 +47,7 @@ const DEFAULT_CONFIG = {
   ffmpegPath: '',
   keys: { gemini: '', googleTranslate: '', ark: '', elevenlabs: '', openai: '', suno: '' },
   openaiModel: 'gpt-5-mini',
+  audioModelId: AUDIO_MODEL.id,
   paths: {
     poser: 'assets/poser',
     video: 'assets/video',
@@ -162,7 +170,29 @@ function metadataFromEntry(entry) {
     characterVariantId: entry.characterVariantId || null, ts: entry.ts,
     aspectRatio: entry.aspectRatio || null, resolution: entry.resolution || null,
     batch: entry.batch || 1, refs: entry.refs || [], voiceId: entry.voiceId || null,
-    voiceName: entry.voiceName || null, cost: entry.cost || 0
+    voiceName: entry.voiceName || null, cost: entry.cost || 0,
+    audioKind: entry.audioKind || (entry.modelId === MUSIC_MODEL.id ? 'music' : entry.type === 'audio' ? 'voice' : null),
+    musicTags: normalizeMusicTags(entry.musicTags)
+  };
+}
+
+function sanitizeAudioKind(value, fallback = 'voice') {
+  return ['voice', 'music', 'sound'].includes(value) ? value : fallback;
+}
+
+function sanitizeMusicTagList(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(',');
+  const seen = new Set();
+  return source.map((tag) => String(tag || '').trim().replace(/\s+/g, ' ').slice(0, 60))
+    .filter((tag) => tag && !seen.has(tag.toLocaleLowerCase('es')) && seen.add(tag.toLocaleLowerCase('es')))
+    .slice(0, 30);
+}
+
+function normalizeMusicTags(value = {}) {
+  return {
+    genres: sanitizeMusicTagList(value.genres ?? value.genre),
+    instruments: sanitizeMusicTagList(value.instruments ?? value.instrument ?? value.instrumentation),
+    moods: sanitizeMusicTagList(value.moods ?? value.mood ?? value.feelings ?? value.feeling ?? value.sentiments ?? value.sentiment ?? value.emotions)
   };
 }
 
@@ -287,7 +317,8 @@ function ts() {
 function extForMime(mime) {
   if (mime === 'image/jpeg') return '.jpg';
   if (mime === 'image/webp') return '.webp';
-  if (mime === 'audio/mpeg') return '.mp3';
+  if (mime === 'audio/mpeg' || mime === 'audio/mp3') return '.mp3';
+  if (mime === 'audio/wav' || mime === 'audio/x-wav' || mime === 'audio/wave') return '.wav';
   return '.png';
 }
 
@@ -364,6 +395,25 @@ async function probeVideoDimensions(ffmpegExecutable, videoPath) {
   });
 }
 
+async function probeMediaDuration(ffmpegExecutable, mediaPath) {
+  const extension = path.extname(ffmpegExecutable).toLowerCase() === '.exe' ? '.exe' : '';
+  const ffprobe = path.join(path.dirname(ffmpegExecutable), `ffprobe${extension}`);
+  const stat = await fs.stat(ffprobe).catch(() => null);
+  if (!stat?.isFile()) return null;
+  return new Promise((resolve) => {
+    execFile(ffprobe, [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      mediaPath
+    ], { windowsHide: true, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+      if (error) return resolve(null);
+      const duration = Number(String(stdout || '').trim());
+      resolve(Number.isFinite(duration) && duration > 0 ? duration : null);
+    });
+  });
+}
+
 async function dominantVideoDimensions(ffmpegExecutable, videoPaths) {
   const dimensions = (await Promise.all(
     videoPaths.map((videoPath) => probeVideoDimensions(ffmpegExecutable, videoPath))
@@ -392,6 +442,42 @@ function automationVideoDimensions(aspectRatio) {
   }
   const width = 1080;
   return { width, height: even(width * ratioHeight / ratioWidth) };
+}
+
+function automationLogoForDimensions(width, height) {
+  const variant = height > width ? 'vertical' : 'horizontal';
+  return {
+    variant,
+    fileName: AUTOMATION_LOGOS[variant],
+    filePath: path.join(AUTOMATION_LOGO_DIR, AUTOMATION_LOGOS[variant])
+  };
+}
+
+const TRANSITION_SOUND_EXTENSIONS = new Set(['.wav', '.mp3', '.m4a', '.aac', '.ogg']);
+
+async function listTransitionSounds() {
+  const categories = (await fs.readdir(AUTOMATION_SOUND_DIR, { withFileTypes: true }).catch(() => []))
+    .filter((entry) => entry.isDirectory())
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const sounds = [];
+  for (const categoryEntry of categories) {
+    const category = categoryEntry.name;
+    const categoryDir = path.join(AUTOMATION_SOUND_DIR, category);
+    const files = (await fs.readdir(categoryDir, { withFileTypes: true }).catch(() => []))
+      .filter((entry) => entry.isFile() && TRANSITION_SOUND_EXTENSIONS.has(path.extname(entry.name).toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    for (const file of files) {
+      const id = `${category}/${file.name}`;
+      sounds.push({
+        id,
+        category,
+        name: path.basename(file.name, path.extname(file.name)).replace(/[_-]+/g, ' '),
+        url: `/sounds/${[category, file.name].map(encodeURIComponent).join('/')}`,
+        filePath: path.join(categoryDir, file.name)
+      });
+    }
+  }
+  return sounds;
 }
 
 function sanitizeName(name) {
@@ -657,19 +743,24 @@ async function runVideoGeneration(req) {
 
 async function runAudioGeneration(req) {
   const cfg = await getConfig();
-  const text = String(req.text || '').trim();
-  if (!text) throw new Error('El texto está vacío.');
+  const requestedText = String(req.text || '').trim();
+  if (!requestedText) throw new Error('El texto está vacío.');
+  const model = getAudioModel(req.audioModelId || req.modelId || cfg.audioModelId);
+  // Las etiquetas [shouting], [whispers], etc. son instrucciones propias de
+  // Eleven v3. En Multilingual v2 se quitan para que nunca se locuten.
+  const text = model.supportsAudioTags ? requestedText : stripTags(requestedText);
+  if (!text) throw new Error('El texto sólo contiene etiquetas de expresión; escribí algo para locutar.');
   const { buffer, mime } = await generateSpeech({
     apiKey: cfg.keys.elevenlabs,
     voiceId: req.voiceId,
     text,
-    modelId: AUDIO_MODEL.apiModel,
+    modelId: model.apiModel,
     stability: req.stability
   });
   // nombre: "<voz> - <texto>", el texto sin [corchetes] ni su interior, corto e
   // incremental si ya existe uno igual: "Alejandro - hola-como-estas.mp3", "…-2.mp3"
   const ext = extForMime(mime);
-  const slug = textSlug(text) || 'voz';
+  const slug = textSlug(requestedText) || 'voz';
   const voice = voiceNameForFile(req.voiceName);
   const base = voice ? `${voice} - ${slug}` : slug;
   const audioDir = resolveDir(cfg.paths.audio);
@@ -680,9 +771,9 @@ async function runAudioGeneration(req) {
   const key = await saveBuffer('audio', name, buffer);
 
   const pricing = await getPricing();
-  const cost = audioPrice(pricing, text.length);
+  const cost = audioPrice(pricing, text.length, model.id);
   await recordCost({
-    type: 'audio', modelId: AUDIO_MODEL.id, label: `${AUDIO_MODEL.name} (${req.voiceName || 'voz'})`,
+    type: 'audio', modelId: model.id, label: `${model.name} (${req.voiceName || 'voz'})`,
     units: text.length, unitLabel: 'caracteres', cost
   });
 
@@ -690,11 +781,13 @@ async function runAudioGeneration(req) {
     id: newId(),
     ts: Date.now(),
     type: 'audio',
-    modelId: AUDIO_MODEL.id,
-    modelName: AUDIO_MODEL.name,
-    prompt: text,
+    modelId: model.id,
+    modelName: model.name,
+    prompt: requestedText,
+    speechText: text,
     voiceId: req.voiceId,
     voiceName: req.voiceName || '',
+    audioKind: 'voice',
     characterId: req.characterId || null,
     outputs: [key],
     errors: [],
@@ -713,6 +806,11 @@ async function runMusicGeneration(req) {
   const prompt = String(req.prompt || '').trim();
   const style = String(req.style || '').trim();
   const title = String(req.title || '').trim();
+  const musicTags = normalizeMusicTags(req.musicTags || {
+    genres: req.genres,
+    instruments: req.instruments,
+    moods: req.moods
+  });
 
   const tracks = await generateMusic({
     apiKey: cfg.keys.suno, endpoint: cfg.endpoints.suno,
@@ -748,6 +846,8 @@ async function runMusicGeneration(req) {
     prompt: [title, style, prompt].filter(Boolean).join(' · ') || prompt,
     voiceId: null,
     voiceName: '',
+    audioKind: 'music',
+    musicTags,
     characterId: null,
     outputs,
     errors: [],
@@ -778,6 +878,47 @@ async function listZone(zone) {
   } catch {}
   entries.sort((a, b) => b.mtime - a.mtime);
   return entries;
+}
+
+function normalizedTagKey(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es').trim();
+}
+
+function musicMatchScore(required, candidate) {
+  const wanted = normalizeMusicTags(required);
+  const available = normalizeMusicTags(candidate);
+  const overlap = (left, right) => {
+    const set = new Set(right.map(normalizedTagKey));
+    return left.reduce((sum, tag) => sum + (set.has(normalizedTagKey(tag)) ? 1 : 0), 0);
+  };
+  return overlap(wanted.genres, available.genres) * 4
+    + overlap(wanted.moods, available.moods) * 3
+    + overlap(wanted.instruments, available.instruments) * 2;
+}
+
+async function findAutomaticMusicTrack(musicConfig) {
+  const [items, metadata] = await Promise.all([listZone('audio'), readJson('asset-metadata.json', {})]);
+  const candidates = items.map((item) => {
+    const meta = metadata[item.key] || {};
+    const kind = sanitizeAudioKind(meta.audioKind, meta.modelId === MUSIC_MODEL.id ? 'music' : 'voice');
+    return { ...item, ...meta, audioKind: kind, musicTags: normalizeMusicTags(meta.musicTags) };
+  }).filter((item) => item.audioKind === 'music');
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => musicMatchScore(musicConfig, b.musicTags) - musicMatchScore(musicConfig, a.musicTags)
+    || b.mtime - a.mtime);
+  const selected = candidates[0];
+  return { key: selected.key, name: selected.name, score: musicMatchScore(musicConfig, selected.musicTags), musicTags: selected.musicTags };
+}
+
+function validateUploadedAudio(mime, buffer) {
+  const isWav = buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+    && buffer.subarray(8, 12).toString('ascii') === 'WAVE';
+  const isMp3 = buffer.length >= 3 && (buffer.subarray(0, 3).toString('ascii') === 'ID3'
+    || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0));
+  if (!isWav && !isMp3) {
+    throw new Error('El archivo debe ser un MP3 o WAV válido.');
+  }
+  return isWav ? { extension: '.wav', mime: 'audio/wav' } : { extension: '.mp3', mime: 'audio/mpeg' };
 }
 
 // ---------------------------------------------------------------------------
@@ -826,6 +967,16 @@ const STATIC_MIME = {
   '.ico': 'image/x-icon',
   '.webmanifest': 'application/manifest+json',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.ogg': 'audio/ogg',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
   '.ico': 'image/x-icon',
   '.ttf': 'font/ttf',
   '.otf': 'font/otf',
@@ -980,8 +1131,61 @@ const DEFAULT_AUTOMATION_CONFIG = {
   resolution: '2K',
   narratorVoiceId: '',
   narratorVoiceName: '',
+  audioModelId: AUDIO_MODEL.id,
+  includeLogos: false,
+  transitionSound: {
+    enabled: false,
+    soundId: ''
+  },
+  music: {
+    enabled: false,
+    source: 'asset',       // asset | auto | suno
+    assetKey: '',
+    genres: [],
+    instruments: [],
+    moods: [],
+    gainDb: -15,
+    fadeOut: false,
+    fadeOutSeconds: 5,
+    sunoModel: MUSIC_MODEL.defaultVersion
+  },
   overlay: { ...DEFAULT_OVERLAY }
 };
+
+function normalizeAutomationMusic(saved = {}, requirement = {}) {
+  const requiredTags = normalizeMusicTags(requirement);
+  const music = {
+    ...DEFAULT_AUTOMATION_CONFIG.music,
+    ...(saved || {})
+  };
+  music.enabled = music.enabled === true;
+  music.source = ['asset', 'auto', 'suno'].includes(music.source) ? music.source : 'asset';
+  music.assetKey = /^audio\//.test(String(music.assetKey || '')) ? String(music.assetKey) : '';
+  music.genres = sanitizeMusicTagList(music.genres?.length ? music.genres : requiredTags.genres);
+  music.instruments = sanitizeMusicTagList(music.instruments?.length ? music.instruments : requiredTags.instruments);
+  music.moods = sanitizeMusicTagList(music.moods?.length ? music.moods : requiredTags.moods);
+  const savedGainDb = Number(saved?.gainDb);
+  const legacyVolumePct = Number(saved?.volumePct);
+  const migratedGainDb = Number.isFinite(legacyVolumePct)
+    ? (legacyVolumePct <= 0 ? -60 : 20 * Math.log10(Math.min(100, legacyVolumePct) / 100))
+    : DEFAULT_AUTOMATION_CONFIG.music.gainDb;
+  music.gainDb = Math.max(-60, Math.min(0, Number.isFinite(savedGainDb) ? savedGainDb : migratedGainDb));
+  delete music.volumePct;
+  music.fadeOut = music.fadeOut === true;
+  const fadeOutSeconds = Number(music.fadeOutSeconds);
+  music.fadeOutSeconds = Number.isFinite(fadeOutSeconds)
+    ? Math.max(0.25, Math.min(30, fadeOutSeconds))
+    : DEFAULT_AUTOMATION_CONFIG.music.fadeOutSeconds;
+  music.sunoModel = MUSIC_MODEL.versions.includes(music.sunoModel) ? music.sunoModel : MUSIC_MODEL.defaultVersion;
+  return music;
+}
+
+function normalizeAutomationTransitionSound(saved = {}) {
+  return {
+    enabled: saved?.enabled === true,
+    soundId: String(saved?.soundId || '').trim().slice(0, 300)
+  };
+}
 
 const stripTags = (s) => String(s || '').replace(/\[[^\]]*\]/g, '').replace(/\s+/g, ' ').trim();
 const roleId = (r) => String(r || '').trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
@@ -1016,14 +1220,18 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
     (project.requirements?.locations?.length || 0) +
     (project.requirements?.objects?.length || 0);
   const blockImages = project.blocks?.length || 0;
+  const audioModel = getAudioModel(project.config?.audioModelId);
   const audioTexts = (project.blocks || []).flatMap((block) =>
-    (block.items || []).map((item) => automationAudioText(item.text)).filter(Boolean)
+    (block.items || []).map((item) => audioModel.supportsAudioTags ? automationAudioText(item.text) : stripTags(item.text)).filter(Boolean)
   );
   const audioCharacters = audioTexts.reduce((sum, text) => sum + text.length, 0);
   const resourceImageCost = resourceImages * imagePrice(pricing, imageModelId, resourceResolution);
   const blockImageCost = blockImages * imagePrice(pricing, imageModelId, blockResolution);
-  const audioCost = audioPrice(pricing, audioCharacters);
-  const estimatedTotal = resourceImageCost + blockImageCost + audioCost;
+  const audioCost = audioPrice(pricing, audioCharacters, audioModel.id);
+  const music = normalizeAutomationMusic(project.config?.music, project.requirements?.music);
+  const generatedMusicTracks = music.enabled && music.source === 'suno' ? 2 : 0;
+  const generatedMusicCost = generatedMusicTracks * musicPrice(pricing);
+  const estimatedTotal = resourceImageCost + blockImageCost + audioCost + generatedMusicCost;
 
   const linkedMetadata = Object.values(assetMetadata || {}).filter((metadata) =>
     metadata?.automationId === project.id
@@ -1049,7 +1257,13 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
       blockImageCost: Number(blockImageCost.toFixed(6)),
       audioItems: audioTexts.length,
       audioCharacters,
+      audioModelId: audioModel.id,
+      audioModelName: audioModel.name,
       audioCost: Number(audioCost.toFixed(6)),
+      musicEnabled: music.enabled,
+      musicSource: music.source,
+      generatedMusicTracks,
+      musicCost: Number(generatedMusicCost.toFixed(6)),
       localVideoCost: 0
     }
   };
@@ -1072,7 +1286,8 @@ function sanitizeAutomation(src, prev = {}) {
   const requirements = {
     characters: reqList(src.requirements?.characters, true),
     locations: reqList(src.requirements?.locations, false),
-    objects: reqList(src.requirements?.objects, false)
+    objects: reqList(src.requirements?.objects, false),
+    music: normalizeMusicTags(src.requirements?.music || src.music || src.script?.music || src.project?.music || prev.requirements?.music || {})
   };
 
   const blocks = (Array.isArray(src.blocks) ? src.blocks : []).slice(0, 500).map((b, i) => {
@@ -1124,6 +1339,10 @@ function sanitizeAutomation(src, prev = {}) {
       ...DEFAULT_AUTOMATION_CONFIG,
       ...(prev.config || {}),
       artStyle: String(prev.config?.artStyle || DEFAULT_AUTOMATION_CONFIG.artStyle).slice(0, 1200),
+      audioModelId: getAudioModel(prev.config?.audioModelId).id,
+      includeLogos: prev.config?.includeLogos === true,
+      transitionSound: normalizeAutomationTransitionSound(prev.config?.transitionSound),
+      music: normalizeAutomationMusic(prev.config?.music, requirements.music),
       overlay: normalizeAutomationOverlay(prev.config?.overlay)
     },
     outputs: prev.outputs || {},
@@ -1635,7 +1854,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations, fonts] = await Promise.all([
+      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations, fonts, transitionSounds] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
@@ -1648,12 +1867,14 @@ const server = http.createServer(async (req, res) => {
         readJson('elements.json', []),
         readJson('element-links.json', []),
         readJson('automations.json', []),
-        readJson('fonts.json', [])
+        readJson('fonts.json', []),
+        listTransitionSounds()
       ]);
       return send(res, 200, {
         config: publicConfig(cfg),
         models: IMAGE_MODELS,
         videoModels: VIDEO_MODELS,
+        audioModels: AUDIO_MODELS,
         audioModel: AUDIO_MODEL,
         musicModel: MUSIC_MODEL,
         characters,
@@ -1670,10 +1891,20 @@ const server = http.createServer(async (req, res) => {
           ...project,
           config: {
             ...project.config,
+            includeLogos: project.config?.includeLogos === true,
+            audioModelId: getAudioModel(project.config?.audioModelId).id,
+            transitionSound: normalizeAutomationTransitionSound(project.config?.transitionSound),
+            music: normalizeAutomationMusic(project.config?.music, project.requirements?.music),
             overlay: normalizeAutomationOverlay(project.config?.overlay)
           }
         })),
-        fonts
+        fonts,
+        transitionSounds: transitionSounds.map((sound) => ({
+          id: sound.id,
+          category: sound.category,
+          name: sound.name,
+          url: sound.url
+        }))
       });
     }
 
@@ -1742,6 +1973,7 @@ const server = http.createServer(async (req, res) => {
         seedanceMiniModelId: body.seedanceMiniModelId ?? cfg.seedanceMiniModelId,
         sunoModelId: body.sunoModelId ?? cfg.sunoModelId,
         openaiModel: body.openaiModel ?? cfg.openaiModel,
+        audioModelId: getAudioModel(body.audioModelId ?? cfg.audioModelId).id,
         poserPrompt: body.poserPrompt !== undefined ? String(body.poserPrompt) : cfg.poserPrompt,
         photoshopPath: body.photoshopPath !== undefined ? String(body.photoshopPath).trim() : cfg.photoshopPath,
         ffmpegPath: body.ffmpegPath !== undefined ? String(body.ffmpegPath).trim() : cfg.ffmpegPath,
@@ -1764,13 +1996,44 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { key, name });
     }
 
+    // Carga de audios a su biblioteca propia. A diferencia del cargador de
+    // imágenes, conserva la clasificación y las etiquetas necesarias para que
+    // el Automatizador pueda encontrar música compatible con una obra.
+    if (p === '/api/assets/audio' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const { mime, buffer } = parseDataUrl(body.dataUrl);
+      if (buffer.length > 100 * 1024 * 1024) throw new Error('El audio supera el límite de 100 MB.');
+      const audioFile = validateUploadedAudio(mime, buffer);
+      const audioKind = sanitizeAudioKind(body.audioKind);
+      const musicTags = audioKind === 'music' ? normalizeMusicTags(body.musicTags) : normalizeMusicTags();
+      const base = sanitizeName(body.name || 'audio').replace(/\.[^.]+$/, '') || 'audio';
+      const audioDir = resolveDir((await getConfig()).paths.audio);
+      await fs.mkdir(audioDir, { recursive: true });
+      const existing = new Set(await fs.readdir(audioDir).catch(() => []));
+      let name = `${ts()}-${base}${audioFile.extension}`;
+      for (let n = 2; existing.has(name); n++) name = `${ts()}-${base}-${n}${audioFile.extension}`;
+      const key = await saveBuffer('audio', name, buffer);
+      const metadata = {
+        type: 'audio', modelId: 'upload', modelName: 'Archivo subido', ts: Date.now(),
+        prompt: '', cost: 0, audioKind, musicTags
+      };
+      await updateJson('asset-metadata.json', {}, (all) => ({ ...all, [key]: metadata }));
+      return send(res, 200, { key, name, ...metadata });
+    }
+
     if (p === '/api/assets' && req.method === 'GET') {
       const [generated, uploads, audio, video] = await Promise.all([
         listZone('generated'), listZone('uploads'), listZone('audio'), listZone('video')
       ]);
       const all = [...generated, ...uploads, ...audio, ...video];
       const metadata = await backfilledAssetMetadata(new Set(all.map((a) => a.key)));
-      for (const item of all) Object.assign(item, metadata[item.key] || {});
+      for (const item of all) {
+        Object.assign(item, metadata[item.key] || {});
+        if (item.key.startsWith('audio/')) {
+          item.audioKind = sanitizeAudioKind(item.audioKind, item.modelId === MUSIC_MODEL.id ? 'music' : 'voice');
+          item.musicTags = normalizeMusicTags(item.musicTags);
+        }
+      }
       return send(res, 200, { generated, uploads, audio, video });
     }
 
@@ -2045,8 +2308,20 @@ const server = http.createServer(async (req, res) => {
             artStyle: body.config.artStyle !== undefined
               ? String(body.config.artStyle).trim().slice(0, 1200)
               : prev.config.artStyle,
+            includeLogos: body.config.includeLogos !== undefined
+              ? body.config.includeLogos === true
+              : prev.config?.includeLogos === true,
+            audioModelId: getAudioModel(body.config.audioModelId ?? prev.config?.audioModelId).id,
+            transitionSound: normalizeAutomationTransitionSound({
+              ...prev.config?.transitionSound,
+              ...(body.config.transitionSound || {})
+            }),
+            music: normalizeAutomationMusic({ ...prev.config.music, ...(body.config.music || {}) }, prev.requirements?.music),
             overlay: normalizeAutomationOverlay({ ...prev.config.overlay, ...(body.config.overlay || {}) })
           };
+          if (body.config?.music !== undefined) next.finalOutput = null;
+          if (body.config?.includeLogos !== undefined) next.finalOutput = null;
+          if (body.config?.transitionSound !== undefined) next.finalOutput = null;
           // outputs por bloque (imagen, imagen+texto, audios, video) — se mergea por id de bloque
           if (body.outputs !== undefined && body.outputs && typeof body.outputs === 'object') {
             next.outputs = { ...prev.outputs, ...body.outputs };
@@ -2059,6 +2334,10 @@ const server = http.createServer(async (req, res) => {
           }
           next.config = {
             ...next.config,
+            includeLogos: next.config?.includeLogos === true,
+            audioModelId: getAudioModel(next.config?.audioModelId).id,
+            transitionSound: normalizeAutomationTransitionSound(next.config?.transitionSound),
+            music: normalizeAutomationMusic(next.config?.music, next.requirements?.music),
             overlay: normalizeAutomationOverlay(next.config?.overlay)
           };
           next.updatedAt = Date.now();
@@ -2070,6 +2349,67 @@ const server = http.createServer(async (req, res) => {
         await updateJson('automations.json', [], (all) => all.filter((x) => x.id !== projectId));
         return send(res, 200, { ok: true });
       }
+    }
+
+    const automationMusicMatch = /^\/api\/automations\/([a-z0-9]+)\/music\/(auto-select|generate)$/.exec(p);
+    if (automationMusicMatch && req.method === 'POST') {
+      const [projectId, action] = [automationMusicMatch[1], automationMusicMatch[2]];
+      const projects = await readJson('automations.json', []);
+      const project = projects.find((item) => item.id === projectId);
+      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
+      const requested = await readJsonBody(req);
+      const music = normalizeAutomationMusic({ ...project.config?.music, ...requested }, project.requirements?.music);
+
+      let selected;
+      let entry = null;
+      if (action === 'auto-select') {
+        selected = await findAutomaticMusicTrack(music);
+        if (!selected) return send(res, 400, { error: 'No hay músicas clasificadas en Assets. Subí o generá una primero.' });
+      } else {
+        const styleParts = [
+          'Instrumental background score designed to support spoken narration without overpowering voices',
+          music.genres.length ? `Genre: ${music.genres.join(', ')}` : '',
+          music.instruments.length ? `Instruments: ${music.instruments.join(', ')}` : '',
+          music.moods.length ? `Mood and emotional tone: ${music.moods.join(', ')}` : '',
+          'No vocals, no spoken words, cohesive cinematic arrangement, loop-friendly ending'
+        ].filter(Boolean);
+        entry = await runMusicGeneration({
+          model: music.sunoModel,
+          prompt: '',
+          style: styleParts.join('. '),
+          title: `${project.name} - Background score`.slice(0, 80),
+          instrumental: true,
+          customMode: true,
+          musicTags: { genres: music.genres, instruments: music.instruments, moods: music.moods }
+        });
+        selected = { key: entry.outputs[0], name: path.basename(entry.outputs[0]), score: null, musicTags: normalizeMusicTags(music) };
+        await updateJson('asset-metadata.json', {}, (metadata) => {
+          for (const key of entry.outputs) metadata[key] = {
+            ...(metadata[key] || {}),
+            audioKind: 'music', musicTags: normalizeMusicTags(music),
+            automationId: project.id, autoKind: 'background-music',
+            cost: Number(entry.cost || 0) / Math.max(1, entry.outputs.length)
+          };
+          return metadata;
+        });
+      }
+
+      let updatedProject;
+      await updateJson('automations.json', [], (all) => all.map((item) => {
+        if (item.id !== projectId) return item;
+        updatedProject = {
+          ...item,
+          config: {
+            ...item.config,
+            music: normalizeAutomationMusic({ ...music, enabled: true, source: action === 'generate' ? 'suno' : 'auto', assetKey: selected.key }, item.requirements?.music),
+            overlay: normalizeAutomationOverlay(item.config?.overlay)
+          },
+          finalOutput: null,
+          updatedAt: Date.now()
+        };
+        return updatedProject;
+      }));
+      return send(res, 200, { project: updatedProject, selected, entry });
     }
 
     // Muxea el video de un bloque: imagen fija (ya con el texto quemado) + audio(s)
@@ -2152,6 +2492,74 @@ const server = http.createServer(async (req, res) => {
       const args = ['-y'];
       for (const videoPath of videoPaths) args.push('-i', videoPath);
 
+      const includeLogos = project.config?.includeLogos === true;
+      const logo = includeLogos ? automationLogoForDimensions(width, height) : null;
+      let logoDuration = 0;
+      if (logo) {
+        const logoStat = await fs.stat(logo.filePath).catch(() => null);
+        if (!logoStat?.isFile()) {
+          return send(res, 500, { error: `No encuentro el logo ${logo.variant} incluido con Manifestador.` });
+        }
+        logoDuration = await probeMediaDuration(ffmpegExecutable, logo.filePath) || 0;
+      }
+
+      const music = normalizeAutomationMusic(project.config?.music, project.requirements?.music);
+      const transitionSound = normalizeAutomationTransitionSound(project.config?.transitionSound);
+      let musicKey = '';
+      let musicPath = '';
+      let selectedTransitionSound = null;
+      let transitionSoundPath = '';
+      let transitionSoundDuration = 0;
+      let finalDuration = null;
+      let blockDurations = null;
+      let appliedFadeOutSeconds = 0;
+      let automaticMusic = null;
+      if (music.enabled) {
+        if (music.source === 'auto') {
+          automaticMusic = await findAutomaticMusicTrack(music);
+          if (!automaticMusic) return send(res, 400, { error: 'La música está en automático, pero no hay pistas clasificadas como Música en Assets.' });
+          musicKey = automaticMusic.key;
+        } else {
+          musicKey = music.assetKey;
+        }
+        if (!/^audio\//.test(musicKey)) return send(res, 400, { error: 'Elegí, subí o generá una música antes del ensamble.' });
+        musicPath = await resolveAssetKey(musicKey);
+        const musicStat = await fs.stat(musicPath).catch(() => null);
+        if (!musicStat?.isFile()) return send(res, 400, { error: 'No encuentro la música elegida. Seleccioná otra pista.' });
+        // La entrada se repite indefinidamente; amix la corta cuando termina la
+        // narración concatenada, de modo que nunca alarga el video final.
+        args.push('-stream_loop', '-1', '-i', musicPath);
+      }
+
+      if (transitionSound.enabled && videoPaths.length > 1) {
+        const transitionSounds = await listTransitionSounds();
+        selectedTransitionSound = transitionSounds.find((sound) => sound.id === transitionSound.soundId) || null;
+        if (!selectedTransitionSound) {
+          return send(res, 400, { error: 'El sonido de transición elegido ya no está disponible. Elegí otro en el panel Automatizar.' });
+        }
+        transitionSoundPath = selectedTransitionSound.filePath;
+        const soundStat = await fs.stat(transitionSoundPath).catch(() => null);
+        if (!soundStat?.isFile()) return send(res, 400, { error: 'No encuentro el sonido de transición elegido.' });
+        transitionSoundDuration = await probeMediaDuration(ffmpegExecutable, transitionSoundPath) || 0;
+        if (!transitionSoundDuration) {
+          return send(res, 400, { error: 'No pude leer la duración del sonido de transición. Verificá el archivo de audio.' });
+        }
+        args.push('-i', transitionSoundPath);
+      }
+
+      if (includeLogos || transitionSoundPath || (musicPath && music.fadeOut)) {
+        blockDurations = await Promise.all(videoPaths.map((videoPath) => probeMediaDuration(ffmpegExecutable, videoPath)));
+        if (blockDurations.some((duration) => !duration)) {
+          return send(res, 400, { error: 'No pude calcular la duración de los bloques para preparar el ensamble. Verificá que ffprobe esté junto a ffmpeg.' });
+        }
+        finalDuration = blockDurations.reduce((sum, duration) => sum + duration, 0);
+        if (musicPath && music.fadeOut) appliedFadeOutSeconds = Math.min(music.fadeOutSeconds, finalDuration);
+      }
+
+      const transitionInputIndex = transitionSoundPath ? videoPaths.length + (musicPath ? 1 : 0) : -1;
+      const logoInputIndex = logo ? videoPaths.length + (musicPath ? 1 : 0) + (transitionSoundPath ? 1 : 0) : -1;
+      if (logo) args.push('-i', logo.filePath);
+
       const filters = [];
       for (let index = 0; index < videoPaths.length; index++) {
         filters.push(
@@ -2165,10 +2573,78 @@ const server = http.createServer(async (req, res) => {
         );
       }
       const concatInputs = videoPaths.map((_, index) => `[v${index}][a${index}]`).join('');
-      filters.push(`${concatInputs}concat=n=${videoPaths.length}:v=1:a=1[vout][aout]`);
+      filters.push(`${concatInputs}concat=n=${videoPaths.length}:v=1:a=1[vout][voiceout]`);
+      let contentAudioLabel = 'voiceout';
+      let transitionCount = 0;
+      if (transitionSoundPath && blockDurations) {
+        transitionCount = videoPaths.length - 1;
+        const sourceLabels = Array.from({ length: transitionCount }, (_, index) => `[transitionSource${index}]`).join('');
+        const normalizedSource = `[${transitionInputIndex}:a:0]aresample=48000,` +
+          'aformat=sample_fmts=fltp:channel_layouts=stereo';
+        if (transitionCount > 1) {
+          filters.push(`${normalizedSource},asplit=${transitionCount}${sourceLabels}`);
+        } else {
+          filters.push(`${normalizedSource}[transitionSource0]`);
+        }
+        let boundary = 0;
+        const transitionLabels = [];
+        for (let index = 0; index < transitionCount; index++) {
+          boundary += blockDurations[index];
+          // Centra el golpe sobre cada corte interno. El pequeño margen impide
+          // que un bloque excepcionalmente corto lleve sonido desde el fotograma inicial.
+          const startAt = Math.max(0.05, boundary - (transitionSoundDuration / 2));
+          const delayMs = Math.round(startAt * 1000);
+          const label = `transition${index}`;
+          transitionLabels.push(`[${label}]`);
+          filters.push(
+            `[transitionSource${index}]atrim=start=0:end=${transitionSoundDuration.toFixed(3)},` +
+            `asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1[${label}]`
+          );
+        }
+        filters.push(
+          `[voiceout]${transitionLabels.join('')}amix=inputs=${transitionCount + 1}:` +
+          'duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[voicefx]'
+        );
+        contentAudioLabel = 'voicefx';
+      }
+      if (musicPath) {
+        const musicInputIndex = videoPaths.length;
+        const gainDb = Math.max(-60, Math.min(0, music.gainDb));
+        const fadeFilter = appliedFadeOutSeconds > 0
+          ? `,atrim=end=${finalDuration.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=out:st=${Math.max(0, finalDuration - appliedFadeOutSeconds).toFixed(3)}:d=${appliedFadeOutSeconds.toFixed(3)}`
+          : '';
+        filters.push(`[${musicInputIndex}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${gainDb.toFixed(2)}dB${fadeFilter}[music]`);
+        filters.push(`[${contentAudioLabel}][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[aout]`);
+      } else {
+        filters.push(`[${contentAudioLabel}]anull[aout]`);
+      }
+
+      let finalVideoLabel = 'vout';
+      let finalAudioLabel = 'aout';
+      let fadeToBlackSeconds = 0;
+      if (logo) {
+        fadeToBlackSeconds = Math.min(AUTOMATION_LOGO_FADE_SECONDS, finalDuration || AUTOMATION_LOGO_FADE_SECONDS);
+        const fadeStart = Math.max(0, (finalDuration || fadeToBlackSeconds) - fadeToBlackSeconds);
+        filters.push(`[vout]fade=t=out:st=${fadeStart.toFixed(3)}:d=${fadeToBlackSeconds.toFixed(3)}[vcontent]`);
+        // El logo ocupa todo el lienzo. En 1:1 se usa el horizontal y se recorta
+        // el excedente lateral para conservar su escala, en vez de reducirlo.
+        filters.push(
+          `[${logoInputIndex}:v:0]scale=${width}:${height}:force_original_aspect_ratio=increase,` +
+          `crop=${width}:${height},setsar=1,fps=25,format=yuv420p,setpts=PTS-STARTPTS[vlogo]`
+        );
+        filters.push(
+          `[${logoInputIndex}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
+          `asetpts=PTS-STARTPTS[alogo]`
+        );
+        // La mezcla de voz y música termina con el contenido. El logo se concatena
+        // después con su pista original, por lo que la música nunca lo invade.
+        filters.push('[vcontent][aout][vlogo][alogo]concat=n=2:v=1:a=1[vfinal][afinal]');
+        finalVideoLabel = 'vfinal';
+        finalAudioLabel = 'afinal';
+      }
       args.push(
         '-filter_complex', filters.join(';'),
-        '-map', '[vout]', '-map', '[aout]',
+        '-map', `[${finalVideoLabel}]`, '-map', `[${finalAudioLabel}]`,
         '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
         '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart',
         outPath
@@ -2190,7 +2666,18 @@ const server = http.createServer(async (req, res) => {
           aspectRatio: project.config?.aspectRatio || null,
           width,
           height,
-          dimensionsSource: detectedDimensions ? 'block-videos' : 'project-aspect-ratio'
+          dimensionsSource: detectedDimensions ? 'block-videos' : 'project-aspect-ratio',
+          includeLogos,
+          logoVariant: logo?.variant || null,
+          logoDuration: logoDuration || null,
+          fadeToBlackSeconds: logo ? fadeToBlackSeconds : 0,
+          musicKey: musicKey || null,
+          musicGainDb: musicKey ? music.gainDb : null,
+          musicFadeOutSeconds: musicKey && music.fadeOut ? appliedFadeOutSeconds : 0,
+          transitionSoundId: selectedTransitionSound?.id || null,
+          transitionSoundName: selectedTransitionSound?.name || null,
+          transitionSoundCategory: selectedTransitionSound?.category || null,
+          transitionCount
         };
         return metadata;
       });
@@ -2204,12 +2691,26 @@ const server = http.createServer(async (req, res) => {
           assembledAt,
           blockCount: project.blocks.length,
           width,
-          height
+          height,
+          includeLogos,
+          logoVariant: logo?.variant || null,
+          logoDuration: logoDuration || null,
+          fadeToBlackSeconds: logo ? fadeToBlackSeconds : 0,
+          musicKey: musicKey || null,
+          musicGainDb: musicKey ? music.gainDb : null,
+          musicFadeOutSeconds: musicKey && music.fadeOut ? appliedFadeOutSeconds : 0,
+          transitionSoundId: selectedTransitionSound?.id || null,
+          transitionSoundName: selectedTransitionSound?.name || null,
+          transitionSoundCategory: selectedTransitionSound?.category || null,
+          transitionCount
         };
         all[index] = {
           ...all[index],
           config: {
             ...all[index].config,
+            includeLogos,
+            transitionSound: normalizeAutomationTransitionSound(transitionSound),
+            music: normalizeAutomationMusic({ ...music, assetKey: musicKey || music.assetKey }, all[index].requirements?.music),
             overlay: normalizeAutomationOverlay(all[index].config?.overlay)
           },
           finalOutput,
@@ -2237,6 +2738,26 @@ const server = http.createServer(async (req, res) => {
         return m;
       });
       return send(res, 200, { ok: true });
+    }
+
+    if (p === '/api/assets/audio-metadata' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const key = String(body.key || '');
+      if (!/^audio\//.test(key)) throw new Error('Ese asset no es un audio.');
+      await fs.access(await resolveAssetKey(key));
+      const audioKind = sanitizeAudioKind(body.audioKind);
+      const musicTags = audioKind === 'music' ? normalizeMusicTags(body.musicTags) : normalizeMusicTags();
+      let updated;
+      await updateJson('asset-metadata.json', {}, (all) => {
+        updated = {
+          ...(all[key] || { type: 'audio', modelId: 'unknown', modelName: 'Audio', ts: Date.now(), cost: 0 }),
+          audioKind,
+          musicTags
+        };
+        all[key] = updated;
+        return all;
+      });
+      return send(res, 200, { key, ...updated });
     }
 
     if (p === '/api/generate/image' && req.method === 'POST') {
@@ -2336,7 +2857,9 @@ const server = http.createServer(async (req, res) => {
       });
       const next = mergePricing({
         image: found.image,
-        audio: found.audio,
+        // El rastreador histórico conoce v3. Conservamos cualquier tarifa
+        // específica de Multilingual v2 hasta que también sea devuelta.
+        audio: { ...current.audio, ...(found.audio || {}) },
         updatedAt: Date.now(),
         note: 'Actualizado por OpenAI (búsqueda web)'
       });
@@ -2456,6 +2979,29 @@ const server = http.createServer(async (req, res) => {
       await updateJson('history.json', [], (all) => all.map((e) => ({
         ...e, outputs: (e.outputs || []).map(swap), refs: (e.refs || []).map(swap)
       })));
+      await updateJson('automations.json', [], (all) => all.map((project) => ({
+        ...project,
+        outputs: Object.fromEntries(Object.entries(project.outputs || {}).map(([blockId, output]) => [blockId, {
+          ...output,
+          imageKey: swap(output.imageKey),
+          textImageKey: swap(output.textImageKey),
+          videoKey: swap(output.videoKey),
+          audioKeys: (output.audioKeys || []).map(swap)
+        }])),
+        config: {
+          ...project.config,
+          music: normalizeAutomationMusic({
+            ...project.config?.music,
+            assetKey: swap(project.config?.music?.assetKey)
+          }, project.requirements?.music),
+          overlay: normalizeAutomationOverlay({ ...project.config?.overlay, previewBg: swap(project.config?.overlay?.previewBg) })
+        },
+        finalOutput: project.finalOutput ? {
+          ...project.finalOutput,
+          videoKey: swap(project.finalOutput.videoKey),
+          musicKey: swap(project.finalOutput.musicKey)
+        } : null
+      })));
       return send(res, 200, { oldKey, newKey, name: newName });
     }
 
@@ -2524,6 +3070,23 @@ const server = http.createServer(async (req, res) => {
         outputs: (entry.outputs || []).filter((key) => !removed.has(key)),
         refs: (entry.refs || []).filter((key) => !removed.has(key))
       })).filter((entry) => entry.outputs.length));
+      await updateJson('automations.json', [], (all) => all.map((project) => {
+        const music = normalizeAutomationMusic(project.config?.music, project.requirements?.music);
+        if (removed.has(music.assetKey)) music.assetKey = '';
+        const finalOutput = project.finalOutput && !removed.has(project.finalOutput.videoKey)
+          ? { ...project.finalOutput, musicKey: removed.has(project.finalOutput.musicKey) ? null : project.finalOutput.musicKey }
+          : null;
+        const outputs = Object.fromEntries(Object.entries(project.outputs || {}).map(([blockId, output]) => [blockId, {
+          ...output,
+          imageKey: removed.has(output.imageKey) ? null : output.imageKey,
+          textImageKey: removed.has(output.textImageKey) ? null : output.textImageKey,
+          videoKey: removed.has(output.videoKey) ? null : output.videoKey,
+          audioKeys: (output.audioKeys || []).filter((key) => !removed.has(key))
+        }]));
+        const overlay = normalizeAutomationOverlay(project.config?.overlay);
+        if (removed.has(overlay.previewBg)) overlay.previewBg = '';
+        return { ...project, outputs, config: { ...project.config, music, overlay }, finalOutput };
+      }));
       return send(res, 200, { ok: true, deleted: allowed.length, history: cleaned.slice(0, 200) });
     }
 
@@ -2795,9 +3358,13 @@ const server = http.createServer(async (req, res) => {
 
     // --- estáticos ---
     if (req.method === 'GET') {
-      const rel = p === '/' ? 'index.html' : p.slice(1);
+      // URL.pathname conserva los espacios como %20. Decodificamos para que
+      // categorías legibles como “Projector Slide” puedan vivir como carpetas.
+      const rel = p === '/' ? 'index.html' : decodeURIComponent(p.slice(1));
       const abs = path.join(PUBLIC_DIR, rel);
-      if (path.resolve(abs).startsWith(path.resolve(PUBLIC_DIR))) {
+      const publicRoot = path.resolve(PUBLIC_DIR);
+      const resolvedStatic = path.resolve(abs);
+      if (resolvedStatic === publicRoot || resolvedStatic.startsWith(publicRoot + path.sep)) {
         const buf = await fs.readFile(abs).catch(() => null);
         if (buf) {
           return send(res, 200, buf, { mime: STATIC_MIME[path.extname(abs).toLowerCase()] || 'application/octet-stream' });

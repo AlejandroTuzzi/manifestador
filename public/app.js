@@ -43,13 +43,16 @@ function setMode(mode) {
   $('#videoControls').hidden = mode !== 'video';
   $('#audioControls').hidden = mode !== 'audio';
   $('#musicControls').hidden = mode !== 'music';
-  $('#tagPalette').hidden = mode !== 'audio';
+  const audioModel = (state.audioModels || []).find((model) => model.id === state.audioModelId);
+  $('#tagPalette').hidden = mode !== 'audio' || audioModel?.supportsAudioTags === false;
   // el armador de tomas es propio del video
   $('#btnShotList').hidden = mode !== 'video';
   if (mode !== 'video') $('#shotListPanel').hidden = true;
-  $('.editor-wrap').classList.toggle('tags-on', mode === 'audio' || mode === 'video');
+  $('.editor-wrap').classList.toggle('tags-on', (mode === 'audio' && audioModel?.supportsAudioTags !== false) || mode === 'video');
   $('#promptBox').placeholder = mode === 'audio'
-    ? 'Escribí el texto a locutar… usá [risas] o [whispers] para expresiones'
+    ? (audioModel?.supportsAudioTags === false
+      ? 'Escribí el texto a locutar… Multilingual v2 prioriza una narración estable'
+      : 'Escribí el texto a locutar… usá [risas] o [whispers] para expresiones')
     : mode === 'video'
     ? 'Describí la escena en movimiento: acción, cámara, ambiente…'
     : mode === 'music'
@@ -57,6 +60,7 @@ function setMode(mode) {
     : 'Escribí lo que querés manifestar…';
   $('#btnGenerate').innerHTML = mode === 'audio' ? `${IC('mic')} Dar voz` : mode === 'video' ? `${IC('film')} Manifestar video` : mode === 'music' ? `${IC('music')} Componer` : `${IC('spark')} Manifestar`;
   if (mode === 'audio' && state.voices === null) loadVoices(false);
+  if (mode === 'audio') renderAudioModelSelect();
   if (mode === 'video') renderVideoControls();
   if (mode === 'music') renderMusicControls();
   if (mode === 'image') renderRefs();
@@ -533,8 +537,33 @@ function renderVoiceSelect() {
   }
 }
 
+function renderAudioModelSelect() {
+  const select = $('#audioModelSelect');
+  if (!select) return;
+  const models = state.audioModels || [];
+  const selected = models.find((model) => model.id === state.audioModelId) || models[0];
+  if (selected) state.audioModelId = selected.id;
+  select.innerHTML = models.map((model) =>
+    `<option value="${esc(model.id)}"${model.id === state.audioModelId ? ' selected' : ''}>${esc(model.name)}</option>`
+  ).join('');
+  $('#audioModelHint').textContent = selected?.notes || '';
+}
+
 $('#voiceSelect').addEventListener('change', (e) => { state.voiceId = e.target.value; });
 $('#btnReloadVoices').addEventListener('click', () => loadVoices(true));
+$('#audioModelSelect').addEventListener('change', async (event) => {
+  const previous = state.audioModelId;
+  state.audioModelId = event.target.value;
+  setMode('audio');
+  try {
+    state.config = await api('/api/config', { method: 'PUT', body: { audioModelId: state.audioModelId } });
+    updateEstimate();
+  } catch (error) {
+    state.audioModelId = previous;
+    setMode('audio');
+    toast(error.message, 'err');
+  }
+});
 
 // ---------------------------------------------------------------------------
 // personaje anclado
@@ -902,6 +931,7 @@ async function generate() {
   const pc = pinnedChar();
   const voiceId = state.voiceId || pc?.voiceId;
   const voice = (state.voices || []).find((v) => v.id === voiceId);
+  const audioModel = (state.audioModels || []).find((candidate) => candidate.id === state.audioModelId) || state.audioModels?.[0];
   const model = isVideo ? currentVideoModel() : currentModel();
   // las etiquetas se estampan acá, sobre copias: el asset guardado queda limpio
   const refsUsed = isImage ? state.refs : isVideo ? state.refs.slice(0, activeRefLimit()) : [];
@@ -912,7 +942,7 @@ async function generate() {
     label: isImage ? `${model.name} · ${state.resolution} · ×${state.batch}`
       : isVideo ? `${model.name} · ${state.video.resolution} · ${state.video.duration}s`
       : isMusic ? `Suno ${state.music.version}${state.music.instrumental ? ' · instrumental' : ''}`
-      : `Eleven v3 · ${voice?.name || pc?.voiceName || 'voz'}`,
+      : `${audioModel?.name || 'ElevenLabs'} · ${voice?.name || pc?.voiceName || 'voz'}`,
     path: isImage ? '/api/generate/image' : isVideo ? '/api/generate/video' : isMusic ? '/api/generate/music' : '/api/generate/audio',
     body: isImage ? {
       modelId: state.modelId, prompt, aspectRatio: state.aspectRatio,
@@ -929,7 +959,13 @@ async function generate() {
       model: state.music.version, prompt,
       style: state.music.style, title: state.music.title,
       instrumental: state.music.instrumental, customMode: state.music.customMode
-    } : { text: prompt, voiceId, voiceName: voice?.name || pc?.voiceName || '', characterId: state.pinnedId || null }
+    } : {
+      text: prompt,
+      audioModelId: audioModel?.id || state.audioModelId,
+      voiceId,
+      voiceName: voice?.name || pc?.voiceName || '',
+      characterId: state.pinnedId || null
+    }
   };
   state.generationJobs.unshift(job);
   renderGenerationQueue();
@@ -1012,7 +1048,7 @@ function showEntry(entry, outputIdx = 0) {
       <div class="bv-media"><div style="padding:8px;color:var(--pink)">${IC('mic', 'ic ic-lg')}</div>
         <audio controls autoplay src="${fileUrl(entry.outputs[0])}"></audio>
       </div>
-      <div class="bv-meta">${esc(entry.voiceName || 'voz')} · Eleven v3 · ${fmtDate(entry.ts)}</div>
+      <div class="bv-meta">${esc(entry.voiceName || 'voz')} · ${esc(entry.modelName || 'ElevenLabs')} · ${fmtDate(entry.ts)}</div>
       <div class="bv-actions">
         <button class="mini-btn" data-act="copy">${IC('copy')} Copiar prompt</button>
         <button class="mini-btn" data-act="regen">${IC('refresh')} Regenerar</button>
@@ -1078,6 +1114,7 @@ async function regenerate(entry) {
   promptBox.value = entry.prompt;
   renderHighlight();
   if (entry.type === 'audio') {
+    if ((state.audioModels || []).some((model) => model.id === entry.modelId)) state.audioModelId = entry.modelId;
     setMode('audio');
     state.voiceId = entry.voiceId || state.voiceId;
     renderVoiceSelect();
@@ -1111,6 +1148,7 @@ async function regenerate(entry) {
 function editEntry(entry) {
   promptBox.value = entry.prompt;
   if (entry.type === 'audio') {
+    if ((state.audioModels || []).some((model) => model.id === entry.modelId)) state.audioModelId = entry.modelId;
     setMode('audio');
     if (entry.voiceId) { state.voiceId = entry.voiceId; renderVoiceSelect(); $('#voiceSelect').value = entry.voiceId; }
   } else if (entry.type === 'video') {
@@ -1524,8 +1562,78 @@ document.addEventListener('paste', async (e) => {
 // assets
 // ---------------------------------------------------------------------------
 
+const AUDIO_KIND_LABELS = { voice: 'Voz', music: 'Música', sound: 'Sonido' };
+const splitMusicTags = (value) => [...new Set(String(value || '').split(',').map((tag) => tag.trim()).filter(Boolean))].slice(0, 30);
+const musicTagSummary = (tags = {}) => [...(tags.genres || []), ...(tags.instruments || []), ...(tags.moods || [])];
+
+function openAudioUpload({ automationId = null, kind = 'voice', musicTags = {} } = {}) {
+  state.audioUploadAutomationId = automationId;
+  $('#audioUploadForm').reset();
+  $('#audioUploadKind').value = ['voice', 'music', 'sound'].includes(kind) ? kind : 'voice';
+  $('#audioUploadKind').disabled = Boolean(automationId);
+  if (automationId) $('#audioUploadKind').value = 'music';
+  $('#audioUploadGenres').value = (musicTags.genres || []).join(', ');
+  $('#audioUploadInstruments').value = (musicTags.instruments || []).join(', ');
+  $('#audioUploadMoods').value = (musicTags.moods || []).join(', ');
+  $('#audioUploadMusicTags').hidden = $('#audioUploadKind').value !== 'music';
+  $('#audioUploadModal').hidden = false;
+}
+
+function closeAudioUpload() {
+  $('#audioUploadModal').hidden = true;
+  state.audioUploadAutomationId = null;
+}
+
+$('#audioUploadKind').addEventListener('change', () => {
+  $('#audioUploadMusicTags').hidden = $('#audioUploadKind').value !== 'music';
+});
+$('#audioUploadClose').addEventListener('click', closeAudioUpload);
+$('#audioUploadCancel').addEventListener('click', closeAudioUpload);
+$('#audioUploadModal').addEventListener('click', (event) => { if (event.target.id === 'audioUploadModal') closeAudioUpload(); });
+$('#audioUploadForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const file = $('#audioUploadFile').files?.[0];
+  if (!file) return;
+  if (file.size > 100 * 1024 * 1024) return toast('El audio supera el límite de 100 MB.', 'err');
+  const submit = event.submitter;
+  if (submit) submit.disabled = true;
+  try {
+    const audioKind = $('#audioUploadKind').value;
+    const uploaded = await api('/api/assets/audio', {
+      method: 'POST',
+      body: {
+        name: file.name,
+        dataUrl: await readFileAsDataUrl(file),
+        audioKind,
+        musicTags: {
+          genres: splitMusicTags($('#audioUploadGenres').value),
+          instruments: splitMusicTags($('#audioUploadInstruments').value),
+          moods: splitMusicTags($('#audioUploadMoods').value)
+        }
+      }
+    });
+    const automationId = state.audioUploadAutomationId;
+    closeAudioUpload();
+    await refreshAssets();
+    if (automationId) {
+      const project = state.automations.find((item) => item.id === automationId);
+      if (project) {
+        await saveAutomation({ config: { music: { ...project.config.music, enabled: true, source: 'asset', assetKey: uploaded.key } } });
+        renderAutomationProject();
+      }
+    }
+    toast(`${AUDIO_KIND_LABELS[audioKind]} subida y clasificada.`, 'ok');
+  } catch (error) {
+    toast(error.message, 'err');
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+});
+
 async function refreshAssets() {
   state.assets = await api('/api/assets');
+  if (assetAudioKey && !(state.assets.audio || []).some((item) => item.key === assetAudioKey)) closeAssetAudioPlayer();
+  else if (assetAudioKey) updateAssetAudioPlayer();
   renderAssetFilterOptions();
   renderAssetsGrid();
 }
@@ -1555,11 +1663,27 @@ $$('#view-assets .tabs .tab').forEach((t) => {
     state.assetsZone = t.dataset.zone;
     state.selectedAssets.clear();
     $$('#view-assets .tabs .tab').forEach((x) => x.classList.toggle('active', x === t));
+    $('#audioKindTabs').hidden = state.assetsZone !== 'audio';
+    $('#btnUploadAsset').innerHTML = state.assetsZone === 'audio'
+      ? `${IC('upload')} Subir audio`
+      : `${IC('upload')} Subir imagen`;
     renderAssetsGrid();
   });
 });
 
+$$('#audioKindTabs [data-audio-kind]').forEach((button) => button.addEventListener('click', () => {
+  state.assetAudioKind = button.dataset.audioKind;
+  $$('#audioKindTabs [data-audio-kind]').forEach((item) => item.classList.toggle('active', item === button));
+  state.selectedAssets.clear();
+  renderAssetsGrid();
+}));
+
 $('#btnUploadAsset').addEventListener('click', () => {
+  if (state.assetsZone === 'audio') {
+    const kind = state.assetAudioKind === 'all' ? 'voice' : state.assetAudioKind;
+    return openAudioUpload({ kind });
+  }
+  $('#fileInput').accept = 'image/*';
   $('#fileInput').onchange = async (e) => { await uploadFiles([...e.target.files], false); e.target.value = ''; };
   $('#fileInput').click();
 });
@@ -1594,7 +1718,9 @@ function renderAssetsGrid() {
       card.className = `asset-card${state.selectedAssets.has(a.key) ? ' selected' : ''}`;
       card.innerHTML = `<button class="asset-check" title="Seleccionar">${state.selectedAssets.has(a.key) ? '✓' : ''}</button><button class="asset-series" title="Asociar a serie">${IC('layers')}</button><a class="asset-download" href="${fileUrl(a.key)}" download="${esc(a.name)}" title="Descargar">${IC('download')}</a><button class="asset-info" title="Información">${IC('info')}</button>${a.prompt ? `<button class="asset-copy" title="Copiar prompt">${IC('copy')}</button>` : ''}<button class="asset-delete" title="Borrar">${IC('trash')}</button>`;
       if (state.assetsZone === 'audio') {
-        card.insertAdjacentHTML('beforeend', `<div class="audio-tile"><span class="audio-tile-icon">${IC('play', 'ic ic-lg')}</span><span class="audio-dur audio-tile-dur" data-durkey="${esc(a.key)}"></span></div><div class="a-name">${esc(a.name)}</div>`);
+        const kind = a.audioKind || 'voice';
+        const tags = kind === 'music' ? musicTagSummary(a.musicTags).slice(0, 4) : [];
+        card.insertAdjacentHTML('beforeend', `<div class="audio-tile" data-audiokey="${esc(a.key)}" title="Abrir en el reproductor"><span class="audio-kind-badge ${kind}">${esc(AUDIO_KIND_LABELS[kind] || 'Audio')}</span><span class="audio-tile-icon">${IC('play', 'ic ic-lg')}</span><span class="audio-dur audio-tile-dur" data-durkey="${esc(a.key)}"></span></div><div class="a-name">${esc(a.name)}</div>${tags.length ? `<div class="audio-card-tags">${tags.map((tag) => `<span>${esc(tag)}</span>`).join('')}</div>` : ''}`);
         card.querySelector('.audio-tile').addEventListener('click', () => toggleAudioPlay(card, a.key));
       } else if (state.assetsZone === 'video') {
         card.insertAdjacentHTML('beforeend', `<video src="${fileUrl(a.key)}" preload="metadata" muted></video><div class="a-name">${esc(a.name)}</div>`);
@@ -1613,6 +1739,8 @@ function renderAssetsGrid() {
     grid.appendChild(section);
   }
   if (state.assetsZone === 'audio') fillAudioDurations(grid);
+  if (assetAudioKey) updateAssetAudioPlayer();
+  syncAssetAudioTiles();
 }
 
 function usePrompt(pr) {
@@ -1777,6 +1905,7 @@ function visibleAssets() {
   return (state.assets[state.assetsZone] || []).filter((a) =>
     (!state.assetRange.from || a.mtime >= state.assetRange.from)
     && (!state.assetRange.to || a.mtime <= state.assetRange.to)
+    && (state.assetsZone !== 'audio' || state.assetAudioKind === 'all' || (a.audioKind || 'voice') === state.assetAudioKind)
     && assetMatchesCharacter(a, state.assetFilterCharacterId)
     && assetMatchesSeries(a, state.assetFilterSeriesId));
 }
@@ -1827,6 +1956,11 @@ async function deleteAssets(keys) {
   const result = await api('/api/assets/delete', { method: 'POST', body: { keys } });
   keys.forEach((key) => state.selectedAssets.delete(key));
   state.series.forEach((s) => { s.assetKeys = (s.assetKeys || []).filter((key) => !keys.includes(key)); });
+  state.automations.forEach((project) => {
+    if (keys.includes(project.config?.music?.assetKey)) project.config.music.assetKey = '';
+    if (keys.includes(project.finalOutput?.videoKey)) project.finalOutput = null;
+    else if (keys.includes(project.finalOutput?.musicKey)) project.finalOutput.musicKey = null;
+  });
   state.history = result.history;
   renderHistory();
   await refreshAssets();
@@ -1871,21 +2005,91 @@ $('#btnApplyAssetRange').addEventListener('click', () => {
   setAssetRange(from, to);
 });
 
-let playingAudio = null;
-function toggleAudioPlay(card, key) {
-  if (playingAudio) { playingAudio.pause(); playingAudio = null; }
-  const tile = card.querySelector('.audio-tile');
-  const icon = tile.querySelector('.audio-tile-icon');
-  const wasPlaying = tile.dataset.playing === '1';
-  // solo se cambia el ícono, no todo el tile, para no borrar la duración
-  $$('.audio-tile').forEach((t) => { t.querySelector('.audio-tile-icon').innerHTML = IC('play', 'ic ic-lg'); t.dataset.playing = ''; });
-  if (wasPlaying) return;
-  playingAudio = new Audio(fileUrl(key));
-  playingAudio.play();
-  icon.innerHTML = IC('pause', 'ic ic-lg');
-  tile.dataset.playing = '1';
-  playingAudio.onended = () => { icon.innerHTML = IC('play', 'ic ic-lg'); tile.dataset.playing = ''; };
+const assetAudioPlayer = $('#assetAudioPlayer');
+const playingAudio = $('#assetPlayerAudio');
+let assetAudioKey = '';
+
+function assetAudioItems() {
+  const all = state.assets.audio || [];
+  if (state.assetsZone !== 'audio') return all;
+  const visible = visibleAssets();
+  return visible.some((item) => item.key === assetAudioKey) ? visible : all;
 }
+
+function syncAssetAudioTiles() {
+  const isPlaying = assetAudioKey && !playingAudio.paused && !playingAudio.ended;
+  $$('.audio-tile').forEach((tile) => {
+    const active = tile.dataset.audiokey === assetAudioKey && isPlaying;
+    tile.dataset.playing = active ? '1' : '';
+    const icon = tile.querySelector('.audio-tile-icon');
+    if (icon) icon.innerHTML = IC(active ? 'pause' : 'play', 'ic ic-lg');
+  });
+}
+
+function updateAssetAudioPlayer() {
+  if (!assetAudioKey) return;
+  const item = (state.assets.audio || []).find((entry) => entry.key === assetAudioKey);
+  const items = assetAudioItems();
+  const index = items.findIndex((entry) => entry.key === assetAudioKey);
+  const kind = item?.audioKind || 'voice';
+  $('#assetPlayerKind').textContent = AUDIO_KIND_LABELS[kind] || 'Audio';
+  $('#assetPlayerName').textContent = item?.name || sbAudioName(assetAudioKey);
+  $('#assetPlayerPosition').textContent = index >= 0 ? `${index + 1} / ${items.length}` : '';
+  $('#assetPlayerPrev').disabled = index <= 0;
+  $('#assetPlayerNext').disabled = index < 0 || index >= items.length - 1;
+}
+
+function openAssetAudioPlayer(key, autoplay = true) {
+  const changed = assetAudioKey !== key;
+  assetAudioKey = key;
+  assetAudioPlayer.hidden = false;
+  document.body.classList.add('asset-player-open');
+  if (changed) {
+    playingAudio.src = fileUrl(key);
+    playingAudio.load();
+  }
+  updateAssetAudioPlayer();
+  syncAssetAudioTiles();
+  if (autoplay) playingAudio.play().catch(() => toast('No se pudo reproducir este audio', 'err'));
+}
+
+function toggleAudioPlay(card, key) {
+  const sameTrack = assetAudioKey === key;
+  assetAudioPlayer.hidden = false;
+  document.body.classList.add('asset-player-open');
+  if (!sameTrack) return openAssetAudioPlayer(key);
+  updateAssetAudioPlayer();
+  if (playingAudio.paused || playingAudio.ended) playingAudio.play().catch(() => toast('No se pudo reproducir este audio', 'err'));
+  else playingAudio.pause();
+}
+
+function navigateAssetAudio(direction) {
+  const items = assetAudioItems();
+  const index = items.findIndex((entry) => entry.key === assetAudioKey);
+  const next = items[index + direction];
+  if (next) openAssetAudioPlayer(next.key);
+}
+
+function closeAssetAudioPlayer() {
+  playingAudio.pause();
+  assetAudioKey = '';
+  playingAudio.removeAttribute('src');
+  playingAudio.load();
+  assetAudioPlayer.hidden = true;
+  document.body.classList.remove('asset-player-open');
+  syncAssetAudioTiles();
+}
+
+playingAudio.addEventListener('play', syncAssetAudioTiles);
+playingAudio.addEventListener('pause', syncAssetAudioTiles);
+playingAudio.addEventListener('ended', syncAssetAudioTiles);
+playingAudio.addEventListener('error', () => {
+  if (assetAudioKey) toast('El reproductor no pudo abrir este archivo', 'err');
+  syncAssetAudioTiles();
+});
+$('#assetPlayerPrev').addEventListener('click', () => navigateAssetAudio(-1));
+$('#assetPlayerNext').addEventListener('click', () => navigateAssetAudio(1));
+$('#assetPlayerClose').addEventListener('click', closeAssetAudioPlayer);
 
 // ---------------------------------------------------------------------------
 // Photoshop: vigilancia de archivos abiertos afuera. Cuando el archivo cambia
@@ -2049,12 +2253,15 @@ window.addEventListener('mouseup', () => { lbPan = null; });
 
 function openAssetInfo(asset) {
   closeLightbox();
+  const isAudio = asset.key?.startsWith('audio/');
+  const audioKind = asset.audioKind || 'voice';
+  const musicTags = asset.musicTags || { genres: [], instruments: [], moods: [] };
   const character = state.characters.find((c) => c.id === asset.characterId);
   const variant = (character?.variants || []).find((v) => v.id === asset.characterVariantId);
   const rows = [
     ['Modelo', asset.modelName || asset.modelId || 'Sin información'],
-    ['Tipo', asset.type || (asset.key?.startsWith('audio/') ? 'audio' : 'imagen')],
-    ...(asset.key?.startsWith('audio/') ? [['Duración', '__DUR__']] : []),
+    ['Tipo', isAudio ? AUDIO_KIND_LABELS[audioKind] || 'Audio' : asset.type || 'imagen'],
+    ...(isAudio ? [['Duración', '__DUR__']] : []),
     ['Proporción', asset.aspectRatio || '—'], ['Resolución', asset.resolution || '—'],
     ['Lote', asset.batch || 1], ['Referencias', (asset.refs || []).length],
     ['Personaje', character ? `${character.name} · ${variant?.name || 'Original'}` : '—'],
@@ -2069,11 +2276,50 @@ function openAssetInfo(asset) {
       <div><input id="assetRenameInput" type="text" maxlength="80" value="${esc(baseName)}"><span class="asset-info-ext">${esc(ext)}</span><button class="mini-btn" id="assetRenameBtn">Renombrar</button></div>
     </div>
     <div class="asset-info-grid">${rows.map(([label, value]) => `<div><span>${label}</span><strong>${value === '__DUR__' ? `<span class="audio-dur" data-durkey="${esc(asset.key)}">…</span>` : esc(value)}</strong></div>`).join('')}</div>
+    ${isAudio ? `<div class="asset-info-audio-action"><button type="button" class="generate-btn small" id="assetInfoPlay">${IC('play')} Abrir en el reproductor</button></div><div class="audio-metadata-editor">
+      <h4>Clasificación del audio</h4>
+      <label>Tipo<select class="select" id="assetAudioKind">${[['voice', 'Voz'], ['music', 'Música'], ['sound', 'Sonido']].map(([value, label]) => `<option value="${value}"${audioKind === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
+      <div id="assetMusicFields" class="audio-music-fields"${audioKind === 'music' ? '' : ' hidden'}>
+        <label>Género<input id="assetMusicGenres" type="text" value="${esc((musicTags.genres || []).join(', '))}" placeholder="ambient, orchestral"></label>
+        <label>Instrumentos<input id="assetMusicInstruments" type="text" value="${esc((musicTags.instruments || []).join(', '))}" placeholder="piano, strings"></label>
+        <label>Sentimientos<input id="assetMusicMoods" type="text" value="${esc((musicTags.moods || []).join(', '))}" placeholder="mysterious, tense"></label>
+      </div>
+      <button type="button" class="mini-btn" id="assetAudioMetadataSave">Guardar clasificación</button>
+    </div>` : ''}
     <div class="asset-info-prompt"><div><span>Prompt utilizado</span>${asset.prompt ? `<button class="mini-btn" id="assetInfoCopy">${IC('copy')} Copiar</button>` : ''}</div><pre>${esc(asset.prompt || 'No hay prompt guardado para este asset.')}</pre></div>`;
   fillAudioDurations($('#assetInfoBody'));
+  $('#assetInfoPlay')?.addEventListener('click', () => {
+    $('#assetInfoModal').hidden = true;
+    openAssetAudioPlayer(asset.key);
+  });
   $('#assetInfoCopy')?.addEventListener('click', () => copyPrompt(asset.prompt));
   $('#assetRenameBtn').addEventListener('click', () => renameAsset(asset.key, $('#assetRenameInput').value));
   $('#assetRenameInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); renameAsset(asset.key, e.target.value); } });
+  $('#assetAudioKind')?.addEventListener('change', () => { $('#assetMusicFields').hidden = $('#assetAudioKind').value !== 'music'; });
+  $('#assetAudioMetadataSave')?.addEventListener('click', async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      const updated = await api('/api/assets/audio-metadata', {
+        method: 'POST',
+        body: {
+          key: asset.key,
+          audioKind: $('#assetAudioKind').value,
+          musicTags: {
+            genres: splitMusicTags($('#assetMusicGenres').value),
+            instruments: splitMusicTags($('#assetMusicInstruments').value),
+            moods: splitMusicTags($('#assetMusicMoods').value)
+          }
+        }
+      });
+      Object.assign(asset, updated);
+      await refreshAssets();
+      openAssetInfo(asset);
+      toast('Clasificación de audio guardada.', 'ok');
+    } catch (error) {
+      event.currentTarget.disabled = false;
+      toast(error.message, 'err');
+    }
+  });
   $('#assetInfoModal').hidden = false;
 }
 
@@ -2088,6 +2334,7 @@ async function renameAsset(oldKey, name) {
     state.elementLinks = s.elementLinks || [];
     state.series = s.series || [];
     state.scripts = s.scripts || [];
+    state.automations = s.automations || [];
     state.history = s.history || [];
     await refreshAssets();
     $('#assetInfoModal').hidden = true;
@@ -2186,6 +2433,7 @@ document.addEventListener('keydown', (e) => {
   if (!$('#lightbox').hidden && e.key === 'ArrowRight') { e.preventDefault(); navigateLightbox(1); return; }
   if (e.key === 'Escape') {
     closeLightbox(); $('#pickerModal').hidden = true; $('#charModal').hidden = true;
+    closeAudioUpload();
     $('#characterGalleryModal').hidden = true; $('#variantEditorModal').hidden = true; $('#associateAssetModal').hidden = true;
     $('#assetInfoModal').hidden = true;
     $('#seriesModal').hidden = true; $('#seriesAssignModal').hidden = true; state.editingSeriesId = null;
@@ -4069,6 +4317,9 @@ function openAutomation(id) {
   $$('.nav-btn').forEach((b) => b.classList.remove('active'));
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-automation'));
   renderAutomationProject();
+  refreshAssets().then(() => {
+    if (state.openAutomationId === id) renderAutomationProject();
+  }).catch(() => {});
   window.scrollTo(0, 0);
 }
 $('#automationBack').addEventListener('click', () => {
@@ -4120,6 +4371,28 @@ function automationRoleName(role) {
 const DEFAULT_AUTOMATION_ART_STYLE = 'Photorealistic cinematic realism, natural human anatomy, realistic skin and materials, restrained color grading, consistent lighting and lens language';
 const SYSTEM_OVERLAY_FONTS = ['sans-serif', 'serif', 'monospace', 'Impact', 'Georgia', 'Arial Black'];
 const loadedCustomFontIds = new Set();
+let automationTransitionPreview = null;
+
+function automationTransitionSoundOptions(selectedId = '') {
+  const groups = new Map();
+  for (const sound of state.transitionSounds || []) {
+    if (!groups.has(sound.category)) groups.set(sound.category, []);
+    groups.get(sound.category).push(sound);
+  }
+  return '<option value="">— elegí un sonido —</option>' + [...groups.entries()].map(([category, sounds]) =>
+    `<optgroup label="${esc(category)}">${sounds.map((sound) => `<option value="${esc(sound.id)}"${sound.id === selectedId ? ' selected' : ''}>${esc(sound.name)}</option>`).join('')}</optgroup>`
+  ).join('');
+}
+
+function previewAutomationTransitionSound(soundId) {
+  const sound = (state.transitionSounds || []).find((item) => item.id === soundId);
+  if (!sound) return;
+  if (automationTransitionPreview) automationTransitionPreview.pause();
+  automationTransitionPreview = new Audio(sound.url);
+  automationTransitionPreview.loop = false;
+  automationTransitionPreview.play().catch(() => toast('No se pudo reproducir este sonido de transición', 'err'));
+  automationTransitionPreview.addEventListener('ended', () => { automationTransitionPreview = null; }, { once: true });
+}
 
 function customFontUrl(font) {
   return `/fonts/${encodeURIComponent(font.file)}`;
@@ -4414,6 +4687,23 @@ function renderAutomationProject() {
   const completedVideos = pr.blocks.filter((block) => pr.outputs?.[block.id]?.videoKey).length;
   const allVideosReady = pr.blocks.length > 0 && completedVideos === pr.blocks.length;
   const finalOutput = pr.finalOutput?.videoKey ? pr.finalOutput : null;
+  const includeLogos = pr.config?.includeLogos === true;
+  const automationAudioModel = (state.audioModels || []).find((candidate) => candidate.id === pr.config?.audioModelId)
+    || state.audioModels?.[0];
+  const transitionSound = { enabled: false, soundId: '', ...(pr.config?.transitionSound || {}) };
+  const selectedTransitionSound = (state.transitionSounds || []).find((sound) => sound.id === transitionSound.soundId);
+  const savedMusic = pr.config.music || {};
+  const legacyGainDb = Number.isFinite(Number(savedMusic.volumePct))
+    ? (Number(savedMusic.volumePct) <= 0 ? -60 : 20 * Math.log10(Math.min(100, Number(savedMusic.volumePct)) / 100))
+    : -15;
+  const music = {
+    enabled: false, source: 'asset', assetKey: '', genres: [], instruments: [], moods: [], gainDb: legacyGainDb,
+    fadeOut: false, fadeOutSeconds: 5,
+    sunoModel: state.musicModel?.defaultVersion || 'V5_5', ...savedMusic
+  };
+  const musicAssets = (state.assets.audio || []).filter((asset) => (asset.audioKind || (asset.modelId === 'suno' ? 'music' : 'voice')) === 'music');
+  const selectedMusic = musicAssets.find((asset) => asset.key === music.assetKey);
+  const musicTestVoiceKey = pr.blocks.map((block) => pr.outputs?.[block.id]?.audioKeys?.[0]).find(Boolean) || '';
 
   const assignRow = (kind, r, options) => {
     const cur = pr.assignments[kind]?.[r.role] || '';
@@ -4507,7 +4797,49 @@ function renderAutomationProject() {
         <select class="select" id="autoRes">${(model?.resolutions || []).map((r) => `<option${r === pr.config.resolution ? ' selected' : ''}>${r}</option>`).join('')}</select></div>
       <div class="control-row"><label>Voz del narrador</label>
         <select class="select" id="autoVoice"><option value="">— elegí una voz —</option>${(state.voices || []).map((v) => `<option value="${v.id}"${v.id === pr.config.narratorVoiceId ? ' selected' : ''}>${esc(v.name)}</option>`).join('')}</select>
-        <span class="hint">Los diálogos usan la voz del personaje asignado (si tiene); si no, la del narrador.</span>
+        <label>Modelo de ElevenLabs</label>
+        <select class="select" id="autoAudioModel">${(state.audioModels || []).map((audioModel) => `<option value="${esc(audioModel.id)}"${audioModel.id === automationAudioModel?.id ? ' selected' : ''}>${esc(audioModel.name)}</option>`).join('')}</select>
+        <span class="hint">Los diálogos usan la voz del personaje asignado (si tiene); si no, la del narrador. ${esc(automationAudioModel?.notes || '')}</span>
+      </div>
+      <div class="automation-music-panel${music.enabled ? ' enabled' : ''}" id="autoMusicPanel">
+        <div class="automation-music-head">
+          <div><h4>Música de fondo</h4><span class="hint">Opcional · una pista se repite en bucle durante todo el video final.</span></div>
+          <label class="poser-toggle"><input type="checkbox" id="autoMusicEnabled"${music.enabled ? ' checked' : ''}> usar música</label>
+        </div>
+        <div class="automation-music-grid">
+          <label><span>Origen</span><select class="select" id="autoMusicSource">
+            <option value="asset"${music.source === 'asset' ? ' selected' : ''}>Elegir de Assets / subida</option>
+            <option value="auto"${music.source === 'auto' ? ' selected' : ''}>Elegir automáticamente por etiquetas</option>
+            <option value="suno"${music.source === 'suno' ? ' selected' : ''}>Generar con Suno</option>
+          </select></label>
+          <label class="automation-music-track"><span>Pista</span><select class="select" id="autoMusicTrack"><option value="">— ninguna —</option>${musicAssets.map((asset) => `<option value="${esc(asset.key)}"${asset.key === music.assetKey ? ' selected' : ''}>${esc(asset.name)}</option>`).join('')}</select></label>
+          <label><span>Nivel musical · dB</span><input type="number" id="autoMusicGain" min="-60" max="0" step="1" value="${Number(music.gainDb).toFixed(1)}"></label>
+          <label><span>Modelo Suno</span><select class="select" id="autoMusicModel">${(state.musicModel?.versions || [music.sunoModel]).map((version) => `<option value="${esc(version)}"${version === music.sunoModel ? ' selected' : ''}>${esc(version)}</option>`).join('')}</select></label>
+          <label class="automation-music-toggle"><span>Final musical</span><span><input type="checkbox" id="autoMusicFadeOut"${music.fadeOut ? ' checked' : ''}> Fade out</span></label>
+          <label><span>Duración del fade · segundos</span><input type="number" id="autoMusicFadeSeconds" min="0.25" max="30" step="0.25" value="${music.fadeOutSeconds}"${music.fadeOut ? '' : ' disabled'}></label>
+          <label><span>Género</span><input type="text" id="autoMusicGenres" value="${esc((music.genres || []).join(', '))}" placeholder="ambient, orchestral"></label>
+          <label><span>Instrumentos</span><input type="text" id="autoMusicInstruments" value="${esc((music.instruments || []).join(', '))}" placeholder="piano, strings"></label>
+          <label><span>Sentimientos</span><input type="text" id="autoMusicMoods" value="${esc((music.moods || []).join(', '))}" placeholder="mysterious, tense"></label>
+        </div>
+        <div class="automation-music-actions">
+          <button type="button" class="mini-btn" id="autoMusicAuto">${IC('spark')} Elegir automáticamente</button>
+          <button type="button" class="mini-btn" id="autoMusicGenerate">${IC('music')} Generar con Suno</button>
+          <button type="button" class="mini-btn" id="autoMusicUpload">${IC('upload')} Subir música</button>
+          <button type="button" class="mini-btn" id="autoMusicTest"${selectedMusic ? '' : ' disabled'}>${IC('play')} ${musicTestVoiceKey ? 'Probar con voz' : 'Probar música'}</button>
+          <span class="hint" id="autoMusicStatus">${selectedMusic ? `Seleccionada: ${esc(selectedMusic.name)}` : music.assetKey ? 'La pista seleccionada ya no está disponible.' : 'Todavía no hay una pista seleccionada.'}</span>
+        </div>
+        ${selectedMusic ? `<audio class="automation-music-preview" id="autoMusicPreview" src="${fileUrl(selectedMusic.key)}" controls preload="metadata"></audio>${musicTestVoiceKey ? `<audio id="autoMusicVoicePreview" src="${fileUrl(musicTestVoiceKey)}" preload="metadata" hidden></audio>` : ''}<span class="hint automation-music-test-hint">La reproducción respeta ${Number(music.gainDb).toFixed(1)} dB${musicTestVoiceKey ? ' y puede compararse con una voz ya generada del proyecto.' : '. Generá al menos una voz para probar el balance conjunto.'}</span>` : ''}
+      </div>
+      <div class="automation-transition-panel${transitionSound.enabled ? ' enabled' : ''}" id="autoTransitionPanel">
+        <div class="automation-transition-head">
+          <div><h4>Transición sonora entre tomas</h4><span class="hint">Opcional · se reproduce en cada corte interno, nunca al inicio ni después de la última toma.</span></div>
+          <label class="poser-toggle"><input type="checkbox" id="autoTransitionEnabled"${transitionSound.enabled ? ' checked' : ''}> activar</label>
+        </div>
+        <div class="automation-transition-controls">
+          <label><span>Sonido por categoría</span><select class="select" id="autoTransitionSound">${automationTransitionSoundOptions(transitionSound.soundId)}</select></label>
+          <button type="button" class="mini-btn" id="autoTransitionTest"${selectedTransitionSound ? '' : ' disabled'}>${IC('play')} Probar una vez</button>
+          <span class="hint" id="autoTransitionStatus">${selectedTransitionSound ? `${esc(selectedTransitionSound.category)} · ${esc(selectedTransitionSound.name)}` : (state.transitionSounds || []).length ? 'Elegí un sonido; se reproducirá automáticamente una vez.' : 'No hay sonidos instalados.'}</span>
+        </div>
       </div>
       <h4>Texto sobreimpreso</h4>
       <div class="overlay-typography-grid">
@@ -4593,15 +4925,19 @@ function renderAutomationProject() {
       <button class="generate-btn" id="autoStart"${missing.length ? ' disabled' : ''}>${IC('spark')} Automatizar</button>
     </div>
 
-    <div class="automation-panel final-assembly-panel">
-      <div class="final-assembly-copy">
-        <h3>Video final</h3>
-        <span class="hint" id="autoAssembleStatus">${
+      <div class="automation-panel final-assembly-panel">
+        <div class="final-assembly-copy">
+          <h3>Video final</h3>
+          <label class="final-logo-toggle">
+            <input type="checkbox" id="autoIncludeLogos"${includeLogos ? ' checked' : ''}>
+            <span><strong>Incluir logos</strong><small>Agrega el cierre de Controversy Tracker con su audio. El video funde a negro y la música termina antes del logo.</small></span>
+          </label>
+          <span class="hint" id="autoAssembleStatus">${
           allVideosReady
             ? `${completedVideos}/${pr.blocks.length} videos listos para unir en el orden del guion.`
             : `Faltan ${pr.blocks.length - completedVideos} de ${pr.blocks.length} videos de bloque.`
         }</span>
-        ${finalOutput ? `<span class="automation-stage-status">Último ensamble · ${finalOutput.blockCount || pr.blocks.length} bloques${finalOutput.width && finalOutput.height ? ` · ${finalOutput.width}×${finalOutput.height}` : ''} · ${fmtDate(finalOutput.assembledAt)}</span>` : ''}
+        ${finalOutput ? `<span class="automation-stage-status">Último ensamble · ${finalOutput.blockCount || pr.blocks.length} bloques${finalOutput.width && finalOutput.height ? ` · ${finalOutput.width}×${finalOutput.height}` : ''}${finalOutput.musicKey ? ` · música en bucle${finalOutput.musicFadeOutSeconds ? ` · fade out ${finalOutput.musicFadeOutSeconds}s` : ''}` : ''}${finalOutput.transitionCount ? ` · ${finalOutput.transitionCount} transiciones (${esc(finalOutput.transitionSoundName || 'sonido')})` : ''}${finalOutput.includeLogos ? ` · logo ${finalOutput.logoVariant === 'vertical' ? 'vertical' : 'horizontal'}` : ''} · ${fmtDate(finalOutput.assembledAt)}</span>` : ''}
         <button type="button" class="generate-btn" id="autoAssemble"${allVideosReady ? '' : ' disabled'}>
           ${IC('film')} ${finalOutput ? 'Reensamblar video final' : 'Ensamblar video final'}
         </button>
@@ -4643,11 +4979,22 @@ function renderAutomationProject() {
     resolution: $('#autoRes').value,
     narratorVoiceId: $('#autoVoice').value,
     narratorVoiceName: (state.voices || []).find((v) => v.id === $('#autoVoice').value)?.name || '',
+    audioModelId: $('#autoAudioModel').value,
+    includeLogos: $('#autoIncludeLogos').checked,
+    transitionSound,
+    music,
     overlay: ov
   } });
   $('#autoModel').addEventListener('change', async () => { await saveAll(); renderAutomationProject(); });
   $('#autoAr').addEventListener('change', async () => { await saveAll(); renderAutomationProject(); });
-  ['autoRes', 'autoVoice', 'autoFallbackModel', 'autoArtStyle'].forEach((id) => $('#' + id).addEventListener('change', saveAll));
+  ['autoRes', 'autoVoice', 'autoAudioModel', 'autoFallbackModel', 'autoArtStyle'].forEach((id) => $('#' + id).addEventListener('change', async () => {
+    await saveAll();
+    if (id === 'autoAudioModel') renderAutomationProject();
+  }));
+  $('#autoIncludeLogos').addEventListener('change', async () => {
+    await saveAll();
+    renderAutomationProject();
+  });
   $('#autoApplyArtPrompt')?.addEventListener('click', async () => {
     const savedPrompt = state.prompts.find((prompt) => prompt.id === $('#autoArtPrompt').value);
     if (!savedPrompt) return toast('Elegí un prompt guardado.', 'err');
@@ -4656,6 +5003,158 @@ function renderAutomationProject() {
     toast(savedPrompt.text.length > 1200
       ? `“${savedPrompt.title}” aplicado; se usaron los primeros 1200 caracteres.`
       : `“${savedPrompt.title}” aplicado al estilo artístico global.`);
+  });
+
+  const readMusicControls = () => {
+    music.enabled = $('#autoMusicEnabled').checked;
+    music.source = $('#autoMusicSource').value;
+    music.assetKey = $('#autoMusicTrack').value;
+    const gainDb = Number($('#autoMusicGain').value);
+    music.gainDb = Number.isFinite(gainDb) ? Math.max(-60, Math.min(0, gainDb)) : -15;
+    music.fadeOut = $('#autoMusicFadeOut').checked;
+    music.fadeOutSeconds = Number($('#autoMusicFadeSeconds').value) || 5;
+    music.sunoModel = $('#autoMusicModel').value;
+    music.genres = splitMusicTags($('#autoMusicGenres').value);
+    music.instruments = splitMusicTags($('#autoMusicInstruments').value);
+    music.moods = splitMusicTags($('#autoMusicMoods').value);
+    $('#autoMusicPanel').classList.toggle('enabled', music.enabled);
+    $('#autoMusicFadeSeconds').disabled = !music.fadeOut;
+    return music;
+  };
+  const readTransitionControls = () => {
+    transitionSound.enabled = $('#autoTransitionEnabled').checked;
+    transitionSound.soundId = $('#autoTransitionSound').value;
+    const selected = (state.transitionSounds || []).find((sound) => sound.id === transitionSound.soundId);
+    $('#autoTransitionPanel').classList.toggle('enabled', transitionSound.enabled);
+    $('#autoTransitionTest').disabled = !transitionSound.soundId;
+    $('#autoTransitionStatus').textContent = selected
+      ? `${selected.category} · ${selected.name}`
+      : (state.transitionSounds || []).length ? 'Elegí un sonido; se reproducirá automáticamente una vez.' : 'No hay sonidos instalados.';
+    return transitionSound;
+  };
+  $('#autoTransitionEnabled').addEventListener('change', async () => {
+    if ($('#autoTransitionEnabled').checked && !$('#autoTransitionSound').value && (state.transitionSounds || []).length) {
+      $('#autoTransitionSound').value = state.transitionSounds[0].id;
+      previewAutomationTransitionSound(state.transitionSounds[0].id);
+    }
+    readTransitionControls();
+    await saveAll();
+  });
+  $('#autoTransitionSound').addEventListener('change', async () => {
+    const soundId = $('#autoTransitionSound').value;
+    if (soundId) $('#autoTransitionEnabled').checked = true;
+    readTransitionControls();
+    previewAutomationTransitionSound(soundId);
+    await saveAll();
+  });
+  $('#autoTransitionTest').addEventListener('click', () => previewAutomationTransitionSound($('#autoTransitionSound').value));
+  ['autoMusicEnabled', 'autoMusicSource', 'autoMusicGain', 'autoMusicModel', 'autoMusicFadeOut', 'autoMusicFadeSeconds', 'autoMusicGenres', 'autoMusicInstruments', 'autoMusicMoods']
+    .forEach((id) => $('#' + id).addEventListener('change', () => { readMusicControls(); saveAll(); }));
+  const musicPreview = $('#autoMusicPreview');
+  const voicePreview = $('#autoMusicVoicePreview');
+  const musicTestButton = $('#autoMusicTest');
+  const applyPreviewGain = () => {
+    if (!musicPreview) return;
+    const enteredDb = Number($('#autoMusicGain').value);
+    const db = Number.isFinite(enteredDb) ? Math.max(-60, Math.min(0, enteredDb)) : -15;
+    musicPreview.volume = Math.max(0, Math.min(1, 10 ** (db / 20)));
+    const hint = $('#autoMusicPanel .automation-music-test-hint');
+    if (hint) hint.textContent = `La reproducción respeta ${db.toFixed(1)} dB${voicePreview ? ' y puede compararse con una voz ya generada del proyecto.' : '. Generá al menos una voz para probar el balance conjunto.'}`;
+  };
+  applyPreviewGain();
+  $('#autoMusicGain').addEventListener('input', applyPreviewGain);
+  musicTestButton?.addEventListener('click', async () => {
+    if (!musicPreview) return;
+    const status = $('#autoMusicStatus');
+    const isTesting = voicePreview ? !voicePreview.paused : !musicPreview.paused;
+    if (isTesting) {
+      musicPreview.pause();
+      if (voicePreview) voicePreview.pause();
+      musicPreview.loop = false;
+      musicTestButton.innerHTML = `${IC('play')} ${voicePreview ? 'Probar con voz' : 'Probar música'}`;
+      status.textContent = 'Prueba detenida.';
+      return;
+    }
+    try {
+      applyPreviewGain();
+      musicPreview.currentTime = 0;
+      musicPreview.loop = Boolean(voicePreview);
+      if (voicePreview) {
+        voicePreview.currentTime = 0;
+        voicePreview.volume = 1;
+        await Promise.all([musicPreview.play(), voicePreview.play()]);
+        status.textContent = `Probando voz con música a ${Number($('#autoMusicGain').value).toFixed(1)} dB…`;
+      } else {
+        await musicPreview.play();
+        status.textContent = `Reproduciendo música a ${Number($('#autoMusicGain').value).toFixed(1)} dB…`;
+      }
+      musicTestButton.textContent = 'Detener prueba';
+    } catch (error) {
+      musicPreview.pause();
+      if (voicePreview) voicePreview.pause();
+      status.textContent = `No se pudo reproducir la prueba: ${error.message}`;
+    }
+  });
+  voicePreview?.addEventListener('ended', () => {
+    musicPreview.pause();
+    musicPreview.loop = false;
+    musicTestButton.innerHTML = `${IC('play')} Probar con voz`;
+    $('#autoMusicStatus').textContent = 'Prueba de balance terminada.';
+  });
+  $('#autoMusicTrack').addEventListener('change', async () => {
+    readMusicControls();
+    if (music.assetKey) {
+      music.enabled = true;
+      music.source = 'asset';
+    }
+    await saveAll();
+    renderAutomationProject();
+  });
+  $('#autoMusicAuto').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const status = $('#autoMusicStatus');
+    readMusicControls();
+    music.enabled = true;
+    music.source = 'auto';
+    button.disabled = true;
+    status.textContent = 'Buscando la música con mayor coincidencia…';
+    try {
+      const result = await api(`/api/automations/${pr.id}/music/auto-select`, { method: 'POST', body: music });
+      state.automations[state.automations.findIndex((item) => item.id === pr.id)] = result.project;
+      renderAutomationProject();
+      toast(result.selected.score > 0
+        ? `Música elegida automáticamente (${result.selected.score} puntos de coincidencia).`
+        : 'Música elegida automáticamente; no había coincidencias exactas y se usó la más reciente.', 'ok');
+    } catch (error) {
+      button.disabled = false;
+      status.textContent = error.message;
+      toast(error.message, 'err');
+    }
+  });
+  $('#autoMusicGenerate').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const status = $('#autoMusicStatus');
+    readMusicControls();
+    music.enabled = true;
+    music.source = 'suno';
+    if (!confirm('Suno generará dos variantes y consumirá créditos. La primera quedará asignada al proyecto y ambas se guardarán en Assets. ¿Continuar?')) return;
+    button.disabled = true;
+    status.textContent = 'Suno está componiendo la música; esto puede tardar varios minutos…';
+    try {
+      const result = await api(`/api/automations/${pr.id}/music/generate`, { method: 'POST', body: music });
+      state.automations[state.automations.findIndex((item) => item.id === pr.id)] = result.project;
+      await refreshAssets();
+      renderAutomationProject();
+      toast('Suno generó dos variantes; la primera quedó asignada al proyecto.', 'ok');
+    } catch (error) {
+      button.disabled = false;
+      status.textContent = error.message;
+      toast(error.message, 'err');
+    }
+  });
+  $('#autoMusicUpload').addEventListener('click', () => {
+    readMusicControls();
+    openAudioUpload({ automationId: pr.id, kind: 'music', musicTags: music });
   });
 
   // --- visualizador del texto sobreimpreso ---
@@ -5080,9 +5579,11 @@ function automationAudioSpec(pr, item) {
   const voiceId = character?.voiceId || pr.config.narratorVoiceId;
   const voiceName = character?.voiceName || pr.config.narratorVoiceName;
   if (!voiceId) throw new Error('Falta la voz del narrador (o del personaje del diálogo).');
-  const tag = emotionTagFor(item.text);
+  const audioModel = (state.audioModels || []).find((model) => model.id === pr.config?.audioModelId) || state.audioModels?.[0];
+  const tag = audioModel?.supportsAudioTags === false ? '' : emotionTagFor(item.text);
   return {
     text: tag ? `${tag} ${item.text}` : item.text,
+    audioModelId: audioModel?.id || 'eleven-v3',
     voiceId,
     voiceName
   };
@@ -5094,11 +5595,12 @@ async function refreshAutomationHistory() {
   return state.history;
 }
 
-function recoverHistoryOutput(type, prompt, { voiceId = '', usedKeys = new Set() } = {}) {
+function recoverHistoryOutput(type, prompt, { voiceId = '', audioModelId = '', usedKeys = new Set() } = {}) {
   const entry = state.history.find((candidate) =>
     candidate.type === type
     && candidate.prompt === prompt
     && (!voiceId || candidate.voiceId === voiceId)
+    && (!audioModelId || candidate.modelId === audioModelId)
     && (candidate.outputs || []).some((key) => !usedKeys.has(key)));
   if (!entry) return null;
   const key = (entry.outputs || []).find((candidate) => !usedKeys.has(candidate));
@@ -5185,7 +5687,7 @@ async function runAutomationBlock(projectId, block, blockEl, { regenerate = fals
           await refreshAutomationHistory();
           historyLoaded = true;
         }
-        recovered = recoverHistoryOutput('audio', spec.text, { voiceId: spec.voiceId, usedKeys: usedAudioKeys });
+        recovered = recoverHistoryOutput('audio', spec.text, { voiceId: spec.voiceId, audioModelId: spec.audioModelId, usedKeys: usedAudioKeys });
       }
       if (recovered) {
         audioKeys.push(recovered.key);
@@ -5256,7 +5758,8 @@ async function assembleAutomationProject(projectId) {
   const button = $('#autoAssemble');
   const status = $('#autoAssembleStatus');
   if (button) button.disabled = true;
-  if (status) status.textContent = `Uniendo ${pr.blocks.length} videos con FFmpeg…`;
+  const hasTransitions = pr.config?.transitionSound?.enabled && pr.blocks.length > 1;
+  if (status) status.textContent = `Uniendo ${pr.blocks.length} videos${hasTransitions ? ` y agregando ${pr.blocks.length - 1} transiciones sonoras` : ''}${pr.config?.music?.enabled ? ' y mezclando la música en bucle' : ''}${pr.config?.includeLogos ? ', fundiendo a negro y agregando el logo' : ''} con FFmpeg…`;
   try {
     const result = await api(`/api/automations/${projectId}/assemble`, { method: 'POST' });
     const index = state.automations.findIndex((item) => item.id === projectId);
@@ -5267,7 +5770,7 @@ async function assembleAutomationProject(projectId) {
       // El ensamble ya quedó guardado aunque la vista de Assets no pueda refrescarse.
     }
     renderAutomationProject();
-    toast(`Video final ensamblado: ${result.finalOutput.blockCount} bloques`, 'ok');
+    toast(`Video final ensamblado: ${result.finalOutput.blockCount} bloques${result.finalOutput.transitionCount ? `, ${result.finalOutput.transitionCount} transiciones sonoras` : ''}${result.finalOutput.musicKey ? ' con música' : ''}${result.finalOutput.includeLogos ? ' y logo final' : ''}`, 'ok');
   } catch (error) {
     if (button) button.disabled = false;
     if (status) status.textContent = `Falló el ensamble: ${error.message}`;
@@ -5299,7 +5802,9 @@ function updateEstimate() {
     const perTrack = state.pricing.music?.perTrack ?? 0;
     el.textContent = perTrack ? `≈ $${(perTrack * 2).toFixed(3)} (2 variantes)` : '';
   } else {
-    const per1k = state.pricing.audio?.['eleven-v3']?.per1kChars ?? 0;
+    const per1k = state.pricing.audio?.[state.audioModelId]?.per1kChars
+      ?? state.pricing.audio?.['eleven-v3']?.per1kChars
+      ?? 0;
     const chars = promptBox.value.length;
     el.textContent = chars
       ? `≈ $${((chars / 1000) * per1k).toFixed(3)} (${chars} car.)`
@@ -5347,7 +5852,7 @@ function renderProjectCostEstimate(projects) {
       </div>
       <div class="project-cost-stat">
         <span>Material previsto</span>
-        <strong>${detail.resourceImages + detail.blockImages} imágenes · ${detail.audioItems} audios</strong>
+        <strong>${detail.resourceImages + detail.blockImages} imágenes · ${detail.audioItems} voces${detail.musicEnabled ? ' · 1 música' : ''}</strong>
       </div>
     </div>
     <div class="project-cost-breakdown">
@@ -5360,9 +5865,13 @@ function renderProjectCostEstimate(projects) {
         <span class="cr-value">${fmtUsd(detail.blockImageCost)}</span>
       </div>
       <div class="cost-row">
-        <span class="cr-label">Voces de narración y diálogo<span class="cr-sub">${detail.audioItems} audios · ${detail.audioCharacters.toLocaleString('es-AR')} caracteres</span></span>
+        <span class="cr-label">Voces de narración y diálogo<span class="cr-sub">${detail.audioItems} audios · ${detail.audioCharacters.toLocaleString('es-AR')} caracteres · ${esc(detail.audioModelName || 'ElevenLabs')}</span></span>
         <span class="cr-value">${fmtUsd(detail.audioCost)}</span>
       </div>
+      ${detail.musicEnabled ? `<div class="cost-row">
+        <span class="cr-label">Música de fondo<span class="cr-sub">${detail.musicSource === 'suno' ? `${detail.generatedMusicTracks} variantes generadas con Suno` : detail.musicSource === 'auto' ? 'Selección automática desde Assets' : 'Pista existente de Assets'}</span></span>
+        <span class="cr-value">${fmtUsd(detail.musicCost)}</span>
+      </div>` : ''}
       <div class="cost-row">
         <span class="cr-label">Videos de bloque y ensamble final<span class="cr-sub">Procesamiento local con FFmpeg</span></span>
         <span class="cr-value">${fmtUsd(detail.localVideoCost)}</span>
@@ -5439,9 +5948,12 @@ async function loadCosts() {
         `<label class="pr-unit">${res} <input type="number" step="0.001" min="0" data-vmodel="${esc(modelId)}" data-res="${esc(res)}" value="${val}"></label>`
       ).join('') + `<span class="pr-unit">USD/segundo</span></div>`;
   }
-  rows += `<div class="pricing-row"><span class="pr-name">Eleven v3</span>
-    <label class="pr-unit">1k car. <input type="number" step="0.001" min="0" data-audio="per1kChars" value="${data.pricing.audio['eleven-v3'].per1kChars}"></label>
-    <span class="pr-unit">USD/1000 caracteres</span></div>`;
+  for (const [modelId, table] of Object.entries(data.pricing.audio || {})) {
+    const name = (state.audioModels || []).find((model) => model.id === modelId)?.name || modelId;
+    rows += `<div class="pricing-row"><span class="pr-name">${esc(name)}</span>
+      <label class="pr-unit">1k car. <input type="number" step="0.001" min="0" data-audio-model="${esc(modelId)}" value="${table.per1kChars}"></label>
+      <span class="pr-unit">USD/1000 caracteres</span></div>`;
+  }
   $('#pricingTable').innerHTML = `<div class="pricing-table">${rows}</div>`;
 
   $('#costsLedger').innerHTML = data.recent.length
@@ -5483,11 +5995,14 @@ $('#btnSavePricing').addEventListener('click', async () => {
     video[m] = video[m] || {};
     video[m][inp.dataset.res] = Number(inp.value) || 0;
   });
-  const per1k = Number($('#pricingTable input[data-audio]')?.value) || 0;
+  const audio = {};
+  $$('#pricingTable input[data-audio-model]').forEach((input) => {
+    audio[input.dataset.audioModel] = { per1kChars: Number(input.value) || 0 };
+  });
   try {
     state.pricing = await api('/api/pricing', {
       method: 'PUT',
-      body: { image, video, audio: { 'eleven-v3': { per1kChars: per1k } } }
+      body: { image, video, audio }
     });
     updateEstimate();
     toast('Tarifas guardadas');
@@ -5640,7 +6155,12 @@ async function init() {
     state.config = s.config;
     state.models = s.models;
     state.videoModels = s.videoModels || [];
+    state.audioModels = s.audioModels || (s.audioModel ? [s.audioModel] : []);
+    state.audioModelId = state.audioModels.some((model) => model.id === s.config?.audioModelId)
+      ? s.config.audioModelId
+      : (state.audioModels[0]?.id || 'eleven-v3');
     state.musicModel = s.musicModel || null;
+    state.transitionSounds = s.transitionSounds || [];
     if (s.musicModel?.defaultVersion) state.music.version = s.config?.sunoModelId || s.musicModel.defaultVersion;
     state.characters = s.characters;
     state.prompts = s.prompts;

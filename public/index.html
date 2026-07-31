@@ -226,7 +226,8 @@
         </div>
         <div class="control-row">
           <label>Modelo</label>
-          <span class="static-value">Eleven v3 — usá <b>[corchetes]</b> para expresiones: se pintan en la caja</span>
+          <select id="audioModelSelect" class="select"></select>
+          <span id="audioModelHint" class="hint"></span>
         </div>
       </div>
 
@@ -405,6 +406,12 @@
         <button class="tab" data-zone="uploads">Subidas</button>
         <button class="tab" data-zone="video">Videos</button>
         <button class="tab" data-zone="audio">Audio</button>
+      </div>
+      <div class="audio-kind-tabs" id="audioKindTabs" hidden>
+        <button class="mini-btn active" data-audio-kind="all">Todo</button>
+        <button class="mini-btn" data-audio-kind="voice">Voz</button>
+        <button class="mini-btn" data-audio-kind="music">Música</button>
+        <button class="mini-btn" data-audio-kind="sound">Sonidos</button>
       </div>
       <div class="assets-toolbar">
         <button id="btnUploadAsset" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> Subir imagen</button>
@@ -662,12 +669,52 @@
   </main>
 </div>
 
+<!-- Reproductor persistente de la biblioteca de audio -->
+<section id="assetAudioPlayer" class="asset-audio-player" aria-label="Reproductor de Assets" hidden>
+  <div class="asset-player-track">
+    <span class="asset-player-art"><svg class="ic ic-lg"><use href="#i-music"/></svg></span>
+    <div class="asset-player-copy">
+      <span id="assetPlayerKind">Audio</span>
+      <strong id="assetPlayerName">Sin reproducción</strong>
+    </div>
+  </div>
+  <div class="asset-player-controls">
+    <button type="button" id="assetPlayerPrev" class="icon-btn" title="Audio anterior" aria-label="Audio anterior"><svg class="ic"><use href="#i-left"/></svg></button>
+    <audio id="assetPlayerAudio" controls preload="metadata"></audio>
+    <button type="button" id="assetPlayerNext" class="icon-btn" title="Audio siguiente" aria-label="Audio siguiente"><svg class="ic"><use href="#i-right"/></svg></button>
+  </div>
+  <span id="assetPlayerPosition" class="asset-player-position"></span>
+  <button type="button" id="assetPlayerClose" class="icon-btn asset-player-close" title="Cerrar reproductor" aria-label="Cerrar reproductor"><svg class="ic"><use href="#i-x"/></svg></button>
+</section>
+
 <!-- Información del asset -->
 <div id="assetInfoModal" class="modal" hidden>
   <div class="modal-box asset-info-box">
     <div class="modal-head"><div><h3>Información del asset</h3><p class="hint">Prompt y configuración de generación</p></div><button class="icon-btn" id="assetInfoClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
     <div id="assetInfoBody"></div>
   </div>
+</div>
+
+<!-- Subir y clasificar un audio -->
+<div id="audioUploadModal" class="modal" hidden>
+  <form id="audioUploadForm" class="modal-box form-modal-box audio-metadata-box">
+    <div class="modal-head"><div><h3>Subir audio</h3><p class="hint">MP3 o WAV, clasificado para reutilizarlo en tus proyectos</p></div><button type="button" class="icon-btn" id="audioUploadClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <label>Archivo<input id="audioUploadFile" type="file" accept=".mp3,.wav,audio/mpeg,audio/wav,audio/x-wav" required></label>
+    <label>Tipo de audio
+      <select id="audioUploadKind" class="select">
+        <option value="voice">Voz</option>
+        <option value="music">Música</option>
+        <option value="sound">Sonido</option>
+      </select>
+    </label>
+    <div id="audioUploadMusicTags" class="audio-music-fields" hidden>
+      <label>Género<input id="audioUploadGenres" type="text" placeholder="ambient, orchestral, dark jazz"></label>
+      <label>Instrumentos<input id="audioUploadInstruments" type="text" placeholder="piano, strings, analog synthesizer"></label>
+      <label>Sentimientos<input id="audioUploadMoods" type="text" placeholder="mysterious, tense, melancholic"></label>
+      <p class="hint">Separá múltiples etiquetas con comas.</p>
+    </div>
+    <div class="form-modal-actions"><button type="button" class="mini-btn" id="audioUploadCancel">Cancelar</button><button type="submit" class="generate-btn small">Subir audio</button></div>
+  </form>
 </div>
 
 <!-- Crear o editar variante -->

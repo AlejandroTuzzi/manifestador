@@ -30,7 +30,8 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
 | Nano Banana 2 | Google Gemini (`gemini-3.1-flash-image`) | 1K/2K/4K, hasta 14 referencias |
 | Nano Banana 2 Lite | Google Gemini (`gemini-3.1-flash-lite-image`) | rápido y barato, 1K |
 | Seedream 5.0 Lite | BytePlus ModelArk | el ID exacto del modelo se ajusta en Configuración |
-| Eleven v3 | ElevenLabs | TTS con expresiones entre corchetes |
+| Eleven v3 | ElevenLabs | TTS expresivo con indicaciones entre corchetes |
+| Eleven Multilingual v2 | ElevenLabs | TTS estable para narraciones y voces compatibles con v2 |
 
 `fal.ai` queda en Configuración para futuros modelos o integraciones, pero ahora mismo no hay un modelo activo que lo use.
 
@@ -48,7 +49,10 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
 - Crear imágenes con modelo, proporción, resolución, referencias y lotes.
 - Mantener una cola de generaciones: puedes seguir escribiendo mientras otras generaciones corren.
 - Pegar imágenes desde el portapapeles con Ctrl+V en la ventana Crear para añadirlas como referencias.
-- Generar audio con Eleven v3 y expresiones/emociones personalizadas.
+- Elegir Eleven v3 o Eleven Multilingual v2 en cada flujo de generación de voz; v3 admite expresiones/emociones entre corchetes.
+- Clasificar la biblioteca de audio en Voz, Música y Sonidos. Los MP3/WAV
+  subidos como música admiten etiquetas separadas de género, instrumentos y
+  sentimientos para encontrarlos y reutilizarlos automáticamente.
 - Guardar prompts por categoría, reutilizarlos y administrarlos desde su propia sección.
 - Crear personajes con fotos, voz, variantes/outfits y assets asociados.
 - Exportar/importar personajes en ZIP para moverlos entre ordenadores.
@@ -88,6 +92,12 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
   bloques del guion y sin volver a generar imágenes ni audios. El resultado se
   guarda como Asset y se invalida si después se regenera un bloque. El ensamble
   conserva la resolución y proporción dominante de los videos del proyecto.
+  Opcionalmente mezcla una música en bucle con nivel configurable en dB: puede
+  elegirse de Assets, encontrarse por etiquetas, subirse o generarse con Suno.
+  Suno guarda sus dos variantes y asigna la primera al proyecto. La música
+  puede cerrar con un fade out configurable —5 segundos inicialmente— sin
+  desvanecer las voces. El Automatizador permite escucharla con esa ganancia y,
+  cuando ya existe una voz generada, probar ambas juntas antes del ensamble.
 - Consultar en Consumo la estimación completa de cada proyecto, desglosada en
   fichas, imágenes de bloques, voces y procesamiento local. Se abre el proyecto
   más reciente y los anteriores se eligen desde una lista.
