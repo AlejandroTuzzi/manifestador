@@ -140,6 +140,11 @@ function sessionToken(req) {
   return cookie ? cookie.slice('manifestador_session='.length) : '';
 }
 
+function isLoopbackRequest(req) {
+  const address = String(req.socket?.remoteAddress || '').toLowerCase();
+  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
+}
+
 // Registro de consumo: una línea por operación cobrada.
 async function recordCost(entry) {
   let recorded;
@@ -824,6 +829,8 @@ function sanitizeScriptScenes(scenes) {
 // El guion llega de Controversy Tracker como JSON con roles en MAYÚSCULAS.
 // ---------------------------------------------------------------------------
 
+const AUTOMATION_CONTRACT = 'manifestador-production@1';
+
 const DEFAULT_OVERLAY = {
   font: 'sans-serif',
   fontSizePct: 6,          // alto de letra como % del alto de la imagen
@@ -896,25 +903,113 @@ function sanitizeAutomation(src, prev = {}) {
     ].filter(Boolean))];
     return {
       id: String(b.id || `b${i + 1}`).slice(0, 40),
+      title: String(b.title || `Bloque ${i + 1}`).slice(0, 160),
       imagePrompt: String(b.imagePrompt ?? b.prompt ?? '').slice(0, 4000),
+      negativePrompt: String(b.negativePrompt || '').slice(0, 2000),
       items,
       characters,
       location: roleId(b.location),
-      prop: roleId(b.prop)
+      prop: roleId(b.prop),
+      sourceReferences: [...new Set((Array.isArray(b.sourceReferences) ? b.sourceReferences : []).map(String))].slice(0, 20),
+      sourceQuote: String(b.sourceQuote || '').slice(0, 4000),
+      quoteReference: String(b.quoteReference || '').slice(0, 80),
+      estimatedDuration: Math.max(0, Math.min(3600, Number(b.estimatedDuration) || 0))
     };
   });
 
+  const projectData = src.project && typeof src.project === 'object' ? src.project : null;
+  const scriptData = src.script && typeof src.script === 'object' ? src.script : null;
   return {
     id: prev.id || newId(),
-    name: String(src.project ?? src.name ?? prev.name ?? 'Proyecto').trim().slice(0, 120) || 'Proyecto',
+    name: String(projectData?.name ?? src.project ?? src.name ?? prev.name ?? 'Proyecto').trim().slice(0, 120) || 'Proyecto',
     requirements,
     blocks,
     assignments: prev.assignments || { characters: {}, locations: {}, objects: {} },
     config: prev.config || { ...DEFAULT_AUTOMATION_CONFIG },
     outputs: prev.outputs || {},
+    integration: src.schema === AUTOMATION_CONTRACT ? {
+      contract: AUTOMATION_CONTRACT,
+      source: String(projectData?.source || 'controversy-tracker').slice(0, 80),
+      externalProjectId: String(projectData?.id || '').slice(0, 120),
+      externalScriptId: String(scriptData?.id || '').slice(0, 120),
+      sourceUrl: String(projectData?.sourceUrl || '').slice(0, 2000),
+      generatedAt: String(src.generatedAt || ''),
+      scriptTitle: String(scriptData?.title || '').slice(0, 160),
+      premise: String(scriptData?.premise || '').slice(0, 4000),
+      conclusion: String(scriptData?.conclusion || '').slice(0, 4000)
+    } : prev.integration,
     ts: prev.ts || Date.now(),
     updatedAt: Date.now()
   };
+}
+
+function validateAutomationSource(src) {
+  if (!src || typeof src !== 'object' || Array.isArray(src)) {
+    throw new Error('El guion debe ser un objeto JSON.');
+  }
+  if (src.schema !== undefined && src.schema !== AUTOMATION_CONTRACT) {
+    throw new Error(`Contrato no compatible: se esperaba ${AUTOMATION_CONTRACT}.`);
+  }
+  if (src.schema !== AUTOMATION_CONTRACT) {
+    if (!Array.isArray(src.blocks)) {
+      if (Array.isArray(src.cycles)) {
+        throw new Error('Este archivo es una cola de ComfyUI. Exportá “Guion para Manifestador” desde Controversy Tracker.');
+      }
+      throw new Error('El JSON no contiene una lista blocks válida.');
+    }
+    return src;
+  }
+
+  if (!src.project || typeof src.project !== 'object' || !String(src.project.id || '').trim() || !String(src.project.name || '').trim()) {
+    throw new Error('El contrato no contiene un proyecto válido.');
+  }
+  if (!src.script || typeof src.script !== 'object' || !String(src.script.id || '').trim()) {
+    throw new Error('El contrato no contiene un identificador de guion.');
+  }
+  if (!src.requirements || typeof src.requirements !== 'object') {
+    throw new Error('El contrato no contiene requirements.');
+  }
+  for (const kind of ['characters', 'locations', 'objects']) {
+    if (!Array.isArray(src.requirements[kind])) throw new Error(`requirements.${kind} debe ser una lista.`);
+  }
+  if (!Array.isArray(src.blocks) || !src.blocks.length) {
+    throw new Error('El guion para Manifestador no contiene bloques.');
+  }
+
+  const declared = {
+    characters: new Set(src.requirements.characters.map((item) => roleId(item?.role)).filter(Boolean)),
+    locations: new Set(src.requirements.locations.map((item) => roleId(item?.role)).filter(Boolean)),
+    objects: new Set(src.requirements.objects.map((item) => roleId(item?.role)).filter(Boolean))
+  };
+  const allDeclared = new Set([...declared.characters, ...declared.locations, ...declared.objects]);
+  if (allDeclared.size !== declared.characters.size + declared.locations.size + declared.objects.size) {
+    throw new Error('Un mismo rol no puede declararse como más de un tipo de ficha.');
+  }
+
+  src.blocks.forEach((block, index) => {
+    if (!block || typeof block !== 'object') throw new Error(`El bloque ${index + 1} no es válido.`);
+    if (!String(block.imagePrompt || '').trim()) throw new Error(`El bloque ${index + 1} no tiene prompt visual.`);
+    if (!Array.isArray(block.items) || !block.items.some((item) => String(item?.text || '').trim())) {
+      throw new Error(`El bloque ${index + 1} no tiene texto para producir.`);
+    }
+    const characters = new Set((Array.isArray(block.characters) ? block.characters : []).map(roleId).filter(Boolean));
+    for (const item of block.items) {
+      if (item?.kind === 'dialogue') characters.add(roleId(item.character));
+    }
+    if ([...characters].some((role) => !declared.characters.has(role))) {
+      throw new Error(`El bloque ${index + 1} usa un personaje no declarado.`);
+    }
+    const location = roleId(block.location);
+    const prop = roleId(block.prop);
+    if (location && !declared.locations.has(location)) throw new Error(`El bloque ${index + 1} usa una locación no declarada.`);
+    if (prop && !declared.objects.has(prop)) throw new Error(`El bloque ${index + 1} usa un objeto no declarado.`);
+    const assigned = new Set([...characters, location, prop].filter(Boolean));
+    const promptRoles = [...String(block.imagePrompt).matchAll(/@([A-Za-z0-9_]+)/g)].map((match) => roleId(match[1]));
+    if (promptRoles.some((role) => !allDeclared.has(role) || !assigned.has(role))) {
+      throw new Error(`El prompt del bloque ${index + 1} contiene un @ROLE no declarado o no asignado.`);
+    }
+  });
+  return src;
 }
 
 function sanitizeScriptCast(list, characters) {
@@ -1227,6 +1322,62 @@ const server = http.createServer(async (req, res) => {
       sessions.delete(sessionToken(req));
       return send(res, 200, { ok: true }, { extra: { 'Set-Cookie': 'manifestador_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' } });
     }
+
+    // Integración local servidor-a-servidor con Controversy Tracker. Usa la
+    // misma clave de acceso de Manifestador, pero nunca depende de cookies.
+    if (p === '/api/integrations/controversy-tracker/health' && req.method === 'GET') {
+      if (!isLoopbackRequest(req)) return send(res, 403, { error: 'La integración con Controversy Tracker sólo admite conexiones locales.' });
+      const cfg = await getConfig();
+      const key = String(req.headers['x-manifestador-access-key'] || '');
+      if (cfg.accessPasswordHash && !verifyPassword(key, cfg.accessPasswordHash)) {
+        return send(res, 401, { error: 'La clave de acceso de Manifestador no es válida.' });
+      }
+      return send(res, 200, {
+        ok: true,
+        service: 'manifestador',
+        contract: AUTOMATION_CONTRACT,
+        protected: Boolean(cfg.accessPasswordHash)
+      });
+    }
+    if (p === '/api/integrations/controversy-tracker/projects' && req.method === 'POST') {
+      if (!isLoopbackRequest(req)) return send(res, 403, { error: 'La integración con Controversy Tracker sólo admite conexiones locales.' });
+      const cfg = await getConfig();
+      const key = String(req.headers['x-manifestador-access-key'] || '');
+      if (cfg.accessPasswordHash && !verifyPassword(key, cfg.accessPasswordHash)) {
+        return send(res, 401, { error: 'La clave de acceso de Manifestador no es válida.' });
+      }
+      let source;
+      try {
+        source = validateAutomationSource(await readJsonBody(req));
+      } catch (error) {
+        return send(res, 400, { error: error.message || 'Guion para Manifestador no válido.' });
+      }
+      if (source.schema !== AUTOMATION_CONTRACT) {
+        return send(res, 400, { error: `La conexión directa requiere el contrato ${AUTOMATION_CONTRACT}.` });
+      }
+      const externalProjectId = String(source.project.id);
+      let out = null;
+      let created = false;
+      await updateJson('automations.json', [], (all) => {
+        const index = all.findIndex((item) => item.integration?.externalProjectId === externalProjectId);
+        if (index === -1) {
+          out = sanitizeAutomation(source);
+          created = true;
+          return [out, ...all];
+        }
+        out = sanitizeAutomation(source, all[index]);
+        all[index] = out;
+        return all;
+      });
+      return send(res, 200, {
+        automationId: out.id,
+        externalProjectId,
+        importedBlocks: out.blocks.length,
+        created,
+        status: 'ready-for-assignment'
+      });
+    }
+
     if (p.startsWith('/api/') || p.startsWith('/files/')) {
       const cfg = await getConfig();
       const token = sessionToken(req);
@@ -1597,7 +1748,14 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/automations' && req.method === 'POST') {
       const body = await readJsonBody(req);
       // { data } = importar de Controversy Tracker; si no, proyecto vacío con { name }
-      const source = body.data && typeof body.data === 'object' ? body.data : { name: body.name };
+      let source = { name: body.name, blocks: [] };
+      if (body.data && typeof body.data === 'object') {
+        try {
+          source = validateAutomationSource(body.data);
+        } catch (error) {
+          return send(res, 400, { error: error.message || 'Guion JSON no válido.' });
+        }
+      }
       const item = sanitizeAutomation(source);
       await updateJson('automations.json', [], (all) => [item, ...all]);
       return send(res, 200, item);

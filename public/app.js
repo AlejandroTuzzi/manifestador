@@ -4167,7 +4167,7 @@ function renderAutomationProject() {
         return `
         <div class="auto-block${done ? ' is-done' : ''}" data-block="${b.id}">
           <div class="auto-block-head">
-            <strong>Bloque ${i + 1}</strong> <span class="hint">${esc([b.characters.join(', '), b.location, b.prop].filter(Boolean).join(' · '))}</span>
+            <strong>Bloque ${i + 1}${b.title ? ` · ${esc(b.title)}` : ''}</strong> <span class="hint">${esc([b.characters.join(', '), b.location, b.prop].filter(Boolean).join(' · '))}</span>
             <span class="auto-block-btns">
               <button class="mini-btn" data-genblock="${b.id}"${missing.length ? ' disabled' : ''}>${IC('spark')} ${done ? 'Regenerar' : 'Generar'}</button>
             </span>
@@ -4340,6 +4340,7 @@ async function automationRefsAndPrompt(pr, block) {
   const refs = refItems.filter((r) => !seen.has(r.key) && seen.add(r.key));
   const labeledRefs = await buildLabeledRefs(refs);
   let prompt = block.imagePrompt.replace(/@([A-Z0-9_]+)/g, (m, r) => names[r] || m.replace('@', ''));
+  if (block.negativePrompt) prompt += `\n\nAvoid in the generated image: ${block.negativePrompt}`;
   return { refs: refs.map((r) => r.key), labeledRefs, prompt };
 }
 
@@ -4426,7 +4427,6 @@ async function runAutomationBlock(projectId, block, blockEl) {
     if (blockEl) blockEl.classList.add('is-working');
     setStatus('Generando imagen…');
     const { refs, labeledRefs, prompt } = await automationRefsAndPrompt(pr, block);
-    if (!refs.length) throw new Error('El bloque no tiene fichas asignadas para las referencias.');
     const img = await api('/api/generate/image', { method: 'POST', body: {
       modelId: pr.config.imageModelId, prompt, refs, labeledRefs,
       aspectRatio: pr.config.aspectRatio, resolution: pr.config.resolution, batch: 1

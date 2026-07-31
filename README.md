@@ -57,6 +57,18 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
 - Navegar assets y lotes con flechas izquierda/derecha.
 - Usar Poser para cargar modelos XPS/XNALara, ajustar huesos, guardar poses y capturar referencias de pose.
 - Consultar consumo estimado por mes/modelo y editar tarifas.
+- Recibir guiones estructurados desde Controversy Tracker, asignar sus roles a
+  fichas locales y producir cada bloque con imagen, voz, sobreimpresión y video.
+
+## Conectar Controversy Tracker
+
+Manifestador expone una conexión local en `http://127.0.0.1:7777` para recibir
+el contrato `manifestador-production@1`. En Controversy Tracker configura esa
+URL y, si Manifestador está protegido, usa la misma clave de acceso.
+
+El botón **Enviar a Manifestador** crea o actualiza el proyecto correspondiente
+en Automatizador. También se puede descargar el JSON desde Tracker e importarlo
+con **Importar guion (JSON)**. Ambos caminos validan el mismo contrato.
 
 ## Dónde queda todo
 
