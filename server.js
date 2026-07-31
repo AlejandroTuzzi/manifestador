@@ -310,6 +310,22 @@ function parseDataUrl(dataUrl) {
   return { mime, buffer };
 }
 
+// Acepta tanto la ruta completa al ejecutable como su carpeta (por ejemplo
+// C:\ffmpeg\bin). Esto evita intentar hacer spawn() sobre un directorio.
+async function resolveFfmpegExecutable(configuredPath) {
+  const configured = String(configuredPath || '').trim().replace(/^"(.*)"$/, '$1');
+  if (!configured) throw new Error('Configurá la ruta de ffmpeg en Configuración para armar el video.');
+  const stat = await fs.stat(configured).catch(() => null);
+  const candidates = stat?.isDirectory()
+    ? [path.join(configured, 'ffmpeg.exe'), path.join(configured, 'ffmpeg')]
+    : [configured];
+  for (const candidate of candidates) {
+    const candidateStat = await fs.stat(candidate).catch(() => null);
+    if (candidateStat?.isFile()) return candidate;
+  }
+  throw new Error(`No encuentro ffmpeg en “${configured}”. Elegí la carpeta bin o el archivo ffmpeg.exe.`);
+}
+
 // ffmpeg como binario externo (config.ffmpegPath), igual que Photoshop: mantiene
 // la app sin dependencias npm. Devuelve el stderr para diagnosticar si falla.
 function runFfmpeg(bin, args) {
@@ -320,6 +336,62 @@ function runFfmpeg(bin, args) {
     ps.on('error', (e) => reject(new Error(`No se pudo ejecutar ffmpeg: ${e.message}`)));
     ps.on('close', (code) => code === 0 ? resolve(err) : reject(new Error(`ffmpeg falló (código ${code}): ${err.slice(-600)}`)));
   });
+}
+
+async function probeVideoDimensions(ffmpegExecutable, videoPath) {
+  const extension = path.extname(ffmpegExecutable).toLowerCase() === '.exe' ? '.exe' : '';
+  const ffprobe = path.join(path.dirname(ffmpegExecutable), `ffprobe${extension}`);
+  const stat = await fs.stat(ffprobe).catch(() => null);
+  if (!stat?.isFile()) return null;
+  return new Promise((resolve) => {
+    execFile(ffprobe, [
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=width,height',
+      '-of', 'json',
+      videoPath
+    ], { windowsHide: true, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+      if (error) return resolve(null);
+      try {
+        const stream = JSON.parse(stdout)?.streams?.[0];
+        const width = Math.floor(Number(stream?.width) / 2) * 2;
+        const height = Math.floor(Number(stream?.height) / 2) * 2;
+        resolve(width > 0 && height > 0 ? { width, height } : null);
+      } catch {
+        resolve(null);
+      }
+    });
+  });
+}
+
+async function dominantVideoDimensions(ffmpegExecutable, videoPaths) {
+  const dimensions = (await Promise.all(
+    videoPaths.map((videoPath) => probeVideoDimensions(ffmpegExecutable, videoPath))
+  )).filter(Boolean);
+  if (!dimensions.length) return null;
+  const counts = new Map();
+  for (const item of dimensions) {
+    const key = `${item.width}x${item.height}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return dimensions.reduce((best, item) => {
+    const itemCount = counts.get(`${item.width}x${item.height}`) || 0;
+    const bestCount = counts.get(`${best.width}x${best.height}`) || 0;
+    return itemCount > bestCount ? item : best;
+  }, dimensions[0]);
+}
+
+function automationVideoDimensions(aspectRatio) {
+  const match = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(String(aspectRatio || '9:16'));
+  const ratioWidth = Number(match?.[1]) || 9;
+  const ratioHeight = Number(match?.[2]) || 16;
+  const even = (value) => Math.max(2, Math.round(value / 2) * 2);
+  if (ratioWidth >= ratioHeight) {
+    const height = 1080;
+    return { width: even(height * ratioWidth / ratioHeight), height };
+  }
+  const width = 1080;
+  return { width, height: even(width * ratioHeight / ratioWidth) };
 }
 
 function sanitizeName(name) {
@@ -754,7 +826,11 @@ const STATIC_MIME = {
   '.ico': 'image/x-icon',
   '.webmanifest': 'application/manifest+json',
   '.png': 'image/png',
-  '.ico': 'image/x-icon'
+  '.ico': 'image/x-icon',
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2'
 };
 
 // ---------------------------------------------------------------------------
@@ -833,10 +909,15 @@ const AUTOMATION_CONTRACT = 'manifestador-production@1';
 
 const DEFAULT_OVERLAY = {
   font: 'sans-serif',
-  fontSizePct: 6,          // alto de letra como % del alto de la imagen
+  fontSizePx: 64,          // píxeles tipográficos sobre un lienzo de 1080 px de alto
+  fontWeight: 700,
+  fontItalic: false,
+  fontUnderline: false,
+  fontStrikeThrough: false,
+  textTransform: 'none',   // none | uppercase | lowercase | capitalize
   color: '#ffffff',
   strokeColor: '#000000',
-  strokeWidthPct: 0.5,     // grosor del borde como % del alto
+  strokeWidthPx: 3,        // píxeles de borde sobre un lienzo de 1080 px de alto
   position: 'bottom',      // preset rápido: top | center | bottom (setea y)
   x: 50,                   // centro del texto, % del ancho (arrastrable)
   y: 88,                   // centro del texto, % del alto (arrastrable)
@@ -845,14 +926,56 @@ const DEFAULT_OVERLAY = {
   bg: false,               // caja semitransparente detrás del texto
   bgColor: '#000000',
   bgOpacity: 0.45,
-  highlightColor: '#fbbf24', // color de las palabras dramáticas (highlights)
+  highlightFont: '',       // vacío = usa la fuente principal
+  highlightFontSizePx: 64,
+  highlightFontWeight: 800,
+  highlightFontItalic: false,
+  highlightFontUnderline: false,
+  highlightFontStrikeThrough: false,
+  highlightTextTransform: 'none',
+  highlightColor: '#fbbf24',
+  highlightStrokeColor: '#000000',
+  highlightStrokeWidthPx: 3,
   previewBg: ''            // asset de fondo SOLO para previsualizar (no se usa al generar)
 };
+
+function normalizeAutomationOverlay(saved = {}) {
+  const overlay = { ...DEFAULT_OVERLAY, ...(saved || {}) };
+  // Migración desde las unidades antiguas: 1% de un lienzo de referencia de
+  // 1080 px equivale a 10,8 px. Conserva la apariencia pero muestra cifras
+  // intuitivas y evita seguir multiplicando porcentajes en la interfaz.
+  if (saved.fontSizePx === undefined && Number.isFinite(Number(saved.fontSizePct))) {
+    overlay.fontSizePx = Number((Number(saved.fontSizePct) * 10.8).toFixed(1));
+  }
+  if (saved.strokeWidthPx === undefined && Number.isFinite(Number(saved.strokeWidthPct))) {
+    overlay.strokeWidthPx = Number((Number(saved.strokeWidthPct) * 10.8).toFixed(1));
+  }
+  if (saved.highlightFontSizePx === undefined) overlay.highlightFontSizePx = overlay.fontSizePx;
+  if (saved.highlightStrokeWidthPx === undefined) overlay.highlightStrokeWidthPx = overlay.strokeWidthPx;
+  overlay.fontSizePx = Math.max(8, Math.min(300, Number(overlay.fontSizePx) || DEFAULT_OVERLAY.fontSizePx));
+  overlay.strokeWidthPx = Math.max(0, Math.min(30, Number(overlay.strokeWidthPx) || 0));
+  overlay.fontWeight = Math.max(100, Math.min(900, Number(overlay.fontWeight) || DEFAULT_OVERLAY.fontWeight));
+  overlay.highlightFontSizePx = Math.max(8, Math.min(300, Number(overlay.highlightFontSizePx) || overlay.fontSizePx));
+  overlay.highlightStrokeWidthPx = Math.max(0, Math.min(30, Number(overlay.highlightStrokeWidthPx) || 0));
+  overlay.highlightFontWeight = Math.max(100, Math.min(900, Number(overlay.highlightFontWeight) || DEFAULT_OVERLAY.highlightFontWeight));
+  overlay.fontItalic = overlay.fontItalic === true;
+  overlay.fontUnderline = overlay.fontUnderline === true;
+  overlay.fontStrikeThrough = overlay.fontStrikeThrough === true;
+  overlay.highlightFontItalic = overlay.highlightFontItalic === true;
+  overlay.highlightFontUnderline = overlay.highlightFontUnderline === true;
+  overlay.highlightFontStrikeThrough = overlay.highlightFontStrikeThrough === true;
+  overlay.textTransform = ['none', 'uppercase', 'lowercase', 'capitalize'].includes(overlay.textTransform) ? overlay.textTransform : 'none';
+  overlay.highlightTextTransform = ['none', 'uppercase', 'lowercase', 'capitalize'].includes(overlay.highlightTextTransform) ? overlay.highlightTextTransform : 'none';
+  overlay.align = ['left', 'center', 'right'].includes(overlay.align) ? overlay.align : 'center';
+  return overlay;
+}
 
 // La voz del narrador es del proyecto; los diálogos usan la voz del personaje
 // asignado (si tiene), con la del narrador como respaldo.
 const DEFAULT_AUTOMATION_CONFIG = {
   imageModelId: 'nano-banana-pro',
+  fallbackImageModelId: '',
+  artStyle: 'Photorealistic cinematic realism, natural human anatomy, realistic skin and materials, restrained color grading, consistent lighting and lens language',
   aspectRatio: '9:16',
   resolution: '2K',
   narratorVoiceId: '',
@@ -863,6 +986,75 @@ const DEFAULT_AUTOMATION_CONFIG = {
 const stripTags = (s) => String(s || '').replace(/\[[^\]]*\]/g, '').replace(/\s+/g, ' ').trim();
 const roleId = (r) => String(r || '').trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
 
+function automationAudioText(text) {
+  const clean = String(text || '').trim();
+  let tag = '';
+  if (/[!¡]/.test(clean) && clean === clean.toUpperCase()) tag = '[shouting]';
+  else if (/[!¡]/.test(clean)) tag = '[excited]';
+  else if (/\?/.test(clean)) tag = '[curious]';
+  else if (/\.\.\.$|…$/.test(clean)) tag = '[sighs]';
+  else if (/(triste|llor|adiós|adios|perdón|perdon|muerte)/i.test(clean)) tag = '[sad]';
+  else if (/(nunca|jamás|jamas|odio|basta|traición|traicion)/i.test(clean)) tag = '[angry]';
+  return tag ? `${tag} ${clean}` : clean;
+}
+
+function automationProjectCostEstimate(project, pricing, assetMetadata) {
+  const imageModelId = String(project.config?.imageModelId || '');
+  const imageModel = getImageModel(imageModelId);
+  const modelName = imageModel?.name || imageModelId || 'Modelo sin definir';
+  const configuredResolution = String(project.config?.resolution || 'auto');
+  const blockResolution = imageModel?.resolutions.includes(configuredResolution)
+    ? configuredResolution
+    : (imageModel?.resolutions[0] || configuredResolution);
+  const resourceResolution = imageModel
+    ? (imageModel.resolutions.includes('2K') ? '2K'
+      : imageModel.resolutions.includes('4K') ? '4K'
+      : imageModel.resolutions[0])
+    : blockResolution;
+  const resourceImages =
+    (project.requirements?.characters?.length || 0) +
+    (project.requirements?.locations?.length || 0) +
+    (project.requirements?.objects?.length || 0);
+  const blockImages = project.blocks?.length || 0;
+  const audioTexts = (project.blocks || []).flatMap((block) =>
+    (block.items || []).map((item) => automationAudioText(item.text)).filter(Boolean)
+  );
+  const audioCharacters = audioTexts.reduce((sum, text) => sum + text.length, 0);
+  const resourceImageCost = resourceImages * imagePrice(pricing, imageModelId, resourceResolution);
+  const blockImageCost = blockImages * imagePrice(pricing, imageModelId, blockResolution);
+  const audioCost = audioPrice(pricing, audioCharacters);
+  const estimatedTotal = resourceImageCost + blockImageCost + audioCost;
+
+  const linkedMetadata = Object.values(assetMetadata || {}).filter((metadata) =>
+    metadata?.automationId === project.id
+  );
+  const spent = linkedMetadata.reduce((sum, metadata) => sum + (Number(metadata.cost) || 0), 0);
+  return {
+    id: project.id,
+    name: project.name,
+    ts: project.ts,
+    updatedAt: project.updatedAt,
+    modelId: imageModelId,
+    modelName,
+    aspectRatio: project.config?.aspectRatio || '',
+    resolution: blockResolution,
+    estimatedTotal: Number(estimatedTotal.toFixed(6)),
+    spent: Number(spent.toFixed(6)),
+    breakdown: {
+      resourceImages,
+      resourceResolution,
+      resourceImageCost: Number(resourceImageCost.toFixed(6)),
+      blockImages,
+      blockResolution,
+      blockImageCost: Number(blockImageCost.toFixed(6)),
+      audioItems: audioTexts.length,
+      audioCharacters,
+      audioCost: Number(audioCost.toFixed(6)),
+      localVideoCost: 0
+    }
+  };
+}
+
 // normaliza un proyecto (importado o editado); conserva lo previo (asignaciones,
 // config, outputs) al re-guardar
 function sanitizeAutomation(src, prev = {}) {
@@ -870,7 +1062,10 @@ function sanitizeAutomation(src, prev = {}) {
     const role = roleId(x.role);
     if (!role) return null;
     const o = { role, description: String(x.description || '').slice(0, 800) };
-    if (withVoice) o.voice = String(x.voice || '');
+    if (withVoice) {
+      o.clothing = String(x.clothing || '').slice(0, 800);
+      o.voice = String(x.voice || '').slice(0, 400);
+    }
     return o;
   }).filter(Boolean);
 
@@ -925,8 +1120,14 @@ function sanitizeAutomation(src, prev = {}) {
     requirements,
     blocks,
     assignments: prev.assignments || { characters: {}, locations: {}, objects: {} },
-    config: prev.config || { ...DEFAULT_AUTOMATION_CONFIG },
+    config: {
+      ...DEFAULT_AUTOMATION_CONFIG,
+      ...(prev.config || {}),
+      artStyle: String(prev.config?.artStyle || DEFAULT_AUTOMATION_CONFIG.artStyle).slice(0, 1200),
+      overlay: normalizeAutomationOverlay(prev.config?.overlay)
+    },
     outputs: prev.outputs || {},
+    finalOutput: prev.finalOutput || null,
     integration: src.schema === AUTOMATION_CONTRACT ? {
       contract: AUTOMATION_CONTRACT,
       source: String(projectData?.source || 'controversy-tracker').slice(0, 80),
@@ -1089,7 +1290,7 @@ async function saveEntityPhoto(destDir, body) {
   await fs.mkdir(destDir, { recursive: true });
   if (body.assetKey) {
     const assetKey = String(body.assetKey);
-    if (!/^(generated|uploads)\//.test(assetKey)) throw new Error('Solo se pueden usar imágenes como foto.');
+    if (!/^(generated|uploads|characters|elements)\//.test(assetKey)) throw new Error('Solo se pueden usar imágenes como foto.');
     const source = await resolveAssetKey(assetKey);
     const ext = path.extname(source).toLowerCase();
     if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) throw new Error('Formato de imagen no admitido.');
@@ -1120,7 +1321,7 @@ async function serveEntityRoutes(meta, { p, req, res, url }) {
   if (p === linksPath && req.method === 'POST') {
     const body = await readJsonBody(req);
     const key = String(body.key || '');
-    if (!/^(generated|uploads)\//.test(key)) throw new Error('Solo se pueden asociar imágenes.');
+    if (!/^(generated|uploads|characters|elements)\//.test(key)) throw new Error('Solo se pueden asociar imágenes.');
     await fs.access(await resolveAssetKey(key));
     const owner = (await readJson(file, [])).find((e) => e.id === body[ownerField]);
     if (!owner) throw new Error(`${notFound}.`);
@@ -1366,6 +1567,7 @@ const server = http.createServer(async (req, res) => {
           return [out, ...all];
         }
         out = sanitizeAutomation(source, all[index]);
+        out.finalOutput = null;
         all[index] = out;
         return all;
       });
@@ -1378,12 +1580,25 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    if (p.startsWith('/api/') || p.startsWith('/files/')) {
+    if (p.startsWith('/api/') || p.startsWith('/files/') || p.startsWith('/fonts/')) {
       const cfg = await getConfig();
       const token = sessionToken(req);
       if (cfg.accessPasswordHash && (sessions.get(token) || 0) <= Date.now()) {
         return send(res, 401, { error: 'Acceso bloqueado', loginRequired: true });
       }
+    }
+
+    // --- fuentes personalizadas persistentes ---
+    if (p.startsWith('/fonts/')) {
+      const fileName = decodeURIComponent(p.slice('/fonts/'.length));
+      if (!fileName || path.basename(fileName) !== fileName) return send(res, 400, { error: 'Nombre de fuente inválido.' });
+      const fontDir = path.join(DATA_DIR, 'fonts');
+      const abs = path.join(fontDir, fileName);
+      const resolved = path.resolve(abs);
+      if (!resolved.startsWith(path.resolve(fontDir) + path.sep)) return send(res, 400, { error: 'Ruta de fuente inválida.' });
+      const buf = await fs.readFile(resolved).catch(() => null);
+      if (!buf) return send(res, 404, { error: 'Fuente no encontrada.' });
+      return send(res, 200, buf, { mime: STATIC_MIME[path.extname(resolved).toLowerCase()] || 'application/octet-stream' });
     }
 
     // --- archivos de assets ---
@@ -1420,7 +1635,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations] = await Promise.all([
+      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations, fonts] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
@@ -1432,7 +1647,8 @@ const server = http.createServer(async (req, res) => {
         readJson('scripts.json', []),
         readJson('elements.json', []),
         readJson('element-links.json', []),
-        readJson('automations.json', [])
+        readJson('automations.json', []),
+        readJson('fonts.json', [])
       ]);
       return send(res, 200, {
         config: publicConfig(cfg),
@@ -1450,7 +1666,14 @@ const server = http.createServer(async (req, res) => {
         scripts,
         elements,
         elementLinks,
-        automations
+        automations: automations.map((project) => ({
+          ...project,
+          config: {
+            ...project.config,
+            overlay: normalizeAutomationOverlay(project.config?.overlay)
+          }
+        })),
+        fonts
       });
     }
 
@@ -1464,6 +1687,43 @@ const server = http.createServer(async (req, res) => {
         return forMode.includes(name) ? all : { ...all, [mode]: [...forMode, name] };
       });
       return send(res, 200, { promptCategories });
+    }
+
+    if (p === '/api/fonts' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const originalName = String(body.fileName || body.name || '').trim();
+      const extension = path.extname(originalName).toLowerCase();
+      if (!['.ttf', '.otf', '.woff', '.woff2'].includes(extension)) {
+        return send(res, 400, { error: 'Formato no admitido. Usá TTF, OTF, WOFF o WOFF2.' });
+      }
+      const { buffer } = parseDataUrl(body.dataUrl);
+      if (!buffer.length || buffer.length > 25 * 1024 * 1024) {
+        return send(res, 400, { error: 'La fuente está vacía o supera el límite de 25 MB.' });
+      }
+      const signature = buffer.subarray(0, 4).toString('latin1');
+      const validSignature = extension === '.woff' ? signature === 'wOFF'
+        : extension === '.woff2' ? signature === 'wOF2'
+        : extension === '.otf' ? signature === 'OTTO'
+        : buffer.subarray(0, 4).equals(Buffer.from([0x00, 0x01, 0x00, 0x00]))
+          || signature === 'true' || signature === 'typ1';
+      if (!validSignature) return send(res, 400, { error: 'El archivo no parece contener una fuente válida.' });
+
+      const id = newId();
+      const displayName = String(body.name || path.basename(originalName, extension) || 'Fuente personalizada').trim().slice(0, 100);
+      const file = `${id}-${sanitizeName(path.basename(originalName, extension))}${extension}`;
+      const fontDir = path.join(DATA_DIR, 'fonts');
+      await fs.mkdir(fontDir, { recursive: true });
+      await fs.writeFile(path.join(fontDir, file), buffer);
+      const item = {
+        id,
+        name: displayName || 'Fuente personalizada',
+        family: `ManifestadorFont_${id}`,
+        file,
+        format: extension.slice(1),
+        ts: Date.now()
+      };
+      await updateJson('fonts.json', [], (fonts) => [item, ...fonts]);
+      return send(res, 200, item);
     }
 
     if (p === '/api/config' && req.method === 'PUT') {
@@ -1517,7 +1777,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/asset-links' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const key = String(body.key || '');
-      if (!/^(generated|uploads)\//.test(key)) throw new Error('Solo se pueden asociar imágenes.');
+      if (!/^(generated|uploads|characters|elements)\//.test(key)) throw new Error('Solo se pueden asociar imágenes.');
       await fs.access(await resolveAssetKey(key));
       const characters = await readJson('characters.json', []);
       const character = characters.find((c) => c.id === body.characterId);
@@ -1574,7 +1834,7 @@ const server = http.createServer(async (req, res) => {
         if (!keys.length) throw new Error('No se indicó ningún asset.');
         if (keys.length > 1000) throw new Error('Demasiados assets en una sola operación.');
         for (const key of keys) {
-          if (!/^(generated|uploads|video|audio)\//.test(key)) throw new Error(`Ese archivo no se puede asociar a una serie: ${key}`);
+          if (!/^(generated|uploads|characters|elements|video|audio)\//.test(key)) throw new Error(`Ese archivo no se puede asociar a una serie: ${key}`);
           await fs.access(await resolveAssetKey(key));
         }
         const item = await mutateSeries((s) => { s.assetKeys = [...keys, ...(s.assetKeys || []).filter((k) => !keys.includes(k))]; });
@@ -1779,13 +2039,28 @@ const server = http.createServer(async (req, res) => {
             locations: { ...(body.assignments.locations || {}) },
             objects: { ...(body.assignments.objects || {}) }
           };
-          if (body.config !== undefined) next.config = { ...prev.config, ...body.config, overlay: { ...prev.config.overlay, ...(body.config.overlay || {}) } };
+          if (body.config !== undefined) next.config = {
+            ...prev.config,
+            ...body.config,
+            artStyle: body.config.artStyle !== undefined
+              ? String(body.config.artStyle).trim().slice(0, 1200)
+              : prev.config.artStyle,
+            overlay: normalizeAutomationOverlay({ ...prev.config.overlay, ...(body.config.overlay || {}) })
+          };
           // outputs por bloque (imagen, imagen+texto, audios, video) — se mergea por id de bloque
-          if (body.outputs !== undefined && body.outputs && typeof body.outputs === 'object') next.outputs = { ...prev.outputs, ...body.outputs };
+          if (body.outputs !== undefined && body.outputs && typeof body.outputs === 'object') {
+            next.outputs = { ...prev.outputs, ...body.outputs };
+            next.finalOutput = null;
+          }
           if (body.data !== undefined) {
             const re = sanitizeAutomation(body.data, prev);
             next.requirements = re.requirements; next.blocks = re.blocks; next.name = re.name;
+            next.finalOutput = null;
           }
+          next.config = {
+            ...next.config,
+            overlay: normalizeAutomationOverlay(next.config?.overlay)
+          };
           next.updatedAt = Date.now();
           all[i] = next; out = next; return all;
         });
@@ -1804,7 +2079,7 @@ const server = http.createServer(async (req, res) => {
     if (automationVideoMatch && req.method === 'POST') {
       const body = await readJsonBody(req);
       const cfg = await getConfig();
-      if (!cfg.ffmpegPath) return send(res, 400, { error: 'Configurá la ruta de ffmpeg en Configuración para armar el video.' });
+      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
       const imageKey = String(body.imageKey || '');
       const audioKeys = (Array.isArray(body.audioKeys) ? body.audioKeys : []).map(String).filter((k) => /^audio\//.test(k));
       if (!/^(generated|uploads)\//.test(imageKey)) return send(res, 400, { error: 'Falta la imagen del bloque.' });
@@ -1828,7 +2103,7 @@ const server = http.createServer(async (req, res) => {
       args.push('-c:v', 'libx264', '-tune', 'stillimage', '-pix_fmt', 'yuv420p',
         '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-r', '25',
         '-c:a', 'aac', '-b:a', '192k', '-shortest', outPath);
-      await runFfmpeg(cfg.ffmpegPath, args);
+      await runFfmpeg(ffmpegExecutable, args);
       const key = `video/${name}`;
       const category = String(body.category || '').slice(0, 80);
       await updateJson('asset-metadata.json', {}, (m) => {
@@ -1836,6 +2111,115 @@ const server = http.createServer(async (req, res) => {
         return m;
       });
       return send(res, 200, { videoKey: key });
+    }
+
+    // Ensambla los MP4 terminados de todos los bloques, respetando exactamente
+    // el orden del guion. No vuelve a generar imágenes ni audios. Se normalizan
+    // tamaño, fps y audio para tolerar bloques creados con modelos distintos.
+    const automationAssembleMatch = /^\/api\/automations\/([a-z0-9]+)\/assemble$/.exec(p);
+    if (automationAssembleMatch && req.method === 'POST') {
+      const projectId = automationAssembleMatch[1];
+      const projects = await readJson('automations.json', []);
+      const project = projects.find((item) => item.id === projectId);
+      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
+      if (!project.blocks?.length) return send(res, 400, { error: 'El proyecto no tiene bloques para ensamblar.' });
+
+      const missingBlocks = project.blocks.filter((block) => !project.outputs?.[block.id]?.videoKey);
+      if (missingBlocks.length) {
+        const names = missingBlocks.slice(0, 8).map((block) => block.title || block.id).join(', ');
+        const extra = missingBlocks.length > 8 ? ` y ${missingBlocks.length - 8} más` : '';
+        return send(res, 400, { error: `Faltan videos terminados: ${names}${extra}.` });
+      }
+
+      const videoPaths = [];
+      for (const block of project.blocks) {
+        const key = String(project.outputs[block.id].videoKey || '');
+        if (!/^video\//.test(key)) return send(res, 400, { error: `El video de “${block.title || block.id}” no es válido.` });
+        const filePath = await resolveAssetKey(key);
+        const stat = await fs.stat(filePath).catch(() => null);
+        if (!stat?.isFile()) return send(res, 400, { error: `No encuentro el video de “${block.title || block.id}”. Regenerá ese bloque.` });
+        videoPaths.push(filePath);
+      }
+
+      const cfg = await getConfig();
+      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
+      const detectedDimensions = await dominantVideoDimensions(ffmpegExecutable, videoPaths);
+      const { width, height } = detectedDimensions || automationVideoDimensions(project.config?.aspectRatio);
+      const name = `${ts()}-final-${sanitizeName(project.name)}-${newId()}.mp4`;
+      const outDir = resolveDir(cfg.paths.video);
+      await fs.mkdir(outDir, { recursive: true });
+      const outPath = path.join(outDir, name);
+      const args = ['-y'];
+      for (const videoPath of videoPaths) args.push('-i', videoPath);
+
+      const filters = [];
+      for (let index = 0; index < videoPaths.length; index++) {
+        filters.push(
+          `[${index}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+          `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
+          `format=yuv420p,setpts=PTS-STARTPTS[v${index}]`
+        );
+        filters.push(
+          `[${index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
+          `asetpts=PTS-STARTPTS[a${index}]`
+        );
+      }
+      const concatInputs = videoPaths.map((_, index) => `[v${index}][a${index}]`).join('');
+      filters.push(`${concatInputs}concat=n=${videoPaths.length}:v=1:a=1[vout][aout]`);
+      args.push(
+        '-filter_complex', filters.join(';'),
+        '-map', '[vout]', '-map', '[aout]',
+        '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart',
+        outPath
+      );
+      await runFfmpeg(ffmpegExecutable, args);
+
+      const key = `video/${name}`;
+      const assembledAt = Date.now();
+      await updateJson('asset-metadata.json', {}, (metadata) => {
+        metadata[key] = {
+          type: 'video',
+          modelId: 'ffmpeg',
+          modelName: 'Ensamble final',
+          ts: assembledAt,
+          category: `Auto: ${project.name}`,
+          automationId: project.id,
+          autoKind: 'final-assembly',
+          blockCount: project.blocks.length,
+          aspectRatio: project.config?.aspectRatio || null,
+          width,
+          height,
+          dimensionsSource: detectedDimensions ? 'block-videos' : 'project-aspect-ratio'
+        };
+        return metadata;
+      });
+
+      let updatedProject = null;
+      await updateJson('automations.json', [], (all) => {
+        const index = all.findIndex((item) => item.id === projectId);
+        if (index === -1) return all;
+        const finalOutput = {
+          videoKey: key,
+          assembledAt,
+          blockCount: project.blocks.length,
+          width,
+          height
+        };
+        all[index] = {
+          ...all[index],
+          config: {
+            ...all[index].config,
+            overlay: normalizeAutomationOverlay(all[index].config?.overlay)
+          },
+          finalOutput,
+          updatedAt: assembledAt
+        };
+        updatedProject = all[index];
+        return all;
+      });
+      if (!updatedProject) return send(res, 404, { error: 'El proyecto fue eliminado durante el ensamble.' });
+      return send(res, 200, { project: updatedProject, finalOutput: updatedProject.finalOutput });
     }
 
     // Etiqueta assets con la categoría del proyecto (y bloque) para agruparlos en Assets.
@@ -1898,7 +2282,12 @@ const server = http.createServer(async (req, res) => {
 
     // --- consumo y precios ---
     if (p === '/api/costs' && req.method === 'GET') {
-      const [pricing, ledger] = await Promise.all([getPricing(), readJson('ledger.json', [])]);
+      const [pricing, ledger, automations, assetMetadata] = await Promise.all([
+        getPricing(),
+        readJson('ledger.json', []),
+        readJson('automations.json', []),
+        readJson('asset-metadata.json', {})
+      ]);
       const byMonth = {};
       const byModelThisMonth = {};
       const nowMonth = monthKey(Date.now());
@@ -1914,6 +2303,9 @@ const server = http.createServer(async (req, res) => {
           byModelThisMonth[k].count += 1;
         }
       }
+      const projects = automations
+        .map((project) => automationProjectCostEstimate(project, pricing, assetMetadata))
+        .sort((a, b) => (b.updatedAt || b.ts || 0) - (a.updatedAt || a.ts || 0));
       return send(res, 200, {
         pricing,
         total,
@@ -1921,6 +2313,7 @@ const server = http.createServer(async (req, res) => {
         currentMonthTotal: byMonth[nowMonth] || 0,
         byMonth,
         byModelThisMonth,
+        projects,
         recent: ledger.slice(0, 100)
       });
     }

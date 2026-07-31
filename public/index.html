@@ -487,7 +487,10 @@
             <span id="automationMeta" class="hint"></span>
           </div>
         </div>
-        <button id="automationDelete" class="mini-btn danger"><svg class="ic"><use href="#i-trash"/></svg> Borrar proyecto</button>
+        <div class="script-head-right">
+          <button id="automationSave" class="generate-btn small"><svg class="ic"><use href="#i-check"/></svg> Guardar proyecto</button>
+          <button id="automationDelete" class="mini-btn danger"><svg class="ic"><use href="#i-trash"/></svg> Borrar proyecto</button>
+        </div>
       </div>
       <div id="automationRoot"></div>
     </section>
@@ -547,6 +550,7 @@
         <button id="btnRefreshPricing" class="generate-btn small"><svg class="ic"><use href="#i-search"/></svg> Actualizar precios con OpenAI</button>
       </div>
       <div id="costsSummary" class="costs-summary"></div>
+      <div id="costProjectEstimate" class="costs-panel"></div>
       <div class="costs-grid">
         <div class="costs-panel">
           <h3>Este mes por herramienta</h3>
@@ -615,9 +619,9 @@
 
         <h3>ffmpeg</h3>
         <div class="cfg-grid">
-          <label>Ruta de ffmpeg.exe <input type="text" name="ffmpegPath" placeholder="C:\ffmpeg\bin\ffmpeg.exe"></label>
+          <label>Ruta de FFmpeg <input type="text" name="ffmpegPath" placeholder="C:\ffmpeg\bin o C:\ffmpeg\bin\ffmpeg.exe"></label>
         </div>
-        <p class="hint">El Automatizador lo usa para armar el video mp4 de cada bloque (imagen + audio). Descargá ffmpeg y pegá la ruta al ejecutable.</p>
+        <p class="hint">El Automatizador lo usa para armar el video mp4 de cada bloque (imagen + audio). Podés pegar la carpeta bin o la ruta completa a ffmpeg.exe.</p>
 
         <h3>Prompt de pose (Poser)</h3>
         <textarea name="poserPrompt" class="cfg-textarea" rows="4" spellcheck="false"></textarea>

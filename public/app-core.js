@@ -11,6 +11,7 @@ const state = {
   models: [],
   characters: [],
   prompts: [],
+  fonts: [],              // fuentes tipográficas personalizadas persistentes
   promptCategoriesExtra: {},
   assetLinks: [],
   promptQuickCategory: '',
@@ -59,6 +60,7 @@ const state = {
   elementLinks: [],
   automations: [],           // proyectos del automatizador
   openAutomationId: null,    // proyecto abierto en la vista de detalle
+  costProjectId: '',         // proyecto elegido en la estimación de Consumo
   overlayBgPick: false,      // el picker está eligiendo fondo de referencia del overlay
   editingElementId: null,
   elementKindFilter: '',

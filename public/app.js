@@ -17,7 +17,7 @@ $$('.nav-btn').forEach((btn) => {
     if (view === 'elements') renderElements();
     if (view === 'poser') window.poserEnter?.();
     if (view === 'prompts') renderPromptLibrary();
-    if (view === 'costs') loadCosts();
+    if (view === 'costs') { state.costProjectId = ''; loadCosts(); }
   });
 });
 
@@ -1939,6 +1939,10 @@ function isVideoKey(key) {
   return String(key).startsWith('video/') || /\.(mp4|webm)$/i.test(String(key));
 }
 
+function isReusableImageKey(key) {
+  return /^(generated|uploads|characters|elements)\//.test(String(key));
+}
+
 function closeLightbox() {
   document.querySelector('#lightbox').hidden = true;
   const v = $('#lbVideo');
@@ -1971,9 +1975,9 @@ function openLightbox(key, keys = null) {
     ${info ? `<button class="mini-btn" id="lbInfo">${IC('info')} Información</button>` : ''}
     ${info?.prompt ? `<button class="mini-btn" id="lbCopyPrompt">${IC('copy')} Copiar prompt</button>` : ''}
     ${!isVideo ? `<button class="mini-btn" id="lbRef">${IC('link')} Usar como referencia</button>` : ''}
-    ${!isVideo && /^(generated|uploads)\//.test(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} Asociar a personaje/elemento</button>` : ''}
+    ${!isVideo && isReusableImageKey(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} Asociar a personaje/elemento</button>` : ''}
     <button class="mini-btn" id="lbSeries">${IC('layers')} Asociar a serie</button>
-    ${!isVideo && key.startsWith('generated/') ? `<button class="mini-btn" id="lbCharacter">${IC('user')} Convertir en personaje</button>` : ''}
+    ${!isVideo && isReusableImageKey(key) ? `<button class="mini-btn" id="lbCharacter">${IC('user')} Convertir en personaje</button>` : ''}
     ${!isVideo ? `<button class="mini-btn" id="lbPhotoshop">${IC('pen')} Abrir en Photoshop</button>` : ''}
     <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} Descargar</a>`;
   $('#lbPhotoshop')?.addEventListener('click', async () => {
@@ -4079,14 +4083,320 @@ $('#automationDelete').addEventListener('click', async () => {
   state.openAutomationId = null;
   $('.nav-btn[data-view="automatizador"]').click();
 });
+$('#automationSave').addEventListener('click', async () => {
+  const pr = currentAutomation();
+  if (!pr) return;
+  const name = $('#autoProjectName')?.value.trim() || pr.name;
+  const artStyle = $('#autoArtStyle')?.value.trim() || pr.config.artStyle || DEFAULT_AUTOMATION_ART_STYLE;
+  const updated = await saveAutomation({ name, config: { artStyle } });
+  if (updated) {
+    $('#automationTitle').textContent = updated.name;
+    toast('Proyecto guardado');
+  }
+});
 
 async function saveAutomation(patch) {
   const pr = currentAutomation();
-  if (!pr) return;
+  if (!pr) return null;
   try {
     const updated = await api(`/api/automations/${pr.id}`, { method: 'PUT', body: patch });
     state.automations[state.automations.findIndex((x) => x.id === pr.id)] = updated;
-  } catch (err) { toast(err.message, 'err'); }
+    return updated;
+  } catch (err) {
+    toast(err.message, 'err');
+    return null;
+  }
+}
+
+function automationRequirement(pr, kind, role) {
+  return (pr.requirements?.[kind] || []).find((item) => item.role === role) || null;
+}
+
+function automationRoleName(role) {
+  return String(role || '').toLowerCase().split('_').filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ') || 'Sin nombre';
+}
+
+const DEFAULT_AUTOMATION_ART_STYLE = 'Photorealistic cinematic realism, natural human anatomy, realistic skin and materials, restrained color grading, consistent lighting and lens language';
+const SYSTEM_OVERLAY_FONTS = ['sans-serif', 'serif', 'monospace', 'Impact', 'Georgia', 'Arial Black'];
+const loadedCustomFontIds = new Set();
+
+function customFontUrl(font) {
+  return `/fonts/${encodeURIComponent(font.file)}`;
+}
+
+async function registerCustomFont(font) {
+  if (!font?.id || loadedCustomFontIds.has(font.id)) return;
+  const face = new FontFace(font.family, `url("${customFontUrl(font)}")`);
+  await face.load();
+  document.fonts.add(face);
+  loadedCustomFontIds.add(font.id);
+}
+
+async function registerCustomFonts(fonts) {
+  const results = await Promise.allSettled((fonts || []).map(registerCustomFont));
+  const failed = results.filter((result) => result.status === 'rejected').length;
+  if (failed) console.warn(`${failed} fuente(s) personalizada(s) no pudieron cargarse.`);
+}
+
+function overlayFontOptions(selected, { inherit = false } = {}) {
+  const options = [];
+  if (inherit) options.push({ value: '', label: 'Misma fuente que el texto normal' });
+  for (const font of SYSTEM_OVERLAY_FONTS) options.push({ value: font, label: font });
+  for (const font of state.fonts || []) options.push({ value: font.family, label: `${font.name} · personalizada` });
+  if (selected && !options.some((option) => option.value === selected)) {
+    options.push({ value: selected, label: `${selected} · no disponible` });
+  }
+  return options.map((option) =>
+    `<option value="${esc(option.value)}"${option.value === selected ? ' selected' : ''}>${esc(option.label)}</option>`
+  ).join('');
+}
+
+function canvasFontFamily(font) {
+  const family = String(font || 'sans-serif');
+  return /^[a-z-]+$/i.test(family) ? family : `"${family.replace(/["\\]/g, '')}"`;
+}
+
+async function ensureOverlayFonts(overlay) {
+  const families = [...new Set([overlay.font, overlay.highlightFont || overlay.font].filter(Boolean))];
+  await Promise.allSettled(families.map((family) => document.fonts.load(`700 64px ${canvasFontFamily(family)}`)));
+}
+
+function automationArtPromptOptions() {
+  const prompts = state.prompts || [];
+  if (!prompts.length) return '<option value="">— no hay prompts guardados —</option>';
+  return '<option value="">— elegí un prompt guardado —</option>' + prompts.map((prompt) =>
+    `<option value="${esc(prompt.id)}">${prompt.mode === 'audio' ? 'Audio' : prompt.mode === 'video' ? 'Video' : 'Imagen'} · ${esc(prompt.category || 'General')} · ${esc(prompt.title)}</option>`
+  ).join('');
+}
+
+function automationProjectArtStyle(pr) {
+  return $('#autoArtStyle')?.value.trim() || pr?.config?.artStyle || DEFAULT_AUTOMATION_ART_STYLE;
+}
+
+function automationStyledPrompt(pr, prompt) {
+  const artStyle = automationProjectArtStyle(pr);
+  return `GLOBAL ART DIRECTION — mandatory for every image in this project: ${artStyle}. Keep the rendering technique, realism level, character proportions, materials, color palette, lighting logic and lens language consistent with every other project asset. Do not switch to cartoon, anime, illustration, 3D render or another visual medium unless the global art direction explicitly requires it.\n\n${prompt}`;
+}
+
+function automationResourcePrompt(kind, requirement) {
+  const description = String(requirement.description || '').trim() || 'no additional visual description was provided';
+  if (kind === 'characters') {
+    const clothing = String(requirement.clothing || '').trim()
+      || 'the clothing stated in the character description, preserved exactly across all three views';
+    return `Create a horizontal character reference sheet containing exactly three views of the same character: one full-body front view, one full-body back view, and one close-up portrait of the face. Preserve exactly the same identity, anatomy, hairstyle and clothing across all three views. Use a neutral pose and neutral expression, even studio lighting and a plain gray background. No text, labels, decorative frames or unrelated objects. Character description: ${description}. Clothing: ${clothing}.`;
+  }
+  if (kind === 'locations') {
+    return `Create a production reference image for this background location. Use one clean wide establishing view in a horizontal 16:9 composition, with the camera at human eye level, neutral readable lighting and enough spatial detail to reuse the image as a reference in later shots. Do not include characters, visible text, readable signs, logos, frames or collages. Location description: ${description}.`;
+  }
+  return `Create a production reference sheet for this object: one main three-quarter view, one front view and one close-up of its important details, preserving exactly the same design in every view. Use a plain gray background and even studio lighting. No people, text, labels, decorative frames or unrelated objects. Object description: ${description}.`;
+}
+
+function automationResourceImageSettings(model, kind) {
+  const preferredAspect = kind === 'characters' ? ['3:2', '16:9', '4:3'] : kind === 'locations' ? ['16:9', '3:2', '4:3'] : ['3:2', '1:1', '4:3'];
+  const aspectRatio = preferredAspect.find((value) => model.aspectRatios.includes(value)) || model.aspectRatios[0];
+  const resolution = model.resolutions.includes('2K')
+    ? '2K'
+    : (model.resolutions.includes('4K') ? '4K' : model.resolutions[0]);
+  return { aspectRatio, resolution };
+}
+
+async function assignAutomationCharacterVoice(projectId, role, card) {
+  const pr = state.automations.find((item) => item.id === projectId);
+  const characterId = pr?.assignments?.characters?.[role];
+  if (!pr || !characterId) return toast('Primero asigná o generá el personaje.', 'err');
+  const voiceId = card.querySelector('[data-role-voice]')?.value || '';
+  const voiceName = (state.voices || []).find((voice) => voice.id === voiceId)?.name || '';
+  const button = card.querySelector('[data-save-role-voice]');
+  try {
+    if (button) button.disabled = true;
+    const updated = await api(`/api/characters/${characterId}`, { method: 'PUT', body: { voiceId, voiceName } });
+    const index = state.characters.findIndex((item) => item.id === characterId);
+    if (index !== -1) state.characters[index] = updated;
+    toast(voiceId ? `Voz ${voiceName} asignada a ${updated.name}` : `Voz quitada de ${updated.name}`);
+    renderAutomationProject();
+  } catch (error) {
+    toast(error.message, 'err');
+    if (button) button.disabled = false;
+  }
+}
+
+async function createAutomationResource({ projectId, kind, role, modelId, prompt, voiceId = '', setStatus = () => {} }) {
+  const pr = state.automations.find((item) => item.id === projectId);
+  const requirement = pr && automationRequirement(pr, kind, role);
+  const model = state.models.find((item) => item.id === modelId);
+  if (!pr || !requirement || !model) throw new Error('No se encontró el rol o el modelo seleccionado.');
+  if (!prompt) throw new Error('El prompt de la ficha está vacío.');
+
+  let created = null;
+  try {
+    setStatus(`Generando con ${model.name}…`);
+    const generated = await api('/api/generate/image', {
+      method: 'POST',
+      body: {
+        modelId: model.id,
+        prompt: automationStyledPrompt(pr, prompt),
+        refs: [],
+        batch: 1,
+        ...automationResourceImageSettings(model, kind)
+      }
+    });
+    const assetKey = generated.outputs?.[0];
+    if (!assetKey) throw new Error('El modelo no devolvió una imagen.');
+
+    setStatus('Guardando la ficha y asignándola al rol…');
+    if (kind === 'characters') {
+      const voiceName = (state.voices || []).find((voice) => voice.id === voiceId)?.name || '';
+      const description = [
+        requirement.description,
+        requirement.clothing ? `Vestimenta: ${requirement.clothing}` : ''
+      ].filter(Boolean).join('\n\n');
+      created = await api('/api/characters', {
+        method: 'POST',
+        body: { name: automationRoleName(role), description, voiceId, voiceName }
+      });
+    } else {
+      created = await api('/api/elements', {
+        method: 'POST',
+        body: {
+          kind: kind === 'objects' ? 'object' : 'location',
+          name: automationRoleName(role),
+          category: `Automatizador · ${pr.name}`,
+          description: requirement.description || ''
+        }
+      });
+    }
+
+    const base = kind === 'characters' ? 'characters' : 'elements';
+    let entity = await api(`/api/${base}/${created.id}/photos`, {
+      method: 'POST',
+      body: { assetKey }
+    });
+    const sheet = entity.photos?.[entity.photos.length - 1] || '';
+    if (sheet) {
+      entity = await api(`/api/${base}/${created.id}`, { method: 'PUT', body: { sheet } });
+    }
+    const collection = kind === 'characters' ? state.characters : state.elements;
+    collection.unshift(entity);
+
+    await api('/api/assets/tag', {
+      method: 'POST',
+      body: {
+        keys: [assetKey],
+        category: `Automatizador · ${pr.name}`,
+        automationId: pr.id,
+        autoKind: kind === 'characters' ? 'character-sheet' : kind === 'locations' ? 'background-sheet' : 'object-sheet'
+      }
+    });
+
+    const assignments = {
+      characters: { ...(pr.assignments.characters || {}) },
+      locations: { ...(pr.assignments.locations || {}) },
+      objects: { ...(pr.assignments.objects || {}) }
+    };
+    assignments[kind][role] = entity.id;
+    const updatedProject = await api(`/api/automations/${pr.id}`, {
+      method: 'PUT',
+      body: { assignments }
+    });
+    state.automations[state.automations.findIndex((item) => item.id === pr.id)] = updatedProject;
+    return { entity, assetKey, project: updatedProject };
+  } catch (error) {
+    error.automationResourceCreated = Boolean(created);
+    throw error;
+  }
+}
+
+async function generateAutomationResource(projectId, kind, role, card) {
+  const modelId = card.querySelector('[data-role-model]')?.value;
+  const prompt = card.querySelector('[data-role-prompt]')?.value.trim();
+  const voiceId = kind === 'characters' ? (card.querySelector('[data-role-voice]')?.value || '') : '';
+  const button = card.querySelector('[data-generate-resource]');
+  const status = card.querySelector('[data-role-status]');
+  const setStatus = (message, error = false) => {
+    if (!status) return;
+    status.textContent = message;
+    status.classList.toggle('warn', error);
+  };
+  try {
+    button.disabled = true;
+    await createAutomationResource({ projectId, kind, role, modelId, prompt, voiceId, setStatus });
+    toast(`${kind === 'characters' ? 'Personaje' : kind === 'locations' ? 'Fondo' : 'Objeto'} generado y asignado a @${role}`);
+    renderAutomationProject();
+  } catch (error) {
+    const suffix = error.automationResourceCreated ? ' El recurso quedó creado y podés asignarlo manualmente.' : '';
+    setStatus(`${error.message}${suffix}`, true);
+    toast(`${error.message}${suffix}`, 'err');
+    button.disabled = false;
+  }
+}
+
+async function generateAllAutomationResources(projectId) {
+  const pr = state.automations.find((item) => item.id === projectId);
+  const root = $('#automationRoot');
+  if (!pr || !root) return;
+
+  // Se capturan ahora el modelo, prompt y voz visibles de cada ficha para
+  // respetar exactamente la selección del usuario durante todo el lote.
+  const tasks = [...root.querySelectorAll('[data-role-card]')].map((card) => {
+    const [kind, role] = card.dataset.roleCard.split(':');
+    if (pr.assignments?.[kind]?.[role]) return null;
+    return {
+      kind,
+      role,
+      card,
+      modelId: card.querySelector('[data-role-model]')?.value || '',
+      prompt: card.querySelector('[data-role-prompt]')?.value.trim() || '',
+      voiceId: kind === 'characters' ? (card.querySelector('[data-role-voice]')?.value || '') : ''
+    };
+  }).filter(Boolean);
+
+  if (!tasks.length) return toast('Todos los assets requeridos ya están asignados.', 'ok');
+  if (!confirm(`¿Generar y asignar los ${tasks.length} assets faltantes? Se realizará una generación de imagen por cada rol.`)) return;
+
+  const bulkButton = $('#autoGenerateAllResources');
+  const progress = $('#autoResourcesProgress');
+  if (bulkButton) bulkButton.disabled = true;
+  root.querySelectorAll('[data-generate-resource]').forEach((button) => { button.disabled = true; });
+  let completed = 0;
+  const errors = [];
+
+  for (let index = 0; index < tasks.length; index++) {
+    const task = tasks[index];
+    const status = task.card.querySelector('[data-role-status]');
+    const setStatus = (message, error = false) => {
+      if (status) {
+        status.textContent = message;
+        status.classList.toggle('warn', error);
+      }
+      if (progress) progress.textContent = `${index + 1}/${tasks.length} · @${task.role} · ${message}`;
+    };
+    try {
+      await createAutomationResource({ projectId, ...task, setStatus });
+      completed++;
+      setStatus('Generado y asignado ✓');
+    } catch (error) {
+      const suffix = error.automationResourceCreated ? ' El recurso quedó creado para asignarlo manualmente.' : '';
+      const message = `${error.message}${suffix}`;
+      errors.push(`@${task.role}: ${message}`);
+      setStatus(`Falló: ${message}`, true);
+    }
+  }
+
+  if (state.openAutomationId === projectId) renderAutomationProject();
+  if (errors.length) {
+    toast(`Assets: ${completed}/${tasks.length} generados. Fallaron ${errors.length}; podés reintentar sólo los faltantes.`, 'err');
+  } else {
+    toast(`Todos los assets fueron generados y asignados: ${completed}/${tasks.length}.`, 'ok');
+  }
+}
+
+function bindAutomationAssetOpeners(root) {
+  root?.querySelectorAll('[data-open-asset]').forEach((button) => {
+    if (button.dataset.assetBound === '1') return;
+    button.dataset.assetBound = '1';
+    button.addEventListener('click', () => openLightbox(button.dataset.openAsset));
+  });
 }
 
 function renderAutomationProject() {
@@ -4101,22 +4411,65 @@ function renderAutomationProject() {
   const chars = state.characters;
   const locs = state.elements.filter((e) => e.kind === 'location');
   const objs = state.elements.filter((e) => e.kind === 'object');
+  const completedVideos = pr.blocks.filter((block) => pr.outputs?.[block.id]?.videoKey).length;
+  const allVideosReady = pr.blocks.length > 0 && completedVideos === pr.blocks.length;
+  const finalOutput = pr.finalOutput?.videoKey ? pr.finalOutput : null;
 
   const assignRow = (kind, r, options) => {
     const cur = pr.assignments[kind]?.[r.role] || '';
-    return `<div class="assign-row">
-      <span class="assign-role">${esc(r.role)}</span>
-      <span class="assign-desc hint">${esc(r.description || '')}</span>
-      <select class="select" data-assign="${kind}:${esc(r.role)}">
-        <option value="">— sin asignar —</option>
-        ${options.map((o) => `<option value="${o.id}"${o.id === cur ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}
-      </select>
+    const assigned = options.find((item) => item.id === cur);
+    const cover = assigned && (assigned.sheet || assigned.photos?.[0]);
+    const selectedVoiceId = kind === 'characters' ? (assigned?.voiceId || '') : '';
+    const kindLabel = kind === 'characters' ? 'personaje' : kind === 'locations' ? 'fondo' : 'objeto';
+    return `<div class="assign-row resource-role-card" data-role-card="${kind}:${esc(r.role)}">
+      <div class="assign-copy">
+        <span class="assign-role">@${esc(r.role)}</span>
+        <span class="assign-desc hint">${esc(r.description || '')}</span>
+        ${r.clothing ? `<span class="assign-detail"><strong>Vestimenta:</strong> ${esc(r.clothing)}</span>` : ''}
+        ${kind === 'characters' && r.voice ? `<span class="assign-detail"><strong>Voz sugerida:</strong> ${esc(r.voice)}</span>` : ''}
+      </div>
+      ${cover ? `<button type="button" class="role-sheet-preview" data-open-asset="${esc(cover)}" title="Abrir ficha y acciones"><img src="${fileUrl(cover)}" alt=""></button>` : ''}
+      <div class="role-resource-controls">
+        <label>${kind === 'locations' ? 'Fondo asignado' : `${kindLabel.charAt(0).toUpperCase() + kindLabel.slice(1)} asignado`}</label>
+        <select class="select" data-assign="${kind}:${esc(r.role)}">
+          <option value="">— sin asignar —</option>
+          ${options.map((o) => `<option value="${o.id}"${o.id === cur ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}
+        </select>
+        <label>Modelo para generar esta ficha</label>
+        <div class="role-generate-line">
+          <select class="select" data-role-model>
+            ${models.map((item) => `<option value="${item.id}"${item.id === model?.id ? ' selected' : ''}>${esc(item.name)}</option>`).join('')}
+          </select>
+          <button type="button" class="mini-btn" data-generate-resource>${IC('spark')} Generar ${kindLabel}</button>
+        </div>
+        ${kind === 'characters' ? `<label>Voz del personaje</label>
+          <div class="role-generate-line">
+            <select class="select" data-role-voice>
+              <option value="">— sin voz propia —</option>
+              ${(state.voices || []).map((voice) => `<option value="${voice.id}"${voice.id === selectedVoiceId ? ' selected' : ''}>${esc(voice.name)}${voice.category ? ` · ${esc(voice.category)}` : ''}</option>`).join('')}
+            </select>
+            <button type="button" class="mini-btn" data-save-role-voice${cur ? '' : ' disabled'}>Guardar voz</button>
+          </div>
+          <span class="hint">${cur ? (assigned?.voiceId ? `Voz actual: ${esc(assigned.voiceName || assigned.voiceId)}` : 'Este personaje todavía no tiene voz propia.') : 'La voz elegida se guardará al generar el personaje.'}</span>` : ''}
+      </div>
+      <label class="role-prompt-label">Prompt de la ficha · inglés
+        <textarea data-role-prompt rows="5">${esc(automationResourcePrompt(kind, r))}</textarea>
+      </label>
+      <span class="hint role-status" data-role-status></span>
     </div>`;
   };
 
   $('#automationRoot').innerHTML = `
     <div class="automation-panel">
-      <h3>Asignación de roles</h3>
+      <div class="automation-panel-heading">
+        <div>
+          <h3>Asignación de roles</h3>
+          <span class="hint" id="autoResourcesProgress">${missing.length ? `${missing.length} assets requeridos todavía no están asignados.` : 'Todos los assets requeridos están asignados.'}</span>
+        </div>
+        <button type="button" class="generate-btn" id="autoGenerateAllResources"${missing.length ? '' : ' disabled'}>
+          ${IC('spark')} Generar todos los assets faltantes
+        </button>
+      </div>
       ${pr.requirements.characters.length ? `<div class="assign-group"><h4>Personajes</h4>${pr.requirements.characters.map((r) => assignRow('characters', r, chars)).join('')}</div>` : ''}
       ${pr.requirements.locations.length ? `<div class="assign-group"><h4>Locaciones</h4>${pr.requirements.locations.map((r) => assignRow('locations', r, locs)).join('')}</div>` : ''}
       ${pr.requirements.objects.length ? `<div class="assign-group"><h4>Objetos</h4>${pr.requirements.objects.map((r) => assignRow('objects', r, objs)).join('')}</div>` : ''}
@@ -4125,8 +4478,29 @@ function renderAutomationProject() {
 
     <div class="automation-panel">
       <h3>Configuración</h3>
+      <div class="control-row"><label>Nombre del proyecto</label>
+        <input type="text" id="autoProjectName" maxlength="120" value="${esc(pr.name)}">
+        <span class="hint">Los cambios del proyecto se guardan en Manifestador. El botón superior confirma el nombre.</span>
+      </div>
+      <div class="control-row auto-style-row"><label>Estilo artístico global</label>
+        <div class="auto-style-field">
+          <textarea id="autoArtStyle" maxlength="1200" rows="3" placeholder="Write the global art direction in English…">${esc(pr.config.artStyle || DEFAULT_AUTOMATION_ART_STYLE)}</textarea>
+          <div class="auto-style-prompt-tools">
+            <select class="select" id="autoArtPrompt">${automationArtPromptOptions()}</select>
+            <button type="button" class="mini-btn" id="autoApplyArtPrompt"${(state.prompts || []).length ? '' : ' disabled'}>${IC('book')} Usar prompt guardado</button>
+          </div>
+          <span class="hint">Escribilo en inglés o cargalo desde tu biblioteca de Prompts. Se añade obligatoriamente a todas las fichas y bloques para mantener el mismo lenguaje visual.</span>
+        </div>
+      </div>
       <div class="control-row"><label>Modelo de imagen</label>
-        <select class="select" id="autoModel">${models.map((m) => `<option value="${m.id}"${m.id === model?.id ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div>
+        <select class="select" id="autoModel">${models.map((m) => `<option value="${m.id}"${m.id === model?.id ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
+        <label>Modelo de respaldo</label>
+        <select class="select" id="autoFallbackModel">
+          <option value="">— sin respaldo —</option>
+          ${models.map((m) => `<option value="${m.id}"${m.id === pr.config.fallbackImageModelId ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}
+        </select>
+        <span class="hint">Si el principal rechaza o falla, se intenta una vez con este modelo.</span>
+      </div>
       <div class="control-row"><label>Proporción</label>
         <select class="select" id="autoAr">${(model?.aspectRatios || []).map((a) => `<option${a === pr.config.aspectRatio ? ' selected' : ''}>${a}</option>`).join('')}</select>
         <label>Resolución</label>
@@ -4136,16 +4510,45 @@ function renderAutomationProject() {
         <span class="hint">Los diálogos usan la voz del personaje asignado (si tiene); si no, la del narrador.</span>
       </div>
       <h4>Texto sobreimpreso</h4>
-      <div class="control-row">
-        <label>Fuente</label><select class="select" id="ovFont">${['sans-serif', 'serif', 'monospace', 'Impact', 'Georgia', 'Arial Black'].map((f) => `<option${f === pr.config.overlay.font ? ' selected' : ''}>${f}</option>`).join('')}</select>
-        <label>Tamaño %</label><input type="number" id="ovSize" min="2" max="30" step="0.5" value="${pr.config.overlay.fontSizePct}" style="width:70px">
-        <label>Posición</label><select class="select" id="ovPos">${[['top', 'Arriba'], ['center', 'Centro'], ['bottom', 'Abajo']].map(([v, l]) => `<option value="${v}"${v === pr.config.overlay.position ? ' selected' : ''}>${l}</option>`).join('')}</select>
+      <div class="overlay-typography-grid">
+        <div class="overlay-type-card">
+          <h5>Texto normal</h5>
+          <label><span>Fuente</span><span class="overlay-font-line"><select class="select" id="ovFont">${overlayFontOptions(pr.config.overlay.font)}</select><button type="button" class="mini-btn" data-import-font="font">Importar</button></span></label>
+          <label><span>Tamaño · px @ 1080</span><input type="number" id="ovSize" min="8" max="300" step="1" value="${pr.config.overlay.fontSizePx}"></label>
+          <label><span>Peso</span><select class="select" id="ovWeight">${[400, 500, 600, 700, 800, 900].map((weight) => `<option value="${weight}"${weight === pr.config.overlay.fontWeight ? ' selected' : ''}>${weight}</option>`).join('')}</select></label>
+          <label><span>Mayúsculas y minúsculas</span><select class="select" id="ovTransform">${[['none', 'Como fue escrito'], ['uppercase', 'MAYÚSCULAS'], ['lowercase', 'minúsculas'], ['capitalize', 'Iniciales En Mayúscula']].map(([value, label]) => `<option value="${value}"${value === (pr.config.overlay.textTransform || 'none') ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
+          <div class="overlay-format-options" aria-label="Formato del texto normal">
+            <label><input type="checkbox" id="ovItalic"${pr.config.overlay.fontItalic ? ' checked' : ''}> <em>Cursiva</em></label>
+            <label><input type="checkbox" id="ovUnderline"${pr.config.overlay.fontUnderline ? ' checked' : ''}> <u>Subrayado</u></label>
+            <label><input type="checkbox" id="ovStrike"${pr.config.overlay.fontStrikeThrough ? ' checked' : ''}> <s>Tachado</s></label>
+          </div>
+          <label><span>Color</span><input type="color" id="ovColor" value="${pr.config.overlay.color}"></label>
+          <label><span>Color del borde</span><input type="color" id="ovStroke" value="${pr.config.overlay.strokeColor}"></label>
+          <label><span>Borde · px @ 1080</span><input type="number" id="ovStrokeW" min="0" max="30" step="0.5" value="${pr.config.overlay.strokeWidthPx}"></label>
+        </div>
+        <div class="overlay-type-card highlight">
+          <h5>Texto resaltado</h5>
+          <label><span>Fuente</span><span class="overlay-font-line"><select class="select" id="ovHlFont">${overlayFontOptions(pr.config.overlay.highlightFont || '', { inherit: true })}</select><button type="button" class="mini-btn" data-import-font="highlightFont">Importar</button></span></label>
+          <label><span>Tamaño · px @ 1080</span><input type="number" id="ovHlSize" min="8" max="300" step="1" value="${pr.config.overlay.highlightFontSizePx}"></label>
+          <label><span>Peso</span><select class="select" id="ovHlWeight">${[400, 500, 600, 700, 800, 900].map((weight) => `<option value="${weight}"${weight === pr.config.overlay.highlightFontWeight ? ' selected' : ''}>${weight}</option>`).join('')}</select></label>
+          <label><span>Mayúsculas y minúsculas</span><select class="select" id="ovHlTransform">${[['none', 'Como fue escrito'], ['uppercase', 'MAYÚSCULAS'], ['lowercase', 'minúsculas'], ['capitalize', 'Iniciales En Mayúscula']].map(([value, label]) => `<option value="${value}"${value === (pr.config.overlay.highlightTextTransform || 'none') ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
+          <div class="overlay-format-options" aria-label="Formato del texto resaltado">
+            <label><input type="checkbox" id="ovHlItalic"${pr.config.overlay.highlightFontItalic ? ' checked' : ''}> <em>Cursiva</em></label>
+            <label><input type="checkbox" id="ovHlUnderline"${pr.config.overlay.highlightFontUnderline ? ' checked' : ''}> <u>Subrayado</u></label>
+            <label><input type="checkbox" id="ovHlStrike"${pr.config.overlay.highlightFontStrikeThrough ? ' checked' : ''}> <s>Tachado</s></label>
+          </div>
+          <label><span>Color</span><input type="color" id="ovHl" value="${pr.config.overlay.highlightColor || '#fbbf24'}"></label>
+          <label><span>Color del borde</span><input type="color" id="ovHlStroke" value="${pr.config.overlay.highlightStrokeColor || '#000000'}"></label>
+          <label><span>Borde · px @ 1080</span><input type="number" id="ovHlStrokeW" min="0" max="30" step="0.5" value="${pr.config.overlay.highlightStrokeWidthPx}"></label>
+        </div>
       </div>
-      <div class="control-row">
-        <label>Color</label><input type="color" id="ovColor" value="${pr.config.overlay.color}">
-        <label>Borde</label><input type="color" id="ovStroke" value="${pr.config.overlay.strokeColor}">
-        <label>Grosor %</label><input type="number" id="ovStrokeW" min="0" max="3" step="0.1" value="${pr.config.overlay.strokeWidthPct}" style="width:70px">
-        <label>Highlight</label><input type="color" id="ovHl" value="${pr.config.overlay.highlightColor || '#fbbf24'}" title="Color de las palabras dramáticas">
+      <input type="file" id="ovFontFile" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" hidden>
+      <span class="hint">Las fuentes importadas (TTF, OTF, WOFF o WOFF2) quedan guardadas en Manifestador y disponibles para todos los proyectos. Los valores tipográficos son píxeles sobre una referencia de 1080 px de alto y se escalan proporcionalmente.</span>
+      <div class="overlay-layout-controls">
+        <label><span>Posición vertical</span><select class="select" id="ovPos">${[['top', 'Arriba'], ['center', 'Centro'], ['bottom', 'Abajo']].map(([v, l]) => `<option value="${v}"${v === pr.config.overlay.position ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label><span>Alineación horizontal</span><select class="select" id="ovAlign">${[['left', 'Izquierda'], ['center', 'Centro'], ['right', 'Derecha']].map(([v, l]) => `<option value="${v}"${v === (pr.config.overlay.align || 'center') ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label><span>Ancho máximo · %</span><input type="number" id="ovMaxWidth" min="20" max="100" step="1" value="${pr.config.overlay.maxWidthPct || 88}"></label>
+        <button type="button" class="mini-btn" id="ovCenterX">Centrar horizontalmente</button>
         <label class="poser-toggle"><input type="checkbox" id="ovBg" ${pr.config.overlay.bg ? 'checked' : ''}> caja de fondo</label>
       </div>
       <div class="ov-preview-tools">
@@ -4155,21 +4558,23 @@ function renderAutomationProject() {
       </div>
       <div class="ov-preview" id="ovPreview" style="aspect-ratio:${(pr.config.aspectRatio || '9:16').replace(':', '/')}">
         ${pr.config.overlay.previewBg ? `<img class="ov-preview-bg" src="${fileUrl(pr.config.overlay.previewBg)}" alt="">` : ''}
-        <div class="ov-text" id="ovText"><span>Un texto de </span><span class="ov-hl">ejemplo</span><span> dramático acá</span></div>
+        <div class="ov-text" id="ovText"><span class="ov-normal">Un texto de </span><span class="ov-hl">ejemplo</span><span class="ov-normal"> dramático acá</span></div>
       </div>
     </div>
 
     <div class="automation-panel">
       <h3>Guion (${pr.blocks.length} bloques)</h3>
       ${pr.blocks.length ? pr.blocks.map((b, i) => {
-        const out = pr.outputs?.[b.id];
-        const done = out && out.videoKey;
+        const out = pr.outputs?.[b.id] || null;
+        const done = Boolean(out?.videoKey);
+        const partial = !done && Boolean(out?.imageKey || out?.textImageKey || out?.audioKeys?.length);
         return `
         <div class="auto-block${done ? ' is-done' : ''}" data-block="${b.id}">
           <div class="auto-block-head">
             <strong>Bloque ${i + 1}${b.title ? ` · ${esc(b.title)}` : ''}</strong> <span class="hint">${esc([b.characters.join(', '), b.location, b.prop].filter(Boolean).join(' · '))}</span>
             <span class="auto-block-btns">
-              <button class="mini-btn" data-genblock="${b.id}"${missing.length ? ' disabled' : ''}>${IC('spark')} ${done ? 'Regenerar' : 'Generar'}</button>
+              <button class="mini-btn" data-genblock="${b.id}" data-force="${done ? '1' : '0'}"${missing.length ? ' disabled' : ''}>${IC('spark')} ${done ? 'Regenerar' : partial ? 'Continuar' : 'Generar / continuar'}</button>
+              ${partial ? `<button class="mini-btn danger" data-regenblock="${b.id}"${missing.length ? ' disabled' : ''}>Regenerar desde cero</button>` : ''}
             </span>
           </div>
           <div class="auto-block-line"><span>Prompt</span>${esc(b.imagePrompt)}</div>
@@ -4186,6 +4591,25 @@ function renderAutomationProject() {
         <option value="all">Regenerar todos</option>
       </select>
       <button class="generate-btn" id="autoStart"${missing.length ? ' disabled' : ''}>${IC('spark')} Automatizar</button>
+    </div>
+
+    <div class="automation-panel final-assembly-panel">
+      <div class="final-assembly-copy">
+        <h3>Video final</h3>
+        <span class="hint" id="autoAssembleStatus">${
+          allVideosReady
+            ? `${completedVideos}/${pr.blocks.length} videos listos para unir en el orden del guion.`
+            : `Faltan ${pr.blocks.length - completedVideos} de ${pr.blocks.length} videos de bloque.`
+        }</span>
+        ${finalOutput ? `<span class="automation-stage-status">Último ensamble · ${finalOutput.blockCount || pr.blocks.length} bloques${finalOutput.width && finalOutput.height ? ` · ${finalOutput.width}×${finalOutput.height}` : ''} · ${fmtDate(finalOutput.assembledAt)}</span>` : ''}
+        <button type="button" class="generate-btn" id="autoAssemble"${allVideosReady ? '' : ' disabled'}>
+          ${IC('film')} ${finalOutput ? 'Reensamblar video final' : 'Ensamblar video final'}
+        </button>
+      </div>
+      ${finalOutput ? `<div class="final-assembly-preview">
+        <video src="${fileUrl(finalOutput.videoKey)}" controls preload="metadata"></video>
+        <button type="button" class="mini-btn" data-open-asset="${esc(finalOutput.videoKey)}">Abrir asset y acciones</button>
+      </div>` : ''}
     </div>`;
 
   $('#automationRoot').querySelectorAll('[data-assign]').forEach((sel) => sel.addEventListener('change', async () => {
@@ -4195,12 +4619,26 @@ function renderAutomationProject() {
     await saveAutomation({ assignments: a });
     renderAutomationProject();
   }));
+  $('#automationRoot').querySelectorAll('[data-generate-resource]').forEach((btn) => btn.addEventListener('click', () => {
+    const card = btn.closest('[data-role-card]');
+    const [kind, role] = card.dataset.roleCard.split(':');
+    generateAutomationResource(pr.id, kind, role, card);
+  }));
+  $('#autoGenerateAllResources')?.addEventListener('click', () => generateAllAutomationResources(pr.id));
+  $('#automationRoot').querySelectorAll('[data-save-role-voice]').forEach((btn) => btn.addEventListener('click', () => {
+    const card = btn.closest('[data-role-card]');
+    const [, role] = card.dataset.roleCard.split(':');
+    assignAutomationCharacterVoice(pr.id, role, card);
+  }));
+  bindAutomationAssetOpeners($('#automationRoot'));
 
   // El overlay vive en un objeto de trabajo local; los controles y el arrastre lo
   // mutan y actualizan el preview en vivo, y se persiste con saveAll().
   const ov = { ...pr.config.overlay };
-  const saveAll = () => saveAutomation({ config: {
+  const saveAll = () => saveAutomation({ name: $('#autoProjectName').value, config: {
     imageModelId: $('#autoModel').value,
+    fallbackImageModelId: $('#autoFallbackModel').value === $('#autoModel').value ? '' : $('#autoFallbackModel').value,
+    artStyle: $('#autoArtStyle').value.trim() || DEFAULT_AUTOMATION_ART_STYLE,
     aspectRatio: $('#autoAr').value,
     resolution: $('#autoRes').value,
     narratorVoiceId: $('#autoVoice').value,
@@ -4209,23 +4647,52 @@ function renderAutomationProject() {
   } });
   $('#autoModel').addEventListener('change', async () => { await saveAll(); renderAutomationProject(); });
   $('#autoAr').addEventListener('change', async () => { await saveAll(); renderAutomationProject(); });
-  ['autoRes', 'autoVoice'].forEach((id) => $('#' + id).addEventListener('change', saveAll));
+  ['autoRes', 'autoVoice', 'autoFallbackModel', 'autoArtStyle'].forEach((id) => $('#' + id).addEventListener('change', saveAll));
+  $('#autoApplyArtPrompt')?.addEventListener('click', async () => {
+    const savedPrompt = state.prompts.find((prompt) => prompt.id === $('#autoArtPrompt').value);
+    if (!savedPrompt) return toast('Elegí un prompt guardado.', 'err');
+    $('#autoArtStyle').value = savedPrompt.text.slice(0, 1200);
+    await saveAll();
+    toast(savedPrompt.text.length > 1200
+      ? `“${savedPrompt.title}” aplicado; se usaron los primeros 1200 caracteres.`
+      : `“${savedPrompt.title}” aplicado al estilo artístico global.`);
+  });
 
   // --- visualizador del texto sobreimpreso ---
   const preview = $('#ovPreview'), text = $('#ovText');
   const styleText = () => {
     const h = preview.clientHeight || 320;
+    const scale = h / 1080;
+    const normalSize = Math.max(4, (ov.fontSizePx || 64) * scale);
+    const highlightSize = Math.max(4, (ov.highlightFontSizePx || ov.fontSizePx || 64) * scale);
     Object.assign(text.style, {
-      fontFamily: ov.font,
-      fontSize: Math.max(8, h * ((ov.fontSizePct || 6) / 100)) + 'px',
-      color: ov.color,
-      webkitTextStroke: `${Math.max(0, h * ((ov.strokeWidthPct || 0) / 100))}px ${ov.strokeColor}`,
+      lineHeight: `${Math.max(normalSize, highlightSize) * 1.2}px`,
       left: (ov.x ?? 50) + '%',
       top: (ov.y ?? 88) + '%',
       maxWidth: (ov.maxWidthPct || 88) + '%',
-      textAlign: ov.align || 'center'
+      textAlign: ov.align || 'center',
+      transform: `translate(${ov.align === 'left' ? '0' : ov.align === 'right' ? '-100%' : '-50%'}, -50%)`
     });
-    text.querySelector('.ov-hl').style.color = ov.highlightColor || '#fbbf24';
+    text.querySelectorAll('.ov-normal').forEach((normal) => Object.assign(normal.style, {
+      fontFamily: ov.font,
+      fontSize: normalSize + 'px',
+      fontWeight: ov.fontWeight || 700,
+      fontStyle: ov.fontItalic ? 'italic' : 'normal',
+      textTransform: ov.textTransform || 'none',
+      textDecorationLine: [ov.fontUnderline && 'underline', ov.fontStrikeThrough && 'line-through'].filter(Boolean).join(' ') || 'none',
+      color: ov.color,
+      webkitTextStroke: `${Math.max(0, (ov.strokeWidthPx || 0) * scale)}px ${ov.strokeColor}`
+    }));
+    Object.assign(text.querySelector('.ov-hl').style, {
+      fontFamily: ov.highlightFont || ov.font,
+      fontSize: highlightSize + 'px',
+      fontWeight: ov.highlightFontWeight || 800,
+      fontStyle: ov.highlightFontItalic ? 'italic' : 'normal',
+      textTransform: ov.highlightTextTransform || 'none',
+      textDecorationLine: [ov.highlightFontUnderline && 'underline', ov.highlightFontStrikeThrough && 'line-through'].filter(Boolean).join(' ') || 'none',
+      color: ov.highlightColor || '#fbbf24',
+      webkitTextStroke: `${Math.max(0, (ov.highlightStrokeWidthPx || 0) * scale)}px ${ov.highlightStrokeColor || '#000000'}`
+    });
     text.classList.toggle('has-bg', !!ov.bg);
   };
   const bindOv = (id, prop, transform = (v) => v) => {
@@ -4233,14 +4700,52 @@ function renderAutomationProject() {
     el.addEventListener('input', () => { ov[prop] = transform(el.type === 'checkbox' ? el.checked : el.value); styleText(); });
     el.addEventListener('change', saveAll);
   };
-  bindOv('ovFont', 'font'); bindOv('ovSize', 'fontSizePct', Number); bindOv('ovColor', 'color');
-  bindOv('ovStroke', 'strokeColor'); bindOv('ovStrokeW', 'strokeWidthPct', Number);
-  bindOv('ovHl', 'highlightColor'); bindOv('ovBg', 'bg');
+  bindOv('ovFont', 'font'); bindOv('ovSize', 'fontSizePx', Number); bindOv('ovWeight', 'fontWeight', Number); bindOv('ovColor', 'color');
+  bindOv('ovTransform', 'textTransform'); bindOv('ovItalic', 'fontItalic'); bindOv('ovUnderline', 'fontUnderline'); bindOv('ovStrike', 'fontStrikeThrough');
+  bindOv('ovStroke', 'strokeColor'); bindOv('ovStrokeW', 'strokeWidthPx', Number);
+  bindOv('ovHlFont', 'highlightFont'); bindOv('ovHlSize', 'highlightFontSizePx', Number); bindOv('ovHlWeight', 'highlightFontWeight', Number);
+  bindOv('ovHlTransform', 'highlightTextTransform'); bindOv('ovHlItalic', 'highlightFontItalic'); bindOv('ovHlUnderline', 'highlightFontUnderline'); bindOv('ovHlStrike', 'highlightFontStrikeThrough');
+  bindOv('ovHl', 'highlightColor'); bindOv('ovHlStroke', 'highlightStrokeColor'); bindOv('ovHlStrokeW', 'highlightStrokeWidthPx', Number);
+  bindOv('ovAlign', 'align'); bindOv('ovMaxWidth', 'maxWidthPct', Number); bindOv('ovBg', 'bg');
   $('#ovPos').addEventListener('change', () => {
     ov.position = $('#ovPos').value;
     ov.y = ov.position === 'top' ? 12 : ov.position === 'center' ? 50 : 88;
     ov.x = 50;
     styleText(); saveAll();
+  });
+  $('#ovCenterX').addEventListener('click', () => {
+    ov.x = 50;
+    styleText();
+    saveAll();
+  });
+
+  let fontImportTarget = 'font';
+  $('#automationRoot').querySelectorAll('[data-import-font]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      fontImportTarget = button.dataset.importFont === 'highlightFont' ? 'highlightFont' : 'font';
+      await saveAll();
+      $('#ovFontFile').value = '';
+      $('#ovFontFile').click();
+    });
+  });
+  $('#ovFontFile').addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const font = await api('/api/fonts', {
+        method: 'POST',
+        body: { fileName: file.name, name: file.name.replace(/\.[^.]+$/, ''), dataUrl }
+      });
+      state.fonts.unshift(font);
+      await registerCustomFont(font);
+      ov[fontImportTarget] = font.family;
+      await saveAutomation({ config: { overlay: ov } });
+      renderAutomationProject();
+      toast(`Fuente “${font.name}” importada y guardada.`);
+    } catch (error) {
+      toast(error.message, 'err');
+    }
   });
 
   // arrastrar el texto para ubicarlo libremente (setea x/y en %)
@@ -4265,9 +4770,17 @@ function renderAutomationProject() {
 
   $('#automationRoot').querySelectorAll('[data-genblock]').forEach((btn) => btn.addEventListener('click', async () => {
     const block = pr.blocks.find((b) => b.id === btn.dataset.genblock);
-    if (block) await runAutomationBlock(pr.id, block, btn.closest('.auto-block'));
+    const force = btn.dataset.force === '1';
+    if (force && !confirm(`¿Regenerar “${block?.title || 'este bloque'}” desde cero? Se crearán una imagen y audios nuevos.`)) return;
+    if (block) await runAutomationBlock(pr.id, block, btn.closest('.auto-block'), { regenerate: force });
+  }));
+  $('#automationRoot').querySelectorAll('[data-regenblock]').forEach((btn) => btn.addEventListener('click', async () => {
+    const block = pr.blocks.find((b) => b.id === btn.dataset.regenblock);
+    if (!block || !confirm(`¿Descartar los parciales de “${block.title || 'este bloque'}” y regenerar imagen y audios?`)) return;
+    await runAutomationBlock(pr.id, block, btn.closest('.auto-block'), { regenerate: true });
   }));
   $('#autoStart').addEventListener('click', () => runAutomationAll(pr.id, $('#autoMode').value));
+  $('#autoAssemble')?.addEventListener('click', () => assembleAutomationProject(pr.id));
   if (state.voices === null) loadVoices(false).then(() => { if (currentAutomation()) renderAutomationProject(); });
 }
 
@@ -4293,6 +4806,15 @@ function pickHighlightWords(text) {
     else if (/[!¡]/.test(w)) idx.add(i);
   });
   return idx;
+}
+
+function transformOverlayWord(word, transform = 'none') {
+  if (transform === 'uppercase') return word.toLocaleUpperCase('es');
+  if (transform === 'lowercase') return word.toLocaleLowerCase('es');
+  if (transform === 'capitalize') {
+    return word.replace(/\p{L}/u, (letter) => letter.toLocaleUpperCase('es'));
+  }
+  return word;
 }
 
 // tags de emoción de ElevenLabs (invisibles en la imagen; sólo van al audio),
@@ -4341,7 +4863,7 @@ async function automationRefsAndPrompt(pr, block) {
   const labeledRefs = await buildLabeledRefs(refs);
   let prompt = block.imagePrompt.replace(/@([A-Z0-9_]+)/g, (m, r) => names[r] || m.replace('@', ''));
   if (block.negativePrompt) prompt += `\n\nAvoid in the generated image: ${block.negativePrompt}`;
-  return { refs: refs.map((r) => r.key), labeledRefs, prompt };
+  return { refs: refs.map((r) => r.key), labeledRefs, prompt: automationStyledPrompt(pr, prompt) };
 }
 
 // quema el texto del bloque sobre la imagen por canvas, replicando el
@@ -4356,49 +4878,103 @@ function burnOverlayText(imageKey, caption, ov) {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0);
         const H = canvas.height, W = canvas.width;
-        const fontPx = Math.max(10, H * ((ov.fontSizePct || 6) / 100));
-        const strokePx = Math.max(0, H * ((ov.strokeWidthPct || 0) / 100));
-        const lineH = fontPx * 1.2;
+        await ensureOverlayFonts(ov);
+        const scale = H / 1080;
         const maxW = W * ((ov.maxWidthPct || 88) / 100);
-        ctx.font = `700 ${fontPx}px ${ov.font || 'sans-serif'}`;
         ctx.textBaseline = 'middle';
-        // envolver en líneas respetando maxW, conservando el índice de palabra
+        ctx.textAlign = 'left';
+        ctx.lineJoin = 'round';
         const words = caption.split(/\s+/).filter(Boolean);
         const hi = pickHighlightWords(caption);
-        const lines = []; let cur = []; let wi = 0; let idxLine = [];
-        for (const w of words) {
-          const test = [...cur, w].join(' ');
-          if (cur.length && ctx.measureText(test).width > maxW) { lines.push({ words: cur, idx: idxLine }); cur = [w]; idxLine = [wi]; }
-          else { cur.push(w); idxLine.push(wi); }
-          wi++;
+        const runStyle = (highlighted) => ({
+          fontPx: Math.max(4, (highlighted ? (ov.highlightFontSizePx || ov.fontSizePx || 64) : (ov.fontSizePx || 64)) * scale),
+          fontWeight: highlighted ? (ov.highlightFontWeight || 800) : (ov.fontWeight || 700),
+          fontFamily: highlighted ? (ov.highlightFont || ov.font || 'sans-serif') : (ov.font || 'sans-serif'),
+          italic: highlighted ? !!ov.highlightFontItalic : !!ov.fontItalic,
+          underline: highlighted ? !!ov.highlightFontUnderline : !!ov.fontUnderline,
+          strikeThrough: highlighted ? !!ov.highlightFontStrikeThrough : !!ov.fontStrikeThrough,
+          textTransform: highlighted ? (ov.highlightTextTransform || 'none') : (ov.textTransform || 'none'),
+          color: highlighted ? (ov.highlightColor || '#fbbf24') : (ov.color || '#ffffff'),
+          strokeColor: highlighted ? (ov.highlightStrokeColor || '#000000') : (ov.strokeColor || '#000000'),
+          strokePx: Math.max(0, (highlighted ? (ov.highlightStrokeWidthPx || 0) : (ov.strokeWidthPx || 0)) * scale)
+        });
+        const makeRun = (word, index, leadingSpace) => {
+          const style = runStyle(hi.has(index));
+          const transformedWord = transformOverlayWord(word, style.textTransform);
+          const text = `${leadingSpace ? ' ' : ''}${transformedWord}`;
+          ctx.font = `${style.italic ? 'italic ' : ''}${style.fontWeight} ${style.fontPx}px ${canvasFontFamily(style.fontFamily)}`;
+          const width = ctx.measureText(text).width;
+          const leadingWidth = leadingSpace ? ctx.measureText(' ').width : 0;
+          return { text, width, leadingWidth, style };
+        };
+        const lines = [];
+        let line = { runs: [], width: 0, height: 0 };
+        words.forEach((word, index) => {
+          let run = makeRun(word, index, line.runs.length > 0);
+          if (line.runs.length && line.width + run.width > maxW) {
+            lines.push(line);
+            line = { runs: [], width: 0, height: 0 };
+            run = makeRun(word, index, false);
+          }
+          line.runs.push(run);
+          line.width += run.width;
+          line.height = Math.max(line.height, run.style.fontPx * 1.2);
+        });
+        if (line.runs.length) lines.push(line);
+        const blockH = lines.reduce((sum, currentLine) => sum + currentLine.height, 0);
+        const anchorY = H * ((ov.y ?? 88) / 100);
+        const anchorX = W * ((ov.x ?? 50) / 100);
+        const align = ['left', 'right'].includes(ov.align) ? ov.align : 'center';
+        let top = anchorY - blockH / 2;
+        for (const currentLine of lines) {
+          currentLine.x = align === 'left' ? anchorX : align === 'right' ? anchorX - currentLine.width : anchorX - currentLine.width / 2;
+          currentLine.y = top + currentLine.height / 2;
+          top += currentLine.height;
         }
-        if (cur.length) lines.push({ words: cur, idx: idxLine });
-        const blockH = lines.length * lineH;
-        let cy = (H * ((ov.y ?? 88) / 100)) - blockH / 2 + lineH / 2;
-        const cx = W * ((ov.x ?? 50) / 100);
         // caja de fondo opcional
-        if (ov.bg) {
-          const pad = fontPx * 0.4;
-          let boxW = 0;
-          for (const ln of lines) boxW = Math.max(boxW, ctx.measureText(ln.words.join(' ')).width);
+        if (ov.bg && lines.length) {
+          const normalFontPx = Math.max(4, (ov.fontSizePx || 64) * scale);
+          const pad = normalFontPx * 0.4;
+          const minX = Math.min(...lines.map((currentLine) => currentLine.x));
+          const maxX = Math.max(...lines.map((currentLine) => currentLine.x + currentLine.width));
           ctx.globalAlpha = ov.bgOpacity ?? 0.45; ctx.fillStyle = ov.bgColor || '#000';
-          ctx.fillRect(cx - boxW / 2 - pad, cy - lineH / 2 - pad, boxW + pad * 2, blockH + pad * 2);
+          ctx.fillRect(minX - pad, anchorY - blockH / 2 - pad, maxX - minX + pad * 2, blockH + pad * 2);
           ctx.globalAlpha = 1;
         }
-        ctx.textAlign = 'left';
-        for (const ln of lines) {
-          const full = ln.words.join(' ');
-          const lineW = ctx.measureText(full).width;
-          let x = cx - lineW / 2; // centrado
-          ln.words.forEach((w, k) => {
-            const isHi = hi.has(ln.idx[k]);
-            const piece = w + (k < ln.words.length - 1 ? ' ' : '');
-            if (strokePx > 0) { ctx.lineWidth = strokePx * 2; ctx.strokeStyle = ov.strokeColor || '#000'; ctx.lineJoin = 'round'; ctx.strokeText(piece, x, cy); }
-            ctx.fillStyle = isHi ? (ov.highlightColor || '#fbbf24') : (ov.color || '#fff');
-            ctx.fillText(piece, x, cy);
-            x += ctx.measureText(piece).width;
-          });
-          cy += lineH;
+        for (const currentLine of lines) {
+          let x = currentLine.x;
+          for (const run of currentLine.runs) {
+            const style = run.style;
+            ctx.font = `${style.italic ? 'italic ' : ''}${style.fontWeight} ${style.fontPx}px ${canvasFontFamily(style.fontFamily)}`;
+            if (style.strokePx > 0) {
+              ctx.lineWidth = style.strokePx * 2;
+              ctx.strokeStyle = style.strokeColor;
+              ctx.strokeText(run.text, x, currentLine.y);
+            }
+            ctx.fillStyle = style.color;
+            ctx.fillText(run.text, x, currentLine.y);
+            const decorationStart = x + run.leadingWidth;
+            const decorationWidth = Math.max(0, run.width - run.leadingWidth);
+            if (decorationWidth && (style.underline || style.strikeThrough)) {
+              ctx.beginPath();
+              ctx.strokeStyle = style.color;
+              ctx.lineWidth = Math.max(1, style.fontPx * 0.055);
+              ctx.lineCap = 'round';
+              if (style.underline) {
+                const underlineY = currentLine.y + style.fontPx * 0.38;
+                ctx.moveTo(decorationStart, underlineY);
+                ctx.lineTo(decorationStart + decorationWidth, underlineY);
+              }
+              if (style.strikeThrough) {
+                const strikeY = currentLine.y - style.fontPx * 0.04;
+                ctx.moveTo(decorationStart, strikeY);
+                ctx.lineTo(decorationStart + decorationWidth, strikeY);
+              }
+              ctx.stroke();
+              ctx.lineCap = 'butt';
+            }
+            x += run.width;
+          }
         }
         const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
         const up = await api('/api/upload', { method: 'POST', body: { dataUrl, name: 'auto-texto' } });
@@ -4411,45 +4987,224 @@ function burnOverlayText(imageKey, caption, ov) {
 }
 
 function automationBlockOutHtml(out) {
-  if (!out || !out.videoKey) return '';
+  if (!out || (!out.imageKey && !out.textImageKey && !out.audioKeys?.length && !out.videoKey)) return '';
+  const audioKeys = Array.isArray(out.audioKeys) ? out.audioKeys : [];
+  const expected = Number(out.audioCountExpected) || audioKeys.length;
   return `
-    ${out.imageKey ? `<a href="${fileUrl(out.imageKey)}" target="_blank"><img src="${fileUrl(out.imageKey)}" alt="imagen"></a>` : ''}
-    ${out.textImageKey ? `<a href="${fileUrl(out.textImageKey)}" target="_blank"><img src="${fileUrl(out.textImageKey)}" alt="con texto"></a>` : ''}
-    ${out.videoKey ? `<video src="${fileUrl(out.videoKey)}" controls preload="metadata"></video>` : ''}`;
+    <span class="automation-stage-status">
+      Imagen ${out.imageKey ? '✓' : '—'} · Texto ${out.textImageKey ? '✓' : '—'} · Audio ${audioKeys.length}/${expected || '—'} · Video ${out.videoKey ? '✓' : '—'}
+    </span>
+    ${out.fallbackUsed ? `<span class="hint warn">Imagen generada con respaldo: ${esc(out.imageModelName || out.imageModelId || '')}</span>` : ''}
+    ${out.imageKey ? `<button type="button" class="auto-output-asset" data-open-asset="${esc(out.imageKey)}" title="Abrir asset y acciones"><img src="${fileUrl(out.imageKey)}" alt="imagen"></button>` : ''}
+    ${out.textImageKey ? `<button type="button" class="auto-output-asset" data-open-asset="${esc(out.textImageKey)}" title="Abrir asset y acciones"><img src="${fileUrl(out.textImageKey)}" alt="con texto"></button>` : ''}
+    ${audioKeys.map((key, index) => `<span class="auto-output-audio"><small>Audio ${index + 1}</small><audio src="${fileUrl(key)}" controls preload="metadata"></audio></span>`).join('')}
+    ${out.videoKey ? `<span class="auto-output-video"><video src="${fileUrl(out.videoKey)}" controls preload="metadata"></video><button type="button" class="mini-btn" data-open-asset="${esc(out.videoKey)}">Acciones del video</button></span>` : ''}`;
 }
 
-async function runAutomationBlock(projectId, block, blockEl) {
-  const pr = state.automations.find((x) => x.id === projectId);
-  if (!pr) return;
+function automationImageSettings(model, config) {
+  const aspectRatio = model.aspectRatios.includes(config.aspectRatio)
+    ? config.aspectRatio
+    : (model.aspectRatios.includes('9:16') ? '9:16' : model.aspectRatios[0]);
+  const resolution = model.resolutions.includes(config.resolution)
+    ? config.resolution
+    : (model.resolutions.includes('2K') ? '2K' : model.resolutions[0]);
+  return { aspectRatio, resolution };
+}
+
+async function generateAutomationImage(pr, request, setStatus) {
+  const primary = state.models.find((model) => model.id === pr.config.imageModelId) || state.models[0];
+  if (!primary) throw new Error('No hay un modelo de imagen disponible.');
+  const attempt = (model) => api('/api/generate/image', {
+    method: 'POST',
+    body: {
+      ...request,
+      modelId: model.id,
+      ...automationImageSettings(model, pr.config),
+      batch: 1
+    }
+  });
+
+  try {
+    const result = await attempt(primary);
+    return { result, model: primary, fallbackUsed: false };
+  } catch (primaryError) {
+    const fallback = state.models.find((model) =>
+      model.id === pr.config.fallbackImageModelId && model.id !== primary.id);
+    if (!fallback) throw primaryError;
+    setStatus(`${primary.name} falló. Reintentando con ${fallback.name}…`);
+    try {
+      const result = await attempt(fallback);
+      return { result, model: fallback, fallbackUsed: true };
+    } catch (fallbackError) {
+      throw new Error(
+        `${primary.name} falló: ${primaryError.message}. ${fallback.name} también falló: ${fallbackError.message}`
+      );
+    }
+  }
+}
+
+async function persistAutomationBlockOutput(projectId, blockId, patch, { replace = false } = {}) {
+  const pr = state.automations.find((item) => item.id === projectId);
+  if (!pr) throw new Error('El proyecto ya no está disponible.');
+  const current = pr.outputs?.[blockId] || {};
+  const nextOutput = replace
+    ? { ...patch, ts: Date.now() }
+    : { ...current, ...patch, ts: Date.now() };
+  const updated = await api(`/api/automations/${projectId}`, {
+    method: 'PUT',
+    body: { outputs: { [blockId]: nextOutput } }
+  });
+  state.automations[state.automations.findIndex((item) => item.id === projectId)] = updated;
+  return updated.outputs?.[blockId] || nextOutput;
+}
+
+async function tagAutomationStage(pr, block, keys) {
+  const valid = keys.filter(Boolean);
+  if (!valid.length) return;
+  await api('/api/assets/tag', {
+    method: 'POST',
+    body: {
+      keys: valid,
+      category: `Auto: ${pr.name}`,
+      automationId: pr.id,
+      blockId: block.id
+    }
+  });
+}
+
+function automationAudioSpec(pr, item) {
+  const isDialog = item.kind === 'dialogue';
+  const character = isDialog
+    ? state.characters.find((candidate) => candidate.id === pr.assignments.characters?.[item.character])
+    : null;
+  const voiceId = character?.voiceId || pr.config.narratorVoiceId;
+  const voiceName = character?.voiceName || pr.config.narratorVoiceName;
+  if (!voiceId) throw new Error('Falta la voz del narrador (o del personaje del diálogo).');
+  const tag = emotionTagFor(item.text);
+  return {
+    text: tag ? `${tag} ${item.text}` : item.text,
+    voiceId,
+    voiceName
+  };
+}
+
+async function refreshAutomationHistory() {
+  const snapshot = await api('/api/state');
+  state.history = snapshot.history || [];
+  return state.history;
+}
+
+function recoverHistoryOutput(type, prompt, { voiceId = '', usedKeys = new Set() } = {}) {
+  const entry = state.history.find((candidate) =>
+    candidate.type === type
+    && candidate.prompt === prompt
+    && (!voiceId || candidate.voiceId === voiceId)
+    && (candidate.outputs || []).some((key) => !usedKeys.has(key)));
+  if (!entry) return null;
+  const key = (entry.outputs || []).find((candidate) => !usedKeys.has(candidate));
+  return key ? { entry, key } : null;
+}
+
+async function runAutomationBlock(projectId, block, blockEl, { regenerate = false } = {}) {
+  let pr = state.automations.find((x) => x.id === projectId);
+  if (!pr) return false;
   const outEl = blockEl?.querySelector('[data-out]');
   const setStatus = (msg) => { if (outEl) outEl.innerHTML = `<span class="hint">${esc(msg)}</span>`; };
+  let output = pr.outputs?.[block.id] || {};
   try {
     if (blockEl) blockEl.classList.add('is-working');
-    setStatus('Generando imagen…');
+    if (regenerate) {
+      output = await persistAutomationBlockOutput(projectId, block.id, {}, { replace: true });
+      pr = state.automations.find((item) => item.id === projectId) || pr;
+    }
+
     const { refs, labeledRefs, prompt } = await automationRefsAndPrompt(pr, block);
-    const img = await api('/api/generate/image', { method: 'POST', body: {
-      modelId: pr.config.imageModelId, prompt, refs, labeledRefs,
-      aspectRatio: pr.config.aspectRatio, resolution: pr.config.resolution, batch: 1
-    } });
-    const imageKey = img.outputs[0];
+    let historyLoaded = false;
+    let imageKey = output.imageKey;
+    if (!imageKey && !regenerate) {
+      setStatus('Buscando una imagen ya generada para este bloque…');
+      await refreshAutomationHistory();
+      historyLoaded = true;
+      const recovered = recoverHistoryOutput('image', prompt);
+      if (recovered) {
+        imageKey = recovered.key;
+        output = await persistAutomationBlockOutput(projectId, block.id, {
+          imageKey,
+          imageModelId: recovered.entry.modelId || '',
+          imageModelName: recovered.entry.modelName || '',
+          fallbackUsed: false,
+          recoveredImage: true,
+          audioCountExpected: block.items.length
+        });
+        await tagAutomationStage(pr, block, [imageKey]);
+      }
+    }
+    if (!imageKey) {
+      setStatus('Generando imagen…');
+      const generatedImage = await generateAutomationImage(
+        pr,
+        { prompt, refs, labeledRefs },
+        setStatus
+      );
+      imageKey = generatedImage.result.outputs[0];
+      state.history.unshift(generatedImage.result);
+      output = await persistAutomationBlockOutput(projectId, block.id, {
+        imageKey,
+        imageModelId: generatedImage.model.id,
+        imageModelName: generatedImage.model.name,
+        fallbackUsed: generatedImage.fallbackUsed,
+        recoveredImage: false,
+        audioCountExpected: block.items.length
+      });
+      await tagAutomationStage(pr, block, [imageKey]);
+    } else {
+      setStatus('Reutilizando la imagen guardada…');
+    }
 
-    setStatus('Sobreimprimiendo el texto…');
-    const caption = block.items.map((it) => it.text).join(' ');
-    const textImageKey = await burnOverlayText(imageKey, caption, pr.config.overlay);
+    let textImageKey = output.textImageKey;
+    if (!textImageKey) {
+      setStatus('Sobreimprimiendo el texto…');
+      const caption = block.items.map((it) => it.text).join(' ');
+      textImageKey = await burnOverlayText(imageKey, caption, pr.config.overlay);
+      output = await persistAutomationBlockOutput(projectId, block.id, { textImageKey });
+      await tagAutomationStage(pr, block, [textImageKey]);
+    } else {
+      setStatus('Reutilizando la imagen con texto guardada…');
+    }
 
-    setStatus('Generando el audio…');
-    const audioKeys = [];
-    for (const it of block.items) {
-      const isDialog = it.kind === 'dialogue';
-      const ch = isDialog ? state.characters.find((c) => c.id === pr.assignments.characters?.[it.character]) : null;
-      const voiceId = (ch && ch.voiceId) || pr.config.narratorVoiceId;
-      const voiceName = (ch && ch.voiceName) || pr.config.narratorVoiceName;
-      if (!voiceId) throw new Error('Falta la voz del narrador (o del personaje del diálogo).');
-      const tag = emotionTagFor(it.text);
-      const a = await api('/api/generate/audio', { method: 'POST', body: {
-        text: tag ? `${tag} ${it.text}` : it.text, voiceId, voiceName
-      } });
-      audioKeys.push(a.outputs[0]);
+    const audioKeys = Array.isArray(output.audioKeys)
+      ? output.audioKeys.slice(0, block.items.length)
+      : [];
+    const usedAudioKeys = new Set(audioKeys);
+    for (let index = audioKeys.length; index < block.items.length; index++) {
+      const spec = automationAudioSpec(pr, block.items[index]);
+      let recovered = null;
+      if (!regenerate) {
+        if (!historyLoaded) {
+          setStatus('Buscando audios ya generados para este bloque…');
+          await refreshAutomationHistory();
+          historyLoaded = true;
+        }
+        recovered = recoverHistoryOutput('audio', spec.text, { voiceId: spec.voiceId, usedKeys: usedAudioKeys });
+      }
+      if (recovered) {
+        audioKeys.push(recovered.key);
+        usedAudioKeys.add(recovered.key);
+        setStatus(`Reutilizando audio ${audioKeys.length}/${block.items.length}…`);
+      } else {
+        setStatus(`Generando audio ${index + 1}/${block.items.length}…`);
+        const generatedAudio = await api('/api/generate/audio', { method: 'POST', body: spec });
+        const audioKey = generatedAudio.outputs?.[0];
+        if (!audioKey) throw new Error(`No se generó el audio ${index + 1}.`);
+        state.history.unshift(generatedAudio);
+        audioKeys.push(audioKey);
+        usedAudioKeys.add(audioKey);
+      }
+      output = await persistAutomationBlockOutput(projectId, block.id, {
+        audioKeys: [...audioKeys],
+        audioCountExpected: block.items.length
+      });
+      await tagAutomationStage(pr, block, [audioKeys[audioKeys.length - 1]]);
     }
 
     setStatus('Armando el video…');
@@ -4457,16 +5212,20 @@ async function runAutomationBlock(projectId, block, blockEl) {
     const v = await api(`/api/automations/${pr.id}/video`, { method: 'POST', body: {
       blockId: block.id, imageKey: textImageKey, audioKeys, category
     } });
-
-    await api('/api/assets/tag', { method: 'POST', body: {
-      keys: [imageKey, textImageKey, ...audioKeys], category, automationId: pr.id, blockId: block.id
-    } });
-    await saveAutomation({ outputs: { [block.id]: { imageKey, textImageKey, audioKeys, videoKey: v.videoKey, ts: Date.now() } } });
+    output = await persistAutomationBlockOutput(projectId, block.id, {
+      videoKey: v.videoKey,
+      completedAt: Date.now()
+    });
+    await tagAutomationStage(pr, block, [imageKey, textImageKey, ...audioKeys, v.videoKey]);
     renderAutomationProject();
     return true;
   } catch (err) {
     toast(err.message, 'err');
-    if (outEl) outEl.innerHTML = `<span class="hint warn">Falló: ${esc(err.message)}</span>`;
+    const latest = state.automations.find((item) => item.id === projectId)?.outputs?.[block.id] || output;
+    if (outEl) {
+      outEl.innerHTML = `${automationBlockOutHtml(latest)}<span class="hint warn">Falló: ${esc(err.message)}. Los parciales guardados se reutilizarán al continuar.</span>`;
+      bindAutomationAssetOpeners(outEl);
+    }
     return false;
   } finally {
     if (blockEl) blockEl.classList.remove('is-working');
@@ -4484,10 +5243,36 @@ async function runAutomationAll(projectId, mode) {
   let ok = 0;
   for (const block of targets) {
     const blockEl = $('#automationRoot')?.querySelector(`.auto-block[data-block="${block.id}"]`);
-    const r = await runAutomationBlock(projectId, block, blockEl);
+    const r = await runAutomationBlock(projectId, block, blockEl, { regenerate: mode === 'all' });
     if (r) ok++; else break; // si uno falla, freno para no encadenar errores
   }
   toast(`Automatización: ${ok}/${targets.length} bloques generados`, ok === targets.length ? 'ok' : 'err');
+}
+
+async function assembleAutomationProject(projectId) {
+  const pr = state.automations.find((item) => item.id === projectId);
+  if (!pr) return;
+  if (pr.finalOutput?.videoKey && !confirm('¿Crear un nuevo ensamble final? El video final anterior seguirá disponible en Assets.')) return;
+  const button = $('#autoAssemble');
+  const status = $('#autoAssembleStatus');
+  if (button) button.disabled = true;
+  if (status) status.textContent = `Uniendo ${pr.blocks.length} videos con FFmpeg…`;
+  try {
+    const result = await api(`/api/automations/${projectId}/assemble`, { method: 'POST' });
+    const index = state.automations.findIndex((item) => item.id === projectId);
+    if (index !== -1) state.automations[index] = result.project;
+    try {
+      await refreshAssets();
+    } catch {
+      // El ensamble ya quedó guardado aunque la vista de Assets no pueda refrescarse.
+    }
+    renderAutomationProject();
+    toast(`Video final ensamblado: ${result.finalOutput.blockCount} bloques`, 'ok');
+  } catch (error) {
+    if (button) button.disabled = false;
+    if (status) status.textContent = `Falló el ensamble: ${error.message}`;
+    toast(error.message, 'err');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -4524,6 +5309,74 @@ function updateEstimate() {
 
 const fmtUsd = (n) => `$${(n || 0).toFixed(n >= 10 ? 2 : 3)}`;
 
+function renderProjectCostEstimate(projects) {
+  const root = $('#costProjectEstimate');
+  if (!root) return;
+  if (!projects?.length) {
+    root.innerHTML = '<h3>Estimación por proyecto</h3><div class="empty-note" style="padding:8px 0">Todavía no hay proyectos del Automatizador.</div>';
+    return;
+  }
+  const selected = projects.find((project) => project.id === state.costProjectId) || projects[0];
+  state.costProjectId = selected.id;
+  const detail = selected.breakdown;
+  const extraSpent = selected.spent > selected.estimatedTotal + 0.000001;
+  root.innerHTML = `
+    <div class="cost-project-head">
+      <div>
+        <h3>Coste estimado por proyecto</h3>
+        <span class="hint">Se muestra el proyecto más reciente por defecto. Elegí otro para consultar su estimación.</span>
+      </div>
+      <label>Proyecto
+        <select class="select" id="costProjectSelect">
+          ${projects.map((project, index) => `<option value="${esc(project.id)}"${project.id === selected.id ? ' selected' : ''}>${index === 0 ? 'Último · ' : ''}${esc(project.name)}</option>`).join('')}
+        </select>
+      </label>
+    </div>
+    <div class="project-cost-title">
+      <strong>${esc(selected.name)}</strong>
+      <span class="hint">${esc(selected.modelName)} · ${esc(selected.resolution)} · ${esc(selected.aspectRatio || 'proporción automática')} · actualizado ${fmtDate(selected.updatedAt || selected.ts)}</span>
+    </div>
+    <div class="project-cost-summary">
+      <div class="project-cost-stat">
+        <span>Producción completa estimada</span>
+        <strong>${fmtUsd(selected.estimatedTotal)}</strong>
+      </div>
+      <div class="project-cost-stat">
+        <span>Consumo ya vinculado</span>
+        <strong>${fmtUsd(selected.spent)}</strong>
+      </div>
+      <div class="project-cost-stat">
+        <span>Material previsto</span>
+        <strong>${detail.resourceImages + detail.blockImages} imágenes · ${detail.audioItems} audios</strong>
+      </div>
+    </div>
+    <div class="project-cost-breakdown">
+      <div class="cost-row">
+        <span class="cr-label">Fichas de personajes, fondos y objetos<span class="cr-sub">${detail.resourceImages} × ${esc(selected.modelName)} ${esc(detail.resourceResolution)}</span></span>
+        <span class="cr-value">${fmtUsd(detail.resourceImageCost)}</span>
+      </div>
+      <div class="cost-row">
+        <span class="cr-label">Imágenes de los bloques<span class="cr-sub">${detail.blockImages} × ${esc(selected.modelName)} ${esc(detail.blockResolution)}</span></span>
+        <span class="cr-value">${fmtUsd(detail.blockImageCost)}</span>
+      </div>
+      <div class="cost-row">
+        <span class="cr-label">Voces de narración y diálogo<span class="cr-sub">${detail.audioItems} audios · ${detail.audioCharacters.toLocaleString('es-AR')} caracteres</span></span>
+        <span class="cr-value">${fmtUsd(detail.audioCost)}</span>
+      </div>
+      <div class="cost-row">
+        <span class="cr-label">Videos de bloque y ensamble final<span class="cr-sub">Procesamiento local con FFmpeg</span></span>
+        <span class="cr-value">${fmtUsd(detail.localVideoCost)}</span>
+      </div>
+    </div>
+    <p class="hint project-cost-note">${extraSpent
+      ? 'El consumo vinculado supera la estimación base porque incluye regeneraciones, reintentos o modelos alternativos.'
+      : 'Estimación calculada con el modelo principal y las tarifas vigentes. Regeneraciones, reintentos y el modelo de respaldo pueden aumentarla.'}</p>`;
+  $('#costProjectSelect')?.addEventListener('change', (event) => {
+    state.costProjectId = event.target.value;
+    renderProjectCostEstimate(projects);
+  });
+}
+
 async function loadCosts() {
   let data;
   try {
@@ -4552,6 +5405,8 @@ async function loadCosts() {
       <div class="ct-value">${data.recent.length >= 100 ? '100+' : data.recent.length}</div>
       <div class="ct-sub">estimaciones, no factura oficial</div>
     </div>`;
+
+  renderProjectCostEstimate(data.projects || []);
 
   const byModel = Object.entries(data.byModelThisMonth).sort((a, b) => b[1].cost - a[1].cost);
   $('#costsByModel').innerHTML = byModel.length
@@ -4789,6 +5644,8 @@ async function init() {
     if (s.musicModel?.defaultVersion) state.music.version = s.config?.sunoModelId || s.musicModel.defaultVersion;
     state.characters = s.characters;
     state.prompts = s.prompts;
+    state.fonts = s.fonts || [];
+    await registerCustomFonts(state.fonts);
     state.promptCategoriesExtra = s.promptCategories || {};
     state.assetLinks = s.assetLinks || [];
     state.series = s.series || [];

@@ -59,6 +59,41 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
 - Consultar consumo estimado por mes/modelo y editar tarifas.
 - Recibir guiones estructurados desde Controversy Tracker, asignar sus roles a
   fichas locales y producir cada bloque con imagen, voz, sobreimpresión y video.
+- Configurar por proyecto un modelo de imagen de respaldo: si el principal
+  rechaza o falla una escena, el Automatizador reintenta una vez con el respaldo
+  y registra cuál produjo la imagen.
+- Guardar y renombrar proyectos del Automatizador; generar desde cada rol su
+  ficha de personaje, fondo u objeto con un modelo elegido para esa solicitud.
+  La imagen se archiva como ficha canónica y queda asignada al rol. También se
+  pueden generar en secuencia todos los assets faltantes con una sola acción,
+  omitiendo los que ya estén asignados.
+- Elegir una voz de ElevenLabs antes de crear un personaje o asignarla después
+  a cualquier personaje vinculado al proyecto.
+- Definir una dirección artística global por proyecto. Se agrega en inglés a
+  todas las fichas y escenas para mantener el mismo medio, realismo, anatomía,
+  materiales, color e iluminación durante toda la producción. Puede cargarse
+  directamente desde cualquier prompt guardado en la biblioteca.
+- Personalizar el texto sobreimpreso con fuentes propias persistentes
+  (TTF/OTF/WOFF/WOFF2), medidas tipográficas en píxeles de referencia,
+  alineación horizontal y estilos independientes para texto normal y palabras
+  resaltadas. Cada uno puede conservar el texto original, convertirlo a
+  mayúsculas o minúsculas, capitalizarlo y usar cursiva, subrayado o tachado.
+- Reanudar cada bloque por etapas: imagen, sobreimpresión y cada audio se
+  persisten apenas terminan. Si FFmpeg o una etapa posterior falla, **Continuar**
+  reutiliza esos parciales; **Regenerar desde cero** es la acción explícita que
+  vuelve a consumir generación.
+- Configurar FFmpeg indicando indistintamente la carpeta `bin` o la ruta completa
+  a `ffmpeg.exe`.
+- Ensamblar el video final desde los MP4 terminados, respetando el orden de los
+  bloques del guion y sin volver a generar imágenes ni audios. El resultado se
+  guarda como Asset y se invalida si después se regenera un bloque. El ensamble
+  conserva la resolución y proporción dominante de los videos del proyecto.
+- Consultar en Consumo la estimación completa de cada proyecto, desglosada en
+  fichas, imágenes de bloques, voces y procesamiento local. Se abre el proyecto
+  más reciente y los anteriores se eligen desde una lista.
+- Abrir fichas y resultados del Automatizador en el visor interno de Assets, con
+  acciones para asociar a series, reutilizar como referencia, convertir en
+  personaje, asociar a entidades, descargar o abrir en Photoshop.
 
 ## Conectar Controversy Tracker
 
@@ -80,5 +115,6 @@ con **Importar guion (JSON)**. Ambos caminos validan el mismo contrato.
 - `assets/generated/`: imágenes generadas.
 - `assets/uploads/`: imágenes subidas.
 - `assets/audio/`: audios generados.
+- `assets/video/`: videos de bloque y ensambles finales.
 
 Estos datos están ignorados por Git para evitar subir claves o material privado.
