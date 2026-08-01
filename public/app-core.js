@@ -83,6 +83,7 @@ const state = {
   lightboxIndex: 0,
   generationJobs: [],
   activeGenerations: 0,
+  uiTasks: [],             // monitor global de operaciones, visible desde cualquier vista
   pinnedId: localStorage.getItem('pinnedCharacterId') || '',
   characterVariantId: localStorage.getItem('pinnedCharacterVariantId') || ''
 };
@@ -117,16 +118,120 @@ function toast(msg, kind = 'ok') {
   toastTimer = setTimeout(() => { t.hidden = true; }, kind === 'err' ? 7000 : 3000);
 }
 
+let uiTaskSequence = 0;
+
+function renderTaskMonitor() {
+  const panel = $('#taskMonitor');
+  const list = $('#taskMonitorList');
+  if (!panel || !list) return;
+  const visible = [...state.uiTasks]
+    .sort((a, b) => (a.status === 'running' ? 0 : 1) - (b.status === 'running' ? 0 : 1)
+      || (b.startedAt || 0) - (a.startedAt || 0))
+    .slice(0, 6);
+  panel.hidden = false;
+  if (!visible.length) {
+    panel.classList.remove('has-running');
+    const summary = $('#taskMonitorSummary');
+    if (summary) summary.textContent = 'Sin tareas activas';
+    list.innerHTML = '<span class="task-monitor-empty">La actividad aparecerá aquí.</span>';
+    return;
+  }
+  const running = state.uiTasks.filter((task) => task.status === 'running');
+  panel.classList.toggle('has-running', running.length > 0);
+  const summary = $('#taskMonitorSummary');
+  if (summary) summary.textContent = running.length
+    ? `${running.length} en ejecución`
+    : 'Actividad reciente';
+  list.innerHTML = visible.map((task) => {
+    const hasTotal = Number(task.total) > 0;
+    const counter = hasTotal
+      ? `${Math.min(Number(task.current) || 0, Number(task.total))}/${Number(task.total)}`
+      : task.status === 'done' ? 'Listo' : task.status === 'error' ? 'Error' : 'En curso';
+    return `<div class="task-monitor-item ${task.status}">
+      <span class="task-dot"></span>
+      <span class="task-item-copy"><strong>${esc(task.title)}</strong><small>${esc(task.detail || (task.status === 'done' ? 'Completado' : 'Esperando respuesta…'))}</small></span>
+      <span class="task-counter">${esc(counter)}</span>
+    </div>`;
+  }).join('');
+}
+
+function startUiTask(spec = {}) {
+  const task = {
+    id: `task-${Date.now()}-${++uiTaskSequence}`,
+    title: String(spec.title || 'Procesando').slice(0, 100),
+    detail: String(spec.detail || '').slice(0, 240),
+    current: Math.max(0, Number(spec.current) || 0),
+    total: Math.max(0, Number(spec.total) || 0),
+    status: 'running',
+    startedAt: Date.now()
+  };
+  state.uiTasks.unshift(task);
+  renderTaskMonitor();
+  return task.id;
+}
+
+function updateUiTask(taskId, patch = {}) {
+  const task = state.uiTasks.find((item) => item.id === taskId);
+  if (!task) return;
+  if (patch.title !== undefined) task.title = String(patch.title).slice(0, 100);
+  if (patch.detail !== undefined) task.detail = String(patch.detail).slice(0, 240);
+  if (patch.current !== undefined) task.current = Math.max(0, Number(patch.current) || 0);
+  if (patch.total !== undefined) task.total = Math.max(0, Number(patch.total) || 0);
+  renderTaskMonitor();
+}
+
+function finishUiTask(taskId, { error = '', detail = '' } = {}) {
+  const task = state.uiTasks.find((item) => item.id === taskId);
+  if (!task) return;
+  task.status = error ? 'error' : 'done';
+  task.detail = String(error || detail || (error ? 'La tarea falló.' : 'Completado')).slice(0, 240);
+  if (!error && task.total > 0) task.current = task.total;
+  task.finishedAt = Date.now();
+  renderTaskMonitor();
+  setTimeout(() => {
+    state.uiTasks = state.uiTasks.filter((item) => item.id !== taskId);
+    renderTaskMonitor();
+  }, error ? 12000 : 6000);
+}
+
+function inferredApiTask(path, method, body) {
+  if (method === 'GET') return null;
+  if (path === '/api/generate/image') return { title: 'Generando imagen', detail: 'Esperando al modelo de imagen…', total: Math.max(1, Number(body?.batch) || 1), current: 1 };
+  if (path === '/api/generate/video') return { title: 'Generando video', detail: 'Esperando al modelo de video…' };
+  if (path === '/api/generate/audio') return { title: 'Generando voz', detail: 'Esperando a ElevenLabs…' };
+  if (path === '/api/generate/music' || /\/music\/generate$/.test(path)) return { title: 'Generando música', detail: 'Esperando a Suno…', total: 2, current: 1 };
+  if (path === '/api/translate') return { title: 'Traduciendo texto', detail: 'Esperando la traducción…' };
+  if (/\/automations\/[a-z0-9]+\/assemble$/.test(path)) return { title: 'Ensamblando video final', detail: 'Uniendo tomas, audio y música con FFmpeg…' };
+  if (/\/automations\/[a-z0-9]+\/effect$/.test(path)) return { title: 'Aplicando efecto final', detail: 'Procesando imagen y conservando subtítulos nítidos…' };
+  if (/\/automations\/[a-z0-9]+\/video$/.test(path)) return { title: 'Armando toma', detail: 'Sincronizando imagen y audio con FFmpeg…' };
+  if (/\/scripts\/[a-z0-9]+\/generate$/.test(path)) return { title: 'Generando guion', detail: 'Esperando la respuesta del modelo…' };
+  if (path === '/api/upload' || path === '/api/assets/audio') return { title: 'Guardando asset', detail: 'Subiendo el archivo a Manifestador…' };
+  if (path === '/api/assets/zip') return { title: 'Preparando descarga', detail: 'Empaquetando los assets seleccionados…' };
+  return null;
+}
+
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined
-  });
-  const json = await res.json().catch(() => ({}));
-  if (res.status === 401 && json.loginRequired) showLogin();
-  if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
-  return json;
+  const { task: requestedTask, ...requestOptions } = opts;
+  const method = String(requestOptions.method || 'GET').toUpperCase();
+  const taskSpec = requestedTask === false
+    ? null
+    : (typeof requestedTask === 'string' ? { title: requestedTask } : requestedTask || inferredApiTask(path, method, requestOptions.body));
+  const taskId = taskSpec ? startUiTask(taskSpec) : '';
+  try {
+    const res = await fetch(path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...requestOptions,
+      body: requestOptions.body ? JSON.stringify(requestOptions.body) : undefined
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.status === 401 && json.loginRequired) showLogin();
+    if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+    if (taskId) finishUiTask(taskId);
+    return json;
+  } catch (error) {
+    if (taskId) finishUiTask(taskId, { error: error.message });
+    throw error;
+  }
 }
 
 function fmtDate(ts) {

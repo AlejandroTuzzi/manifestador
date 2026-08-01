@@ -28,6 +28,7 @@ const AUTOMATION_LOGOS = {
 const AUTOMATION_LOGO_FADE_SECONDS = 0.75;
 const PORT = process.env.PORT ? Number(process.env.PORT) : 7777;
 const sessions = new Map();
+const automationAssemblyJobs = new Set();
 
 // Se agrega automáticamente (sin mostrarse en la caja) cuando alguna
 // referencia viene del Poser, para que el modelo la tome solo como pose.
@@ -442,6 +443,87 @@ function automationVideoDimensions(aspectRatio) {
   }
   const width = 1080;
   return { width, height: even(width * ratioHeight / ratioWidth) };
+}
+
+const AUTOMATION_VIDEO_EFFECTS = Object.freeze({
+  wiggle: { name: 'Wiggle suave' },
+  oldFilm: { name: 'Cinta vieja' },
+  vhs: { name: 'VHS' }
+});
+
+function normalizeAutomationVideoEffect(saved = {}) {
+  const preset = Object.hasOwn(AUTOMATION_VIDEO_EFFECTS, saved?.preset) ? saved.preset : 'wiggle';
+  const enteredIntensity = Number(saved?.intensity);
+  return {
+    enabled: saved?.enabled === true,
+    preset,
+    intensity: Number.isFinite(enteredIntensity) ? Math.max(0, Math.min(100, Math.round(enteredIntensity))) : 35
+  };
+}
+
+// Devuelve una cadena de filtros que siempre conserva las dimensiones originales.
+// La intensidad se traduce a rangos deliberadamente moderados: 100% sigue siendo
+// utilizable para texto y rostros, pero deja el efecto claramente visible.
+function automationVideoEffectFilters(effect, width, height) {
+  const normalized = normalizeAutomationVideoEffect(effect);
+  const amount = normalized.intensity / 100;
+  if (normalized.intensity === 0) return 'setsar=1,format=yuv420p';
+  const even = (value) => Math.max(2, Math.round(value / 2) * 2);
+  const margin = even(Math.max(8, Math.min(width, height) * (0.012 + amount * 0.028)));
+  const scaledWidth = even(width + margin * 2);
+  const scaledHeight = even(height + margin * 2);
+
+  if (normalized.preset === 'oldFilm') {
+    const jitterX = (0.4 + amount * 2.8).toFixed(2);
+    const jitterY = (0.25 + amount * 1.8).toFixed(2);
+    const brightness = (0.004 + amount * 0.024).toFixed(4);
+    const noise = Math.round(3 + amount * 19);
+    const saturation = (0.9 - amount * 0.32).toFixed(3);
+    const contrast = (1.03 + amount * 0.18).toFixed(3);
+    const vignetteAngle = (Math.PI / (5.2 - amount * 1.7)).toFixed(4);
+    return [
+      `scale=${scaledWidth}:${scaledHeight}`,
+      `crop=${width}:${height}:x='(in_w-out_w)/2+${jitterX}*sin(2*PI*t*8.7)':y='(in_h-out_h)/2+${jitterY}*sin(2*PI*t*6.1)'`,
+      `eq=contrast=${contrast}:brightness='${brightness}*sin(2*PI*t*4.3)':saturation=${saturation}:eval=frame`,
+      `noise=alls=${noise}:allf=t+u`,
+      `vignette=angle=${vignetteAngle}`,
+      'setsar=1',
+      'format=yuv420p'
+    ].join(',');
+  }
+
+  if (normalized.preset === 'vhs') {
+    const jitterX = (1 + amount * 7).toFixed(2);
+    const jitterY = (0.3 + amount * 2.2).toFixed(2);
+    const channelShift = Math.max(1, Math.round(1 + amount * 8));
+    const noise = Math.round(2 + amount * 13);
+    const scanOpacity = (0.035 + amount * 0.13).toFixed(3);
+    const scanHeight = Math.max(3, Math.round(height / 180));
+    const saturation = (0.98 - amount * 0.22).toFixed(3);
+    const contrast = (1.01 + amount * 0.11).toFixed(3);
+    return [
+      `scale=${scaledWidth}:${scaledHeight}`,
+      `crop=${width}:${height}:x='(in_w-out_w)/2+${jitterX}*sin(2*PI*t*11.3)':y='(in_h-out_h)/2+${jitterY}*sin(2*PI*t*7.1)'`,
+      `rgbashift=rh=${channelShift}:bh=-${channelShift}:edge=smear`,
+      `eq=contrast=${contrast}:brightness=-0.008:saturation=${saturation}`,
+      `noise=alls=${noise}:allf=t+u`,
+      `drawgrid=w=iw:h=${scanHeight}:t=1:c=black@${scanOpacity}`,
+      'setsar=1',
+      'format=yuv420p'
+    ].join(',');
+  }
+
+  const angle = (0.0015 + amount * 0.011).toFixed(5);
+  const x = (0.5 + amount * 5.5).toFixed(2);
+  const y = (0.35 + amount * 3.8).toFixed(2);
+  const frequency = (0.55 + amount * 0.7).toFixed(2);
+  return [
+    `scale=${scaledWidth}:${scaledHeight}`,
+    `rotate='${angle}*sin(2*PI*t*${frequency})':ow=iw:oh=ih:c=black@0`,
+    `crop=${width}:${height}:x='(in_w-out_w)/2+${x}*sin(2*PI*t*1.17)':y='(in_h-out_h)/2+${y}*sin(2*PI*t*0.91)'`,
+    'setsar=1',
+    'format=yuv420p'
+  ].join(',');
 }
 
 function automationLogoForDimensions(width, height) {
@@ -1090,6 +1172,31 @@ const DEFAULT_OVERLAY = {
   previewBg: ''            // asset de fondo SOLO para previsualizar (no se usa al generar)
 };
 
+const DEFAULT_TITLE_OVERLAY = {
+  enabled: false,
+  mode: 'block',
+  blockId: '',
+  text: '',
+  font: 'sans-serif',
+  fontSizePx: 96,
+  fontWeight: 900,
+  fontItalic: false,
+  fontUnderline: false,
+  fontStrikeThrough: false,
+  textTransform: 'none',
+  color: '#ffffff',
+  strokeColor: '#000000',
+  strokeWidthPx: 3,
+  position: 'top',
+  x: 50,
+  y: 14,
+  align: 'center',
+  maxWidthPct: 88,
+  bg: false,
+  bgColor: '#000000',
+  bgOpacity: 0.45
+};
+
 function normalizeAutomationOverlay(saved = {}) {
   const overlay = { ...DEFAULT_OVERLAY, ...(saved || {}) };
   // Migración desde las unidades antiguas: 1% de un lienzo de referencia de
@@ -1121,6 +1228,75 @@ function normalizeAutomationOverlay(saved = {}) {
   return overlay;
 }
 
+function normalizeAutomationTitleOverlay(saved = {}, blocks = [], fallbackText = '') {
+  const title = { ...DEFAULT_TITLE_OVERLAY, ...(saved || {}) };
+  const blockIds = (blocks || []).map((block) => String(block.id));
+  title.enabled = title.enabled === true;
+  title.mode = ['block', 'project'].includes(title.mode) ? title.mode : 'block';
+  title.blockId = blockIds.includes(String(title.blockId || '')) ? String(title.blockId) : (blockIds[0] || '');
+  title.text = String(title.text || fallbackText || '').trim().slice(0, 300);
+  title.font = String(title.font || DEFAULT_TITLE_OVERLAY.font).slice(0, 160);
+  title.fontSizePx = Math.max(8, Math.min(300, Number(title.fontSizePx) || DEFAULT_TITLE_OVERLAY.fontSizePx));
+  title.fontWeight = Math.max(100, Math.min(900, Number(title.fontWeight) || DEFAULT_TITLE_OVERLAY.fontWeight));
+  title.fontItalic = title.fontItalic === true;
+  title.fontUnderline = title.fontUnderline === true;
+  title.fontStrikeThrough = title.fontStrikeThrough === true;
+  title.textTransform = ['none', 'uppercase', 'lowercase', 'capitalize'].includes(title.textTransform) ? title.textTransform : 'none';
+  title.strokeWidthPx = Math.max(0, Math.min(30, Number(title.strokeWidthPx) || 0));
+  title.position = ['top', 'center', 'bottom'].includes(title.position) ? title.position : 'top';
+  const x = Number(title.x);
+  const y = Number(title.y);
+  title.x = Math.max(0, Math.min(100, Number.isFinite(x) ? x : 50));
+  title.y = Math.max(0, Math.min(100, Number.isFinite(y) ? y : DEFAULT_TITLE_OVERLAY.y));
+  title.align = ['left', 'center', 'right'].includes(title.align) ? title.align : 'center';
+  title.maxWidthPct = Math.max(20, Math.min(100, Number(title.maxWidthPct) || DEFAULT_TITLE_OVERLAY.maxWidthPct));
+  title.bg = title.bg === true;
+  const bgOpacity = Number(title.bgOpacity);
+  title.bgOpacity = Math.max(0, Math.min(1, Number.isFinite(bgOpacity) ? bgOpacity : DEFAULT_TITLE_OVERLAY.bgOpacity));
+  return title;
+}
+
+function automationTitleRenderSignature(saved = {}, blocks = [], fallbackText = '') {
+  const normalized = normalizeAutomationTitleOverlay(saved, blocks, fallbackText);
+  if (!normalized.enabled) return JSON.stringify({ enabled: false });
+  if (normalized.mode === 'block') {
+    delete normalized.blockId;
+    delete normalized.text;
+  }
+  return JSON.stringify(normalized);
+}
+
+function automationOverlayRenderSignature(saved = {}) {
+  const normalized = normalizeAutomationOverlay(saved);
+  delete normalized.previewBg;
+  return JSON.stringify(normalized);
+}
+
+function invalidateAutomationOutput(output = {}, { image = false, text = false, audio = false } = {}) {
+  const next = { ...(output || {}) };
+  if (image) {
+    delete next.imageKey;
+    delete next.imageModelId;
+    delete next.imageModelName;
+    delete next.fallbackUsed;
+    delete next.recoveredImage;
+    text = true;
+  }
+  if (text) {
+    delete next.textImageKey;
+    delete next.textLayerKey;
+  }
+  if (audio) {
+    delete next.audioKeys;
+    delete next.audioCountExpected;
+  }
+  if (image || text || audio) {
+    delete next.videoKey;
+    delete next.completedAt;
+  }
+  return next;
+}
+
 // La voz del narrador es del proyecto; los diálogos usan la voz del personaje
 // asignado (si tiene), con la del narrador como respaldo.
 const DEFAULT_AUTOMATION_CONFIG = {
@@ -1133,6 +1309,11 @@ const DEFAULT_AUTOMATION_CONFIG = {
   narratorVoiceName: '',
   audioModelId: AUDIO_MODEL.id,
   includeLogos: false,
+  videoEffect: {
+    enabled: false,
+    preset: 'wiggle',
+    intensity: 35
+  },
   transitionSound: {
     enabled: false,
     soundId: ''
@@ -1149,7 +1330,8 @@ const DEFAULT_AUTOMATION_CONFIG = {
     fadeOutSeconds: 5,
     sunoModel: MUSIC_MODEL.defaultVersion
   },
-  overlay: { ...DEFAULT_OVERLAY }
+  overlay: { ...DEFAULT_OVERLAY },
+  titleOverlay: { ...DEFAULT_TITLE_OVERLAY }
 };
 
 function normalizeAutomationMusic(saved = {}, requirement = {}) {
@@ -1269,6 +1451,31 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
   };
 }
 
+function normalizeAutomationGeneratedCharacters(saved = {}, requirements = []) {
+  const allowedRoles = new Set((requirements || []).map((item) => roleId(item.role)).filter(Boolean));
+  const source = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  return Object.fromEntries(Object.entries(source).flatMap(([rawRole, raw]) => {
+    const role = roleId(rawRole);
+    if (!role || !allowedRoles.has(role) || !raw || typeof raw !== 'object') return [];
+    const assetKey = String(raw.assetKey || raw.sheet || '').trim();
+    if (!/^(generated|uploads)\/[\w./ -]+$/i.test(assetKey) || assetKey.includes('..')) return [];
+    return [[role, {
+      id: `automation-character:${role}`,
+      role,
+      name: String(raw.name || role).trim().slice(0, 120) || role,
+      description: String(raw.description || '').slice(0, 1600),
+      clothing: String(raw.clothing || '').slice(0, 800),
+      assetKey,
+      sheet: assetKey,
+      photos: [assetKey],
+      voiceId: String(raw.voiceId || '').slice(0, 200),
+      voiceName: String(raw.voiceName || '').slice(0, 200),
+      modelId: String(raw.modelId || '').slice(0, 120),
+      generatedAt: Number(raw.generatedAt) || Date.now()
+    }]];
+  }));
+}
+
 // normaliza un proyecto (importado o editado); conserva lo previo (asignaciones,
 // config, outputs) al re-guardar
 function sanitizeAutomation(src, prev = {}) {
@@ -1334,6 +1541,7 @@ function sanitizeAutomation(src, prev = {}) {
     name: String(projectData?.name ?? src.project ?? src.name ?? prev.name ?? 'Proyecto').trim().slice(0, 120) || 'Proyecto',
     requirements,
     blocks,
+    generatedCharacters: normalizeAutomationGeneratedCharacters(prev.generatedCharacters || src.generatedCharacters, requirements.characters),
     assignments: prev.assignments || { characters: {}, locations: {}, objects: {} },
     config: {
       ...DEFAULT_AUTOMATION_CONFIG,
@@ -1341,12 +1549,19 @@ function sanitizeAutomation(src, prev = {}) {
       artStyle: String(prev.config?.artStyle || DEFAULT_AUTOMATION_CONFIG.artStyle).slice(0, 1200),
       audioModelId: getAudioModel(prev.config?.audioModelId).id,
       includeLogos: prev.config?.includeLogos === true,
+      videoEffect: normalizeAutomationVideoEffect(prev.config?.videoEffect),
       transitionSound: normalizeAutomationTransitionSound(prev.config?.transitionSound),
       music: normalizeAutomationMusic(prev.config?.music, requirements.music),
-      overlay: normalizeAutomationOverlay(prev.config?.overlay)
+      overlay: normalizeAutomationOverlay(prev.config?.overlay),
+      titleOverlay: normalizeAutomationTitleOverlay(
+        prev.config?.titleOverlay,
+        blocks,
+        scriptData?.title || projectData?.name || src.name || prev.name
+      )
     },
     outputs: prev.outputs || {},
     finalOutput: prev.finalOutput || null,
+    effectOutput: prev.effectOutput || null,
     integration: src.schema === AUTOMATION_CONTRACT ? {
       contract: AUTOMATION_CONTRACT,
       source: String(projectData?.source || 'controversy-tracker').slice(0, 80),
@@ -1787,6 +2002,7 @@ const server = http.createServer(async (req, res) => {
         }
         out = sanitizeAutomation(source, all[index]);
         out.finalOutput = null;
+        out.effectOutput = null;
         all[index] = out;
         return all;
       });
@@ -1892,10 +2108,12 @@ const server = http.createServer(async (req, res) => {
           config: {
             ...project.config,
             includeLogos: project.config?.includeLogos === true,
+            videoEffect: normalizeAutomationVideoEffect(project.config?.videoEffect),
             audioModelId: getAudioModel(project.config?.audioModelId).id,
             transitionSound: normalizeAutomationTransitionSound(project.config?.transitionSound),
             music: normalizeAutomationMusic(project.config?.music, project.requirements?.music),
-            overlay: normalizeAutomationOverlay(project.config?.overlay)
+            overlay: normalizeAutomationOverlay(project.config?.overlay),
+            titleOverlay: normalizeAutomationTitleOverlay(project.config?.titleOverlay, project.blocks, project.integration?.scriptTitle || project.name)
           }
         })),
         fonts,
@@ -2302,6 +2520,9 @@ const server = http.createServer(async (req, res) => {
             locations: { ...(body.assignments.locations || {}) },
             objects: { ...(body.assignments.objects || {}) }
           };
+          if (body.generatedCharacters !== undefined) {
+            next.generatedCharacters = normalizeAutomationGeneratedCharacters(body.generatedCharacters, next.requirements?.characters);
+          }
           if (body.config !== undefined) next.config = {
             ...prev.config,
             ...body.config,
@@ -2311,21 +2532,98 @@ const server = http.createServer(async (req, res) => {
             includeLogos: body.config.includeLogos !== undefined
               ? body.config.includeLogos === true
               : prev.config?.includeLogos === true,
+            videoEffect: normalizeAutomationVideoEffect({
+              ...prev.config?.videoEffect,
+              ...(body.config.videoEffect || {})
+            }),
             audioModelId: getAudioModel(body.config.audioModelId ?? prev.config?.audioModelId).id,
             transitionSound: normalizeAutomationTransitionSound({
               ...prev.config?.transitionSound,
               ...(body.config.transitionSound || {})
             }),
             music: normalizeAutomationMusic({ ...prev.config.music, ...(body.config.music || {}) }, prev.requirements?.music),
-            overlay: normalizeAutomationOverlay({ ...prev.config.overlay, ...(body.config.overlay || {}) })
+            overlay: normalizeAutomationOverlay({ ...prev.config.overlay, ...(body.config.overlay || {}) }),
+            titleOverlay: normalizeAutomationTitleOverlay(
+              { ...prev.config?.titleOverlay, ...(body.config.titleOverlay || {}) },
+              next.blocks,
+              prev.integration?.scriptTitle || next.name
+            )
           };
-          if (body.config?.music !== undefined) next.finalOutput = null;
-          if (body.config?.includeLogos !== undefined) next.finalOutput = null;
-          if (body.config?.transitionSound !== undefined) next.finalOutput = null;
+          if (body.config?.overlay !== undefined
+            && automationOverlayRenderSignature(prev.config?.overlay) !== automationOverlayRenderSignature(next.config?.overlay)) {
+            next.outputs = Object.fromEntries(Object.entries(next.outputs || {}).map(([blockId, output]) => [
+              blockId,
+              invalidateAutomationOutput(output, { text: true })
+            ]));
+            next.finalOutput = null;
+          }
+          if (body.config?.titleOverlay !== undefined) {
+            const previousTitle = normalizeAutomationTitleOverlay(prev.config?.titleOverlay, prev.blocks, prev.integration?.scriptTitle || prev.name);
+            const nextTitle = normalizeAutomationTitleOverlay(next.config?.titleOverlay, next.blocks, next.integration?.scriptTitle || next.name);
+            const titleRenderingChanged = automationTitleRenderSignature(previousTitle, prev.blocks, prev.integration?.scriptTitle || prev.name)
+              !== automationTitleRenderSignature(nextTitle, next.blocks, next.integration?.scriptTitle || next.name);
+            if (titleRenderingChanged) {
+              const affectsEveryBlock = previousTitle.mode === 'block' || nextTitle.mode === 'block';
+              const affectedBlockIds = new Set([previousTitle.blockId, nextTitle.blockId].filter(Boolean));
+              next.outputs = Object.fromEntries(Object.entries(next.outputs || {}).map(([blockId, output]) => [
+                blockId,
+                affectsEveryBlock || affectedBlockIds.has(blockId) ? invalidateAutomationOutput(output, { text: true }) : output
+              ]));
+              next.finalOutput = null;
+            }
+          }
+          if (body.config?.music !== undefined
+            && JSON.stringify(normalizeAutomationMusic(prev.config?.music, prev.requirements?.music))
+              !== JSON.stringify(normalizeAutomationMusic(next.config?.music, prev.requirements?.music))) next.finalOutput = null;
+          if (body.config?.includeLogos !== undefined
+            && (prev.config?.includeLogos === true) !== (next.config?.includeLogos === true)) next.finalOutput = null;
+          if (body.config?.transitionSound !== undefined
+            && JSON.stringify(normalizeAutomationTransitionSound(prev.config?.transitionSound))
+              !== JSON.stringify(normalizeAutomationTransitionSound(next.config?.transitionSound))) next.finalOutput = null;
           // outputs por bloque (imagen, imagen+texto, audios, video) — se mergea por id de bloque
           if (body.outputs !== undefined && body.outputs && typeof body.outputs === 'object') {
+            const changesRenderedVideo = Object.entries(body.outputs).some(([blockId, output]) =>
+              String(prev.outputs?.[blockId]?.videoKey || '') !== String(output?.videoKey || ''));
             next.outputs = { ...prev.outputs, ...body.outputs };
-            next.finalOutput = null;
+            if (changesRenderedVideo) next.finalOutput = null;
+          }
+          if (body.blocks !== undefined) {
+            const sanitized = sanitizeAutomation({ ...prev, requirements: prev.requirements, blocks: body.blocks }, prev).blocks;
+            if (sanitized.some((block) => !block.imagePrompt.trim() || !block.items.length)) {
+              throw new Error('Cada bloque debe conservar un prompt visual y al menos un texto de narración o diálogo.');
+            }
+            const previousById = new Map((prev.blocks || []).map((block) => [block.id, block]));
+            const nextOutputs = {};
+            let generationChanged = sanitized.length !== (prev.blocks || []).length;
+            for (const block of sanitized) {
+              const previousBlock = previousById.get(block.id);
+              let output = next.outputs?.[block.id] || {};
+              if (!previousBlock) {
+                generationChanged = true;
+              } else {
+                const promptChanged = previousBlock.imagePrompt !== block.imagePrompt
+                  || previousBlock.negativePrompt !== block.negativePrompt;
+                const textChanged = JSON.stringify(previousBlock.items || []) !== JSON.stringify(block.items || []);
+                const blockTitleChanged = previousBlock.title !== block.title
+                  && next.config?.titleOverlay?.enabled === true
+                  && next.config?.titleOverlay?.mode === 'block';
+                if (promptChanged || textChanged || blockTitleChanged) generationChanged = true;
+                output = invalidateAutomationOutput(output, {
+                  image: promptChanged,
+                  text: textChanged || blockTitleChanged,
+                  audio: textChanged
+                });
+              }
+              nextOutputs[block.id] = output;
+            }
+            next.blocks = sanitized;
+            next.outputs = nextOutputs;
+            next.config.titleOverlay = normalizeAutomationTitleOverlay(
+              next.config?.titleOverlay,
+              next.blocks,
+              next.integration?.scriptTitle || next.name
+            );
+            if (generationChanged) next.finalOutput = null;
           }
           if (body.data !== undefined) {
             const re = sanitizeAutomation(body.data, prev);
@@ -2335,11 +2633,15 @@ const server = http.createServer(async (req, res) => {
           next.config = {
             ...next.config,
             includeLogos: next.config?.includeLogos === true,
+            videoEffect: normalizeAutomationVideoEffect(next.config?.videoEffect),
             audioModelId: getAudioModel(next.config?.audioModelId).id,
             transitionSound: normalizeAutomationTransitionSound(next.config?.transitionSound),
             music: normalizeAutomationMusic(next.config?.music, next.requirements?.music),
-            overlay: normalizeAutomationOverlay(next.config?.overlay)
+            overlay: normalizeAutomationOverlay(next.config?.overlay),
+            titleOverlay: normalizeAutomationTitleOverlay(next.config?.titleOverlay, next.blocks, next.integration?.scriptTitle || next.name)
           };
+          next.generatedCharacters = normalizeAutomationGeneratedCharacters(next.generatedCharacters, next.requirements?.characters);
+          if (!next.finalOutput) next.effectOutput = null;
           next.updatedAt = Date.now();
           all[i] = next; out = next; return all;
         });
@@ -2405,6 +2707,7 @@ const server = http.createServer(async (req, res) => {
             overlay: normalizeAutomationOverlay(item.config?.overlay)
           },
           finalOutput: null,
+          effectOutput: null,
           updatedAt: Date.now()
         };
         return updatedProject;
@@ -2547,7 +2850,7 @@ const server = http.createServer(async (req, res) => {
         args.push('-i', transitionSoundPath);
       }
 
-      if (includeLogos || transitionSoundPath || (musicPath && music.fadeOut)) {
+      if (includeLogos || transitionSoundPath || musicPath) {
         blockDurations = await Promise.all(videoPaths.map((videoPath) => probeMediaDuration(ffmpegExecutable, videoPath)));
         if (blockDurations.some((duration) => !duration)) {
           return send(res, 400, { error: 'No pude calcular la duración de los bloques para preparar el ensamble. Verificá que ffprobe esté junto a ffmpeg.' });
@@ -2610,10 +2913,16 @@ const server = http.createServer(async (req, res) => {
       if (musicPath) {
         const musicInputIndex = videoPaths.length;
         const gainDb = Math.max(-60, Math.min(0, music.gainDb));
-        const fadeFilter = appliedFadeOutSeconds > 0
-          ? `,atrim=end=${finalDuration.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=out:st=${Math.max(0, finalDuration - appliedFadeOutSeconds).toFixed(3)}:d=${appliedFadeOutSeconds.toFixed(3)}`
+        // La entrada musical usa -stream_loop -1. Siempre hay que acotarla a la
+        // duración del contenido, aunque el fade esté desactivado; de lo contrario
+        // FFmpeg puede finalizar el MP4 pero quedar esperando la fuente infinita.
+        const trimFilter = finalDuration
+          ? `,atrim=end=${finalDuration.toFixed(3)},asetpts=PTS-STARTPTS`
           : '';
-        filters.push(`[${musicInputIndex}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${gainDb.toFixed(2)}dB${fadeFilter}[music]`);
+        const fadeFilter = appliedFadeOutSeconds > 0
+          ? `,afade=t=out:st=${Math.max(0, finalDuration - appliedFadeOutSeconds).toFixed(3)}:d=${appliedFadeOutSeconds.toFixed(3)}`
+          : '';
+        filters.push(`[${musicInputIndex}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${gainDb.toFixed(2)}dB${trimFilter}${fadeFilter}[music]`);
         filters.push(`[${contentAudioLabel}][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[aout]`);
       } else {
         filters.push(`[${contentAudioLabel}]anull[aout]`);
@@ -2646,10 +2955,18 @@ const server = http.createServer(async (req, res) => {
         '-filter_complex', filters.join(';'),
         '-map', `[${finalVideoLabel}]`, '-map', `[${finalAudioLabel}]`,
         '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart',
+        '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-shortest',
         outPath
       );
-      await runFfmpeg(ffmpegExecutable, args);
+      if (automationAssemblyJobs.has(projectId)) {
+        return send(res, 409, { error: 'Este proyecto ya tiene un ensamble en curso. Esperá a que termine antes de iniciarlo otra vez.' });
+      }
+      automationAssemblyJobs.add(projectId);
+      try {
+        await runFfmpeg(ffmpegExecutable, args);
+      } finally {
+        automationAssemblyJobs.delete(projectId);
+      }
 
       const key = `video/${name}`;
       const assembledAt = Date.now();
@@ -2714,6 +3031,7 @@ const server = http.createServer(async (req, res) => {
             overlay: normalizeAutomationOverlay(all[index].config?.overlay)
           },
           finalOutput,
+          effectOutput: null,
           updatedAt: assembledAt
         };
         updatedProject = all[index];
@@ -2721,6 +3039,195 @@ const server = http.createServer(async (req, res) => {
       });
       if (!updatedProject) return send(res, 404, { error: 'El proyecto fue eliminado durante el ensamble.' });
       return send(res, 200, { project: updatedProject, finalOutput: updatedProject.finalOutput });
+    }
+
+    // Posproducción opcional: reconstruye cada toma con su imagen limpia, aplica
+    // el efecto y recién después agrega la capa PNG de texto. Reutiliza el audio
+    // del MP4 final, no llama modelos y mantiene disponible el master anterior.
+    const automationEffectMatch = /^\/api\/automations\/([a-z0-9]+)\/effect$/.exec(p);
+    if (automationEffectMatch && req.method === 'POST') {
+      const projectId = automationEffectMatch[1];
+      const projects = await readJson('automations.json', []);
+      const project = projects.find((item) => item.id === projectId);
+      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
+      if (!project.finalOutput?.videoKey) {
+        return send(res, 400, { error: 'Primero ensamblá el video final limpio.' });
+      }
+
+      const body = await readJsonBody(req);
+      const effect = normalizeAutomationVideoEffect({
+        ...project.config?.videoEffect,
+        ...(body.videoEffect || body || {}),
+        enabled: true
+      });
+      const sourceVideoKey = String(project.finalOutput.videoKey);
+      if (!/^video\//.test(sourceVideoKey)) return send(res, 400, { error: 'El ensamble final no es un video válido.' });
+      const sourcePath = await resolveAssetKey(sourceVideoKey);
+      const sourceStat = await fs.stat(sourcePath).catch(() => null);
+      if (!sourceStat?.isFile()) return send(res, 400, { error: 'No encuentro el ensamble final. Volvé a ensamblarlo.' });
+
+      const cfg = await getConfig();
+      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
+      const detectedDimensions = await probeVideoDimensions(ffmpegExecutable, sourcePath);
+      const fallbackDimensions = automationVideoDimensions(project.config?.aspectRatio);
+      const width = Number(project.finalOutput.width) || detectedDimensions?.width || fallbackDimensions.width;
+      const height = Number(project.finalOutput.height) || detectedDimensions?.height || fallbackDimensions.height;
+      const duration = await probeMediaDuration(ffmpegExecutable, sourcePath);
+      if (!duration) return send(res, 400, { error: 'No pude leer la duración del ensamble. Verificá que ffprobe esté junto a ffmpeg.' });
+
+      const blockSources = [];
+      for (const block of project.blocks || []) {
+        const output = project.outputs?.[block.id] || {};
+        const imageKey = String(output.imageKey || '');
+        const textLayerKey = String(output.textLayerKey || '');
+        const blockVideoKey = String(output.videoKey || '');
+        if (!/^(generated|uploads)\//.test(imageKey)) {
+          return send(res, 400, { error: `Falta la imagen limpia de “${block.title || block.id}”.` });
+        }
+        if (!/^(generated|uploads)\//.test(textLayerKey)) {
+          return send(res, 400, { error: `Falta la capa de subtítulos de “${block.title || block.id}”. Volvé a aplicar el efecto para prepararla.` });
+        }
+        if (!/^video\//.test(blockVideoKey)) {
+          return send(res, 400, { error: `Falta el video terminado de “${block.title || block.id}”.` });
+        }
+        const [imagePath, textLayerPath, blockVideoPath] = await Promise.all([
+          resolveAssetKey(imageKey), resolveAssetKey(textLayerKey), resolveAssetKey(blockVideoKey)
+        ]);
+        const stats = await Promise.all([
+          fs.stat(imagePath).catch(() => null),
+          fs.stat(textLayerPath).catch(() => null),
+          fs.stat(blockVideoPath).catch(() => null)
+        ]);
+        if (stats.some((stat) => !stat?.isFile())) {
+          return send(res, 400, { error: `No encuentro todos los materiales locales de “${block.title || block.id}”.` });
+        }
+        blockSources.push({ block, imagePath, textLayerPath, blockVideoPath });
+      }
+      if (!blockSources.length) return send(res, 400, { error: 'El proyecto no tiene tomas para procesar.' });
+
+      const blockDurations = await Promise.all(
+        blockSources.map((source) => probeMediaDuration(ffmpegExecutable, source.blockVideoPath))
+      );
+      if (blockDurations.some((blockDuration) => !blockDuration)) {
+        return send(res, 400, { error: 'No pude calcular la duración de todas las tomas. Verificá que ffprobe esté junto a ffmpeg.' });
+      }
+      const contentDuration = blockDurations.reduce((sum, blockDuration) => sum + blockDuration, 0);
+      const effectFilters = automationVideoEffectFilters(effect, width, height);
+      const name = `${ts()}-efecto-${effect.preset}-${sanitizeName(project.name)}-${newId()}.mp4`;
+      const outDir = resolveDir(cfg.paths.video);
+      await fs.mkdir(outDir, { recursive: true });
+      const outPath = path.join(outDir, name);
+      const args = ['-y', '-i', sourcePath];
+      for (const source of blockSources) {
+        args.push('-loop', '1', '-framerate', '25', '-i', source.imagePath);
+        args.push('-loop', '1', '-framerate', '25', '-i', source.textLayerPath);
+      }
+      const filters = [
+        `[0:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,format=yuv420p[base]`
+      ];
+      const shotLabels = [];
+      for (let index = 0; index < blockSources.length; index++) {
+        const imageInputIndex = 1 + index * 2;
+        const layerInputIndex = imageInputIndex + 1;
+        const blockDuration = blockDurations[index].toFixed(3);
+        filters.push(
+          `[${imageInputIndex}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+          `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
+          `${effectFilters},trim=start=0:end=${blockDuration},setpts=PTS-STARTPTS[effectbg${index}]`
+        );
+        filters.push(
+          `[${layerInputIndex}:v:0]format=rgba,scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+          `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1,` +
+          `trim=start=0:end=${blockDuration},setpts=PTS-STARTPTS,format=rgba[textlayer${index}]`
+        );
+        filters.push(
+          `[effectbg${index}][textlayer${index}]overlay=x=0:y=0:shortest=1:format=auto,` +
+          `format=yuv420p,setpts=PTS-STARTPTS[shot${index}]`
+        );
+        shotLabels.push(`[shot${index}]`);
+      }
+      const fadeToBlackSeconds = project.finalOutput.includeLogos
+        ? Math.max(0, Math.min(contentDuration, Number(project.finalOutput.fadeToBlackSeconds) || AUTOMATION_LOGO_FADE_SECONDS))
+        : 0;
+      const finalContentFilter = fadeToBlackSeconds > 0
+        ? `fade=t=out:st=${Math.max(0, contentDuration - fadeToBlackSeconds).toFixed(3)}:d=${fadeToBlackSeconds.toFixed(3)},`
+        : '';
+      filters.push(
+        `${shotLabels.join('')}concat=n=${shotLabels.length}:v=1:a=0,fps=25,` +
+        `${finalContentFilter}format=yuv420p[effectcontent]`
+      );
+      // El ensamble anterior se usa como lienzo temporal y fuente de audio. El
+      // contenido reconstruido lo cubre por completo; al terminar, eof_action=pass
+      // deja visible el logo original (si existe), sin efectos ni subtítulos.
+      filters.push('[base][effectcontent]overlay=x=0:y=0:eof_action=pass:shortest=0:format=auto,format=yuv420p[vout]');
+      args.push(
+        '-filter_complex', filters.join(';'),
+        '-map', '[vout]', '-map', '0:a:0?',
+        '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
+        '-c:a', 'copy', '-movflags', '+faststart',
+        outPath
+      );
+      await runFfmpeg(ffmpegExecutable, args);
+
+      const videoKey = `video/${name}`;
+      const processedAt = Date.now();
+      const presetName = AUTOMATION_VIDEO_EFFECTS[effect.preset].name;
+      await updateJson('asset-metadata.json', {}, (metadata) => {
+        metadata[videoKey] = {
+          type: 'video',
+          modelId: 'ffmpeg',
+          modelName: 'Posproducción FFmpeg',
+          ts: processedAt,
+          category: `Auto: ${project.name}`,
+          automationId: project.id,
+          autoKind: 'post-effect',
+          sourceVideoKey,
+          effectPreset: effect.preset,
+          effectName: presetName,
+          effectIntensity: effect.intensity,
+          width,
+          height,
+          subtitleLayerCount: blockSources.length,
+          subtitlesPreserved: true,
+          logoPreserved: project.finalOutput.includeLogos === true,
+          cost: 0
+        };
+        return metadata;
+      });
+
+      let updatedProject = null;
+      await updateJson('automations.json', [], (all) => all.map((item) => {
+        if (item.id !== projectId) return item;
+        updatedProject = {
+          ...item,
+          config: {
+            ...item.config,
+            videoEffect: effect,
+            transitionSound: normalizeAutomationTransitionSound(item.config?.transitionSound),
+            music: normalizeAutomationMusic(item.config?.music, item.requirements?.music),
+            overlay: normalizeAutomationOverlay(item.config?.overlay),
+            titleOverlay: normalizeAutomationTitleOverlay(item.config?.titleOverlay, item.blocks, item.integration?.scriptTitle || item.name)
+          },
+          effectOutput: {
+            videoKey,
+            sourceVideoKey,
+            processedAt,
+            preset: effect.preset,
+            presetName,
+            intensity: effect.intensity,
+            width,
+            height,
+            subtitleLayerCount: blockSources.length,
+            subtitlesPreserved: true,
+            logoPreserved: project.finalOutput.includeLogos === true
+          },
+          updatedAt: processedAt
+        };
+        return updatedProject;
+      }));
+      if (!updatedProject) return send(res, 404, { error: 'El proyecto fue eliminado durante la posproducción.' });
+      return send(res, 200, { project: updatedProject, effectOutput: updatedProject.effectOutput });
     }
 
     // Etiqueta assets con la categoría del proyecto (y bloque) para agruparlos en Assets.
@@ -2981,10 +3488,17 @@ const server = http.createServer(async (req, res) => {
       })));
       await updateJson('automations.json', [], (all) => all.map((project) => ({
         ...project,
+        generatedCharacters: Object.fromEntries(Object.entries(project.generatedCharacters || {}).map(([role, character]) => [role, {
+          ...character,
+          assetKey: swap(character.assetKey),
+          sheet: swap(character.sheet),
+          photos: (character.photos || []).map(swap)
+        }])),
         outputs: Object.fromEntries(Object.entries(project.outputs || {}).map(([blockId, output]) => [blockId, {
           ...output,
           imageKey: swap(output.imageKey),
           textImageKey: swap(output.textImageKey),
+          textLayerKey: swap(output.textLayerKey),
           videoKey: swap(output.videoKey),
           audioKeys: (output.audioKeys || []).map(swap)
         }])),
@@ -3000,6 +3514,11 @@ const server = http.createServer(async (req, res) => {
           ...project.finalOutput,
           videoKey: swap(project.finalOutput.videoKey),
           musicKey: swap(project.finalOutput.musicKey)
+        } : null,
+        effectOutput: project.effectOutput ? {
+          ...project.effectOutput,
+          videoKey: swap(project.effectOutput.videoKey),
+          sourceVideoKey: swap(project.effectOutput.sourceVideoKey)
         } : null
       })));
       return send(res, 200, { oldKey, newKey, name: newName });
@@ -3076,16 +3595,30 @@ const server = http.createServer(async (req, res) => {
         const finalOutput = project.finalOutput && !removed.has(project.finalOutput.videoKey)
           ? { ...project.finalOutput, musicKey: removed.has(project.finalOutput.musicKey) ? null : project.finalOutput.musicKey }
           : null;
+        const effectOutput = project.effectOutput
+          && !removed.has(project.effectOutput.videoKey)
+          && !removed.has(project.effectOutput.sourceVideoKey)
+          && finalOutput
+          ? { ...project.effectOutput }
+          : null;
         const outputs = Object.fromEntries(Object.entries(project.outputs || {}).map(([blockId, output]) => [blockId, {
           ...output,
           imageKey: removed.has(output.imageKey) ? null : output.imageKey,
           textImageKey: removed.has(output.textImageKey) ? null : output.textImageKey,
+          textLayerKey: removed.has(output.textLayerKey) ? null : output.textLayerKey,
           videoKey: removed.has(output.videoKey) ? null : output.videoKey,
           audioKeys: (output.audioKeys || []).filter((key) => !removed.has(key))
         }]));
+        const generatedCharacters = Object.fromEntries(Object.entries(project.generatedCharacters || {})
+          .filter(([, character]) => !removed.has(character.assetKey || character.sheet)));
+        const assignments = {
+          ...project.assignments,
+          characters: Object.fromEntries(Object.entries(project.assignments?.characters || {}).filter(([role, id]) =>
+            !String(id).startsWith('automation-character:') || generatedCharacters[role]?.id === id))
+        };
         const overlay = normalizeAutomationOverlay(project.config?.overlay);
         if (removed.has(overlay.previewBg)) overlay.previewBg = '';
-        return { ...project, outputs, config: { ...project.config, music, overlay }, finalOutput };
+        return { ...project, generatedCharacters, assignments, outputs, config: { ...project.config, music, overlay }, finalOutput, effectOutput };
       }));
       return send(res, 200, { ok: true, deleted: allowed.length, history: cleaned.slice(0, 200) });
     }
