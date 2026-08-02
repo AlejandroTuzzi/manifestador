@@ -359,6 +359,12 @@ function newId() {
   return crypto.randomBytes(6).toString('hex');
 }
 
+function heyGenMotionPromptValue(heygen = {}, field = 'wideMotionPrompt') {
+  const source = heygen && typeof heygen === 'object' ? heygen : {};
+  const value = Object.prototype.hasOwnProperty.call(source, field) ? source[field] : source.motionPrompt;
+  return String(value || '').trim().slice(0, 1000);
+}
+
 function ts() {
   return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 }
@@ -502,11 +508,26 @@ const AUTOMATION_VIDEO_EFFECTS = Object.freeze({
 function normalizeAutomationVideoEffect(saved = {}) {
   const preset = Object.hasOwn(AUTOMATION_VIDEO_EFFECTS, saved?.preset) ? saved.preset : 'wiggle';
   const enteredIntensity = Number(saved?.intensity);
+  const enteredMaskOpacity = Number(saved?.maskOpacity);
+  const maskColor = /^#[0-9a-f]{6}$/i.test(String(saved?.maskColor || ''))
+    ? String(saved.maskColor).toLowerCase()
+    : '#000000';
   return {
     enabled: saved?.enabled === true,
     preset,
-    intensity: Number.isFinite(enteredIntensity) ? Math.max(0, Math.min(100, Math.round(enteredIntensity))) : 35
+    intensity: Number.isFinite(enteredIntensity) ? Math.max(0, Math.min(100, Math.round(enteredIntensity))) : 35,
+    maskEnabled: saved?.maskEnabled === true,
+    maskColor,
+    maskOpacity: Number.isFinite(enteredMaskOpacity) ? Math.max(0, Math.min(100, Math.round(enteredMaskOpacity))) : 10
   };
+}
+
+function automationVideoMaskFilter(effect) {
+  const normalized = normalizeAutomationVideoEffect(effect);
+  if (!normalized.maskEnabled || normalized.maskOpacity <= 0) return '';
+  const color = normalized.maskColor.slice(1);
+  const opacity = (normalized.maskOpacity / 100).toFixed(3);
+  return `,drawbox=x=0:y=0:w=iw:h=ih:color=0x${color}@${opacity}:t=fill`;
 }
 
 // Devuelve una cadena de filtros que siempre conserva las dimensiones originales.
@@ -825,7 +846,7 @@ async function runHeyGenVideoGeneration(req, cfg, model) {
       throw new Error('Elegí un personaje con código de avatar HeyGen.');
     }
     characterId = character.id;
-    characterMotionPrompt = String(character.heygen?.motionPrompt || '').trim();
+    characterMotionPrompt = heyGenMotionPromptValue(character.heygen, 'wideMotionPrompt');
     payload = {
       type: 'avatar',
       avatar_id: avatarId,
@@ -1464,7 +1485,10 @@ const DEFAULT_AUTOMATION_CONFIG = {
   videoEffect: {
     enabled: false,
     preset: 'wiggle',
-    intensity: 35
+    intensity: 35,
+    maskEnabled: false,
+    maskColor: '#000000',
+    maskOpacity: 10
   },
   transitionSound: {
     enabled: false,
@@ -1875,20 +1899,26 @@ const ENTITY_META = {
     ownerField: 'characterId',
     notFound: 'Personaje no encontrado',
     allowReorder: true,
-    buildCreate: (body) => ({
-      name: String(body.name || '').trim() || 'Sin nombre',
-      description: String(body.description || ''),
-      voiceId: body.voiceId || '',
-      voiceName: body.voiceName || '',
-      arkAssetId: String(body.arkAssetId || '').trim().replace(/^asset:\/\//, ''),
-      heygen: {
-        avatarId: String(body.heygenWideAvatarId || body.heygenAvatarId || '').trim().slice(0, 200),
-        wideAvatarId: String(body.heygenWideAvatarId || body.heygenAvatarId || '').trim().slice(0, 200),
-        closeAvatarId: String(body.heygenCloseAvatarId || '').trim().slice(0, 200),
-        motionPrompt: String(body.heygenMotionPrompt || '').trim().slice(0, 1000),
-        imageKey: ''
-      }
-    }),
+    buildCreate: (body) => {
+      const wideMotionPrompt = String(body.heygenWideMotionPrompt ?? body.heygenMotionPrompt ?? '').trim().slice(0, 1000);
+      const closeMotionPrompt = String(body.heygenCloseMotionPrompt ?? body.heygenMotionPrompt ?? '').trim().slice(0, 1000);
+      return {
+        name: String(body.name || '').trim() || 'Sin nombre',
+        description: String(body.description || ''),
+        voiceId: body.voiceId || '',
+        voiceName: body.voiceName || '',
+        arkAssetId: String(body.arkAssetId || '').trim().replace(/^asset:\/\//, ''),
+        heygen: {
+          avatarId: String(body.heygenWideAvatarId || body.heygenAvatarId || '').trim().slice(0, 200),
+          wideAvatarId: String(body.heygenWideAvatarId || body.heygenAvatarId || '').trim().slice(0, 200),
+          closeAvatarId: String(body.heygenCloseAvatarId || '').trim().slice(0, 200),
+          motionPrompt: wideMotionPrompt,
+          wideMotionPrompt,
+          closeMotionPrompt,
+          imageKey: ''
+        }
+      };
+    },
     applyUpdate: (e, body) => {
       if (body.name !== undefined) e.name = String(body.name).trim() || e.name;
       if (body.description !== undefined) e.description = String(body.description);
@@ -1896,14 +1926,20 @@ const ENTITY_META = {
       if (body.voiceName !== undefined) e.voiceName = body.voiceName;
       if (body.arkAssetId !== undefined) e.arkAssetId = String(body.arkAssetId).trim().replace(/^asset:\/\//, '');
       if (body.heygenAvatarId !== undefined || body.heygenWideAvatarId !== undefined
-        || body.heygenCloseAvatarId !== undefined || body.heygenMotionPrompt !== undefined) {
+        || body.heygenCloseAvatarId !== undefined || body.heygenMotionPrompt !== undefined
+        || body.heygenWideMotionPrompt !== undefined || body.heygenCloseMotionPrompt !== undefined) {
         const wideAvatarId = String(body.heygenWideAvatarId ?? body.heygenAvatarId ?? e.heygen?.wideAvatarId ?? e.heygen?.avatarId ?? '').trim().slice(0, 200);
+        const legacyMotionPrompt = body.heygenMotionPrompt;
+        const wideMotionPrompt = String(body.heygenWideMotionPrompt ?? legacyMotionPrompt ?? heyGenMotionPromptValue(e.heygen, 'wideMotionPrompt')).trim().slice(0, 1000);
+        const closeMotionPrompt = String(body.heygenCloseMotionPrompt ?? legacyMotionPrompt ?? heyGenMotionPromptValue(e.heygen, 'closeMotionPrompt')).trim().slice(0, 1000);
         e.heygen = {
           ...(e.heygen || {}),
           avatarId: wideAvatarId,
           wideAvatarId,
           closeAvatarId: String(body.heygenCloseAvatarId ?? e.heygen?.closeAvatarId ?? '').trim().slice(0, 200),
-          motionPrompt: String(body.heygenMotionPrompt ?? e.heygen?.motionPrompt ?? '').trim().slice(0, 1000)
+          motionPrompt: wideMotionPrompt,
+          wideMotionPrompt,
+          closeMotionPrompt
         };
       }
     },
@@ -3044,6 +3080,11 @@ const server = http.createServer(async (req, res) => {
       const audioGroups = rawGroups.map((group) => (Array.isArray(group) ? group : []).map(String).filter((key) => /^audio\//.test(key))).filter((group) => group.length);
       const expectedGroups = framing === 'split' ? 2 : 1;
       if (audioGroups.length !== expectedGroups) return send(res, 400, { error: `HeyGen necesita ${expectedGroups} grupo(s) de audio para este encuadre.` });
+      const requestedSegmentIndex = body.regenerateSegmentIndex === undefined ? -1 : Number(body.regenerateSegmentIndex);
+      const regenerateSegmentIndex = framing === 'split' && [0, 1].includes(requestedSegmentIndex) ? requestedSegmentIndex : -1;
+      if (body.regenerateSegmentIndex !== undefined && regenerateSegmentIndex < 0) {
+        return send(res, 400, { error: 'Sólo se puede regenerar un plano individual en una toma HeyGen de dos planos.' });
+      }
 
       const cfg = await getConfig();
       const authMode = project.config?.heygenAuthMode === 'oauth' ? 'oauth' : 'key';
@@ -3075,7 +3116,6 @@ const server = http.createServer(async (req, res) => {
         const avatarIds = framing === 'split' ? [wideAvatarId, closeAvatarId] : [framing === 'close' ? closeAvatarId : wideAvatarId];
         const aspectRatio = ['16:9', '9:16', '4:5', '5:4', '1:1', 'auto'].includes(project.config?.aspectRatio) ? project.config.aspectRatio : '9:16';
         const resolution = project.config?.resolution === '1K' ? '720p' : '1080p';
-        const motionPrompt = String(character.heygen?.motionPrompt || '').trim().slice(0, 1000);
         const generateClip = async (audioPath, index) => {
           const buffer = await fs.readFile(audioPath);
           const extension = path.extname(audioPath).toLowerCase();
@@ -3095,6 +3135,8 @@ const server = http.createServer(async (req, res) => {
             output_format: 'mp4',
             engine: { type: 'avatar_iv' }
           };
+          const usesClosePrompt = framing === 'close' || (framing === 'split' && index === 1);
+          const motionPrompt = heyGenMotionPromptValue(character.heygen, usesClosePrompt ? 'closeMotionPrompt' : 'wideMotionPrompt');
           if (motionPrompt) payload.motion_prompt = motionPrompt;
           const created = authMode === 'oauth'
             ? await createHeyGenVideoWithMcp({ accessToken: oauth.accessToken, payload })
@@ -3118,17 +3160,23 @@ const server = http.createServer(async (req, res) => {
         const storedSegmentKeys = Array.isArray(project.outputs?.[block.id]?.heygenSegmentVideoKeys)
           ? project.outputs[block.id].heygenSegmentVideoKeys.slice(0, expectedGroups)
           : [];
-        const clipResults = [];
-        for (const key of storedSegmentKeys) {
+        const clipResults = Array(expectedGroups).fill(null);
+        for (const [index, key] of storedSegmentKeys.entries()) {
+          if (index === regenerateSegmentIndex) continue;
           if (!/^video\//.test(String(key || ''))) break;
           const exists = await fs.access(await resolveAssetKey(key)).then(() => true).catch(() => false);
           if (!exists) break;
-          clipResults.push({ key, videoId: '', duration: 0, cost: 0, reused: true });
+          clipResults[index] = { key, videoId: '', duration: 0, cost: 0, reused: true };
         }
-        for (let index = clipResults.length; index < preparedAudioPaths.length; index++) {
+        if (regenerateSegmentIndex >= 0 && !clipResults[regenerateSegmentIndex === 0 ? 1 : 0]) {
+          return send(res, 400, { error: 'No encuentro el otro plano guardado. Usá Continuar para reconstruir la toma completa.' });
+        }
+        for (let index = 0; index < preparedAudioPaths.length; index++) {
+          if (clipResults[index]) continue;
           const clip = await generateClip(preparedAudioPaths[index], index);
-          clipResults.push(clip);
-          const partialKeys = clipResults.map((item) => item.key);
+          clipResults[index] = clip;
+          const partialKeys = clipResults.map((item) => item?.key || '');
+          while (partialKeys.length && !partialKeys[partialKeys.length - 1]) partialKeys.pop();
           await updateJson('automations.json', [], (all) => all.map((item) => item.id !== projectId ? item : ({
             ...item,
             outputs: {
@@ -3138,6 +3186,7 @@ const server = http.createServer(async (req, res) => {
                 heygenSegmentVideoKeys: partialKeys,
                 generator: 'heygen',
                 heygenFraming: framing,
+                ...(regenerateSegmentIndex >= 0 ? { videoKey: null, completedAt: null } : {}),
                 ts: Date.now()
               }
             },
@@ -3145,6 +3194,7 @@ const server = http.createServer(async (req, res) => {
           })));
         }
 
+        if (clipResults.some((item) => !item)) throw new Error('No se pudieron preparar todos los planos HeyGen.');
         const segmentVideoKeys = clipResults.map((item) => item.key);
         let videoKey = segmentVideoKeys[0];
         if (segmentVideoKeys.length === 2) {
@@ -3216,6 +3266,10 @@ const server = http.createServer(async (req, res) => {
       const imgPath = await resolveAssetKey(imageKey);
       const audioPaths = [];
       for (const k of audioKeys) audioPaths.push(await resolveAssetKey(k));
+      const audioDurations = await Promise.all(audioPaths.map((audioPath) => probeMediaDuration(ffmpegExecutable, audioPath)));
+      const exactDuration = audioDurations.every((duration) => Number.isFinite(duration) && duration > 0)
+        ? audioDurations.reduce((sum, duration) => sum + duration, 0)
+        : null;
       const name = `${ts()}-auto-${newId()}.mp4`;
       const outDir = resolveDir(cfg.paths.video);
       await fs.mkdir(outDir, { recursive: true });
@@ -3231,7 +3285,13 @@ const server = http.createServer(async (req, res) => {
       // dimensiones pares (requisito de yuv420p) y cierre al terminar el audio
       args.push('-c:v', 'libx264', '-tune', 'stillimage', '-pix_fmt', 'yuv420p',
         '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-r', '25',
-        '-c:a', 'aac', '-b:a', '192k', '-shortest', outPath);
+        '-c:a', 'aac', '-b:a', '192k');
+      // -shortest por sí solo puede conservar varios segundos de fotogramas en
+      // cola cuando la imagen fija tarda más en codificarse que el audio en
+      // demuxearse. El límite explícito garantiza que el MP4 mida exactamente
+      // la suma de los audios, incluso en regeneraciones con imágenes pesadas.
+      if (exactDuration) args.push('-t', exactDuration.toFixed(3));
+      args.push('-shortest', outPath);
       await runFfmpeg(ffmpegExecutable, args);
       const key = `video/${name}`;
       const category = String(body.category || '').slice(0, 80);
@@ -3527,9 +3587,10 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { project: updatedProject, finalOutput: updatedProject.finalOutput });
     }
 
-    // Posproducción opcional: reconstruye cada toma con su imagen limpia, aplica
-    // el efecto y recién después agrega la capa PNG de texto. Reutiliza el audio
-    // del MP4 final, no llama modelos y mantiene disponible el master anterior.
+    // Posproducción opcional: reconstruye cada toma desde su imagen limpia o los
+    // segmentos originales de HeyGen, aplica efecto y máscara, y recién después
+    // agrega la capa PNG de texto. Reutiliza el audio del MP4 final, no llama
+    // modelos y mantiene disponible el master anterior.
     const automationEffectMatch = /^\/api\/automations\/([a-z0-9]+)\/effect$/.exec(p);
     if (automationEffectMatch && req.method === 'POST') {
       const projectId = automationEffectMatch[1];
@@ -3567,8 +3628,15 @@ const server = http.createServer(async (req, res) => {
         const imageKey = String(output.imageKey || '');
         const textLayerKey = String(output.textLayerKey || '');
         const blockVideoKey = String(output.videoKey || '');
-        if (!/^(generated|uploads)\//.test(imageKey)) {
+        const isHeyGen = block.generator === 'heygen' || output.generator === 'heygen';
+        const heygenSegmentKeys = (Array.isArray(output.heygenSegmentVideoKeys) ? output.heygenSegmentVideoKeys : [])
+          .map(String)
+          .filter((key) => /^video\//.test(key));
+        if (!isHeyGen && !/^(generated|uploads)\//.test(imageKey)) {
           return send(res, 400, { error: `Falta la imagen limpia de “${block.title || block.id}”.` });
+        }
+        if (isHeyGen && !heygenSegmentKeys.length) {
+          return send(res, 400, { error: `Faltan los planos originales de HeyGen de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.` });
         }
         if (!/^(generated|uploads)\//.test(textLayerKey)) {
           return send(res, 400, { error: `Falta la capa de subtítulos de “${block.title || block.id}”. Volvé a aplicar el efecto para prepararla.` });
@@ -3576,18 +3644,21 @@ const server = http.createServer(async (req, res) => {
         if (!/^video\//.test(blockVideoKey)) {
           return send(res, 400, { error: `Falta el video terminado de “${block.title || block.id}”.` });
         }
-        const [imagePath, textLayerPath, blockVideoPath] = await Promise.all([
-          resolveAssetKey(imageKey), resolveAssetKey(textLayerKey), resolveAssetKey(blockVideoKey)
+        const visualKeys = isHeyGen ? heygenSegmentKeys : [imageKey];
+        const [visualPaths, textLayerPath, blockVideoPath] = await Promise.all([
+          Promise.all(visualKeys.map((key) => resolveAssetKey(key))),
+          resolveAssetKey(textLayerKey),
+          resolveAssetKey(blockVideoKey)
         ]);
         const stats = await Promise.all([
-          fs.stat(imagePath).catch(() => null),
+          ...visualPaths.map((visualPath) => fs.stat(visualPath).catch(() => null)),
           fs.stat(textLayerPath).catch(() => null),
           fs.stat(blockVideoPath).catch(() => null)
         ]);
         if (stats.some((stat) => !stat?.isFile())) {
           return send(res, 400, { error: `No encuentro todos los materiales locales de “${block.title || block.id}”.` });
         }
-        blockSources.push({ block, imagePath, textLayerPath, blockVideoPath });
+        blockSources.push({ block, kind: isHeyGen ? 'video' : 'image', visualPaths, textLayerPath, blockVideoPath });
       }
       if (!blockSources.length) return send(res, 400, { error: 'El proyecto no tiene tomas para procesar.' });
 
@@ -3599,14 +3670,22 @@ const server = http.createServer(async (req, res) => {
       }
       const contentDuration = blockDurations.reduce((sum, blockDuration) => sum + blockDuration, 0);
       const effectFilters = automationVideoEffectFilters(effect, width, height);
+      const maskFilter = automationVideoMaskFilter(effect);
       const name = `${ts()}-efecto-${effect.preset}-${sanitizeName(project.name)}-${newId()}.mp4`;
       const outDir = resolveDir(cfg.paths.video);
       await fs.mkdir(outDir, { recursive: true });
       const outPath = path.join(outDir, name);
       const args = ['-y', '-i', sourcePath];
+      let nextInputIndex = 1;
       for (const source of blockSources) {
-        args.push('-loop', '1', '-framerate', '25', '-i', source.imagePath);
+        source.visualInputIndexes = [];
+        for (const visualPath of source.visualPaths) {
+          if (source.kind === 'image') args.push('-loop', '1', '-framerate', '25');
+          args.push('-i', visualPath);
+          source.visualInputIndexes.push(nextInputIndex++);
+        }
         args.push('-loop', '1', '-framerate', '25', '-i', source.textLayerPath);
+        source.layerInputIndex = nextInputIndex++;
       }
       const filters = [
         `[0:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
@@ -3614,14 +3693,37 @@ const server = http.createServer(async (req, res) => {
       ];
       const shotLabels = [];
       for (let index = 0; index < blockSources.length; index++) {
-        const imageInputIndex = 1 + index * 2;
-        const layerInputIndex = imageInputIndex + 1;
+        const source = blockSources[index];
+        const layerInputIndex = source.layerInputIndex;
         const blockDuration = blockDurations[index].toFixed(3);
-        filters.push(
-          `[${imageInputIndex}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-          `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
-          `${effectFilters},trim=start=0:end=${blockDuration},setpts=PTS-STARTPTS[effectbg${index}]`
-        );
+        if (source.kind === 'image') {
+          filters.push(
+            `[${source.visualInputIndexes[0]}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+            `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
+            `${effectFilters}${maskFilter},trim=start=0:end=${blockDuration},setpts=PTS-STARTPTS[effectbg${index}]`
+          );
+        } else {
+          const segmentLabels = [];
+          for (const [segmentIndex, inputIndex] of source.visualInputIndexes.entries()) {
+            const label = `heygen${index}_${segmentIndex}`;
+            filters.push(
+              `[${inputIndex}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+              `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
+              `format=yuv420p,setpts=PTS-STARTPTS[${label}]`
+            );
+            segmentLabels.push(`[${label}]`);
+          }
+          const visualLabel = `heygenbase${index}`;
+          if (segmentLabels.length === 1) {
+            filters.push(`${segmentLabels[0]}null[${visualLabel}]`);
+          } else {
+            filters.push(`${segmentLabels.join('')}concat=n=${segmentLabels.length}:v=1:a=0[${visualLabel}]`);
+          }
+          filters.push(
+            `[${visualLabel}]${effectFilters}${maskFilter},trim=start=0:end=${blockDuration},` +
+            `setpts=PTS-STARTPTS[effectbg${index}]`
+          );
+        }
         filters.push(
           `[${layerInputIndex}:v:0]format=rgba,scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
           `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1,` +
@@ -3672,6 +3774,9 @@ const server = http.createServer(async (req, res) => {
           effectPreset: effect.preset,
           effectName: presetName,
           effectIntensity: effect.intensity,
+          maskEnabled: effect.maskEnabled,
+          maskColor: effect.maskColor,
+          maskOpacity: effect.maskOpacity,
           width,
           height,
           subtitleLayerCount: blockSources.length,
@@ -3702,6 +3807,9 @@ const server = http.createServer(async (req, res) => {
             preset: effect.preset,
             presetName,
             intensity: effect.intensity,
+            maskEnabled: effect.maskEnabled,
+            maskColor: effect.maskColor,
+            maskOpacity: effect.maskOpacity,
             width,
             height,
             subtitleLayerCount: blockSources.length,
@@ -4193,7 +4301,9 @@ const server = http.createServer(async (req, res) => {
           avatarId: String(source.heygen?.wideAvatarId || source.heygen?.avatarId || ''),
           wideAvatarId: String(source.heygen?.wideAvatarId || source.heygen?.avatarId || ''),
           closeAvatarId: String(source.heygen?.closeAvatarId || ''),
-          motionPrompt: String(source.heygen?.motionPrompt || ''),
+          motionPrompt: heyGenMotionPromptValue(source.heygen, 'wideMotionPrompt'),
+          wideMotionPrompt: heyGenMotionPromptValue(source.heygen, 'wideMotionPrompt'),
+          closeMotionPrompt: heyGenMotionPromptValue(source.heygen, 'closeMotionPrompt'),
           imageKey: ''
         },
         photos: [], variants: [], ts: Date.now()
@@ -4253,7 +4363,9 @@ const server = http.createServer(async (req, res) => {
         avatarId: character.heygen?.wideAvatarId || character.heygen?.avatarId || '',
         wideAvatarId: character.heygen?.wideAvatarId || character.heygen?.avatarId || '',
         closeAvatarId: character.heygen?.closeAvatarId || '',
-        motionPrompt: character.heygen?.motionPrompt || '',
+        motionPrompt: heyGenMotionPromptValue(character.heygen, 'wideMotionPrompt'),
+        wideMotionPrompt: heyGenMotionPromptValue(character.heygen, 'wideMotionPrompt'),
+        closeMotionPrompt: heyGenMotionPromptValue(character.heygen, 'closeMotionPrompt'),
         image: ''
       };
       if (character.heygen?.imageKey) {
@@ -4261,7 +4373,7 @@ const server = http.createServer(async (req, res) => {
         heygen.image = `heygen/mirror${ext}`;
         entries.push({ name: heygen.image, data: await fs.readFile(await resolveAssetKey(character.heygen.imageKey)) });
       }
-      const manifest = { format: 'manifestador-character', version: 2, exportedAt: Date.now(), character: { name: character.name, description: character.description || '', voiceId: character.voiceId || '', voiceName: character.voiceName || '', photos, variants, heygen } };
+      const manifest = { format: 'manifestador-character', version: 3, exportedAt: Date.now(), character: { name: character.name, description: character.description || '', voiceId: character.voiceId || '', voiceName: character.voiceName || '', photos, variants, heygen } };
       entries.unshift({ name: 'character.json', data: Buffer.from(JSON.stringify(manifest, null, 2), 'utf8') });
       const zip = createZip(entries);
       const filename = `${sanitizeName(character.name || 'personaje').replace(/\.[^.]+$/, '')}.manifestador.zip`;

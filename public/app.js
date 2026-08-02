@@ -334,6 +334,12 @@ function heygenWideAvatarId(character) {
   return character?.heygen?.wideAvatarId || character?.heygen?.avatarId || '';
 }
 
+function heygenMotionPromptFor(character, framing = 'wide') {
+  const heygen = character?.heygen || {};
+  const field = framing === 'close' ? 'closeMotionPrompt' : 'wideMotionPrompt';
+  return Object.prototype.hasOwnProperty.call(heygen, field) ? (heygen[field] || '') : (heygen.motionPrompt || '');
+}
+
 function heygenCharacterReady(character) {
   return Boolean(heygenWideAvatarId(character));
 }
@@ -3791,7 +3797,7 @@ function openCharModal(id, assetKey = null) {
 
 function renderCharModal() {
   const id = state.editingCharId;
-  const c = state.characters.find((x) => x.id === id) || { name: '', description: '', voiceId: '', photos: [], heygen: { avatarId: '', wideAvatarId: '', closeAvatarId: '', motionPrompt: '', imageKey: '' } };
+  const c = state.characters.find((x) => x.id === id) || { name: '', description: '', voiceId: '', photos: [], heygen: { avatarId: '', wideAvatarId: '', closeAvatarId: '', wideMotionPrompt: '', closeMotionPrompt: '', imageKey: '' } };
   const voices = state.voices || [];
   const body = $('#charModalBody');
   body.innerHTML = `
@@ -3813,8 +3819,9 @@ function renderCharModal() {
       <div class="variant-manager-head"><label>Variante especial · HeyGen</label>${heygenCharacterReady(c) ? '<span class="heygen-ready">Lista para video</span>' : ''}</div>
       <label class="heygen-character-field"><span>Plano general · avatar_id</span><input type="text" id="chHeyGenWideAvatar" value="${esc(heygenWideAvatarId(c))}" placeholder="91bd75d9e4414cc58043c82bcfc340f4"></label>
       <label class="heygen-character-field"><span>Primer plano · avatar_id</span><input type="text" id="chHeyGenCloseAvatar" value="${esc(c.heygen?.closeAvatarId || '')}" placeholder="6f85c7941c594c94ae8594e17337bef0"></label>
-      <label class="heygen-character-field"><span>Contexto para la animación</span><textarea id="chHeyGenMotionPrompt" maxlength="1000" rows="3" placeholder="El personaje tiene una máscara que cubre todo su rostro, de tela, quedando su boca y facciones detrás de ella.">${esc(c.heygen?.motionPrompt || '')}</textarea></label>
-      <div class="hint" style="margin-top:4px">El plano general es obligatorio. El primer plano habilita la toma alternada. La imagen espejo es una referencia visual local y opcional; Manifestador no la envía ni registra el avatar.</div>
+      <label class="heygen-character-field"><span>Prompt de comportamiento · plano general</span><textarea id="chHeyGenWideMotionPrompt" maxlength="1000" rows="3" placeholder="Describe cómo debe comportarse y moverse el personaje en el plano general…">${esc(heygenMotionPromptFor(c, 'wide'))}</textarea></label>
+      <label class="heygen-character-field"><span>Prompt de comportamiento · primer plano</span><textarea id="chHeyGenCloseMotionPrompt" maxlength="1000" rows="3" placeholder="Describe la actuación facial y el movimiento para el primer plano…">${esc(heygenMotionPromptFor(c, 'close'))}</textarea></label>
+      <div class="hint" style="margin-top:4px">Cada instrucción se envía únicamente con su encuadre. El plano general es obligatorio y el primer plano habilita la toma alternada. La imagen espejo es una referencia visual local y opcional.</div>
       ${id ? `<div class="heygen-mirror">
         ${c.heygen?.imageKey ? `<img src="${fileUrl(c.heygen.imageKey)}" alt="Imagen espejo de HeyGen">` : '<div class="heygen-mirror-empty">Sin imagen espejo</div>'}
         <div><button type="button" class="mini-btn" id="chHeyGenUpload">${IC('upload')} Subir imagen espejo</button>
@@ -3868,7 +3875,8 @@ function renderCharModal() {
       arkAssetId: $('#chArkAsset').value.trim(),
       heygenWideAvatarId: $('#chHeyGenWideAvatar').value.trim(),
       heygenCloseAvatarId: $('#chHeyGenCloseAvatar').value.trim(),
-      heygenMotionPrompt: $('#chHeyGenMotionPrompt').value.trim()
+      heygenWideMotionPrompt: $('#chHeyGenWideMotionPrompt').value.trim(),
+      heygenCloseMotionPrompt: $('#chHeyGenCloseMotionPrompt').value.trim()
     };
     try {
       if (id) {
@@ -5103,6 +5111,34 @@ function bindAutomationAssetOpeners(root) {
   });
 }
 
+function bindAutomationHeyGenSegmentActions(root, project) {
+  root?.querySelectorAll('[data-regenerate-heygen-segment]').forEach((button) => {
+    if (button.dataset.heygenSegmentBound === '1') return;
+    button.dataset.heygenSegmentBound = '1';
+    button.addEventListener('click', async () => {
+      const liveProject = state.automations.find((item) => item.id === project?.id) || project;
+      const block = liveProject?.blocks?.find((item) => item.id === button.dataset.blockId);
+      const output = block && liveProject.outputs?.[block.id];
+      const segmentIndex = Number(button.dataset.segmentIndex);
+      const segmentKeys = Array.isArray(output?.heygenSegmentVideoKeys) ? output.heygenSegmentVideoKeys : [];
+      if (!block || block.generator !== 'heygen' || block.heygenFraming !== 'split' || segmentKeys.length !== 2 || ![0, 1].includes(segmentIndex)) {
+        return toast('Esta toma ya no tiene dos planos HeyGen completos.', 'err');
+      }
+      const expectedAudio = Number(output.audioCountExpected) || (block.items || []).length;
+      if (!Array.isArray(output.audioKeys) || output.audioKeys.length < expectedAudio) {
+        return toast('Faltan audios guardados para regenerar sólo este plano.', 'err');
+      }
+      const label = segmentIndex === 0 ? 'plano general' : 'primer plano';
+      if (!confirm(`¿Regenerar únicamente el ${label} de “${block.title || 'este bloque'}”? Se conservarán el otro plano y todos los audios; HeyGen consumirá sólo esta nueva toma y luego se volverán a unir ambas.`)) return;
+      button.disabled = true;
+      await runAutomationBlock(liveProject.id, block, button.closest('.auto-block'), {
+        requireExistingAudio: true,
+        regenerateHeyGenSegment: segmentIndex
+      });
+    });
+  });
+}
+
 function renderAutomationProject() {
   const pr = currentAutomation();
   if (!pr) return;
@@ -5120,7 +5156,15 @@ function renderAutomationProject() {
   const finalOutput = pr.finalOutput?.videoKey ? pr.finalOutput : null;
   const effectOutput = pr.effectOutput?.videoKey ? pr.effectOutput : null;
   const includeLogos = pr.config?.includeLogos === true;
-  const videoEffect = { enabled: false, preset: 'wiggle', intensity: 35, ...(pr.config?.videoEffect || {}) };
+  const videoEffect = {
+    enabled: false,
+    preset: 'wiggle',
+    intensity: 35,
+    maskEnabled: false,
+    maskColor: '#000000',
+    maskOpacity: 10,
+    ...(pr.config?.videoEffect || {})
+  };
   const automationAudioModel = (state.audioModels || []).find((candidate) => candidate.id === pr.config?.audioModelId)
     || state.audioModels?.[0];
   const transitionSound = { enabled: false, soundId: '', ...(pr.config?.transitionSound || {}) };
@@ -5433,7 +5477,7 @@ function renderAutomationProject() {
             </div>
             <div class="auto-block-edit-actions"><span class="hint">Guardar no genera nada. Si ya había material, se conservarán las etapas que sigan siendo válidas.</span><button type="button" class="mini-btn accent" data-save-block="${esc(b.id)}">${IC('save')} Guardar cambios del bloque</button></div>
           </div>
-          <div class="auto-block-out" data-out="${b.id}">${automationBlockOutHtml(out)}</div>
+          <div class="auto-block-out" data-out="${b.id}">${automationBlockOutHtml(out, b)}</div>
         </div>`;
       }).join('') : '<p class="hint">Sin bloques. Añadí uno manualmente o importá un guion.</p>'}
     </div>
@@ -5473,7 +5517,7 @@ function renderAutomationProject() {
     <div class="automation-panel post-effect-panel${videoEffect.enabled ? ' enabled' : ''}" id="autoEffectPanel">
       <div class="post-effect-copy">
         <div class="post-effect-heading">
-          <div><h3>Efectos finales</h3><span class="hint">Posproducción opcional: imagen limpia → efecto → subtítulos. No vuelve a llamar a modelos generativos.</span></div>
+          <div><h3>Efectos finales</h3><span class="hint">Posproducción opcional: imagen o video HeyGen → efecto → máscara de color → subtítulos. No vuelve a llamar a modelos generativos.</span></div>
           <label class="poser-toggle"><input type="checkbox" id="autoEffectEnabled"${videoEffect.enabled ? ' checked' : ''}> activar</label>
         </div>
         <div class="post-effect-controls">
@@ -5484,8 +5528,14 @@ function renderAutomationProject() {
           </select></label>
           <label class="post-effect-intensity"><span>Presencia / intensidad</span><span class="post-effect-range"><input type="range" id="autoEffectIntensity" min="0" max="100" step="1" value="${videoEffect.intensity}"><output id="autoEffectIntensityValue">${videoEffect.intensity}%</output></span></label>
         </div>
+        <div class="post-effect-mask${videoEffect.maskEnabled ? ' enabled' : ''}" id="autoEffectMaskPanel">
+          <label class="post-effect-mask-toggle"><input type="checkbox" id="autoEffectMaskEnabled"${videoEffect.maskEnabled ? ' checked' : ''}><span>Máscara de color</span></label>
+          <label><span>Color</span><input type="color" id="autoEffectMaskColor" value="${esc(videoEffect.maskColor)}"${videoEffect.maskEnabled ? '' : ' disabled'}></label>
+          <label class="post-effect-mask-opacity"><span>Opacidad</span><span class="post-effect-range"><input type="range" id="autoEffectMaskOpacity" min="0" max="100" step="1" value="${videoEffect.maskOpacity}"${videoEffect.maskEnabled ? '' : ' disabled'}><output id="autoEffectMaskOpacityValue">${videoEffect.maskOpacity}%</output></span></label>
+          <span class="hint">Se coloca sobre la imagen o el video y debajo de títulos, texto y resaltado.</span>
+        </div>
         <span class="hint" id="autoEffectStatus">${finalOutput ? 'El video limpio se conserva. Si hay logo, el efecto termina antes del cierre.' : 'Primero ensamblá el video final limpio.'}</span>
-        ${effectOutput ? `<span class="automation-stage-status">Última versión · ${esc(effectOutput.presetName || effectOutput.preset)} · intensidad ${effectOutput.intensity}%${effectOutput.subtitlesPreserved ? ' · subtítulos nítidos' : ''}${effectOutput.logoPreserved ? ' · logo preservado' : ''} · ${fmtDate(effectOutput.processedAt)}</span>` : ''}
+        ${effectOutput ? `<span class="automation-stage-status">Última versión · ${esc(effectOutput.presetName || effectOutput.preset)} · intensidad ${effectOutput.intensity}%${effectOutput.maskEnabled ? ` · máscara ${esc(effectOutput.maskColor)} al ${effectOutput.maskOpacity}%` : ''}${effectOutput.subtitlesPreserved ? ' · subtítulos nítidos' : ''}${effectOutput.logoPreserved ? ' · logo preservado' : ''} · ${fmtDate(effectOutput.processedAt)}</span>` : ''}
         <button type="button" class="generate-btn" id="autoApplyEffect"${finalOutput && videoEffect.enabled ? '' : ' disabled'}>${IC('spark')} ${effectOutput ? 'Crear otra versión con efecto' : 'Aplicar efecto al video final'}</button>
       </div>
       ${effectOutput ? `<div class="final-assembly-preview post-effect-preview">
@@ -5513,6 +5563,7 @@ function renderAutomationProject() {
     assignAutomationCharacterVoice(pr.id, role, card);
   }));
   bindAutomationAssetOpeners($('#automationRoot'));
+  bindAutomationHeyGenSegmentActions($('#automationRoot'), pr);
 
   const newBlockForm = $('#autoNewBlockForm');
   const newBlockKind = $('#autoNewBlockKind');
@@ -5712,8 +5763,16 @@ function renderAutomationProject() {
     videoEffect.preset = $('#autoEffectPreset').value;
     const enteredIntensity = Number($('#autoEffectIntensity').value);
     videoEffect.intensity = Number.isFinite(enteredIntensity) ? Math.max(0, Math.min(100, Math.round(enteredIntensity))) : 35;
+    videoEffect.maskEnabled = $('#autoEffectMaskEnabled').checked;
+    videoEffect.maskColor = $('#autoEffectMaskColor').value;
+    const enteredMaskOpacity = Number($('#autoEffectMaskOpacity').value);
+    videoEffect.maskOpacity = Number.isFinite(enteredMaskOpacity) ? Math.max(0, Math.min(100, Math.round(enteredMaskOpacity))) : 10;
     $('#autoEffectPanel').classList.toggle('enabled', videoEffect.enabled);
+    $('#autoEffectMaskPanel').classList.toggle('enabled', videoEffect.maskEnabled);
     $('#autoEffectIntensityValue').textContent = `${videoEffect.intensity}%`;
+    $('#autoEffectMaskOpacityValue').textContent = `${videoEffect.maskOpacity}%`;
+    $('#autoEffectMaskColor').disabled = !videoEffect.maskEnabled;
+    $('#autoEffectMaskOpacity').disabled = !videoEffect.maskEnabled;
     $('#autoApplyEffect').disabled = !finalOutput || !videoEffect.enabled;
     return videoEffect;
   };
@@ -5727,6 +5786,20 @@ function renderAutomationProject() {
   });
   $('#autoEffectIntensity').addEventListener('input', readEffectControls);
   $('#autoEffectIntensity').addEventListener('change', async () => {
+    readEffectControls();
+    await saveAll();
+  });
+  $('#autoEffectMaskEnabled').addEventListener('change', async () => {
+    readEffectControls();
+    await saveAll();
+  });
+  $('#autoEffectMaskColor').addEventListener('input', readEffectControls);
+  $('#autoEffectMaskColor').addEventListener('change', async () => {
+    readEffectControls();
+    await saveAll();
+  });
+  $('#autoEffectMaskOpacity').addEventListener('input', readEffectControls);
+  $('#autoEffectMaskOpacity').addEventListener('change', async () => {
     readEffectControls();
     await saveAll();
   });
@@ -6453,11 +6526,13 @@ function burnOverlayText(imageKey, caption, ov, { transparent = false, title = n
   });
 }
 
-function automationBlockOutHtml(out) {
+function automationBlockOutHtml(out, block = null) {
   if (!out || (!out.imageKey && !out.textImageKey && !out.textLayerKey && !out.audioKeys?.length && !out.videoKey)) return '';
   const audioKeys = Array.isArray(out.audioKeys) ? out.audioKeys : [];
+  const segmentVideoKeys = Array.isArray(out.heygenSegmentVideoKeys) ? out.heygenSegmentVideoKeys : [];
   const expected = Number(out.audioCountExpected) || audioKeys.length;
   const isHeyGen = out.generator === 'heygen';
+  const canRegenerateHeyGenPlanes = isHeyGen && out.heygenFraming === 'split' && segmentVideoKeys.length === 2 && block?.id;
   return `
     <span class="automation-stage-status">
       ${isHeyGen ? `HeyGen · ${out.heygenFraming === 'split' ? '2 planos' : '1 plano'}` : `Imagen ${out.imageKey ? '✓' : '—'} · Texto ${out.textImageKey ? '✓' : '—'} · Capa ${out.textLayerKey ? '✓' : '—'}`} · Audio ${audioKeys.length}/${expected || '—'} · Video ${out.videoKey ? '✓' : '—'}
@@ -6467,7 +6542,10 @@ function automationBlockOutHtml(out) {
     ${out.textImageKey ? `<button type="button" class="auto-output-asset" data-open-asset="${esc(out.textImageKey)}" title="Abrir asset y acciones"><img src="${fileUrl(out.textImageKey)}" alt="con texto"></button>` : ''}
     ${out.textLayerKey ? `<button type="button" class="mini-btn" data-open-asset="${esc(out.textLayerKey)}">Capa de subtítulos</button>` : ''}
     ${audioKeys.map((key, index) => `<span class="auto-output-audio"><small>Audio ${index + 1}</small><audio src="${fileUrl(key)}" controls preload="metadata"></audio></span>`).join('')}
-    ${(out.heygenSegmentVideoKeys || []).length ? `<span class="hint">Segmentos HeyGen: ${(out.heygenSegmentVideoKeys || []).map((key, index) => `<button type="button" class="mini-btn" data-open-asset="${esc(key)}">${out.heygenFraming === 'split' ? (index === 0 ? 'Plano general' : 'Primer plano') : 'Toma HeyGen'}</button>`).join(' ')}</span>` : ''}
+    ${segmentVideoKeys.length ? `<span class="heygen-segment-list"><small>Segmentos HeyGen</small>${segmentVideoKeys.map((key, index) => {
+      const label = out.heygenFraming === 'split' ? (index === 0 ? 'Plano general' : 'Primer plano') : 'Toma HeyGen';
+      return `<span class="heygen-segment-row"><button type="button" class="mini-btn" data-open-asset="${esc(key)}">${label}</button>${canRegenerateHeyGenPlanes ? `<button type="button" class="mini-btn accent" data-regenerate-heygen-segment data-block-id="${esc(block.id)}" data-segment-index="${index}">${IC('refresh')} Regenerar</button>` : ''}</span>`;
+    }).join('')}</span>` : ''}
     ${out.videoKey ? `<span class="auto-output-video"><video src="${fileUrl(out.videoKey)}" controls preload="metadata"></video><button type="button" class="mini-btn" data-open-asset="${esc(out.videoKey)}">Acciones del video</button></span>` : ''}`;
 }
 
@@ -6629,7 +6707,7 @@ function recoverHistoryOutput(type, prompt, { voiceId = '', audioModelId = '', u
   return key ? { entry, key } : null;
 }
 
-async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false, regenerateAudio = false, setStatus }) {
+async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false, regenerateAudio = false, requireExistingAudio = false, regenerateSegmentIndex = -1, setStatus }) {
   const character = state.characters.find((item) => item.id === block.heygenCharacterId);
   if (!heygenCharacterReady(character)) throw new Error('El bloque necesita un personaje con variante HeyGen completa.');
   if (['close', 'split'].includes(block.heygenFraming) && !character.heygen?.closeAvatarId) {
@@ -6640,6 +6718,9 @@ async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false,
 
   const plan = automationAudioPlan(block);
   const audioKeys = Array.isArray(output.audioKeys) ? output.audioKeys.slice(0, plan.segments.length) : [];
+  if ((requireExistingAudio || regenerateSegmentIndex >= 0) && audioKeys.length !== plan.segments.length) {
+    throw new Error('Faltan audios guardados; regenerar un plano HeyGen no creará reemplazos con ElevenLabs.');
+  }
   const usedAudioKeys = new Set(audioKeys);
   let historyLoaded = false;
   for (let index = audioKeys.length; index < plan.segments.length; index++) {
@@ -6691,12 +6772,24 @@ async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false,
 
   const audioGroups = plan.groups.map((indexes) => indexes.map((index) => audioKeys[index]).filter(Boolean)).filter((group) => group.length);
   if (block.heygenFraming === 'split' && audioGroups.length !== 2) throw new Error('No pude dividir el texto en dos fragmentos utilizables.');
-  setStatus(block.heygenFraming === 'split'
-    ? 'Enviando dos audios a HeyGen y preparando ambos encuadres…'
-    : 'Enviando el audio de ElevenLabs a HeyGen…');
+  if (regenerateSegmentIndex >= 0) {
+    output = await persistAutomationBlockOutput(pr.id, block.id, { videoKey: null, completedAt: null });
+  }
+  setStatus(regenerateSegmentIndex >= 0
+    ? `Regenerando ${regenerateSegmentIndex === 0 ? 'el plano general' : 'el primer plano'} y conservando el otro…`
+    : block.heygenFraming === 'split'
+      ? 'Enviando dos audios a HeyGen y preparando ambos encuadres…'
+      : 'Enviando el audio de ElevenLabs a HeyGen…');
   const result = await api(`/api/automations/${pr.id}/heygen-block`, {
     method: 'POST',
-    body: { blockId: block.id, characterId: character.id, framing: block.heygenFraming, audioGroups, textLayerKey }
+    body: {
+      blockId: block.id,
+      characterId: character.id,
+      framing: block.heygenFraming,
+      audioGroups,
+      textLayerKey,
+      ...(regenerateSegmentIndex >= 0 ? { regenerateSegmentIndex } : {})
+    }
   });
   output = await persistAutomationBlockOutput(pr.id, block.id, {
     videoKey: result.videoKey,
@@ -6710,7 +6803,7 @@ async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false,
 }
 
 async function runAutomationBlock(projectId, block, blockEl, {
-  regenerate = false, regenerateAudio = false, requireExistingAudio = false, monitorTaskId = '', monitorIndex = 0, monitorTotal = 0
+  regenerate = false, regenerateAudio = false, requireExistingAudio = false, regenerateHeyGenSegment = -1, monitorTaskId = '', monitorIndex = 0, monitorTotal = 0
 } = {}) {
   let pr = state.automations.find((x) => x.id === projectId);
   if (!pr) return false;
@@ -6737,7 +6830,13 @@ async function runAutomationBlock(projectId, block, blockEl, {
     }
 
     if (block.generator === 'heygen') {
-      await runAutomationHeyGenBlock(pr, block, output, { regenerate, regenerateAudio, setStatus });
+      await runAutomationHeyGenBlock(pr, block, output, {
+        regenerate,
+        regenerateAudio,
+        requireExistingAudio,
+        regenerateSegmentIndex: regenerateHeyGenSegment,
+        setStatus
+      });
       if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: 'Toma HeyGen terminada.' });
       renderAutomationProject();
       return true;
@@ -6860,10 +6959,17 @@ async function runAutomationBlock(projectId, block, blockEl, {
   } catch (err) {
     if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { error: err.message });
     toast(err.message, 'err');
+    if (block.generator === 'heygen') {
+      try {
+        const snapshot = await api('/api/state');
+        state.automations = snapshot.automations || state.automations;
+      } catch { /* mantenemos el estado local si tampoco se puede refrescar */ }
+    }
     const latest = state.automations.find((item) => item.id === projectId)?.outputs?.[block.id] || output;
     if (outEl) {
-      outEl.innerHTML = `${automationBlockOutHtml(latest)}<span class="hint warn">Falló: ${esc(err.message)}. Los parciales guardados se reutilizarán al continuar.</span>`;
+      outEl.innerHTML = `${automationBlockOutHtml(latest, block)}<span class="hint warn">Falló: ${esc(err.message)}. Los parciales guardados se reutilizarán al continuar.</span>`;
       bindAutomationAssetOpeners(outEl);
+      bindAutomationHeyGenSegmentActions(outEl, state.automations.find((item) => item.id === projectId) || pr);
     }
     return false;
   } finally {
@@ -6941,11 +7047,14 @@ async function ensureAutomationSubtitleLayers(projectId, taskId = '') {
         ? `Verificando subtítulos ${index + 1}/${pr.blocks.length}…`
         : `Creando capa de subtítulos ${index + 1}/${pr.blocks.length}…`
     });
-    if (!output.imageKey) throw new Error(`Falta la imagen limpia de “${block.title || block.id}”.`);
     if (!output.textLayerKey) {
       const caption = (block.items || []).map((item) => item.text).join(' ');
       const title = automationTitleForBlock(pr, block);
-      const textLayerKey = await burnOverlayText(output.imageKey, caption, pr.config.overlay, { transparent: true, title });
+      const textLayerKey = await burnOverlayText(output.imageKey || '', caption, pr.config.overlay, {
+        transparent: true,
+        title,
+        aspectRatio: pr.config.aspectRatio || '9:16'
+      });
       output = await persistAutomationBlockOutput(projectId, block.id, { textLayerKey });
       await tagAutomationStage(pr, block, [textLayerKey]);
       pr = state.automations.find((item) => item.id === projectId) || pr;
@@ -6975,7 +7084,7 @@ async function applyAutomationVideoEffect(projectId, requestedEffect) {
       current: pr.blocks.length + 1,
       detail: 'Aplicando el efecto debajo del texto con FFmpeg…'
     });
-    if (status) status.textContent = 'Aplicando el efecto sobre las imágenes limpias y colocando el texto al final…';
+    if (status) status.textContent = 'Aplicando el efecto sobre imágenes y tomas HeyGen, luego la máscara y el texto…';
     const result = await api(`/api/automations/${projectId}/effect`, {
       method: 'POST',
       body: { videoEffect: requestedEffect || pr.config?.videoEffect }
@@ -6989,7 +7098,10 @@ async function applyAutomationVideoEffect(projectId, requestedEffect) {
     }
     finishUiTask(taskId, { detail: 'Efecto aplicado; subtítulos preservados.' });
     renderAutomationProject();
-    toast(`${result.effectOutput.presetName} aplicado al ${result.effectOutput.intensity}%. El ensamble limpio se conservó.`, 'ok');
+    const maskSummary = result.effectOutput.maskEnabled
+      ? ` Máscara ${result.effectOutput.maskColor} al ${result.effectOutput.maskOpacity}%.`
+      : '';
+    toast(`${result.effectOutput.presetName} aplicado al ${result.effectOutput.intensity}%.${maskSummary} El ensamble limpio se conservó.`, 'ok');
   } catch (error) {
     finishUiTask(taskId, { error: error.message });
     if (button) button.disabled = false;

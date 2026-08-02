@@ -95,9 +95,13 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
   reemplazar el contenido ni el modo de aparición del título del proyecto.
 - Elegir por bloque entre imagen fija con audio o un avatar HeyGen. Los
   personajes admiten una variante especial HeyGen con imagen espejo, código de
-  plano general, código de primer plano y contexto de animación. En el modo de
-  dos planos, el Automatizador divide el texto cerca del centro, conserva las
-  voces de ElevenLabs, crea los dos clips y los entrega unidos como una toma.
+  plano general, código de primer plano e instrucciones de actuación separadas
+  para cada encuadre. En el modo de dos planos, el Automatizador divide el texto
+  cerca del centro, conserva las voces de ElevenLabs, envía a cada avatar sólo
+  su prompt de comportamiento y entrega ambos clips unidos como una toma.
+  Cada plano puede regenerarse por separado: se conserva el otro clip y todos
+  los audios, se consume HeyGen sólo para la toma elegida y ambas se ensamblan
+  otra vez automáticamente.
 - Reanudar cada bloque por etapas: imagen, sobreimpresión y cada audio se
   persisten apenas terminan. Si FFmpeg o una etapa posterior falla, **Continuar**
   reutiliza esos parciales; **Regenerar desde cero** es la acción explícita que
@@ -117,6 +121,10 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
   puede cerrar con un fade out configurable —5 segundos inicialmente— sin
   desvanecer las voces. El Automatizador permite escucharla con esa ganancia y,
   cuando ya existe una voz generada, probar ambas juntas antes del ensamble.
+- Crear una versión de posproducción con Wiggle, Cinta vieja o VHS sobre una
+  mezcla de bloques de imagen y HeyGen, conservando el master limpio. Puede
+  sumar una máscara de cualquier color y opacidad entre el visual procesado y
+  las capas nítidas de títulos, texto y resaltado.
 - Consultar en Consumo la estimación completa de cada proyecto, desglosada en
   fichas, imágenes de bloques, voces y procesamiento local. Se abre el proyecto
   más reciente y los anteriores se eligen desde una lista.
