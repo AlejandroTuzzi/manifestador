@@ -54,6 +54,9 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
   subidos como música admiten etiquetas separadas de género, instrumentos y
   sentimientos para encontrarlos y reutilizarlos automáticamente.
 - Guardar prompts por categoría, reutilizarlos y administrarlos desde su propia sección.
+- Guardar estilos visuales como una categoría especial de Prompts: cada estilo
+  combina una imagen con su descripción en inglés, puede analizarse con Gemini
+  y adjunta una copia temporal rotulada `ARTISTIC STYLE` al reutilizarlo.
 - Crear personajes con fotos, voz, variantes/outfits y assets asociados.
 - Exportar/importar personajes en ZIP para moverlos entre ordenadores.
 - Convertir una imagen generada en personaje.
@@ -71,21 +74,37 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
   La imagen se archiva como ficha canónica y queda asignada al rol. También se
   pueden generar en secuencia todos los assets faltantes con una sola acción,
   omitiendo los que ya estén asignados.
+- Añadir bloques manualmente al principio, al final o después de cualquier
+  bloque existente, indicando título, prompt visual y una narración o diálogo
+  inicial. El bloque queda integrado y editable como cualquiera importado.
 - Elegir una voz de ElevenLabs antes de crear un personaje o asignarla después
   a cualquier personaje vinculado al proyecto.
 - Definir una dirección artística global por proyecto. Se agrega en inglés a
   todas las fichas y escenas para mantener el mismo medio, realismo, anatomía,
   materiales, color e iluminación durante toda la producción. Puede cargarse
-  directamente desde cualquier prompt guardado en la biblioteca.
+  directamente desde cualquier prompt guardado en la biblioteca. Si se elige
+  uno de la categoría Estilos, su imagen también acompaña cada ficha y escena
+  como referencia estética, sin modificar el archivo original.
 - Personalizar el texto sobreimpreso con fuentes propias persistentes
   (TTF/OTF/WOFF/WOFF2), medidas tipográficas en píxeles de referencia,
   alineación horizontal y estilos independientes para texto normal y palabras
   resaltadas. Cada uno puede conservar el texto original, convertirlo a
   mayúsculas o minúsculas, capitalizarlo y usar cursiva, subrayado o tachado.
+- Guardar como presets reutilizables toda la apariencia del título, el texto
+  normal y el resaltado —tipografías, colores, bordes, cajas y posición— sin
+  reemplazar el contenido ni el modo de aparición del título del proyecto.
+- Elegir por bloque entre imagen fija con audio o un avatar HeyGen. Los
+  personajes admiten una variante especial HeyGen con imagen espejo, código de
+  plano general, código de primer plano y contexto de animación. En el modo de
+  dos planos, el Automatizador divide el texto cerca del centro, conserva las
+  voces de ElevenLabs, crea los dos clips y los entrega unidos como una toma.
 - Reanudar cada bloque por etapas: imagen, sobreimpresión y cada audio se
   persisten apenas terminan. Si FFmpeg o una etapa posterior falla, **Continuar**
   reutiliza esos parciales; **Regenerar desde cero** es la acción explícita que
   vuelve a consumir generación.
+- **Rehacer texto + video** conserva exactamente la imagen limpia y todos los
+  audios existentes: vuelve a dibujar el texto y ensambla el MP4 localmente sin
+  realizar una nueva llamada a ElevenLabs.
 - Configurar FFmpeg indicando indistintamente la carpeta `bin` o la ruta completa
   a `ffmpeg.exe`.
 - Ensamblar el video final desde los MP4 terminados, respetando el orden de los
@@ -108,8 +127,9 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
 ## Conectar Controversy Tracker
 
 Manifestador expone una conexión local en `http://127.0.0.1:7777` para recibir
-el contrato `manifestador-production@1`. En Controversy Tracker configura esa
-URL y, si Manifestador está protegido, usa la misma clave de acceso.
+el contrato `manifestador-production@1`. El conector acepta exclusivamente
+conexiones loopback del mismo equipo; la contraseña de la interfaz protege los
+datos y archivos, pero no es necesaria para entregar guiones desde Tracker.
 
 El botón **Enviar a Manifestador** crea o actualiza el proyecto correspondiente
 en Automatizador. También se puede descargar el JSON desde Tracker e importarlo

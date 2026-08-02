@@ -849,7 +849,19 @@
         <option value="audio">Audio</option>
       </select>
     </label>
-    <label>Prompt<textarea id="promptEditorText" rows="8" placeholder="Texto del prompt…" required></textarea></label>
+    <section id="promptStyleFields" class="prompt-style-fields" hidden>
+      <div id="promptStylePreview" class="prompt-style-preview">
+        <div class="prompt-style-placeholder">Elegí la imagen que define la estética</div>
+      </div>
+      <input id="promptStyleUpload" type="file" accept="image/*" hidden>
+      <div class="prompt-style-actions">
+        <button type="button" class="mini-btn" id="promptStyleUploadBtn"><svg class="ic"><use href="#i-upload"/></svg> Subir imagen</button>
+        <button type="button" class="mini-btn" id="promptStyleAssetsBtn"><svg class="ic"><use href="#i-image"/></svg> Elegir de Assets</button>
+        <button type="button" class="mini-btn" id="promptStyleAnalyzeBtn"><svg class="ic"><use href="#i-spark"/></svg> Escribir estilo con IA</button>
+      </div>
+      <span id="promptStyleStatus" class="hint">La IA describirá solo la estética, técnica, soporte, luz, color y textura; no copiará el contenido de la escena.</span>
+    </section>
+    <label><span id="promptEditorTextLabel">Prompt</span><textarea id="promptEditorText" rows="8" placeholder="Texto del prompt…" required></textarea></label>
     <div class="form-modal-actions">
       <button type="button" class="mini-btn" id="promptEditorCancel">Cancelar</button>
       <button type="submit" class="generate-btn small">Guardar prompt</button>

@@ -10,7 +10,7 @@ import { spawn, execFile } from 'node:child_process';
 
 import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel, getAudioModel } from './lib/models.js';
 import {
-  generateGemini, generateSeedream, generateOpenAIImage, generateSeedanceVideo, generateScreenplay,
+  generateGemini, analyzeArtStyle, generateSeedream, generateOpenAIImage, generateSeedanceVideo, generateScreenplay,
   listVoices, generateSpeech, generateMusic, translateText, searchUpdatedPricing, testService
 } from './lib/providers.js';
 import { mergePricing, imagePrice, videoPrice, audioPrice, musicPrice, translatePrice, scriptPrice } from './lib/pricing.js';
@@ -49,7 +49,7 @@ const DEFAULT_POSER_PROMPT = 'The attached 3D figure render is ONLY a reference 
 // igual (describir un elemento visual tiende a reforzarlo). Ahora se enuncia
 // como una propiedad del resultado —una fotografía limpia, sin sobreimpresos—
 // en vez de como una prohibición sobre algo descripto.
-const LABELED_REFS_PROMPT = 'The reference images are annotated working proofs: the name tag across the top of each one identifies the subject for you and is not part of its scene. Read the tags, then ignore them. Produce a clean, unannotated photograph: the frame contains only the depicted scene, edge to edge, with no overlay, tag, strip, banner, caption or lettering added on top of it. Text that physically exists inside the scene (signage, posters, packaging, screens, graffiti, or any text the prompt asks for) is rendered as usual.';
+const LABELED_REFS_PROMPT = 'The reference images are annotated working proofs. A name tag identifies the subject to preserve; a tag reading ARTISTIC STYLE identifies a style-only reference, from which you must use only its medium, technique, lighting, palette, texture and overall visual treatment, never its people, objects, setting, action or composition. The tags are instructions, not part of any scene. Read them, then ignore their graphic appearance. Produce a clean, unannotated image with no overlay, tag, strip, banner, caption or lettering added on top. Text that physically exists inside the requested scene is rendered as usual.';
 
 const DEFAULT_CONFIG = {
   poserPrompt: DEFAULT_POSER_PROMPT,
@@ -58,6 +58,7 @@ const DEFAULT_CONFIG = {
   keys: { gemini: '', googleTranslate: '', ark: '', elevenlabs: '', openai: '', suno: '', heygen: '' },
   openaiModel: 'gpt-5-mini',
   audioModelId: AUDIO_MODEL.id,
+  heygenAuthMode: 'key',
   paths: {
     poser: 'assets/poser',
     video: 'assets/video',
@@ -814,18 +815,20 @@ async function runHeyGenVideoGeneration(req, cfg, model) {
   let payload;
   let refs = [];
   let characterId = null;
+  let characterMotionPrompt = '';
 
   if (model.requiresRegisteredCharacter) {
     const characters = await readJson('characters.json', []);
     const character = characters.find((item) => item.id === req.heygenCharacterId);
-    if (!character?.heygen?.avatarId || !character?.heygen?.imageKey) {
-      throw new Error('Elegí un personaje con variante HeyGen completa (imagen espejo y código de avatar).');
+    const avatarId = character?.heygen?.wideAvatarId || character?.heygen?.avatarId || '';
+    if (!avatarId) {
+      throw new Error('Elegí un personaje con código de avatar HeyGen.');
     }
-    await fs.access(await resolveAssetKey(character.heygen.imageKey));
     characterId = character.id;
+    characterMotionPrompt = String(character.heygen?.motionPrompt || '').trim();
     payload = {
       type: 'avatar',
-      avatar_id: character.heygen.avatarId,
+      avatar_id: avatarId,
       script: prompt,
       resolution,
       aspect_ratio: aspectRatio,
@@ -857,7 +860,7 @@ async function runHeyGenVideoGeneration(req, cfg, model) {
     };
   }
 
-  const motionPrompt = String(req.heygenMotionPrompt || '').trim().slice(0, 1000);
+  const motionPrompt = String(req.heygenMotionPrompt || characterMotionPrompt || '').trim().slice(0, 1000);
   if (model.supportsMotion && motionPrompt) payload.motion_prompt = motionPrompt;
   if (model.engine === 'avatar_iv' && ['low', 'medium', 'high'].includes(req.heygenExpressiveness)) {
     payload.expressiveness = req.heygenExpressiveness;
@@ -1435,6 +1438,9 @@ function invalidateAutomationOutput(output = {}, { image = false, text = false, 
   }
   if (image || text || audio) {
     delete next.videoKey;
+    delete next.heygenSegmentVideoKeys;
+    delete next.heygenFraming;
+    delete next.generator;
     delete next.completedAt;
   }
   return next;
@@ -1446,11 +1452,14 @@ const DEFAULT_AUTOMATION_CONFIG = {
   imageModelId: 'nano-banana-pro',
   fallbackImageModelId: '',
   artStyle: 'Photorealistic cinematic realism, natural human anatomy, realistic skin and materials, restrained color grading, consistent lighting and lens language',
+  artStylePromptId: '',
+  artStyleImageKey: '',
   aspectRatio: '9:16',
   resolution: '2K',
   narratorVoiceId: '',
   narratorVoiceName: '',
   audioModelId: AUDIO_MODEL.id,
+  heygenAuthMode: 'key',
   includeLogos: false,
   videoEffect: {
     enabled: false,
@@ -1673,7 +1682,10 @@ function sanitizeAutomation(src, prev = {}) {
       sourceReferences: [...new Set((Array.isArray(b.sourceReferences) ? b.sourceReferences : []).map(String))].slice(0, 20),
       sourceQuote: String(b.sourceQuote || '').slice(0, 4000),
       quoteReference: String(b.quoteReference || '').slice(0, 80),
-      estimatedDuration: Math.max(0, Math.min(3600, Number(b.estimatedDuration) || 0))
+      estimatedDuration: Math.max(0, Math.min(3600, Number(b.estimatedDuration) || 0)),
+      generator: b.generator === 'heygen' ? 'heygen' : 'image',
+      heygenCharacterId: /^[a-z0-9]+$/.test(String(b.heygenCharacterId || '')) ? String(b.heygenCharacterId) : '',
+      heygenFraming: ['wide', 'close', 'split'].includes(b.heygenFraming) ? b.heygenFraming : 'wide'
     };
   });
 
@@ -1690,7 +1702,10 @@ function sanitizeAutomation(src, prev = {}) {
       ...DEFAULT_AUTOMATION_CONFIG,
       ...(prev.config || {}),
       artStyle: String(prev.config?.artStyle || DEFAULT_AUTOMATION_CONFIG.artStyle).slice(0, 1200),
+      artStylePromptId: String(prev.config?.artStylePromptId || '').slice(0, 80),
+      artStyleImageKey: normalizeStyleImageKey(prev.config?.artStyleImageKey),
       audioModelId: getAudioModel(prev.config?.audioModelId).id,
+      heygenAuthMode: prev.config?.heygenAuthMode === 'oauth' ? 'oauth' : 'key',
       includeLogos: prev.config?.includeLogos === true,
       videoEffect: normalizeAutomationVideoEffect(prev.config?.videoEffect),
       transitionSound: normalizeAutomationTransitionSound(prev.config?.transitionSound),
@@ -1719,6 +1734,51 @@ function sanitizeAutomation(src, prev = {}) {
     ts: prev.ts || Date.now(),
     updatedAt: Date.now()
   };
+}
+
+function automationForClient(project) {
+  return {
+    ...project,
+    config: {
+      ...project.config,
+      heygenAuthMode: project.config?.heygenAuthMode === 'oauth' ? 'oauth' : 'key',
+      includeLogos: project.config?.includeLogos === true,
+      videoEffect: normalizeAutomationVideoEffect(project.config?.videoEffect),
+      audioModelId: getAudioModel(project.config?.audioModelId).id,
+      transitionSound: normalizeAutomationTransitionSound(project.config?.transitionSound),
+      music: normalizeAutomationMusic(project.config?.music, project.requirements?.music),
+      overlay: normalizeAutomationOverlay(project.config?.overlay),
+      titleOverlay: normalizeAutomationTitleOverlay(
+        project.config?.titleOverlay,
+        project.blocks,
+        project.integration?.scriptTitle || project.name
+      )
+    }
+  };
+}
+
+function sanitizeOverlayPreset(body = {}, previous = {}) {
+  const overlay = normalizeAutomationOverlay(body.overlay || previous.overlay || {});
+  delete overlay.previewBg;
+  const titleOverlay = normalizeAutomationTitleOverlay(body.titleOverlay || previous.titleOverlay || {}, [], '');
+  delete titleOverlay.enabled;
+  delete titleOverlay.mode;
+  delete titleOverlay.blockId;
+  delete titleOverlay.text;
+  return {
+    id: previous.id || newId(),
+    name: String(body.name ?? previous.name ?? '').trim().slice(0, 100) || 'Estilo sin nombre',
+    overlay,
+    titleOverlay,
+    ts: previous.ts || Date.now(),
+    updatedAt: Date.now()
+  };
+}
+
+function normalizeStyleImageKey(value) {
+  const key = String(value || '').trim();
+  if (!key || key.includes('..')) return '';
+  return /^(generated|uploads|characters|elements|poser)\/[\w./ -]+$/i.test(key) ? key : '';
 }
 
 function validateAutomationSource(src) {
@@ -1821,7 +1881,13 @@ const ENTITY_META = {
       voiceId: body.voiceId || '',
       voiceName: body.voiceName || '',
       arkAssetId: String(body.arkAssetId || '').trim().replace(/^asset:\/\//, ''),
-      heygen: { avatarId: String(body.heygenAvatarId || '').trim().slice(0, 200), imageKey: '' }
+      heygen: {
+        avatarId: String(body.heygenWideAvatarId || body.heygenAvatarId || '').trim().slice(0, 200),
+        wideAvatarId: String(body.heygenWideAvatarId || body.heygenAvatarId || '').trim().slice(0, 200),
+        closeAvatarId: String(body.heygenCloseAvatarId || '').trim().slice(0, 200),
+        motionPrompt: String(body.heygenMotionPrompt || '').trim().slice(0, 1000),
+        imageKey: ''
+      }
     }),
     applyUpdate: (e, body) => {
       if (body.name !== undefined) e.name = String(body.name).trim() || e.name;
@@ -1829,9 +1895,17 @@ const ENTITY_META = {
       if (body.voiceId !== undefined) e.voiceId = body.voiceId;
       if (body.voiceName !== undefined) e.voiceName = body.voiceName;
       if (body.arkAssetId !== undefined) e.arkAssetId = String(body.arkAssetId).trim().replace(/^asset:\/\//, '');
-      if (body.heygenAvatarId !== undefined) e.heygen = {
-        ...(e.heygen || {}), avatarId: String(body.heygenAvatarId || '').trim().slice(0, 200)
-      };
+      if (body.heygenAvatarId !== undefined || body.heygenWideAvatarId !== undefined
+        || body.heygenCloseAvatarId !== undefined || body.heygenMotionPrompt !== undefined) {
+        const wideAvatarId = String(body.heygenWideAvatarId ?? body.heygenAvatarId ?? e.heygen?.wideAvatarId ?? e.heygen?.avatarId ?? '').trim().slice(0, 200);
+        e.heygen = {
+          ...(e.heygen || {}),
+          avatarId: wideAvatarId,
+          wideAvatarId,
+          closeAvatarId: String(body.heygenCloseAvatarId ?? e.heygen?.closeAvatarId ?? '').trim().slice(0, 200),
+          motionPrompt: String(body.heygenMotionPrompt ?? e.heygen?.motionPrompt ?? '').trim().slice(0, 1000)
+        };
+      }
     },
     onDelete: async (id) => {
       await updateJson('asset-links.json', [], (links) => links.filter((l) => l.characterId !== id));
@@ -2134,29 +2208,24 @@ const server = http.createServer(async (req, res) => {
       return res.end(html);
     }
 
-    // Integración local servidor-a-servidor con Controversy Tracker. Usa la
-    // misma clave de acceso de Manifestador, pero nunca depende de cookies.
+    // Integración local servidor-a-servidor con Controversy Tracker. El límite
+    // de confianza es loopback: la contraseña sigue protegiendo la interfaz,
+    // archivos y APIs de usuario, pero no puede dejar inoperante el conector
+    // por una copia ausente o desactualizada en el IndexedDB del Tracker.
     if (p === '/api/integrations/controversy-tracker/health' && req.method === 'GET') {
       if (!isLoopbackRequest(req)) return send(res, 403, { error: 'La integración con Controversy Tracker sólo admite conexiones locales.' });
       const cfg = await getConfig();
-      const key = String(req.headers['x-manifestador-access-key'] || '');
-      if (cfg.accessPasswordHash && !verifyPassword(key, cfg.accessPasswordHash)) {
-        return send(res, 401, { error: 'La clave de acceso de Manifestador no es válida.' });
-      }
       return send(res, 200, {
         ok: true,
         service: 'manifestador',
         contract: AUTOMATION_CONTRACT,
-        protected: Boolean(cfg.accessPasswordHash)
+        protected: false,
+        appProtected: Boolean(cfg.accessPasswordHash),
+        transport: 'loopback'
       });
     }
     if (p === '/api/integrations/controversy-tracker/projects' && req.method === 'POST') {
       if (!isLoopbackRequest(req)) return send(res, 403, { error: 'La integración con Controversy Tracker sólo admite conexiones locales.' });
-      const cfg = await getConfig();
-      const key = String(req.headers['x-manifestador-access-key'] || '');
-      if (cfg.accessPasswordHash && !verifyPassword(key, cfg.accessPasswordHash)) {
-        return send(res, 401, { error: 'La clave de acceso de Manifestador no es válida.' });
-      }
       let source;
       try {
         source = validateAutomationSource(await readJsonBody(req));
@@ -2278,7 +2347,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations, fonts, transitionSounds] = await Promise.all([
+      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations, fonts, overlayPresets, transitionSounds] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
@@ -2292,6 +2361,7 @@ const server = http.createServer(async (req, res) => {
         readJson('element-links.json', []),
         readJson('automations.json', []),
         readJson('fonts.json', []),
+        readJson('overlay-presets.json', []),
         listTransitionSounds()
       ]);
       return send(res, 200, {
@@ -2311,20 +2381,9 @@ const server = http.createServer(async (req, res) => {
         scripts,
         elements,
         elementLinks,
-        automations: automations.map((project) => ({
-          ...project,
-          config: {
-            ...project.config,
-            includeLogos: project.config?.includeLogos === true,
-            videoEffect: normalizeAutomationVideoEffect(project.config?.videoEffect),
-            audioModelId: getAudioModel(project.config?.audioModelId).id,
-            transitionSound: normalizeAutomationTransitionSound(project.config?.transitionSound),
-            music: normalizeAutomationMusic(project.config?.music, project.requirements?.music),
-            overlay: normalizeAutomationOverlay(project.config?.overlay),
-            titleOverlay: normalizeAutomationTitleOverlay(project.config?.titleOverlay, project.blocks, project.integration?.scriptTitle || project.name)
-          }
-        })),
+        automations: automations.map(automationForClient),
         fonts,
+        overlayPresets,
         transitionSounds: transitionSounds.map((sound) => ({
           id: sound.id,
           category: sound.category,
@@ -2381,6 +2440,22 @@ const server = http.createServer(async (req, res) => {
       };
       await updateJson('fonts.json', [], (fonts) => [item, ...fonts]);
       return send(res, 200, item);
+    }
+
+    if (p === '/api/overlay-presets' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const item = sanitizeOverlayPreset(body);
+      await updateJson('overlay-presets.json', [], (all) => [item, ...all].slice(0, 200));
+      return send(res, 200, item);
+    }
+    if (p.startsWith('/api/overlay-presets/') && req.method === 'DELETE') {
+      const id = p.split('/').pop();
+      let found = false;
+      await updateJson('overlay-presets.json', [], (all) => {
+        found = all.some((item) => item.id === id);
+        return all.filter((item) => item.id !== id);
+      });
+      return found ? send(res, 200, { ok: true }) : send(res, 404, { error: 'Estilo no encontrado.' });
     }
 
     if (p === '/api/config' && req.method === 'PUT') {
@@ -2694,6 +2769,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- automatizaciones ---
+    if (p === '/api/automations' && req.method === 'GET') {
+      const automations = await readJson('automations.json', []);
+      return send(res, 200, { automations: automations.map(automationForClient) });
+    }
+
     if (p === '/api/automations' && req.method === 'POST') {
       const body = await readJsonBody(req);
       // { data } = importar de Controversy Tracker; si no, proyecto vacío con { name }
@@ -2737,6 +2817,12 @@ const server = http.createServer(async (req, res) => {
             artStyle: body.config.artStyle !== undefined
               ? String(body.config.artStyle).trim().slice(0, 1200)
               : prev.config.artStyle,
+            artStylePromptId: body.config.artStylePromptId !== undefined
+              ? String(body.config.artStylePromptId || '').trim().slice(0, 80)
+              : (prev.config.artStylePromptId || ''),
+            artStyleImageKey: body.config.artStyleImageKey !== undefined
+              ? normalizeStyleImageKey(body.config.artStyleImageKey)
+              : normalizeStyleImageKey(prev.config.artStyleImageKey),
             includeLogos: body.config.includeLogos !== undefined
               ? body.config.includeLogos === true
               : prev.config?.includeLogos === true,
@@ -2745,6 +2831,7 @@ const server = http.createServer(async (req, res) => {
               ...(body.config.videoEffect || {})
             }),
             audioModelId: getAudioModel(body.config.audioModelId ?? prev.config?.audioModelId).id,
+            heygenAuthMode: (body.config.heygenAuthMode ?? prev.config?.heygenAuthMode) === 'oauth' ? 'oauth' : 'key',
             transitionSound: normalizeAutomationTransitionSound({
               ...prev.config?.transitionSound,
               ...(body.config.transitionSound || {})
@@ -2811,15 +2898,18 @@ const server = http.createServer(async (req, res) => {
               } else {
                 const promptChanged = previousBlock.imagePrompt !== block.imagePrompt
                   || previousBlock.negativePrompt !== block.negativePrompt;
+                const generatorChanged = previousBlock.generator !== block.generator
+                  || previousBlock.heygenCharacterId !== block.heygenCharacterId
+                  || previousBlock.heygenFraming !== block.heygenFraming;
                 const textChanged = JSON.stringify(previousBlock.items || []) !== JSON.stringify(block.items || []);
                 const blockTitleChanged = previousBlock.title !== block.title
                   && next.config?.titleOverlay?.enabled === true
                   && next.config?.titleOverlay?.mode === 'block';
-                if (promptChanged || textChanged || blockTitleChanged) generationChanged = true;
+                if (promptChanged || generatorChanged || textChanged || blockTitleChanged) generationChanged = true;
                 output = invalidateAutomationOutput(output, {
-                  image: promptChanged,
-                  text: textChanged || blockTitleChanged,
-                  audio: textChanged
+                  image: promptChanged || generatorChanged,
+                  text: textChanged || blockTitleChanged || generatorChanged,
+                  audio: textChanged || generatorChanged
                 });
               }
               nextOutputs[block.id] = output;
@@ -2843,6 +2933,7 @@ const server = http.createServer(async (req, res) => {
             includeLogos: next.config?.includeLogos === true,
             videoEffect: normalizeAutomationVideoEffect(next.config?.videoEffect),
             audioModelId: getAudioModel(next.config?.audioModelId).id,
+            heygenAuthMode: next.config?.heygenAuthMode === 'oauth' ? 'oauth' : 'key',
             transitionSound: normalizeAutomationTransitionSound(next.config?.transitionSound),
             music: normalizeAutomationMusic(next.config?.music, next.requirements?.music),
             overlay: normalizeAutomationOverlay(next.config?.overlay),
@@ -2921,6 +3012,193 @@ const server = http.createServer(async (req, res) => {
         return updatedProject;
       }));
       return send(res, 200, { project: updatedProject, selected, entry });
+    }
+
+    // Genera una toma de Automatizador con uno o dos avatares HeyGen usando
+    // exactamente los audios que ya produjo ElevenLabs. Si hay dos encuadres,
+    // cada grupo de audio se envia por separado y los clips se unen localmente.
+    const automationHeyGenBlockMatch = /^\/api\/automations\/([a-z0-9]+)\/heygen-block$/.exec(p);
+    if (automationHeyGenBlockMatch && req.method === 'POST') {
+      const projectId = automationHeyGenBlockMatch[1];
+      const body = await readJsonBody(req);
+      const projects = await readJson('automations.json', []);
+      const project = projects.find((item) => item.id === projectId);
+      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
+      const block = project.blocks?.find((item) => item.id === String(body.blockId || ''));
+      if (!block) return send(res, 404, { error: 'Bloque no encontrado.' });
+      if (block.generator !== 'heygen') return send(res, 400, { error: 'Este bloque no está configurado para HeyGen.' });
+      const characters = await readJson('characters.json', []);
+      const requestedCharacterId = String(body.characterId || '');
+      if (requestedCharacterId && requestedCharacterId !== block.heygenCharacterId) {
+        return send(res, 400, { error: 'El personaje no coincide con la variante HeyGen guardada en el bloque.' });
+      }
+      const character = characters.find((item) => item.id === String(block.heygenCharacterId || ''));
+      if (!character) return send(res, 404, { error: 'Personaje HeyGen no encontrado.' });
+      const wideAvatarId = String(character.heygen?.wideAvatarId || character.heygen?.avatarId || '').trim();
+      const closeAvatarId = String(character.heygen?.closeAvatarId || '').trim();
+      if (!wideAvatarId) return send(res, 400, { error: 'La variante HeyGen necesita el código de plano general.' });
+
+      const framing = ['wide', 'close', 'split'].includes(body.framing) ? body.framing : 'wide';
+      if (['close', 'split'].includes(framing) && !closeAvatarId) return send(res, 400, { error: 'Falta el código HeyGen de primer plano.' });
+      const rawGroups = Array.isArray(body.audioGroups) ? body.audioGroups : [];
+      const audioGroups = rawGroups.map((group) => (Array.isArray(group) ? group : []).map(String).filter((key) => /^audio\//.test(key))).filter((group) => group.length);
+      const expectedGroups = framing === 'split' ? 2 : 1;
+      if (audioGroups.length !== expectedGroups) return send(res, 400, { error: `HeyGen necesita ${expectedGroups} grupo(s) de audio para este encuadre.` });
+
+      const cfg = await getConfig();
+      const authMode = project.config?.heygenAuthMode === 'oauth' ? 'oauth' : 'key';
+      const apiKey = String(cfg.keys.heygen || '').trim();
+      const oauth = authMode === 'oauth' ? await getHeyGenOAuth() : null;
+      if (authMode === 'key' && !apiKey) return send(res, 400, { error: 'Falta la API key de HeyGen en Configuración.' });
+      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
+      const outDir = resolveDir(cfg.paths.video);
+      await fs.mkdir(outDir, { recursive: true });
+      const temporaryAudioPaths = [];
+
+      const audioPathForGroup = async (keys, index) => {
+        const paths = [];
+        for (const key of keys) paths.push(await resolveAssetKey(key));
+        if (paths.length === 1) return paths[0];
+        const tempPath = path.join(outDir, `.heygen-audio-${projectId}-${block.id}-${index}-${newId()}.mp3`);
+        const args = ['-y'];
+        for (const inputPath of paths) args.push('-i', inputPath);
+        const inputs = paths.map((_, inputIndex) => `[${inputIndex}:a]`).join('');
+        args.push('-filter_complex', `${inputs}concat=n=${paths.length}:v=0:a=1[a]`, '-map', '[a]', '-c:a', 'libmp3lame', '-b:a', '192k', tempPath);
+        await runFfmpeg(ffmpegExecutable, args);
+        temporaryAudioPaths.push(tempPath);
+        return tempPath;
+      };
+
+      try {
+        const preparedAudioPaths = [];
+        for (const [index, group] of audioGroups.entries()) preparedAudioPaths.push(await audioPathForGroup(group, index));
+        const avatarIds = framing === 'split' ? [wideAvatarId, closeAvatarId] : [framing === 'close' ? closeAvatarId : wideAvatarId];
+        const aspectRatio = ['16:9', '9:16', '4:5', '5:4', '1:1', 'auto'].includes(project.config?.aspectRatio) ? project.config.aspectRatio : '9:16';
+        const resolution = project.config?.resolution === '1K' ? '720p' : '1080p';
+        const motionPrompt = String(character.heygen?.motionPrompt || '').trim().slice(0, 1000);
+        const generateClip = async (audioPath, index) => {
+          const buffer = await fs.readFile(audioPath);
+          const extension = path.extname(audioPath).toLowerCase();
+          const mime = extension === '.wav' ? 'audio/wav' : extension === '.m4a' ? 'audio/mp4' : 'audio/mpeg';
+          const idem = `automation-${projectId}-${block.id}-${index}-${newId()}`;
+          const upload = authMode === 'oauth'
+            ? await uploadHeyGenAssetWithMcp({ accessToken: oauth.accessToken, buffer, filename: path.basename(audioPath), mime })
+            : await uploadHeyGenAssetWithKey({ apiKey, buffer, filename: path.basename(audioPath), mime, idempotencyKey: `${idem}-audio` });
+          if (!upload.asset_id) throw new Error('HeyGen subió el audio, pero no devolvió asset_id.');
+          const payload = {
+            type: 'avatar',
+            avatar_id: avatarIds[index],
+            audio_asset_id: upload.asset_id,
+            title: `${project.name} - ${block.title || block.id} - ${index + 1}`.slice(0, 160),
+            resolution,
+            aspect_ratio: aspectRatio,
+            output_format: 'mp4',
+            engine: { type: 'avatar_iv' }
+          };
+          if (motionPrompt) payload.motion_prompt = motionPrompt;
+          const created = authMode === 'oauth'
+            ? await createHeyGenVideoWithMcp({ accessToken: oauth.accessToken, payload })
+            : await createHeyGenVideoWithKey({ apiKey, payload, idempotencyKey: idem });
+          const videoId = created.video_id || created.id;
+          if (!videoId) throw new Error('HeyGen aceptó el audio, pero no devolvió video_id.');
+          const finished = await waitForHeyGenVideo(() => authMode === 'oauth'
+            ? getHeyGenVideoWithMcp({ accessToken: oauth.accessToken, videoId })
+            : getHeyGenVideoWithKey({ apiKey, videoId }));
+          const videoBuffer = await downloadHeyGenVideo(finished.video_url);
+          const key = await saveBuffer('video', `${ts()}-auto-heygen-${index + 1}-${newId()}.mp4`, videoBuffer);
+          const duration = Number(finished.duration || finished.duration_seconds || created.duration || 0);
+          const model = getVideoModel('heygen-avatar-iv');
+          const cost = authMode === 'key' && duration > 0 ? duration * Number(model?.apiPricePerSecond || 0) : 0;
+          await recordCost({ type: 'video', modelId: 'heygen-avatar-iv', label: `HeyGen Avatar IV${authMode === 'oauth' ? ' (plan web)' : ' (API)'}`, units: duration || 1, unitLabel: duration ? 'segundo(s)' : 'video', cost });
+          return { key, videoId, duration, cost, reused: false };
+        };
+
+        // Cada clip queda ligado al proyecto apenas se descarga. Si el segundo
+        // plano o FFmpeg fallan después, Continuar reutiliza lo ya pagado.
+        const storedSegmentKeys = Array.isArray(project.outputs?.[block.id]?.heygenSegmentVideoKeys)
+          ? project.outputs[block.id].heygenSegmentVideoKeys.slice(0, expectedGroups)
+          : [];
+        const clipResults = [];
+        for (const key of storedSegmentKeys) {
+          if (!/^video\//.test(String(key || ''))) break;
+          const exists = await fs.access(await resolveAssetKey(key)).then(() => true).catch(() => false);
+          if (!exists) break;
+          clipResults.push({ key, videoId: '', duration: 0, cost: 0, reused: true });
+        }
+        for (let index = clipResults.length; index < preparedAudioPaths.length; index++) {
+          const clip = await generateClip(preparedAudioPaths[index], index);
+          clipResults.push(clip);
+          const partialKeys = clipResults.map((item) => item.key);
+          await updateJson('automations.json', [], (all) => all.map((item) => item.id !== projectId ? item : ({
+            ...item,
+            outputs: {
+              ...(item.outputs || {}),
+              [block.id]: {
+                ...(item.outputs?.[block.id] || {}),
+                heygenSegmentVideoKeys: partialKeys,
+                generator: 'heygen',
+                heygenFraming: framing,
+                ts: Date.now()
+              }
+            },
+            updatedAt: Date.now()
+          })));
+        }
+
+        const segmentVideoKeys = clipResults.map((item) => item.key);
+        let videoKey = segmentVideoKeys[0];
+        if (segmentVideoKeys.length === 2) {
+          const videoPaths = [];
+          for (const key of segmentVideoKeys) videoPaths.push(await resolveAssetKey(key));
+          const { width, height } = automationVideoDimensions(aspectRatio);
+          const name = `${ts()}-auto-heygen-unido-${newId()}.mp4`;
+          const outPath = path.join(outDir, name);
+          const args = ['-y', '-i', videoPaths[0], '-i', videoPaths[1], '-filter_complex',
+            `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=25[v0];` +
+            `[1:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=25[v1];` +
+            `[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a0];` +
+            `[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a1];` +
+            '[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]',
+            '-map', '[v]', '-map', '[a]', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', outPath];
+          await runFfmpeg(ffmpegExecutable, args);
+          videoKey = `video/${name}`;
+        }
+
+        const textLayerKey = String(body.textLayerKey || '');
+        if (/^(generated|uploads)\//.test(textLayerKey)) {
+          const baseVideoPath = await resolveAssetKey(videoKey);
+          const textLayerPath = await resolveAssetKey(textLayerKey);
+          const { width, height } = automationVideoDimensions(aspectRatio);
+          const name = `${ts()}-auto-heygen-texto-${newId()}.mp4`;
+          const outPath = path.join(outDir, name);
+          const args = ['-y', '-i', baseVideoPath, '-i', textLayerPath, '-filter_complex',
+            `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[base];` +
+            `[1:v]scale=${width}:${height},format=rgba[layer];[base][layer]overlay=0:0:format=auto,format=yuv420p[v]`,
+            '-map', '[v]', '-map', '0:a?', '-c:v', 'libx264', '-c:a', 'aac', '-b:a', '192k', '-shortest', outPath];
+          await runFfmpeg(ffmpegExecutable, args);
+          videoKey = `video/${name}`;
+        }
+
+        const category = `Auto: ${project.name}`.slice(0, 80);
+        await updateJson('asset-metadata.json', {}, (metadata) => {
+          for (const [index, item] of clipResults.entries()) {
+            if (item.reused && metadata[item.key]) continue;
+            metadata[item.key] = {
+              type: 'video', modelId: 'heygen-avatar-iv', modelName: 'HeyGen Avatar IV', ts: Date.now(), category,
+              automationId: projectId, blockId: block.id, heygenVideoId: item.videoId, heygenFraming: framing === 'split' ? (index === 0 ? 'wide' : 'close') : framing,
+              characterId: character.id, cost: Number(item.cost.toFixed(6))
+            };
+          }
+          if (!segmentVideoKeys.includes(videoKey)) metadata[videoKey] = {
+            type: 'video', modelId: 'ffmpeg', modelName: 'HeyGen · composición local', ts: Date.now(), category,
+            automationId: projectId, blockId: block.id, heygenFraming: framing, characterId: character.id, cost: 0
+          };
+          return metadata;
+        });
+        return send(res, 200, { videoKey, segmentVideoKeys, framing, characterId: character.id });
+      } finally {
+        for (const tempPath of temporaryAudioPaths) await fs.unlink(tempPath).catch(() => {});
+      }
     }
 
     // Muxea el video de un bloque: imagen fija (ya con el texto quemado) + audio(s)
@@ -3608,14 +3886,31 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- prompts archivados ---
+    if (p === '/api/prompts/analyze-style' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const imageKey = normalizeStyleImageKey(body.imageKey);
+      if (!imageKey) return send(res, 400, { error: 'Elegí una imagen válida para analizar.' });
+      const cfg = await getConfig();
+      const result = await analyzeArtStyle({
+        apiKey: cfg.keys.gemini,
+        imagePath: await resolveAssetKey(imageKey)
+      });
+      return send(res, 200, result);
+    }
+
     if (p === '/api/prompts' && req.method === 'POST') {
       const body = await readJsonBody(req);
+      const isStyle = body.kind === 'style' || String(body.category || '').trim().toLowerCase() === 'estilos';
+      const styleImageKey = isStyle ? normalizeStyleImageKey(body.styleImageKey) : '';
+      if (isStyle && !styleImageKey) return send(res, 400, { error: 'Los estilos necesitan una imagen de referencia.' });
       const item = {
         id: newId(),
         title: String(body.title || '').trim() || 'Sin título',
         text: String(body.text || ''),
-        mode: ['audio', 'video'].includes(body.mode) ? body.mode : 'image',
-        category: String(body.category || '').trim() || 'General',
+        mode: isStyle ? 'image' : (['audio', 'video'].includes(body.mode) ? body.mode : 'image'),
+        category: isStyle ? 'Estilos' : (String(body.category || '').trim() || 'General'),
+        kind: isStyle ? 'style' : 'prompt',
+        styleImageKey,
         ts: Date.now()
       };
       await updateJson('prompts.json', [], (all) => [item, ...all]);
@@ -3625,18 +3920,28 @@ const server = http.createServer(async (req, res) => {
       const id = p.split('/').pop();
       const body = await readJsonBody(req);
       let out = null;
+      let invalidStyle = false;
       await updateJson('prompts.json', [], (all) => {
         const i = all.findIndex((x) => x.id === id);
         if (i === -1) return all;
+        const requestedCategory = body.category !== undefined ? String(body.category).trim() || 'General' : (all[i].category || 'General');
+        const isStyle = body.kind === 'style' || requestedCategory.toLowerCase() === 'estilos';
+        const styleImageKey = isStyle
+          ? normalizeStyleImageKey(body.styleImageKey !== undefined ? body.styleImageKey : all[i].styleImageKey)
+          : '';
+        if (isStyle && !styleImageKey) { invalidStyle = true; return all; }
         all[i] = {
           ...all[i],
           title: body.title !== undefined ? String(body.title).trim() || 'Sin título' : all[i].title,
           text: body.text !== undefined ? String(body.text) : all[i].text,
-          category: body.category !== undefined ? String(body.category).trim() || 'General' : (all[i].category || 'General'),
-          mode: body.mode !== undefined ? (['audio', 'video'].includes(body.mode) ? body.mode : 'image') : all[i].mode
+          category: isStyle ? 'Estilos' : requestedCategory,
+          mode: isStyle ? 'image' : (body.mode !== undefined ? (['audio', 'video'].includes(body.mode) ? body.mode : 'image') : all[i].mode),
+          kind: isStyle ? 'style' : 'prompt',
+          styleImageKey
         };
         out = all[i]; return all;
       });
+      if (invalidStyle) return send(res, 400, { error: 'Los estilos necesitan una imagen de referencia.' });
       return out ? send(res, 200, out) : send(res, 404, { error: 'Prompt no encontrado' });
     }
     if (p.startsWith('/api/prompts/') && req.method === 'DELETE') {
@@ -3884,7 +4189,13 @@ const server = http.createServer(async (req, res) => {
       const item = {
         id, name: String(source.name || 'Personaje importado'), description: String(source.description || ''),
         voiceId: String(source.voiceId || ''), voiceName: String(source.voiceName || ''),
-        heygen: { avatarId: String(source.heygen?.avatarId || ''), imageKey: '' },
+        heygen: {
+          avatarId: String(source.heygen?.wideAvatarId || source.heygen?.avatarId || ''),
+          wideAvatarId: String(source.heygen?.wideAvatarId || source.heygen?.avatarId || ''),
+          closeAvatarId: String(source.heygen?.closeAvatarId || ''),
+          motionPrompt: String(source.heygen?.motionPrompt || ''),
+          imageKey: ''
+        },
         photos: [], variants: [], ts: Date.now()
       };
       await fs.mkdir(characterDir, { recursive: true });
@@ -3938,7 +4249,13 @@ const server = http.createServer(async (req, res) => {
         }
         variants.push({ name: variant.name, description: variant.description || '', photos: variantPhotos });
       }
-      let heygen = { avatarId: character.heygen?.avatarId || '', image: '' };
+      let heygen = {
+        avatarId: character.heygen?.wideAvatarId || character.heygen?.avatarId || '',
+        wideAvatarId: character.heygen?.wideAvatarId || character.heygen?.avatarId || '',
+        closeAvatarId: character.heygen?.closeAvatarId || '',
+        motionPrompt: character.heygen?.motionPrompt || '',
+        image: ''
+      };
       if (character.heygen?.imageKey) {
         const ext = path.extname(character.heygen.imageKey).toLowerCase();
         heygen.image = `heygen/mirror${ext}`;

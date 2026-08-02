@@ -330,6 +330,14 @@ function renderImageControls() {
   updateEstimate();
 }
 
+function heygenWideAvatarId(character) {
+  return character?.heygen?.wideAvatarId || character?.heygen?.avatarId || '';
+}
+
+function heygenCharacterReady(character) {
+  return Boolean(heygenWideAvatarId(character));
+}
+
 function renderVideoControls() {
   const m = currentVideoModel();
   if (!m) return;
@@ -375,17 +383,17 @@ function renderVideoControls() {
   $('#btnShotList').hidden = isHeyGen;
   if (isHeyGen) {
     state.video.mode = 'reference';
-    const eligible = state.characters.filter((character) => character.heygen?.avatarId && character.heygen?.imageKey);
+    const eligible = state.characters.filter(heygenCharacterReady);
     if (!eligible.some((character) => character.id === state.video.heygenCharacterId)) {
       state.video.heygenCharacterId = eligible[0]?.id || '';
     }
     $('#heygenCharacterRow').hidden = !m.requiresRegisteredCharacter;
     $('#heygenCharacterSelect').innerHTML = eligible.length
-      ? eligible.map((character) => `<option value="${character.id}">${esc(character.name)} · ${esc(character.heygen.avatarId)}</option>`).join('')
+      ? eligible.map((character) => `<option value="${character.id}">${esc(character.name)} · HeyGen${character.heygen?.closeAvatarId ? ' · 2 planos' : ' · 1 plano'}</option>`).join('')
       : '<option value="">— no hay personajes HeyGen completos —</option>';
     $('#heygenCharacterSelect').value = state.video.heygenCharacterId;
     $('#heygenCharacterHint').textContent = eligible.length
-      ? 'Sólo aparecen personajes con imagen espejo y código de avatar.'
+      ? 'Sólo aparecen personajes con código de avatar. La imagen espejo es una referencia local opcional.'
       : 'Creá la variante HeyGen en Personajes para habilitar este modelo.';
     $('#heygenVoiceRow').hidden = false;
     $('#heygenMotionRow').hidden = !m.supportsMotion;
@@ -638,7 +646,7 @@ function applyPinnedCharacterPhotos() {
   const videoModel = state.mode === 'video' ? currentVideoModel() : null;
   if (videoModel?.provider === 'heygen') {
     if (videoModel.requiresRegisteredCharacter) {
-      if (pc.heygen?.avatarId && pc.heygen?.imageKey) state.video.heygenCharacterId = pc.id;
+      if (heygenCharacterReady(pc)) state.video.heygenCharacterId = pc.id;
       return;
     }
     const key = pc.heygen?.imageKey || pc.photos?.[0];
@@ -987,7 +995,7 @@ async function generate() {
   const isHeyGen = isVideo && model?.provider === 'heygen';
   if (isHeyGen && model.requiresRegisteredCharacter) {
     const character = state.characters.find((item) => item.id === state.video.heygenCharacterId);
-    if (!character?.heygen?.avatarId || !character?.heygen?.imageKey) {
+    if (!heygenCharacterReady(character)) {
       return toast('Este modelo necesita un personaje con variante HeyGen completa', 'err');
     }
   }
@@ -1356,17 +1364,14 @@ function renderPromptsPanel() {
   }
   for (const pr of filtered) {
     const d = document.createElement('div');
-    d.className = 'prompt-item';
-    d.innerHTML = `<span class="p-mode">${pr.mode === 'audio' ? IC('mic') : pr.mode === 'video' ? IC('film') : IC('image')}</span>
+    d.className = `prompt-item${isStylePrompt(pr) ? ' style' : ''}`;
+    d.innerHTML = `${isStylePrompt(pr) && pr.styleImageKey ? `<span class="prompt-item-style-thumb"><img src="${esc(fileUrl(pr.styleImageKey))}" alt=""><span class="prompt-style-label">ARTISTIC STYLE</span></span>` : ''}<span class="p-mode">${pr.mode === 'audio' ? IC('mic') : pr.mode === 'video' ? IC('film') : IC('image')}</span>
       <span class="p-title">${esc(pr.category || 'General')} · ${esc(pr.title)}</span>
       <span class="p-text">${esc(pr.text)}</span>
       <button class="icon-btn" title="Eliminar">${IC('x')}</button>`;
     d.addEventListener('click', (e) => {
       if (e.target.closest('.icon-btn')) return;
-      promptBox.value = pr.text;
-      setMode(['audio', 'video'].includes(pr.mode) ? pr.mode : 'image');
-      renderHighlight();
-      promptBox.focus();
+      usePrompt(pr);
     });
     d.querySelector('.icon-btn').addEventListener('click', async () => {
       await api(`/api/prompts/${pr.id}`, { method: 'DELETE' });
@@ -1392,6 +1397,16 @@ function openPicker(replaceIndex = null) {
 
 // una selección del picker: reemplaza si estamos en ese modo, o agrega
 function pickRef(key) {
+  if (state.promptStyleImagePick) {
+    state.promptStyleImagePick = false;
+    state.replaceRefIndex = null;
+    $('#pickerModal').hidden = true;
+    if (state.promptEditor) {
+      state.promptEditor.styleImageKey = key;
+      renderPromptStylePreview();
+    }
+    return;
+  }
   if (state.overlayBgPick) {
     state.overlayBgPick = false;
     $('#pickerModal').hidden = true;
@@ -1415,7 +1430,7 @@ function replaceRef(i, key) {
   toast('Referencia reemplazada — el orden y la cita se mantienen');
 }
 
-$('#pickerClose').addEventListener('click', () => { $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.overlayBgPick = false; });
+$('#pickerClose').addEventListener('click', () => { $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.overlayBgPick = false; state.promptStyleImagePick = false; });
 $$('#pickerTabs .tab').forEach((t) => {
   t.addEventListener('click', () => setPickerTab(t.dataset.src));
 });
@@ -1812,9 +1827,37 @@ function renderAssetsGrid() {
   syncAssetAudioTiles();
 }
 
+const STYLE_CATEGORY = 'Estilos';
+const ARTISTIC_STYLE_LABEL = 'ARTISTIC STYLE';
+
+function isStylePrompt(pr) {
+  return pr?.kind === 'style' || String(pr?.category || '').trim().toLowerCase() === STYLE_CATEGORY.toLowerCase();
+}
+
+function addStyleReference(key) {
+  if (!key) return true;
+  const existing = state.refs.find((ref) => ref.key === key);
+  if (existing) {
+    existing.label = ARTISTIC_STYLE_LABEL;
+    renderRefs();
+    return true;
+  }
+  const model = activeRefModel();
+  const maxRefs = activeRefLimit();
+  if (state.refs.length >= maxRefs) {
+    toast(`${model.name} admite hasta ${maxRefs} referencia(s); liberá una para aplicar el estilo.`, 'err');
+    return false;
+  }
+  state.refs.unshift({ key, fromChar: false, label: ARTISTIC_STYLE_LABEL });
+  renderRefs();
+  return true;
+}
+
 function usePrompt(pr) {
+  const mode = isStylePrompt(pr) ? 'image' : (['audio', 'video'].includes(pr.mode) ? pr.mode : 'image');
+  setMode(mode);
+  if (isStylePrompt(pr) && !addStyleReference(pr.styleImageKey)) return;
   promptBox.value = pr.text;
-  setMode(['audio', 'video'].includes(pr.mode) ? pr.mode : 'image');
   renderHighlight();
   goToCreate();
   promptBox.focus();
@@ -1826,7 +1869,28 @@ function promptCategories(mode = null) {
   const extra = mode
     ? (state.promptCategoriesExtra[mode] || [])
     : Object.values(state.promptCategoriesExtra).flat();
-  return [...new Set([...fromPrompts, ...extra])].sort((a, b) => a.localeCompare(b));
+  const builtIn = !mode || mode === 'image' ? [STYLE_CATEGORY] : [];
+  return [...new Set([...builtIn, ...fromPrompts, ...extra])].sort((a, b) => a.localeCompare(b));
+}
+
+function promptEditorIsStyle() {
+  return String($('#promptEditorCategory').value || '').trim().toLowerCase() === STYLE_CATEGORY.toLowerCase();
+}
+
+function renderPromptStylePreview() {
+  const key = state.promptEditor?.styleImageKey || '';
+  $('#promptStylePreview').innerHTML = key
+    ? `<img src="${esc(fileUrl(key))}" alt="Referencia de estilo"><span class="prompt-style-label">${ARTISTIC_STYLE_LABEL}</span>`
+    : '<div class="prompt-style-placeholder">Elegí la imagen que define la estética</div>';
+}
+
+function syncPromptEditorStyleFields() {
+  const isStyle = promptEditorIsStyle();
+  $('#promptStyleFields').hidden = !isStyle;
+  $('#promptEditorTextLabel').textContent = isStyle ? 'Prompt de estilo (en inglés)' : 'Prompt';
+  $('#promptEditorMode').disabled = isStyle;
+  if (isStyle) $('#promptEditorMode').value = 'image';
+  renderPromptStylePreview();
 }
 
 function renderPromptEditorCategories() {
@@ -1835,15 +1899,17 @@ function renderPromptEditorCategories() {
     $('#promptEditorCategory').value = c;
     renderPromptEditorCategories();
   });
+  syncPromptEditorStyleFields();
 }
 
 function openPromptEditor({ prompt = null, initialText = '', initialMode = state.mode, source = 'library' } = {}) {
-  state.promptEditor = { id: prompt?.id || null, source };
+  state.promptEditor = { id: prompt?.id || null, source, styleImageKey: prompt?.styleImageKey || '' };
   $('#promptEditorTitle').textContent = prompt ? 'Editar prompt' : 'Nuevo prompt';
   $('#promptEditorName').value = prompt?.title || (initialText ? initialText.slice(0, 60) : '');
   $('#promptEditorCategory').value = prompt?.category || 'General';
   $('#promptEditorMode').value = prompt?.mode || (['audio', 'video'].includes(initialMode) ? initialMode : 'image');
   $('#promptEditorText').value = prompt?.text || initialText || '';
+  $('#promptStyleStatus').textContent = 'La IA describirá solo la estética, técnica, soporte, luz, color y textura; no copiará el contenido de la escena.';
   renderPromptEditorCategories();
   $('#promptEditorModal').hidden = false;
   setTimeout(() => $('#promptEditorName').focus(), 0);
@@ -1852,9 +1918,50 @@ function openPromptEditor({ prompt = null, initialText = '', initialMode = state
 $('#promptEditorMode').addEventListener('change', renderPromptEditorCategories);
 $('#promptEditorCategory').addEventListener('input', renderPromptEditorCategories);
 
+$('#promptStyleUploadBtn').addEventListener('click', () => $('#promptStyleUpload').click());
+$('#promptStyleUpload').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file || !state.promptEditor) return;
+  try {
+    $('#promptStyleStatus').textContent = 'Subiendo imagen…';
+    const { key } = await api('/api/upload', { method: 'POST', body: { name: file.name, dataUrl: await readFileAsDataUrl(file) } });
+    state.promptEditor.styleImageKey = key;
+    renderPromptStylePreview();
+    $('#promptStyleStatus').textContent = 'Imagen lista. Podés escribir el estilo o pedir el análisis con IA.';
+  } catch (err) {
+    $('#promptStyleStatus').textContent = err.message;
+    toast(err.message, 'err');
+  }
+});
+$('#promptStyleAssetsBtn').addEventListener('click', () => {
+  state.promptStyleImagePick = true;
+  openPicker();
+  $('#pickerTitle').textContent = 'Elegir imagen para el estilo artístico';
+});
+$('#promptStyleAnalyzeBtn').addEventListener('click', async () => {
+  const key = state.promptEditor?.styleImageKey;
+  if (!key) return toast('Primero elegí una imagen para analizar.', 'err');
+  const button = $('#promptStyleAnalyzeBtn');
+  button.disabled = true;
+  $('#promptStyleStatus').textContent = 'Analizando estética, técnica, luz, color y textura…';
+  try {
+    const result = await api('/api/prompts/analyze-style', { method: 'POST', body: { imageKey: key } });
+    $('#promptEditorText').value = result.text || '';
+    $('#promptStyleStatus').textContent = `Estilo escrito con ${result.model || 'IA'}. Revisalo y guardalo cuando esté listo.`;
+    if (!$('#promptEditorName').value.trim()) $('#promptEditorName').value = 'Estilo artístico';
+  } catch (err) {
+    $('#promptStyleStatus').textContent = err.message;
+    toast(err.message, 'err');
+  } finally {
+    button.disabled = false;
+  }
+});
+
 function closePromptEditor() {
   $('#promptEditorModal').hidden = true;
   state.promptEditor = null;
+  state.promptStyleImagePick = false;
 }
 
 $('#promptEditorClose').addEventListener('click', closePromptEditor);
@@ -1867,9 +1974,12 @@ $('#promptEditorForm').addEventListener('submit', async (e) => {
     title: $('#promptEditorName').value.trim(),
     category: $('#promptEditorCategory').value.trim() || 'General',
     mode: ['audio', 'video'].includes($('#promptEditorMode').value) ? $('#promptEditorMode').value : 'image',
-    text: $('#promptEditorText').value.trim()
+    text: $('#promptEditorText').value.trim(),
+    kind: promptEditorIsStyle() ? 'style' : 'prompt',
+    styleImageKey: promptEditorIsStyle() ? (editor.styleImageKey || '') : ''
   };
   if (!body.title || !body.text) return;
+  if (body.kind === 'style' && !body.styleImageKey) return toast('Elegí una imagen para este estilo.', 'err');
   try {
     if (editor.id) {
       const updated = await api(`/api/prompts/${editor.id}`, { method: 'PUT', body });
@@ -1903,6 +2013,7 @@ function renderPromptLibrary() {
   library.innerHTML = items.length ? items.map((pr) => `
     <article class="prompt-library-card" data-prompt="${pr.id}">
       <div class="prompt-library-head"><div><span class="prompt-category">${esc(pr.category || 'General')}</span><h3>${esc(pr.title)}</h3></div><span>${pr.mode === 'audio' ? IC('mic') : pr.mode === 'video' ? IC('film') : IC('image')}</span></div>
+      ${isStylePrompt(pr) && pr.styleImageKey ? `<div class="prompt-style-image"><img src="${esc(fileUrl(pr.styleImageKey))}" alt="Referencia de ${esc(pr.title)}"><span class="prompt-style-label">${ARTISTIC_STYLE_LABEL}</span></div>` : ''}
       <div class="prompt-library-text">${esc(pr.text)}</div>
       <div class="prompt-library-actions"><button class="mini-btn" data-pact="use">Usar</button><button class="mini-btn" data-pact="edit">${IC('edit')} Editar</button><button class="mini-btn danger" data-pact="delete">${IC('trash')}</button></div>
     </article>`).join('') : '<div class="empty-note">No hay prompts que coincidan.</div>';
@@ -3558,7 +3669,7 @@ function renderCharacters() {
         <div class="char-voice">${c.voiceName ? IC('mic') + ' ' + esc(c.voiceName) : '<span style="color:#6f5f8d">sin voz</span>'}</div>
       </div></div>
       <div class="char-desc">${esc(c.description || '')}</div>
-      ${c.heygen?.avatarId && c.heygen?.imageKey ? `<div class="heygen-card-badge">HeyGen · ${esc(c.heygen.avatarId)}</div>` : ''}
+      ${heygenCharacterReady(c) ? `<div class="heygen-card-badge">HeyGen · ${c.heygen?.closeAvatarId ? '2 planos' : '1 plano'}</div>` : ''}
       ${(c.variants || []).length ? `<div class="hint" style="margin-bottom:8px">${(c.variants || []).length} variante${c.variants.length === 1 ? '' : 's'} de outfit</div>` : ''}
       ${inSeries.length ? `<div class="char-series">${IC('layers')} ${inSeries.map((s) => esc(s.title)).join(' · ')}</div>` : ''}
       <div class="char-photos-mini">${minis}</div>
@@ -3680,7 +3791,7 @@ function openCharModal(id, assetKey = null) {
 
 function renderCharModal() {
   const id = state.editingCharId;
-  const c = state.characters.find((x) => x.id === id) || { name: '', description: '', voiceId: '', photos: [], heygen: { avatarId: '', imageKey: '' } };
+  const c = state.characters.find((x) => x.id === id) || { name: '', description: '', voiceId: '', photos: [], heygen: { avatarId: '', wideAvatarId: '', closeAvatarId: '', motionPrompt: '', imageKey: '' } };
   const voices = state.voices || [];
   const body = $('#charModalBody');
   body.innerHTML = `
@@ -3699,12 +3810,15 @@ function renderCharModal() {
       <div class="hint" style="margin-top:4px">Para personas reales: verificá la identidad en la consola de ModelArk (Playground → My assets → Real-human) y pegá acá el asset ID. En video se usa en lugar de las fotos, que Seedance rechaza si tienen rostros reales.</div>
     </div>
     <div class="heygen-character-card">
-      <div class="variant-manager-head"><label>Variante especial · HeyGen</label>${c.heygen?.avatarId && c.heygen?.imageKey ? '<span class="heygen-ready">Lista para video</span>' : ''}</div>
-      <input type="text" id="chHeyGenAvatar" value="${esc(c.heygen?.avatarId || '')}" placeholder="Código del avatar registrado en HeyGen">
-      <div class="hint" style="margin-top:4px">Pegá el avatar_id remoto y guardá una imagen espejo de la misma identidad. Manifestador no registra ni sube este personaje automáticamente.</div>
+      <div class="variant-manager-head"><label>Variante especial · HeyGen</label>${heygenCharacterReady(c) ? '<span class="heygen-ready">Lista para video</span>' : ''}</div>
+      <label class="heygen-character-field"><span>Plano general · avatar_id</span><input type="text" id="chHeyGenWideAvatar" value="${esc(heygenWideAvatarId(c))}" placeholder="91bd75d9e4414cc58043c82bcfc340f4"></label>
+      <label class="heygen-character-field"><span>Primer plano · avatar_id</span><input type="text" id="chHeyGenCloseAvatar" value="${esc(c.heygen?.closeAvatarId || '')}" placeholder="6f85c7941c594c94ae8594e17337bef0"></label>
+      <label class="heygen-character-field"><span>Contexto para la animación</span><textarea id="chHeyGenMotionPrompt" maxlength="1000" rows="3" placeholder="El personaje tiene una máscara que cubre todo su rostro, de tela, quedando su boca y facciones detrás de ella.">${esc(c.heygen?.motionPrompt || '')}</textarea></label>
+      <div class="hint" style="margin-top:4px">El plano general es obligatorio. El primer plano habilita la toma alternada. La imagen espejo es una referencia visual local y opcional; Manifestador no la envía ni registra el avatar.</div>
       ${id ? `<div class="heygen-mirror">
         ${c.heygen?.imageKey ? `<img src="${fileUrl(c.heygen.imageKey)}" alt="Imagen espejo de HeyGen">` : '<div class="heygen-mirror-empty">Sin imagen espejo</div>'}
         <div><button type="button" class="mini-btn" id="chHeyGenUpload">${IC('upload')} Subir imagen espejo</button>
+        <input type="file" id="chHeyGenFileInput" accept="image/png,image/jpeg,image/webp" hidden>
         ${c.photos?.[0] ? `<button type="button" class="mini-btn" id="chHeyGenUseCover">Usar portada</button>` : ''}
         ${c.heygen?.imageKey ? `<button type="button" class="mini-btn danger" id="chHeyGenRemove">Quitar</button>` : ''}</div>
       </div>` : '<p class="hint">Creá el personaje primero para subir su imagen espejo.</p>'}
@@ -3752,7 +3866,9 @@ function renderCharModal() {
       voiceId,
       voiceName: voices2.find((v) => v.id === voiceId)?.name || '',
       arkAssetId: $('#chArkAsset').value.trim(),
-      heygenAvatarId: $('#chHeyGenAvatar').value.trim()
+      heygenWideAvatarId: $('#chHeyGenWideAvatar').value.trim(),
+      heygenCloseAvatarId: $('#chHeyGenCloseAvatar').value.trim(),
+      heygenMotionPrompt: $('#chHeyGenMotionPrompt').value.trim()
     };
     try {
       if (id) {
@@ -3802,6 +3918,59 @@ function renderCharModal() {
       renderPinned();
     };
     $('#fileInput').click();
+  });
+
+  $('#chHeyGenUpload')?.addEventListener('click', () => $('#chHeyGenFileInput').click());
+  $('#chHeyGenFileInput')?.addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const button = $('#chHeyGenUpload');
+    try {
+      button.disabled = true;
+      const updated = await api(`/api/characters/${id}/heygen-image`, {
+        method: 'POST',
+        body: { name: file.name, dataUrl: await readFileAsDataUrl(file) }
+      });
+      state.characters[state.characters.findIndex((item) => item.id === id)] = updated;
+      renderCharModal();
+      renderCharacters();
+      renderVideoControls();
+      toast('Imagen espejo actualizada.');
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message, 'err');
+    }
+  });
+  $('#chHeyGenUseCover')?.addEventListener('click', async () => {
+    const button = $('#chHeyGenUseCover');
+    try {
+      button.disabled = true;
+      const updated = await api(`/api/characters/${id}/heygen-image`, { method: 'POST', body: { assetKey: c.photos[0] } });
+      state.characters[state.characters.findIndex((item) => item.id === id)] = updated;
+      renderCharModal();
+      renderCharacters();
+      renderVideoControls();
+      toast('Portada usada como imagen espejo.');
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message, 'err');
+    }
+  });
+  $('#chHeyGenRemove')?.addEventListener('click', async () => {
+    const button = $('#chHeyGenRemove');
+    try {
+      button.disabled = true;
+      const updated = await api(`/api/characters/${id}/heygen-image`, { method: 'DELETE' });
+      state.characters[state.characters.findIndex((item) => item.id === id)] = updated;
+      renderCharModal();
+      renderCharacters();
+      renderVideoControls();
+      toast('Imagen espejo quitada.');
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message, 'err');
+    }
   });
 
   $('#chAddVariant')?.addEventListener('click', () => openVariantEditor(id));
@@ -4339,6 +4508,71 @@ function openElementAssets(id) {
 // ---------------------------------------------------------------------------
 
 // roles sin asignar (personajes y locaciones obligatorios; objetos también si se declararon)
+let automationSyncTimer = null;
+let automationSyncInFlight = false;
+let automationSyncNeedsRender = false;
+
+function automationListSignature(projects) {
+  return (projects || []).map((project) =>
+    `${project.id}:${Number(project.updatedAt) || 0}:${project.blocks?.length || 0}`
+  ).join('|');
+}
+
+function renderSyncedAutomationProject() {
+  if (!$('#view-automation')?.classList.contains('active')) return;
+  const active = document.activeElement;
+  if (active?.matches('input, textarea, select') && active.closest('#view-automation')) {
+    automationSyncNeedsRender = true;
+    return;
+  }
+  automationSyncNeedsRender = false;
+  renderAutomationProject();
+}
+
+async function syncAutomations() {
+  if (automationSyncInFlight || document.hidden || !state.config) return;
+  automationSyncInFlight = true;
+  try {
+    const result = await api('/api/automations', { task: false });
+    const incoming = Array.isArray(result.automations) ? result.automations : [];
+    if (automationListSignature(incoming) === automationListSignature(state.automations)) return;
+
+    const previous = new Map(state.automations.map((project) => [project.id, project]));
+    const added = incoming.filter((project) => !previous.has(project.id));
+    const changedIds = new Set(incoming.filter((project) => {
+      const current = previous.get(project.id);
+      return current && Number(current.updatedAt) !== Number(project.updatedAt);
+    }).map((project) => project.id));
+    state.automations = incoming;
+
+    if ($('#view-automatizador')?.classList.contains('active')) renderAutomations();
+    if (state.openAutomationId && changedIds.has(state.openAutomationId)) renderSyncedAutomationProject();
+
+    const received = added.find((project) => project.integration?.source === 'controversy-tracker');
+    const updated = incoming.find((project) =>
+      changedIds.has(project.id) && project.integration?.source === 'controversy-tracker');
+    if (received) toast(`Nuevo guion recibido: ${received.name}`, 'ok');
+    else if (updated) toast(`Guion actualizado: ${updated.name}`, 'ok');
+  } catch {
+    // La siguiente consulta reintenta. Los errores de sesión ya los gestiona api().
+  } finally {
+    automationSyncInFlight = false;
+  }
+}
+
+function startAutomationSync() {
+  if (automationSyncTimer) return;
+  automationSyncTimer = setInterval(syncAutomations, 2500);
+  window.addEventListener('focus', syncAutomations);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) syncAutomations();
+  });
+  document.addEventListener('focusout', () => {
+    if (!automationSyncNeedsRender) return;
+    setTimeout(renderSyncedAutomationProject, 0);
+  });
+}
+
 function automationMissing(pr) {
   const miss = [];
   for (const r of pr.requirements.characters) if (!automationAssignedEntity(pr, 'characters', r.role)) miss.push(`personaje ${r.role}`);
@@ -4550,11 +4784,48 @@ async function ensureOverlayFonts(...overlays) {
 }
 
 function automationArtPromptOptions() {
-  const prompts = state.prompts || [];
+  const prompts = (state.prompts || [])
+    .filter((prompt) => !['audio', 'video'].includes(prompt.mode))
+    .sort((a, b) => Number(isStylePrompt(b)) - Number(isStylePrompt(a)) || String(a.title).localeCompare(String(b.title)));
   if (!prompts.length) return '<option value="">— no hay prompts guardados —</option>';
   return '<option value="">— elegí un prompt guardado —</option>' + prompts.map((prompt) =>
-    `<option value="${esc(prompt.id)}">${prompt.mode === 'audio' ? 'Audio' : prompt.mode === 'video' ? 'Video' : 'Imagen'} · ${esc(prompt.category || 'General')} · ${esc(prompt.title)}</option>`
+    `<option value="${esc(prompt.id)}"${prompt.id === currentAutomation()?.config?.artStylePromptId ? ' selected' : ''}>${isStylePrompt(prompt) ? 'Estilo con referencia' : 'Imagen'} · ${esc(prompt.category || 'General')} · ${esc(prompt.title)}</option>`
   ).join('');
+}
+
+function automationHeyGenCharacters() {
+  return state.characters.filter(heygenCharacterReady);
+}
+
+function automationBlockHeyGenCharacter(pr, block) {
+  const direct = state.characters.find((character) => character.id === block.heygenCharacterId && heygenCharacterReady(character));
+  if (direct) return direct;
+  for (const role of block.characters || []) {
+    const assigned = automationAssignedEntity(pr, 'characters', role);
+    if (assigned && heygenCharacterReady(assigned)) return assigned;
+  }
+  return automationHeyGenCharacters()[0] || null;
+}
+
+function overlayPresetOptions() {
+  const items = state.overlayPresets || [];
+  return `<option value="">— elegí un estilo guardado —</option>` + items.map((item) =>
+    `<option value="${esc(item.id)}">${esc(item.name)}</option>`
+  ).join('');
+}
+
+function automationStyleRefItems(pr) {
+  const key = pr?.config?.artStyleImageKey || '';
+  return key ? [{ key, label: ARTISTIC_STYLE_LABEL }] : [];
+}
+
+function automationStyleReferenceMarkup(pr) {
+  const key = pr?.config?.artStyleImageKey || '';
+  if (!key) return '';
+  return `<div class="auto-style-reference">
+    <div class="prompt-style-image"><img src="${esc(fileUrl(key))}" alt="Referencia de estilo"><span class="prompt-style-label">${ARTISTIC_STYLE_LABEL}</span></div>
+    <p>Esta imagen se enviará como referencia visual en cada ficha y bloque. Manifestador rotula una copia temporal; el archivo original permanece intacto.</p>
+  </div>`;
 }
 
 function automationProjectArtStyle(pr) {
@@ -4634,12 +4905,15 @@ async function createAutomationResource({ projectId, kind, role, modelId, prompt
   let created = null;
   try {
     setStatus(`Generando con ${model.name}…`);
+    const styleRefs = automationStyleRefItems(pr);
+    const labeledRefs = await buildLabeledRefs(styleRefs);
     const generated = await api('/api/generate/image', {
       method: 'POST',
       body: {
         modelId: model.id,
         prompt: automationStyledPrompt(pr, prompt),
-        refs: [],
+        refs: styleRefs.map((ref) => ref.key),
+        labeledRefs,
         batch: 1,
         ...automationResourceImageSettings(model, kind)
       }
@@ -4777,35 +5051,6 @@ async function generateAllAutomationResources(projectId) {
     detail: `Preparando el primer rol de ${tasks.length}…`,
     total: tasks.length,
     current: 1
-  });
-
-  $('#chHeyGenUpload')?.addEventListener('click', () => {
-    $('#fileInput').accept = 'image/png,image/jpeg,image/webp';
-    $('#fileInput').multiple = false;
-    $('#fileInput').onchange = async (event) => {
-      const file = event.target.files[0]; event.target.value = ''; event.target.multiple = true; event.target.accept = 'image/*';
-      if (!file) return;
-      try {
-        const updated = await api(`/api/characters/${id}/heygen-image`, { method: 'POST', body: { name: file.name, dataUrl: await readFileAsDataUrl(file) } });
-        state.characters[state.characters.findIndex((item) => item.id === id)] = updated;
-        renderCharModal(); renderCharacters(); renderVideoControls();
-      } catch (error) { toast(error.message, 'err'); }
-    };
-    $('#fileInput').click();
-  });
-  $('#chHeyGenUseCover')?.addEventListener('click', async () => {
-    try {
-      const updated = await api(`/api/characters/${id}/heygen-image`, { method: 'POST', body: { assetKey: c.photos[0] } });
-      state.characters[state.characters.findIndex((item) => item.id === id)] = updated;
-      renderCharModal(); renderCharacters(); renderVideoControls();
-    } catch (error) { toast(error.message, 'err'); }
-  });
-  $('#chHeyGenRemove')?.addEventListener('click', async () => {
-    try {
-      const updated = await api(`/api/characters/${id}/heygen-image`, { method: 'DELETE' });
-      state.characters[state.characters.findIndex((item) => item.id === id)] = updated;
-      renderCharModal(); renderCharacters(); renderVideoControls();
-    } catch (error) { toast(error.message, 'err'); }
   });
 
   const bulkButton = $('#autoGenerateAllResources');
@@ -4973,8 +5218,9 @@ function renderAutomationProject() {
           <textarea id="autoArtStyle" maxlength="1200" rows="3" placeholder="Write the global art direction in English…">${esc(pr.config.artStyle || DEFAULT_AUTOMATION_ART_STYLE)}</textarea>
           <div class="auto-style-prompt-tools">
             <select class="select" id="autoArtPrompt">${automationArtPromptOptions()}</select>
-            <button type="button" class="mini-btn" id="autoApplyArtPrompt"${(state.prompts || []).length ? '' : ' disabled'}>${IC('book')} Usar prompt guardado</button>
+            <button type="button" class="mini-btn" id="autoApplyArtPrompt"${(state.prompts || []).some((prompt) => !['audio', 'video'].includes(prompt.mode)) ? '' : ' disabled'}>${IC('book')} Usar prompt guardado</button>
           </div>
+          ${automationStyleReferenceMarkup(pr)}
           <span class="hint">Escribilo en inglés o cargalo desde tu biblioteca de Prompts. Se añade obligatoriamente a todas las fichas y bloques para mantener el mismo lenguaje visual.</span>
         </div>
       </div>
@@ -4996,6 +5242,10 @@ function renderAutomationProject() {
         <label>Modelo de ElevenLabs</label>
         <select class="select" id="autoAudioModel">${(state.audioModels || []).map((audioModel) => `<option value="${esc(audioModel.id)}"${audioModel.id === automationAudioModel?.id ? ' selected' : ''}>${esc(audioModel.name)}</option>`).join('')}</select>
         <span class="hint">Los diálogos usan la voz del personaje asignado (si tiene); si no, la del narrador. ${esc(automationAudioModel?.notes || '')}</span>
+      </div>
+      <div class="control-row"><label>Conexión HeyGen para bloques</label>
+        <select class="select" id="autoHeyGenAuth"><option value="key"${pr.config.heygenAuthMode === 'oauth' ? '' : ' selected'}>API key</option><option value="oauth"${pr.config.heygenAuthMode === 'oauth' ? ' selected' : ''}>OAuth · plan web</option></select>
+        <span class="hint">${pr.config.heygenAuthMode === 'oauth' ? (state.heygenOAuth.connected ? 'OAuth conectado.' : 'OAuth no conectado; hacelo desde Configuración.') : (state.config?.keys?.heygen ? 'API key configurada.' : 'Falta la API key de HeyGen en Configuración.')}</span>
       </div>
       <div class="automation-music-panel${music.enabled ? ' enabled' : ''}" id="autoMusicPanel">
         <div class="automation-music-head">
@@ -5036,6 +5286,13 @@ function renderAutomationProject() {
           <button type="button" class="mini-btn" id="autoTransitionTest"${selectedTransitionSound ? '' : ' disabled'}>${IC('play')} Probar una vez</button>
           <span class="hint" id="autoTransitionStatus">${selectedTransitionSound ? `${esc(selectedTransitionSound.category)} · ${esc(selectedTransitionSound.name)}` : (state.transitionSounds || []).length ? 'Elegí un sonido; se reproducirá automáticamente una vez.' : 'No hay sonidos instalados.'}</span>
         </div>
+      </div>
+      <div class="overlay-preset-bar">
+        <div><h4>Estilos de títulos y textos</h4><span class="hint">Guarda texto normal, resaltado, título, posición, caja, colores y bordes como un preset reutilizable.</span></div>
+        <select class="select" id="overlayPresetSelect">${overlayPresetOptions()}</select>
+        <button type="button" class="mini-btn" id="overlayPresetApply"${(state.overlayPresets || []).length ? '' : ' disabled'}>${IC('check')} Aplicar</button>
+        <button type="button" class="mini-btn accent" id="overlayPresetSave">${IC('save')} Guardar estilo actual</button>
+        <button type="button" class="mini-btn danger" id="overlayPresetDelete" disabled>${IC('trash')}</button>
       </div>
       <h4>Texto sobreimpreso</h4>
       <div class="overlay-typography-grid">
@@ -5125,22 +5382,49 @@ function renderAutomationProject() {
     </div>
 
     <div class="automation-panel">
-      <h3>Guion (${pr.blocks.length} bloques)</h3>
+      <div class="automation-panel-heading automation-script-heading">
+        <div><h3>Guion (${pr.blocks.length} bloques)</h3><span class="hint">Los bloques manuales se integran en la misma secuencia que los importados.</span></div>
+        <button type="button" class="mini-btn accent" id="autoAddBlock">${IC('plus')} Añadir bloque</button>
+      </div>
+      <form class="auto-block-create" id="autoNewBlockForm" hidden>
+        <div class="auto-block-create-head"><div><strong>Nuevo bloque manual</strong><span class="hint">Guardar el bloque no genera contenido.</span></div><button type="button" class="mini-btn" id="autoNewBlockCancel">Cancelar</button></div>
+        <div class="auto-block-create-grid">
+          <label><span>Título interno</span><input type="text" id="autoNewBlockTitle" maxlength="160" placeholder="Ej: La revelación"></label>
+          <label><span>Ubicación en el guion</span><select class="select" id="autoNewBlockPosition"><option value="end">Al final</option><option value="start">Al principio</option>${pr.blocks.map((block, index) => `<option value="after:${esc(block.id)}">Después del bloque ${index + 1}${block.title ? ` · ${esc(block.title)}` : ''}</option>`).join('')}</select></label>
+          <label class="auto-block-create-wide"><span>Prompt visual · inglés</span><textarea id="autoNewBlockPrompt" maxlength="4000" rows="4" required placeholder="Describe la imagen de esta toma…"></textarea></label>
+          <label><span>Tipo de texto inicial</span><select class="select" id="autoNewBlockKind"><option value="narration">Narración</option><option value="dialogue"${pr.requirements.characters.length ? '' : ' disabled'}>Diálogo</option></select></label>
+          <label id="autoNewBlockCharacterField" hidden><span>Personaje del diálogo</span><select class="select" id="autoNewBlockCharacter">${pr.requirements.characters.map((role) => `<option value="${esc(role.role)}">${esc(automationRoleName(role.role))} · @${esc(role.role)}</option>`).join('')}</select></label>
+          <label class="auto-block-create-wide"><span id="autoNewBlockTextLabel">Narración inicial</span><textarea id="autoNewBlockText" maxlength="2000" rows="3" required placeholder="Texto que se convertirá en audio…"></textarea></label>
+        </div>
+        <div class="auto-block-create-actions"><span class="hint">Después podrás configurar generador, prompt negativo, HeyGen y el resto de opciones desde el bloque.</span><button type="submit" class="mini-btn accent" id="autoNewBlockSave">${IC('save')} Crear bloque</button></div>
+      </form>
       ${pr.blocks.length ? pr.blocks.map((b, i) => {
         const out = pr.outputs?.[b.id] || null;
         const done = Boolean(out?.videoKey);
         const partial = !done && Boolean(out?.imageKey || out?.textImageKey || out?.textLayerKey || out?.audioKeys?.length);
+        const reusableAudioReady = Array.isArray(out?.audioKeys) && out.audioKeys.length >= (b.items || []).length;
+        const heygenCharacters = automationHeyGenCharacters();
+        const selectedHeyGenCharacter = automationBlockHeyGenCharacter(pr, b);
+        const blockGenerator = b.generator === 'heygen' ? 'heygen' : 'image';
         return `
         <div class="auto-block${done ? ' is-done' : ''}" data-block="${b.id}">
           <div class="auto-block-head">
             <strong>Bloque ${i + 1}${b.title ? ` · ${esc(b.title)}` : ''}</strong> <span class="hint">${esc([b.characters.join(', '), b.location, b.prop].filter(Boolean).join(' · '))}</span>
             <span class="auto-block-btns">
               <button class="mini-btn" data-genblock="${b.id}" data-force="${done ? '1' : '0'}"${missing.length ? ' disabled' : ''}>${IC('spark')} ${done ? 'Regenerar' : partial ? 'Continuar' : 'Generar / continuar'}</button>
-              ${out?.imageKey ? `<button class="mini-btn" data-regen-downstream="${b.id}"${missing.length ? ' disabled' : ''} title="Conserva la imagen limpia y rehace texto, audio y video">${IC('mic')} Rehacer texto + audio + video</button>` : ''}
+              ${out?.imageKey && reusableAudioReady ? `<button class="mini-btn" data-regen-downstream="${b.id}"${missing.length ? ' disabled' : ''} title="Conserva la imagen y los audios existentes; sólo rehace el texto y ensambla el video">${IC('film')} Rehacer texto + video</button>` : ''}
               ${partial ? `<button class="mini-btn danger" data-regenblock="${b.id}"${missing.length ? ' disabled' : ''}>Regenerar desde cero</button>` : ''}
             </span>
           </div>
           <div class="auto-block-editor">
+            <div class="auto-block-generator">
+              <label><span>Generador de la toma</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>Imagen + audio</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + audio de ElevenLabs</option></select></label>
+              <div class="auto-block-heygen-settings" data-block-heygen-settings${blockGenerator === 'heygen' ? '' : ' hidden'}>
+                <label><span>Personaje · variante HeyGen</span><select class="select" data-block-heygen-character>${heygenCharacters.length ? heygenCharacters.map((character) => `<option value="${character.id}"${character.id === selectedHeyGenCharacter?.id ? ' selected' : ''}>${esc(character.name)} · HeyGen · ${character.heygen?.closeAvatarId ? '2 planos' : '1 plano'}</option>`).join('') : '<option value="">— no hay personajes HeyGen listos —</option>'}</select></label>
+                <label><span>Encuadre</span><select class="select" data-block-heygen-framing><option value="wide"${b.heygenFraming === 'wide' || !b.heygenFraming ? ' selected' : ''}>Plano general</option><option value="close"${b.heygenFraming === 'close' ? ' selected' : ''}>Primer plano</option><option value="split"${b.heygenFraming === 'split' ? ' selected' : ''}>Alternar general → primer plano</option></select></label>
+                <span class="hint" data-block-heygen-hint>${selectedHeyGenCharacter?.heygen?.closeAvatarId ? 'La alternancia corta el texto cerca del punto medio y une ambos videos.' : 'Este personaje solo tiene código de plano general.'}</span>
+              </div>
+            </div>
             <label><span>Título interno del bloque</span><input type="text" data-block-title maxlength="160" value="${esc(b.title || '')}"></label>
             <label><span>Prompt visual · inglés</span><textarea data-block-prompt maxlength="4000" rows="5">${esc(b.imagePrompt)}</textarea></label>
             <label><span>Prompt negativo · inglés</span><textarea data-block-negative maxlength="2000" rows="2">${esc(b.negativePrompt || '')}</textarea></label>
@@ -5151,7 +5435,7 @@ function renderAutomationProject() {
           </div>
           <div class="auto-block-out" data-out="${b.id}">${automationBlockOutHtml(out)}</div>
         </div>`;
-      }).join('') : '<p class="hint">Sin bloques. Importá un guion.</p>'}
+      }).join('') : '<p class="hint">Sin bloques. Añadí uno manualmente o importá un guion.</p>'}
     </div>
 
     <div class="automation-actions">
@@ -5230,19 +5514,99 @@ function renderAutomationProject() {
   }));
   bindAutomationAssetOpeners($('#automationRoot'));
 
+  const newBlockForm = $('#autoNewBlockForm');
+  const newBlockKind = $('#autoNewBlockKind');
+  const newBlockCharacterField = $('#autoNewBlockCharacterField');
+  const syncNewBlockKind = () => {
+    const isDialogue = newBlockKind.value === 'dialogue';
+    newBlockCharacterField.hidden = !isDialogue;
+    $('#autoNewBlockTextLabel').textContent = isDialogue ? 'Diálogo inicial' : 'Narración inicial';
+    $('#autoNewBlockText').placeholder = isDialogue ? 'Texto que dirá el personaje…' : 'Texto que se convertirá en audio…';
+  };
+  $('#autoAddBlock').addEventListener('click', () => {
+    newBlockForm.hidden = false;
+    $('#autoAddBlock').disabled = true;
+    syncNewBlockKind();
+    requestAnimationFrame(() => $('#autoNewBlockTitle').focus());
+  });
+  $('#autoNewBlockCancel').addEventListener('click', () => {
+    newBlockForm.reset();
+    newBlockForm.hidden = true;
+    $('#autoAddBlock').disabled = false;
+    syncNewBlockKind();
+  });
+  newBlockKind.addEventListener('change', syncNewBlockKind);
+  newBlockForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const imagePrompt = $('#autoNewBlockPrompt').value.trim();
+    const text = $('#autoNewBlockText').value.trim();
+    const kind = newBlockKind.value === 'dialogue' ? 'dialogue' : 'narration';
+    const character = kind === 'dialogue' ? $('#autoNewBlockCharacter').value : '';
+    if (!imagePrompt) return toast('Escribí el prompt visual del nuevo bloque.', 'err');
+    if (!text) return toast('Escribí la narración o diálogo inicial.', 'err');
+    if (kind === 'dialogue' && !character) return toast('Elegí el personaje que dirá el diálogo.', 'err');
+
+    const newBlock = {
+      id: `manual-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      title: $('#autoNewBlockTitle').value.trim() || `Bloque ${pr.blocks.length + 1}`,
+      imagePrompt,
+      negativePrompt: '',
+      items: [{ kind, character, text }],
+      characters: character ? [character] : [],
+      location: '',
+      prop: '',
+      sourceReferences: [],
+      sourceQuote: '',
+      quoteReference: '',
+      estimatedDuration: 0,
+      generator: 'image',
+      heygenCharacterId: '',
+      heygenFraming: 'wide'
+    };
+    const position = $('#autoNewBlockPosition').value;
+    const blocks = [...pr.blocks];
+    if (position === 'start') {
+      blocks.unshift(newBlock);
+    } else if (position.startsWith('after:')) {
+      const targetId = position.slice('after:'.length);
+      const targetIndex = blocks.findIndex((block) => block.id === targetId);
+      blocks.splice(targetIndex >= 0 ? targetIndex + 1 : blocks.length, 0, newBlock);
+    } else {
+      blocks.push(newBlock);
+    }
+
+    const submitButton = $('#autoNewBlockSave');
+    submitButton.disabled = true;
+    const updated = await saveAutomation({ blocks });
+    if (!updated) {
+      submitButton.disabled = false;
+      return;
+    }
+    renderAutomationProject();
+    const createdElement = $('#automationRoot').querySelector(`[data-block="${newBlock.id}"]`);
+    createdElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    toast(`Bloque “${newBlock.title}” añadido al guion.`);
+  });
+  syncNewBlockKind();
+
   // El overlay vive en un objeto de trabajo local; los controles y el arrastre lo
   // mutan y actualizan el preview en vivo, y se persiste con saveAll().
   const ov = { ...pr.config.overlay };
   const titleOv = { ...titleOverlay };
+  let artStylePromptId = pr.config.artStylePromptId || '';
+  let artStyleImageKey = pr.config.artStyleImageKey || '';
   const saveAll = () => saveAutomation({ name: $('#autoProjectName').value, config: {
     imageModelId: $('#autoModel').value,
     fallbackImageModelId: $('#autoFallbackModel').value === $('#autoModel').value ? '' : $('#autoFallbackModel').value,
     artStyle: $('#autoArtStyle').value.trim() || DEFAULT_AUTOMATION_ART_STYLE,
+    artStylePromptId,
+    artStyleImageKey,
     aspectRatio: $('#autoAr').value,
     resolution: $('#autoRes').value,
     narratorVoiceId: $('#autoVoice').value,
     narratorVoiceName: (state.voices || []).find((v) => v.id === $('#autoVoice').value)?.name || '',
     audioModelId: $('#autoAudioModel').value,
+    heygenAuthMode: $('#autoHeyGenAuth').value,
     includeLogos: $('#autoIncludeLogos').checked,
     videoEffect,
     transitionSound,
@@ -5250,9 +5614,52 @@ function renderAutomationProject() {
     overlay: ov,
     titleOverlay: titleOv
   } });
+  $('#overlayPresetSelect').addEventListener('change', () => {
+    const hasSelection = Boolean($('#overlayPresetSelect').value);
+    $('#overlayPresetApply').disabled = !hasSelection;
+    $('#overlayPresetDelete').disabled = !hasSelection;
+  });
+  $('#overlayPresetApply').addEventListener('click', async () => {
+    const preset = (state.overlayPresets || []).find((item) => item.id === $('#overlayPresetSelect').value);
+    if (!preset) return toast('Elegí un estilo guardado.', 'err');
+    Object.assign(ov, preset.overlay || {});
+    const titleBehavior = {
+      enabled: titleOv.enabled,
+      mode: titleOv.mode,
+      blockId: titleOv.blockId,
+      text: titleOv.text
+    };
+    Object.assign(titleOv, preset.titleOverlay || {}, titleBehavior);
+    await saveAutomation({ config: { overlay: ov, titleOverlay: titleOv } });
+    renderAutomationProject();
+    toast(`Estilo “${preset.name}” aplicado.`);
+  });
+  $('#overlayPresetSave').addEventListener('click', async () => {
+    const name = window.prompt('Nombre para este estilo de títulos y textos:');
+    if (!name?.trim()) return;
+    try {
+      const item = await api('/api/overlay-presets', {
+        method: 'POST',
+        body: { name: name.trim(), overlay: ov, titleOverlay: titleOv }
+      });
+      state.overlayPresets.unshift(item);
+      renderAutomationProject();
+      toast(`Estilo “${item.name}” guardado.`);
+    } catch (error) { toast(error.message, 'err'); }
+  });
+  $('#overlayPresetDelete').addEventListener('click', async () => {
+    const preset = (state.overlayPresets || []).find((item) => item.id === $('#overlayPresetSelect').value);
+    if (!preset || !confirm(`¿Borrar el estilo “${preset.name}”?`)) return;
+    try {
+      await api(`/api/overlay-presets/${preset.id}`, { method: 'DELETE' });
+      state.overlayPresets = state.overlayPresets.filter((item) => item.id !== preset.id);
+      renderAutomationProject();
+      toast('Estilo eliminado.');
+    } catch (error) { toast(error.message, 'err'); }
+  });
   $('#autoModel').addEventListener('change', async () => { await saveAll(); renderAutomationProject(); });
   $('#autoAr').addEventListener('change', async () => { await saveAll(); renderAutomationProject(); });
-  ['autoRes', 'autoVoice', 'autoAudioModel', 'autoFallbackModel', 'autoArtStyle'].forEach((id) => $('#' + id).addEventListener('change', async () => {
+  ['autoRes', 'autoVoice', 'autoAudioModel', 'autoHeyGenAuth', 'autoFallbackModel', 'autoArtStyle'].forEach((id) => $('#' + id).addEventListener('change', async () => {
     await saveAll();
     if (id === 'autoAudioModel') renderAutomationProject();
   }));
@@ -5264,7 +5671,10 @@ function renderAutomationProject() {
     const savedPrompt = state.prompts.find((prompt) => prompt.id === $('#autoArtPrompt').value);
     if (!savedPrompt) return toast('Elegí un prompt guardado.', 'err');
     $('#autoArtStyle').value = savedPrompt.text.slice(0, 1200);
+    artStylePromptId = savedPrompt.id;
+    artStyleImageKey = isStylePrompt(savedPrompt) ? (savedPrompt.styleImageKey || '') : '';
     await saveAll();
+    renderAutomationProject();
     toast(savedPrompt.text.length > 1200
       ? `“${savedPrompt.title}” aplicado; se usaron los primeros 1200 caracteres.`
       : `“${savedPrompt.title}” aplicado al estilo artístico global.`);
@@ -5631,6 +6041,25 @@ function renderAutomationProject() {
   $('#ovPickBg').addEventListener('click', () => { state.overlayBgPick = true; openPicker(); $('#pickerTitle').textContent = 'Elegir fondo de referencia'; });
   $('#ovClearBg')?.addEventListener('click', () => { ov.previewBg = ''; saveAll().then(() => renderAutomationProject()); });
 
+  $('#automationRoot').querySelectorAll('[data-block-generator]').forEach((select) => {
+    const blockElement = select.closest('.auto-block');
+    const settings = blockElement.querySelector('[data-block-heygen-settings]');
+    const characterSelect = blockElement.querySelector('[data-block-heygen-character]');
+    const framingSelect = blockElement.querySelector('[data-block-heygen-framing]');
+    const hint = blockElement.querySelector('[data-block-heygen-hint]');
+    const sync = () => {
+      settings.hidden = select.value !== 'heygen';
+      const character = state.characters.find((item) => item.id === characterSelect?.value);
+      if (hint) hint.textContent = character?.heygen?.closeAvatarId
+        ? 'La alternancia corta el texto cerca del punto medio y une ambos videos.'
+        : 'Este personaje solo tiene código de plano general.';
+      if (character && !character.heygen?.closeAvatarId && ['close', 'split'].includes(framingSelect?.value)) framingSelect.value = 'wide';
+    };
+    select.addEventListener('change', sync);
+    characterSelect?.addEventListener('change', sync);
+    sync();
+  });
+
   $('#automationRoot').querySelectorAll('[data-save-block]').forEach((button) => button.addEventListener('click', async () => {
     const blockElement = button.closest('.auto-block');
     const blockId = button.dataset.saveBlock;
@@ -5639,16 +6068,22 @@ function renderAutomationProject() {
     const imagePrompt = blockElement.querySelector('[data-block-prompt]').value.trim();
     const negativePrompt = blockElement.querySelector('[data-block-negative]').value.trim();
     const title = blockElement.querySelector('[data-block-title]').value.trim() || currentBlock.title || 'Bloque';
+    const generator = blockElement.querySelector('[data-block-generator]').value === 'heygen' ? 'heygen' : 'image';
+    const heygenCharacterId = generator === 'heygen' ? (blockElement.querySelector('[data-block-heygen-character]').value || '') : '';
+    const heygenFraming = generator === 'heygen' ? blockElement.querySelector('[data-block-heygen-framing]').value : 'wide';
+    const heygenCharacter = state.characters.find((character) => character.id === heygenCharacterId);
     const items = currentBlock.items.map((item, index) => ({
       ...item,
       text: blockElement.querySelector(`[data-block-item="${index}"]`)?.value.trim() || ''
     })).filter((item) => item.text);
     if (!imagePrompt) return toast('El bloque debe conservar un prompt visual.', 'err');
     if (!items.length) return toast('El bloque debe conservar al menos un texto de narración o diálogo.', 'err');
+    if (generator === 'heygen' && !heygenCharacterReady(heygenCharacter)) return toast('Elegí un personaje con variante HeyGen completa.', 'err');
+    if (generator === 'heygen' && ['close', 'split'].includes(heygenFraming) && !heygenCharacter.heygen?.closeAvatarId) return toast('Ese personaje no tiene código de primer plano.', 'err');
     button.disabled = true;
     const updated = await saveAutomation({
       blocks: pr.blocks.map((block) => block.id === blockId
-        ? { ...block, title, imagePrompt, negativePrompt, items }
+        ? { ...block, title, imagePrompt, negativePrompt, items, generator, heygenCharacterId, heygenFraming }
         : block)
     });
     if (updated) {
@@ -5662,26 +6097,30 @@ function renderAutomationProject() {
   $('#automationRoot').querySelectorAll('[data-genblock]').forEach((btn) => btn.addEventListener('click', async () => {
     const block = pr.blocks.find((b) => b.id === btn.dataset.genblock);
     const force = btn.dataset.force === '1';
-    if (force && !confirm(`¿Regenerar “${block?.title || 'este bloque'}” desde cero? Se crearán una imagen y audios nuevos.`)) return;
+    const newMaterials = block?.generator === 'heygen' ? 'audios y videos HeyGen nuevos' : 'una imagen y audios nuevos';
+    if (force && !confirm(`¿Regenerar “${block?.title || 'este bloque'}” desde cero? Se crearán ${newMaterials}.`)) return;
     if (block) await runAutomationBlock(pr.id, block, btn.closest('.auto-block'), { regenerate: force });
   }));
   $('#automationRoot').querySelectorAll('[data-regen-downstream]').forEach((button) => button.addEventListener('click', async () => {
     const block = pr.blocks.find((item) => item.id === button.dataset.regenDownstream);
     const output = block && pr.outputs?.[block.id];
     if (!block || !output?.imageKey) return toast('Este bloque todavía no tiene una imagen limpia para reutilizar.', 'err');
-    if (!confirm(`¿Rehacer texto, audios y video de “${block.title || 'este bloque'}”? Se conservará exactamente la imagen limpia actual y se consumirán créditos sólo para los audios nuevos.`)) return;
+    const existingAudioKeys = Array.isArray(output.audioKeys) ? output.audioKeys.slice(0, block.items.length) : [];
+    if (existingAudioKeys.length !== block.items.length) return toast('Este bloque no tiene todos sus audios guardados para reensamblar.', 'err');
+    if (!confirm(`¿Rehacer el texto y el video de “${block.title || 'este bloque'}”? Se conservarán exactamente la imagen limpia y los ${existingAudioKeys.length} audio${existingAudioKeys.length === 1 ? '' : 's'} existentes; no se llamará a ElevenLabs.`)) return;
     const preservedOutput = {
       imageKey: output.imageKey,
       imageModelId: output.imageModelId || '',
       imageModelName: output.imageModelName || '',
       fallbackUsed: output.fallbackUsed === true,
       recoveredImage: output.recoveredImage === true,
+      audioKeys: existingAudioKeys,
       audioCountExpected: block.items.length
     };
     try {
       button.disabled = true;
       await persistAutomationBlockOutput(pr.id, block.id, preservedOutput, { replace: true });
-      await runAutomationBlock(pr.id, block, button.closest('.auto-block'), { regenerateAudio: true });
+      await runAutomationBlock(pr.id, block, button.closest('.auto-block'), { requireExistingAudio: true });
     } catch (error) {
       button.disabled = false;
       toast(error.message, 'err');
@@ -5689,7 +6128,8 @@ function renderAutomationProject() {
   }));
   $('#automationRoot').querySelectorAll('[data-regenblock]').forEach((btn) => btn.addEventListener('click', async () => {
     const block = pr.blocks.find((b) => b.id === btn.dataset.regenblock);
-    if (!block || !confirm(`¿Descartar los parciales de “${block.title || 'este bloque'}” y regenerar imagen y audios?`)) return;
+    const materials = block?.generator === 'heygen' ? 'audios y videos HeyGen' : 'imagen y audios';
+    if (!block || !confirm(`¿Descartar los parciales de “${block.title || 'este bloque'}” y regenerar ${materials}?`)) return;
     await runAutomationBlock(pr.id, block, btn.closest('.auto-block'), { regenerate: true });
   }));
   $('#autoStart').addEventListener('click', () => runAutomationAll(pr.id, $('#autoMode').value));
@@ -5755,7 +6195,9 @@ function fichaKeyForEntity(entity) {
 
 // resuelve refs (fichas etiquetadas) y expande @ROL → nombre en el prompt.
 async function automationRefsAndPrompt(pr, block) {
-  const refItems = [];
+  // La referencia de estilo va primero para que se conserve aun si el modelo
+  // limita la cantidad total de imagenes adjuntas.
+  const refItems = automationStyleRefItems(pr);
   const names = {};
   const addChar = (role) => {
     const c = automationAssignedEntity(pr, 'characters', role);
@@ -5874,7 +6316,7 @@ function drawAutomationTitle(ctx, width, height, titleText, title) {
 // Renderiza el texto del bloque replicando el visualizador. La variante normal
 // crea la previsualización ya fusionada; transparent=true guarda sólo una capa
 // PNG alfa, que FFmpeg coloca DESPUÉS de los efectos para mantenerla legible.
-function burnOverlayText(imageKey, caption, ov, { transparent = false, title = null } = {}) {
+function burnOverlayText(imageKey, caption, ov, { transparent = false, title = null, aspectRatio = '9:16' } = {}) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = async () => {
@@ -5992,7 +6434,22 @@ function burnOverlayText(imageKey, caption, ov, { transparent = false, title = n
       } catch (e) { reject(e); }
     };
     img.onerror = () => reject(new Error('No se pudo leer la imagen para sobreimprimir el texto'));
-    img.src = fileUrl(imageKey);
+    if (imageKey) {
+      img.src = fileUrl(imageKey);
+    } else {
+      const match = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(String(aspectRatio || '9:16'));
+      const ratioWidth = Number(match?.[1]) || 9;
+      const ratioHeight = Number(match?.[2]) || 16;
+      const blank = document.createElement('canvas');
+      if (ratioWidth >= ratioHeight) {
+        blank.height = 1080;
+        blank.width = Math.max(2, Math.round((1080 * ratioWidth / ratioHeight) / 2) * 2);
+      } else {
+        blank.width = 1080;
+        blank.height = Math.max(2, Math.round((1080 * ratioHeight / ratioWidth) / 2) * 2);
+      }
+      img.src = blank.toDataURL('image/png');
+    }
   });
 }
 
@@ -6000,15 +6457,17 @@ function automationBlockOutHtml(out) {
   if (!out || (!out.imageKey && !out.textImageKey && !out.textLayerKey && !out.audioKeys?.length && !out.videoKey)) return '';
   const audioKeys = Array.isArray(out.audioKeys) ? out.audioKeys : [];
   const expected = Number(out.audioCountExpected) || audioKeys.length;
+  const isHeyGen = out.generator === 'heygen';
   return `
     <span class="automation-stage-status">
-      Imagen ${out.imageKey ? '✓' : '—'} · Texto ${out.textImageKey ? '✓' : '—'} · Capa ${out.textLayerKey ? '✓' : '—'} · Audio ${audioKeys.length}/${expected || '—'} · Video ${out.videoKey ? '✓' : '—'}
+      ${isHeyGen ? `HeyGen · ${out.heygenFraming === 'split' ? '2 planos' : '1 plano'}` : `Imagen ${out.imageKey ? '✓' : '—'} · Texto ${out.textImageKey ? '✓' : '—'} · Capa ${out.textLayerKey ? '✓' : '—'}`} · Audio ${audioKeys.length}/${expected || '—'} · Video ${out.videoKey ? '✓' : '—'}
     </span>
     ${out.fallbackUsed ? `<span class="hint warn">Imagen generada con respaldo: ${esc(out.imageModelName || out.imageModelId || '')}</span>` : ''}
     ${out.imageKey ? `<button type="button" class="auto-output-asset" data-open-asset="${esc(out.imageKey)}" title="Abrir asset y acciones"><img src="${fileUrl(out.imageKey)}" alt="imagen"></button>` : ''}
     ${out.textImageKey ? `<button type="button" class="auto-output-asset" data-open-asset="${esc(out.textImageKey)}" title="Abrir asset y acciones"><img src="${fileUrl(out.textImageKey)}" alt="con texto"></button>` : ''}
     ${out.textLayerKey ? `<button type="button" class="mini-btn" data-open-asset="${esc(out.textLayerKey)}">Capa de subtítulos</button>` : ''}
     ${audioKeys.map((key, index) => `<span class="auto-output-audio"><small>Audio ${index + 1}</small><audio src="${fileUrl(key)}" controls preload="metadata"></audio></span>`).join('')}
+    ${(out.heygenSegmentVideoKeys || []).length ? `<span class="hint">Segmentos HeyGen: ${(out.heygenSegmentVideoKeys || []).map((key, index) => `<button type="button" class="mini-btn" data-open-asset="${esc(key)}">${out.heygenFraming === 'split' ? (index === 0 ? 'Plano general' : 'Primer plano') : 'Toma HeyGen'}</button>`).join(' ')}</span>` : ''}
     ${out.videoKey ? `<span class="auto-output-video"><video src="${fileUrl(out.videoKey)}" controls preload="metadata"></video><button type="button" class="mini-btn" data-open-asset="${esc(out.videoKey)}">Acciones del video</button></span>` : ''}`;
 }
 
@@ -6101,6 +6560,57 @@ function automationAudioSpec(pr, item) {
   };
 }
 
+function splitTextNearMiddle(text) {
+  const clean = String(text || '').trim();
+  if (!clean) return [];
+  const sentences = clean.match(/[^.!?]+(?:[.!?]+|$)/g)?.map((part) => part.trim()).filter(Boolean) || [];
+  if (sentences.length > 1) {
+    const total = sentences.reduce((sum, part) => sum + part.length, 0);
+    let running = 0;
+    let bestIndex = 1;
+    let bestDistance = Infinity;
+    for (let index = 1; index < sentences.length; index++) {
+      running += sentences[index - 1].length;
+      const distance = Math.abs((total / 2) - running);
+      if (distance < bestDistance) { bestDistance = distance; bestIndex = index; }
+    }
+    return [sentences.slice(0, bestIndex).join(' '), sentences.slice(bestIndex).join(' ')];
+  }
+  const spaces = [...clean.matchAll(/\s+/g)].map((match) => match.index).filter((index) => index > 0 && index < clean.length - 1);
+  if (!spaces.length) return [clean];
+  const middle = clean.length / 2;
+  const cut = spaces.reduce((best, index) => Math.abs(index - middle) < Math.abs(best - middle) ? index : best, spaces[0]);
+  return [clean.slice(0, cut).trim(), clean.slice(cut).trim()].filter(Boolean);
+}
+
+function automationAudioPlan(block) {
+  const original = (block.items || []).map((item) => ({ ...item, text: String(item.text || '').trim() })).filter((item) => item.text);
+  if (block.generator !== 'heygen' || block.heygenFraming !== 'split') {
+    return { segments: original, groups: [original.map((_, index) => index)] };
+  }
+  if (original.length === 1) {
+    const parts = splitTextNearMiddle(original[0].text);
+    if (parts.length < 2) return { segments: original, groups: [[0]] };
+    return { segments: parts.map((text) => ({ ...original[0], text })), groups: [[0], [1]] };
+  }
+  const total = original.reduce((sum, item) => sum + item.text.length, 0);
+  let running = 0;
+  let boundary = 1;
+  let distance = Infinity;
+  for (let index = 1; index < original.length; index++) {
+    running += original[index - 1].text.length;
+    const nextDistance = Math.abs((total / 2) - running);
+    if (nextDistance < distance) { distance = nextDistance; boundary = index; }
+  }
+  return {
+    segments: original,
+    groups: [
+      original.slice(0, boundary).map((_, index) => index),
+      original.slice(boundary).map((_, index) => boundary + index)
+    ]
+  };
+}
+
 async function refreshAutomationHistory() {
   const snapshot = await api('/api/state');
   state.history = snapshot.history || [];
@@ -6119,8 +6629,88 @@ function recoverHistoryOutput(type, prompt, { voiceId = '', audioModelId = '', u
   return key ? { entry, key } : null;
 }
 
+async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false, regenerateAudio = false, setStatus }) {
+  const character = state.characters.find((item) => item.id === block.heygenCharacterId);
+  if (!heygenCharacterReady(character)) throw new Error('El bloque necesita un personaje con variante HeyGen completa.');
+  if (['close', 'split'].includes(block.heygenFraming) && !character.heygen?.closeAvatarId) {
+    throw new Error('El personaje HeyGen elegido no tiene código de primer plano.');
+  }
+  if (pr.config?.heygenAuthMode === 'oauth' && !state.heygenOAuth.connected) throw new Error('Conectá HeyGen OAuth desde Configuración.');
+  if (pr.config?.heygenAuthMode !== 'oauth' && !state.config?.keys?.heygen) throw new Error('Guardá la API key de HeyGen en Configuración.');
+
+  const plan = automationAudioPlan(block);
+  const audioKeys = Array.isArray(output.audioKeys) ? output.audioKeys.slice(0, plan.segments.length) : [];
+  const usedAudioKeys = new Set(audioKeys);
+  let historyLoaded = false;
+  for (let index = audioKeys.length; index < plan.segments.length; index++) {
+    const spec = automationAudioSpec(pr, plan.segments[index]);
+    let recovered = null;
+    if (!regenerate && !regenerateAudio) {
+      if (!historyLoaded) {
+        setStatus('Buscando audios ya generados para este bloque…');
+        await refreshAutomationHistory();
+        historyLoaded = true;
+      }
+      recovered = recoverHistoryOutput('audio', spec.text, { voiceId: spec.voiceId, audioModelId: spec.audioModelId, usedKeys: usedAudioKeys });
+    }
+    if (recovered) {
+      audioKeys.push(recovered.key);
+      usedAudioKeys.add(recovered.key);
+      setStatus(`Reutilizando audio ${audioKeys.length}/${plan.segments.length}…`);
+    } else {
+      setStatus(`Generando audio ${index + 1}/${plan.segments.length} con ElevenLabs…`);
+      const generatedAudio = await api('/api/generate/audio', { method: 'POST', body: spec });
+      const audioKey = generatedAudio.outputs?.[0];
+      if (!audioKey) throw new Error(`No se generó el audio ${index + 1}.`);
+      state.history.unshift(generatedAudio);
+      audioKeys.push(audioKey);
+      usedAudioKeys.add(audioKey);
+    }
+    output = await persistAutomationBlockOutput(pr.id, block.id, {
+      audioKeys: [...audioKeys],
+      audioCountExpected: plan.segments.length,
+      generator: 'heygen',
+      heygenFraming: block.heygenFraming
+    });
+    await tagAutomationStage(pr, block, [audioKeys[audioKeys.length - 1]]);
+  }
+
+  let textLayerKey = output.textLayerKey;
+  if (!textLayerKey) {
+    setStatus('Preparando título, texto y resaltado para el video HeyGen…');
+    const caption = block.items.map((item) => item.text).join(' ');
+    const title = automationTitleForBlock(pr, block);
+    textLayerKey = await burnOverlayText('', caption, pr.config.overlay, {
+      transparent: true,
+      title,
+      aspectRatio: pr.config.aspectRatio || '9:16'
+    });
+    output = await persistAutomationBlockOutput(pr.id, block.id, { textLayerKey });
+    await tagAutomationStage(pr, block, [textLayerKey]);
+  }
+
+  const audioGroups = plan.groups.map((indexes) => indexes.map((index) => audioKeys[index]).filter(Boolean)).filter((group) => group.length);
+  if (block.heygenFraming === 'split' && audioGroups.length !== 2) throw new Error('No pude dividir el texto en dos fragmentos utilizables.');
+  setStatus(block.heygenFraming === 'split'
+    ? 'Enviando dos audios a HeyGen y preparando ambos encuadres…'
+    : 'Enviando el audio de ElevenLabs a HeyGen…');
+  const result = await api(`/api/automations/${pr.id}/heygen-block`, {
+    method: 'POST',
+    body: { blockId: block.id, characterId: character.id, framing: block.heygenFraming, audioGroups, textLayerKey }
+  });
+  output = await persistAutomationBlockOutput(pr.id, block.id, {
+    videoKey: result.videoKey,
+    heygenSegmentVideoKeys: result.segmentVideoKeys || [],
+    generator: 'heygen',
+    heygenFraming: block.heygenFraming,
+    completedAt: Date.now()
+  });
+  await tagAutomationStage(pr, block, [textLayerKey, ...audioKeys, ...(result.segmentVideoKeys || []), result.videoKey]);
+  return output;
+}
+
 async function runAutomationBlock(projectId, block, blockEl, {
-  regenerate = false, regenerateAudio = false, monitorTaskId = '', monitorIndex = 0, monitorTotal = 0
+  regenerate = false, regenerateAudio = false, requireExistingAudio = false, monitorTaskId = '', monitorIndex = 0, monitorTotal = 0
 } = {}) {
   let pr = state.automations.find((x) => x.id === projectId);
   if (!pr) return false;
@@ -6144,6 +6734,13 @@ async function runAutomationBlock(projectId, block, blockEl, {
     if (regenerate) {
       output = await persistAutomationBlockOutput(projectId, block.id, {}, { replace: true });
       pr = state.automations.find((item) => item.id === projectId) || pr;
+    }
+
+    if (block.generator === 'heygen') {
+      await runAutomationHeyGenBlock(pr, block, output, { regenerate, regenerateAudio, setStatus });
+      if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: 'Toma HeyGen terminada.' });
+      renderAutomationProject();
+      return true;
     }
 
     const { refs, labeledRefs, prompt } = await automationRefsAndPrompt(pr, block);
@@ -6212,6 +6809,9 @@ async function runAutomationBlock(projectId, block, blockEl, {
     const audioKeys = Array.isArray(output.audioKeys)
       ? output.audioKeys.slice(0, block.items.length)
       : [];
+    if (requireExistingAudio && audioKeys.length !== block.items.length) {
+      throw new Error('Faltan audios guardados; este reensamble no generará reemplazos con ElevenLabs.');
+    }
     const usedAudioKeys = new Set(audioKeys);
     for (let index = audioKeys.length; index < block.items.length; index++) {
       const spec = automationAudioSpec(pr, block.items[index]);
@@ -6836,6 +7436,7 @@ async function init() {
     state.characters = s.characters;
     state.prompts = s.prompts;
     state.fonts = s.fonts || [];
+    state.overlayPresets = s.overlayPresets || [];
     await registerCustomFonts(state.fonts);
     state.promptCategoriesExtra = s.promptCategories || {};
     state.assetLinks = s.assetLinks || [];
@@ -6867,6 +7468,7 @@ async function init() {
   fillConfigForm();
   setMode('image');
   if (state.pinnedId && !pinnedChar()) setPinned('');
+  startAutomationSync();
 
   // deep-links: #audio, #assets, #characters, #series, #prompts, #costs, #config
   const h = location.hash.slice(1);

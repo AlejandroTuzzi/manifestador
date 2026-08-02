@@ -12,6 +12,7 @@ const state = {
   characters: [],
   prompts: [],
   fonts: [],              // fuentes tipográficas personalizadas persistentes
+  overlayPresets: [],
   promptCategoriesExtra: {},
   assetLinks: [],
   promptQuickCategory: '',
@@ -82,6 +83,7 @@ const state = {
   pendingCharacterAsset: null,
   variantEditor: null,
   promptEditor: null,
+  promptStyleImagePick: false,
   pendingAssociationKey: null,
   lightboxKeys: [],
   lightboxIndex: 0,
