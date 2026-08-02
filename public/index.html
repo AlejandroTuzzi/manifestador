@@ -203,7 +203,7 @@
           <label>Resolución</label>
           <div id="videoResChips" class="chips"></div>
         </div>
-        <div class="control-row">
+        <div class="control-row" id="videoDurationRow">
           <label>Duración</label>
           <div id="videoDurChips" class="chips"></div>
           <span class="hint">segundos — el costo escala con la duración</span>
@@ -212,7 +212,7 @@
           <label>Audio</label>
           <label class="poser-toggle"><input type="checkbox" id="videoAudio"> generar audio (voces, ambiente, efectos)</label>
         </div>
-        <div class="control-row">
+        <div class="control-row" id="videoModeRow">
           <label>Modo</label>
           <div id="videoModeChips" class="chips"></div>
         </div>
@@ -220,6 +220,12 @@
           <label>Imágenes <span id="videoRefsCount" class="refs-count"></span></label>
           <div id="videoRefsStrip" class="refs-strip"></div>
           <span class="hint" id="videoRefsHint"></span>
+        </div>
+        <div id="heygenVideoControls" class="heygen-video-controls" hidden>
+          <div class="control-row"><label>Conexión</label><select id="heygenAuthMode" class="select"><option value="oauth">OAuth · plan web</option><option value="key">API key · saldo API</option></select><span id="heygenVideoAuthStatus" class="hint"></span></div>
+          <div class="control-row" id="heygenCharacterRow"><label>Personaje HeyGen</label><select id="heygenCharacterSelect" class="select"></select><span id="heygenCharacterHint" class="hint"></span></div>
+          <div class="control-row" id="heygenVoiceRow"><label>Voz HeyGen</label><input id="heygenVoiceId" class="text-input" type="text" placeholder="Código de voz de HeyGen"><span class="hint">Obligatoria para Imagen libre; opcional si el avatar ya tiene voz.</span></div>
+          <div class="control-row" id="heygenMotionRow"><label>Movimiento</label><input id="heygenMotionPrompt" class="text-input" type="text" placeholder="Natural hand gestures, subtle head movement…"><select id="heygenExpressiveness" class="select"><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option></select></div>
         </div>
         <div id="videoModelNote" class="model-note"></div>
       </div>
@@ -617,6 +623,16 @@
             <span class="key-row"><input type="password" name="key_suno" placeholder="key del proveedor de Suno"><button type="button" class="tool-btn test-btn" data-service="suno">Probar</button></span>
             <span class="test-result" data-result="suno"></span>
           </label>
+          <label>HeyGen API
+            <span class="key-row"><input type="password" name="key_heygen" placeholder="API key de HeyGen"><button type="button" class="tool-btn test-btn" data-service="heygen">Probar</button></span>
+            <span class="test-result" data-result="heygen"></span>
+          </label>
+        </div>
+        <h3>HeyGen OAuth</h3>
+        <div class="oauth-card">
+          <div><strong id="heygenOauthTitle">Sin conectar</strong><p id="heygenOauthStatus" class="hint">Usa tu plan web de HeyGen. El retorno OAuth funciona en localhost.</p></div>
+          <button type="button" id="heygenOauthConnect" class="tool-btn">Conectar HeyGen</button>
+          <button type="button" id="heygenOauthDisconnect" class="mini-btn danger" hidden>Desconectar</button>
         </div>
         <h3>Carpetas</h3>
         <div class="cfg-grid">

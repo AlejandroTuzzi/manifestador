@@ -27,7 +27,11 @@ const state = {
   resolution: '1K',
   batch: 1,
   videoModels: [],
-  video: { modelId: null, mode: 'reference', aspectRatio: '16:9', resolution: '720p', duration: 5, audio: false },
+  video: {
+    modelId: null, mode: 'reference', aspectRatio: '16:9', resolution: '720p', duration: 5, audio: false,
+    heygenAuthMode: 'oauth', heygenCharacterId: '', heygenVoiceId: '', heygenMotionPrompt: '', heygenExpressiveness: 'low'
+  },
+  heygenOAuth: { connected: false, localhostSupported: true },
   musicModel: null,
   music: { version: 'V5_5', customMode: true, instrumental: false, style: '', title: '' },
   transitionSounds: [],   // catálogo local, agrupado por las carpetas de public/sounds

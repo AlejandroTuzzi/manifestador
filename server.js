@@ -15,6 +15,14 @@ import {
 } from './lib/providers.js';
 import { mergePricing, imagePrice, videoPrice, audioPrice, musicPrice, translatePrice, scriptPrice } from './lib/pricing.js';
 import { POSER_BODY_PARTS } from './public/poser-bodyparts.js';
+import {
+  registerHeyGenOAuthClient, heyGenAuthorizationUrl, exchangeHeyGenOAuthCode,
+  refreshHeyGenOAuthToken, getHeyGenMcpUser, getHeyGenApiUser,
+  uploadHeyGenAssetWithKey, uploadHeyGenAssetWithMcp,
+  createHeyGenVideoWithKey, createHeyGenVideoWithMcp,
+  getHeyGenVideoWithKey, getHeyGenVideoWithMcp,
+  waitForHeyGenVideo, downloadHeyGenVideo
+} from './lib/heygen.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(ROOT, 'data');
@@ -29,6 +37,7 @@ const AUTOMATION_LOGO_FADE_SECONDS = 0.75;
 const PORT = process.env.PORT ? Number(process.env.PORT) : 7777;
 const sessions = new Map();
 const automationAssemblyJobs = new Set();
+const heygenOAuthStates = new Map();
 
 // Se agrega automáticamente (sin mostrarse en la caja) cuando alguna
 // referencia viene del Poser, para que el modelo la tome solo como pose.
@@ -46,7 +55,7 @@ const DEFAULT_CONFIG = {
   poserPrompt: DEFAULT_POSER_PROMPT,
   photoshopPath: '',
   ffmpegPath: '',
-  keys: { gemini: '', googleTranslate: '', ark: '', elevenlabs: '', openai: '', suno: '' },
+  keys: { gemini: '', googleTranslate: '', ark: '', elevenlabs: '', openai: '', suno: '', heygen: '' },
   openaiModel: 'gpt-5-mini',
   audioModelId: AUDIO_MODEL.id,
   paths: {
@@ -147,6 +156,44 @@ function verifyPassword(password, stored) {
 function sessionToken(req) {
   const cookie = String(req.headers.cookie || '').split(';').map((x) => x.trim()).find((x) => x.startsWith('manifestador_session='));
   return cookie ? cookie.slice('manifestador_session='.length) : '';
+}
+
+function oauthRedirectUri(req) {
+  const host = String(req.headers.host || `localhost:${PORT}`);
+  return `http://${host}/api/heygen/oauth/callback`;
+}
+
+function oauthExpiry(token) {
+  return Date.now() + Math.max(60, Number(token.expires_in) || 3600) * 1000;
+}
+
+async function getHeyGenOAuth({ refresh = true } = {}) {
+  const auth = await readJson('heygen-oauth.json', {});
+  if (!auth.accessToken) throw new Error('HeyGen OAuth no está conectado. Conectalo desde Configuración.');
+  if (!refresh || auth.expiresAt > Date.now() + 60_000) return auth;
+  if (!auth.refreshToken || !auth.clientId) throw new Error('La sesión OAuth de HeyGen venció. Volvé a conectarla.');
+  const token = await refreshHeyGenOAuthToken({ clientId: auth.clientId, refreshToken: auth.refreshToken });
+  const next = {
+    ...auth,
+    accessToken: token.access_token,
+    refreshToken: token.refresh_token || auth.refreshToken,
+    expiresAt: oauthExpiry(token),
+    scope: token.scope || auth.scope,
+    updatedAt: Date.now()
+  };
+  await writeJson('heygen-oauth.json', next);
+  return next;
+}
+
+function safeHeyGenAccount(value) {
+  const data = value?.data || value || {};
+  return {
+    id: data.id || data.user_id || '',
+    name: data.name || data.username || '',
+    email: data.email || '',
+    billingType: data.billing_type || data.billingType || '',
+    balance: data.balance ?? data.credit_balance ?? null
+  };
 }
 
 function isLoopbackRequest(req) {
@@ -751,10 +798,106 @@ async function runImageGeneration(req) {
   return entry;
 }
 
+async function runHeyGenVideoGeneration(req, cfg, model) {
+  const prompt = String(req.prompt || '').trim();
+  if (!prompt) throw new Error('El texto que dirá el avatar está vacío.');
+  if (prompt.length > 5000) throw new Error('HeyGen admite hasta 5000 caracteres por video.');
+
+  const authMode = req.heygenAuthMode === 'key' ? 'key' : 'oauth';
+  const apiKey = String(cfg.keys.heygen || '').trim();
+  const oauth = authMode === 'oauth' ? await getHeyGenOAuth() : null;
+  if (authMode === 'key' && !apiKey) throw new Error('Falta la API key de HeyGen en Configuración.');
+  const aspectRatio = model.aspectRatios.includes(req.aspectRatio) ? req.aspectRatio : model.aspectRatios[0];
+  const resolution = model.resolutions.includes(req.resolution) ? req.resolution : model.resolutions[0];
+  const voiceId = String(req.heygenVoiceId || '').trim();
+  const idempotencyKey = String(req.idempotencyKey || crypto.randomUUID()).slice(0, 120);
+  let payload;
+  let refs = [];
+  let characterId = null;
+
+  if (model.requiresRegisteredCharacter) {
+    const characters = await readJson('characters.json', []);
+    const character = characters.find((item) => item.id === req.heygenCharacterId);
+    if (!character?.heygen?.avatarId || !character?.heygen?.imageKey) {
+      throw new Error('Elegí un personaje con variante HeyGen completa (imagen espejo y código de avatar).');
+    }
+    await fs.access(await resolveAssetKey(character.heygen.imageKey));
+    characterId = character.id;
+    payload = {
+      type: 'avatar',
+      avatar_id: character.heygen.avatarId,
+      script: prompt,
+      resolution,
+      aspect_ratio: aspectRatio,
+      engine: { type: model.engine }
+    };
+    if (voiceId) payload.voice_id = voiceId;
+  } else {
+    const key = String((Array.isArray(req.refs) ? req.refs : [])[0] || '');
+    if (!key || key.startsWith('asset://')) throw new Error('HeyGen Imagen libre necesita una imagen local.');
+    const imagePath = await resolveAssetKey(key);
+    const ext = path.extname(imagePath).toLowerCase();
+    const mime = ext === '.png' ? 'image/png' : ['.jpg', '.jpeg'].includes(ext) ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : '';
+    if (!mime) throw new Error('La referencia debe ser una imagen JPG, PNG o WebP.');
+    if (!voiceId) throw new Error('HeyGen Imagen libre necesita el código de una voz de HeyGen.');
+    const buffer = await fs.readFile(imagePath);
+    const upload = authMode === 'oauth'
+      ? await uploadHeyGenAssetWithMcp({ accessToken: oauth.accessToken, buffer, filename: path.basename(imagePath), mime })
+      : await uploadHeyGenAssetWithKey({ apiKey, buffer, filename: path.basename(imagePath), mime, idempotencyKey: `${idempotencyKey}-asset` });
+    if (!upload.asset_id) throw new Error('HeyGen subió la imagen, pero no devolvió su asset_id.');
+    refs = [key];
+    payload = {
+      type: 'image',
+      image: { type: 'asset_id', asset_id: upload.asset_id },
+      script: prompt,
+      voice_id: voiceId,
+      resolution,
+      aspect_ratio: aspectRatio,
+      engine: { type: model.engine }
+    };
+  }
+
+  const motionPrompt = String(req.heygenMotionPrompt || '').trim().slice(0, 1000);
+  if (model.supportsMotion && motionPrompt) payload.motion_prompt = motionPrompt;
+  if (model.engine === 'avatar_iv' && ['low', 'medium', 'high'].includes(req.heygenExpressiveness)) {
+    payload.expressiveness = req.heygenExpressiveness;
+  }
+
+  const created = authMode === 'oauth'
+    ? await createHeyGenVideoWithMcp({ accessToken: oauth.accessToken, payload })
+    : await createHeyGenVideoWithKey({ apiKey, payload, idempotencyKey });
+  const videoId = created.video_id || created.id;
+  if (!videoId) throw new Error('HeyGen aceptó la solicitud, pero no devolvió video_id.');
+  const finished = await waitForHeyGenVideo(() => authMode === 'oauth'
+    ? getHeyGenVideoWithMcp({ accessToken: oauth.accessToken, videoId })
+    : getHeyGenVideoWithKey({ apiKey, videoId }));
+  const buffer = await downloadHeyGenVideo(finished.video_url);
+  const key = await saveBuffer('video', `${ts()}-${model.id}-${newId()}.mp4`, buffer);
+  const duration = Number(finished.duration || finished.duration_seconds || created.duration || 0);
+  // OAuth consume el plan web; no inventamos un cargo marginal. Con API key
+  // guardamos una estimación por segundo para que el ledger no quede ciego.
+  const cost = authMode === 'key' && duration > 0 ? duration * Number(model.apiPricePerSecond || 0) : 0;
+  await recordCost({
+    type: 'video', modelId: model.id,
+    label: `${model.name}${authMode === 'oauth' ? ' (plan HeyGen)' : ' (API)'}`,
+    units: duration || 1, unitLabel: duration ? 'segundo(s)' : 'video', cost
+  });
+  const entry = {
+    id: newId(), ts: Date.now(), type: 'video', modelId: model.id, modelName: model.name,
+    prompt, mode: 'heygen', aspectRatio, resolution, duration, audio: true, refs,
+    characterId, outputs: [key], errors: [], cost: Number(cost.toFixed(6)),
+    heygenVideoId: videoId, heygenAuthMode: authMode
+  };
+  await updateJson('history.json', [], (history) => [entry, ...history].slice(0, 1000));
+  await recordAssetMetadata(entry);
+  return entry;
+}
+
 async function runVideoGeneration(req) {
   const cfg = await getConfig();
   const model = getVideoModel(req.modelId);
   if (!model) throw new Error(`Modelo de video desconocido: ${req.modelId}`);
+  if (model.provider === 'heygen') return runHeyGenVideoGeneration(req, cfg, model);
   const prompt = String(req.prompt || '').trim();
   if (!prompt) throw new Error('El prompt está vacío.');
 
@@ -1677,7 +1820,8 @@ const ENTITY_META = {
       description: String(body.description || ''),
       voiceId: body.voiceId || '',
       voiceName: body.voiceName || '',
-      arkAssetId: String(body.arkAssetId || '').trim().replace(/^asset:\/\//, '')
+      arkAssetId: String(body.arkAssetId || '').trim().replace(/^asset:\/\//, ''),
+      heygen: { avatarId: String(body.heygenAvatarId || '').trim().slice(0, 200), imageKey: '' }
     }),
     applyUpdate: (e, body) => {
       if (body.name !== undefined) e.name = String(body.name).trim() || e.name;
@@ -1685,6 +1829,9 @@ const ENTITY_META = {
       if (body.voiceId !== undefined) e.voiceId = body.voiceId;
       if (body.voiceName !== undefined) e.voiceName = body.voiceName;
       if (body.arkAssetId !== undefined) e.arkAssetId = String(body.arkAssetId).trim().replace(/^asset:\/\//, '');
+      if (body.heygenAvatarId !== undefined) e.heygen = {
+        ...(e.heygen || {}), avatarId: String(body.heygenAvatarId || '').trim().slice(0, 200)
+      };
     },
     onDelete: async (id) => {
       await updateJson('asset-links.json', [], (links) => links.filter((l) => l.characterId !== id));
@@ -1958,6 +2105,35 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true }, { extra: { 'Set-Cookie': 'manifestador_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' } });
     }
 
+    // HeyGen vuelve desde otro sitio y puede no traer la cookie local; el
+    // state de un solo uso + PKCE autentican este callback.
+    if (p === '/api/heygen/oauth/callback' && req.method === 'GET') {
+      const state = String(url.searchParams.get('state') || '');
+      const pending = heygenOAuthStates.get(state);
+      heygenOAuthStates.delete(state);
+      let ok = false; let detail = '';
+      try {
+        if (!pending || pending.expiresAt < Date.now()) throw new Error('La solicitud OAuth venció. Volvé a iniciarla desde Manifestador.');
+        const oauthError = url.searchParams.get('error_description') || url.searchParams.get('error');
+        if (oauthError) throw new Error(oauthError);
+        const code = String(url.searchParams.get('code') || '');
+        if (!code) throw new Error('HeyGen no devolvió el código OAuth.');
+        const token = await exchangeHeyGenOAuthCode({
+          clientId: pending.clientId, redirectUri: pending.redirectUri, code, codeVerifier: pending.codeVerifier
+        });
+        await writeJson('heygen-oauth.json', {
+          clientId: pending.clientId, redirectUri: pending.redirectUri,
+          accessToken: token.access_token, refreshToken: token.refresh_token || '',
+          expiresAt: oauthExpiry(token), scope: token.scope || '', updatedAt: Date.now()
+        });
+        ok = true; detail = 'HeyGen quedó conectado con OAuth.';
+      } catch (error) { detail = error.message || 'No se pudo conectar HeyGen.'; }
+      const safeDetail = JSON.stringify(detail).replace(/</g, '\\u003c');
+      const html = `<!doctype html><html><meta charset="utf-8"><title>HeyGen · Manifestador</title><body style="font:16px system-ui;padding:40px;background:#17101f;color:#fff"><h2>${ok ? 'HeyGen conectado' : 'No se pudo conectar HeyGen'}</h2><p>${detail.replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</p><script>window.opener?.postMessage({type:'manifestador-heygen-oauth',ok:${ok},detail:${safeDetail}},location.origin);setTimeout(()=>window.close(),900)</script></body></html>`;
+      res.writeHead(ok ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(html);
+    }
+
     // Integración local servidor-a-servidor con Controversy Tracker. Usa la
     // misma clave de acceso de Manifestador, pero nunca depende de cookies.
     if (p === '/api/integrations/controversy-tracker/health' && req.method === 'GET') {
@@ -2021,6 +2197,38 @@ const server = http.createServer(async (req, res) => {
       if (cfg.accessPasswordHash && (sessions.get(token) || 0) <= Date.now()) {
         return send(res, 401, { error: 'Acceso bloqueado', loginRequired: true });
       }
+    }
+
+    if (p === '/api/heygen/oauth/start' && req.method === 'POST') {
+      if (!isLoopbackRequest(req)) return send(res, 403, { error: 'Por seguridad, HeyGen OAuth sólo se inicia desde localhost.' });
+      const redirectUri = oauthRedirectUri(req);
+      if (!/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(redirectUri)) {
+        return send(res, 400, { error: 'Abrí Manifestador con localhost o 127.0.0.1 para conectar HeyGen OAuth.' });
+      }
+      const saved = await readJson('heygen-oauth.json', {});
+      let clientId = saved.redirectUri === redirectUri ? saved.clientId : '';
+      if (!clientId) clientId = (await registerHeyGenOAuthClient(redirectUri)).client_id;
+      const state = crypto.randomBytes(24).toString('base64url');
+      const codeVerifier = crypto.randomBytes(48).toString('base64url');
+      const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+      heygenOAuthStates.set(state, { clientId, redirectUri, codeVerifier, expiresAt: Date.now() + 10 * 60_000 });
+      return send(res, 200, { url: heyGenAuthorizationUrl({ clientId, redirectUri, state, codeChallenge }), localhostSupported: true });
+    }
+    if (p === '/api/heygen/oauth/status' && req.method === 'GET') {
+      const saved = await readJson('heygen-oauth.json', {});
+      if (!saved.accessToken) return send(res, 200, { connected: false, localhostSupported: true });
+      try {
+        const auth = await getHeyGenOAuth();
+        const account = safeHeyGenAccount(await getHeyGenMcpUser(auth.accessToken));
+        return send(res, 200, { connected: true, localhostSupported: true, expiresAt: auth.expiresAt, account });
+      } catch (error) {
+        return send(res, 200, { connected: false, localhostSupported: true, error: error.message });
+      }
+    }
+    if (p === '/api/heygen/oauth/disconnect' && req.method === 'POST') {
+      const saved = await readJson('heygen-oauth.json', {});
+      await writeJson('heygen-oauth.json', { clientId: saved.clientId || '', redirectUri: saved.redirectUri || '' });
+      return send(res, 200, { connected: false, localhostSupported: true });
     }
 
     // --- fuentes personalizadas persistentes ---
@@ -3378,6 +3586,11 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const cfg = await getConfig();
       const service = String(body.service || '');
+      if (service === 'heygen') {
+        const account = safeHeyGenAccount(await getHeyGenApiUser(body.key || cfg.keys.heygen || ''));
+        const label = account.email || account.name || account.id || 'cuenta válida';
+        return send(res, 200, { ok: true, detail: `Conectado a ${label}${account.billingType ? ` · ${account.billingType}` : ''}`, account });
+      }
       const endpoint = body.endpoint || (service === 'ark' ? cfg.endpoints.ark : service === 'suno' ? cfg.endpoints.suno : '');
       const result = await testService({
         service,
@@ -3623,6 +3836,34 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, deleted: allowed.length, history: cleaned.slice(0, 200) });
     }
 
+    // Imagen espejo local del avatar que ya fue registrado en HeyGen. Nunca se
+    // sube ni registra automáticamente: sirve para identificar visualmente el
+    // código remoto y para impedir que se elija el personaje equivocado.
+    const heygenImageMatch = /^\/api\/characters\/([a-z0-9]+)\/heygen-image$/.exec(p);
+    if (heygenImageMatch && ['POST', 'DELETE'].includes(req.method)) {
+      const id = heygenImageMatch[1];
+      const characters = await readJson('characters.json', []);
+      const character = characters.find((item) => item.id === id);
+      if (!character) return send(res, 404, { error: 'Personaje no encontrado' });
+      const previous = character.heygen?.imageKey || '';
+      let imageKey = '';
+      if (req.method === 'POST') {
+        const body = await readJsonBody(req);
+        if (body.dataUrl && !String(body.dataUrl).startsWith('data:image/')) throw new Error('La variante HeyGen debe ser una imagen.');
+        const dir = path.join(DATA_DIR, 'characters', id, 'heygen');
+        const name = await saveEntityPhoto(dir, body);
+        imageKey = `characters/${id}/heygen/${name}`;
+      }
+      let updated;
+      await updateJson('characters.json', [], (all) => all.map((item) => {
+        if (item.id !== id) return item;
+        updated = { ...item, heygen: { ...(item.heygen || {}), imageKey } };
+        return updated;
+      }));
+      if (previous && previous !== imageKey) await fs.unlink(await resolveAssetKey(previous)).catch(() => {});
+      return send(res, 200, updated);
+    }
+
     // --- personajes y elementos: fotos, variantes, vínculos y CRUD compartidos ---
     if (await serveEntityRoutes(ENTITY_META.characters, { p, req, res, url })) return;
     if (await serveEntityRoutes(ENTITY_META.elements, { p, req, res, url })) return;
@@ -3642,7 +3883,9 @@ const server = http.createServer(async (req, res) => {
       const characterDir = path.join(DATA_DIR, 'characters', id);
       const item = {
         id, name: String(source.name || 'Personaje importado'), description: String(source.description || ''),
-        voiceId: String(source.voiceId || ''), voiceName: String(source.voiceName || ''), photos: [], variants: [], ts: Date.now()
+        voiceId: String(source.voiceId || ''), voiceName: String(source.voiceName || ''),
+        heygen: { avatarId: String(source.heygen?.avatarId || ''), imageKey: '' },
+        photos: [], variants: [], ts: Date.now()
       };
       await fs.mkdir(characterDir, { recursive: true });
       for (const [index, file] of (source.photos || []).entries()) {
@@ -3662,6 +3905,15 @@ const server = http.createServer(async (req, res) => {
           variant.photos.push(`characters/${id}/variants/${variantId}/${name}`);
         }
         item.variants.push(variant);
+      }
+      if (source.heygen?.image) {
+        const data = files.get(source.heygen.image);
+        const ext = path.extname(source.heygen.image).toLowerCase();
+        if (data && ['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) {
+          const dir = path.join(characterDir, 'heygen'); await fs.mkdir(dir, { recursive: true });
+          const name = `mirror${ext}`; await fs.writeFile(path.join(dir, name), data);
+          item.heygen.imageKey = `characters/${id}/heygen/${name}`;
+        }
       }
       await updateJson('characters.json', [], (characters) => [item, ...characters]);
       return send(res, 200, item);
@@ -3686,7 +3938,13 @@ const server = http.createServer(async (req, res) => {
         }
         variants.push({ name: variant.name, description: variant.description || '', photos: variantPhotos });
       }
-      const manifest = { format: 'manifestador-character', version: 1, exportedAt: Date.now(), character: { name: character.name, description: character.description || '', voiceId: character.voiceId || '', voiceName: character.voiceName || '', photos, variants } };
+      let heygen = { avatarId: character.heygen?.avatarId || '', image: '' };
+      if (character.heygen?.imageKey) {
+        const ext = path.extname(character.heygen.imageKey).toLowerCase();
+        heygen.image = `heygen/mirror${ext}`;
+        entries.push({ name: heygen.image, data: await fs.readFile(await resolveAssetKey(character.heygen.imageKey)) });
+      }
+      const manifest = { format: 'manifestador-character', version: 2, exportedAt: Date.now(), character: { name: character.name, description: character.description || '', voiceId: character.voiceId || '', voiceName: character.voiceName || '', photos, variants, heygen } };
       entries.unshift({ name: 'character.json', data: Buffer.from(JSON.stringify(manifest, null, 2), 'utf8') });
       const zip = createZip(entries);
       const filename = `${sanitizeName(character.name || 'personaje').replace(/\.[^.]+$/, '')}.manifestador.zip`;

@@ -333,6 +333,7 @@ function renderImageControls() {
 function renderVideoControls() {
   const m = currentVideoModel();
   if (!m) return;
+  const isHeyGen = m.provider === 'heygen';
   state.video.modelId = m.id;
   if (!m.aspectRatios.includes(state.video.aspectRatio)) state.video.aspectRatio = m.aspectRatios[0];
   if (!m.resolutions.includes(state.video.resolution)) state.video.resolution = m.resolutions[0];
@@ -340,12 +341,14 @@ function renderVideoControls() {
   if (state.refs.length > activeRefLimit()) state.refs = state.refs.slice(0, activeRefLimit());
 
   chipRow($('#videoModelChips'), state.videoModels.map((x) => x.id), m.id,
-    (id) => { state.video.modelId = id; renderVideoControls(); },
+    (id) => { state.video.modelId = id; applyPinnedCharacterPhotos(); renderVideoControls(); },
     (id) => state.videoModels.find((x) => x.id === id).name);
   chipRow($('#videoModeChips'), ['reference', 'frames'], state.video.mode,
     (v) => { state.video.mode = v; renderVideoControls(); },
     (v) => (v === 'reference' ? 'Referencias (@)' : 'Inicio → Fin'));
-  $('#videoRefsHint').textContent = state.video.mode === 'reference'
+  $('#videoRefsHint').textContent = isHeyGen
+    ? 'Usá una imagen JPG o PNG: puede venir de cualquier asset o personaje.'
+    : state.video.mode === 'reference'
     ? 'mencionalas en el prompt con @image1, @image2… (botón @ en cada miniatura)'
     : '1ª imagen = fotograma inicial · 2ª = final';
   chipRow($('#videoArChips'), m.aspectRatios, state.video.aspectRatio,
@@ -364,12 +367,50 @@ function renderVideoControls() {
 
   $('#videoAudioRow').hidden = !m.audio;
   $('#videoAudio').checked = m.audio && state.video.audio;
+  $('#videoDurationRow').hidden = isHeyGen;
+  $('#videoModeRow').hidden = isHeyGen;
+  $('#videoAudioRow').hidden = isHeyGen || !m.audio;
+  $('#heygenVideoControls').hidden = !isHeyGen;
+  $('#videoRefsStrip').closest('.control-row').hidden = isHeyGen && m.requiresRegisteredCharacter;
+  $('#btnShotList').hidden = isHeyGen;
+  if (isHeyGen) {
+    state.video.mode = 'reference';
+    const eligible = state.characters.filter((character) => character.heygen?.avatarId && character.heygen?.imageKey);
+    if (!eligible.some((character) => character.id === state.video.heygenCharacterId)) {
+      state.video.heygenCharacterId = eligible[0]?.id || '';
+    }
+    $('#heygenCharacterRow').hidden = !m.requiresRegisteredCharacter;
+    $('#heygenCharacterSelect').innerHTML = eligible.length
+      ? eligible.map((character) => `<option value="${character.id}">${esc(character.name)} · ${esc(character.heygen.avatarId)}</option>`).join('')
+      : '<option value="">— no hay personajes HeyGen completos —</option>';
+    $('#heygenCharacterSelect').value = state.video.heygenCharacterId;
+    $('#heygenCharacterHint').textContent = eligible.length
+      ? 'Sólo aparecen personajes con imagen espejo y código de avatar.'
+      : 'Creá la variante HeyGen en Personajes para habilitar este modelo.';
+    $('#heygenVoiceRow').hidden = false;
+    $('#heygenMotionRow').hidden = !m.supportsMotion;
+    $('#heygenAuthMode').value = state.video.heygenAuthMode;
+    $('#heygenVoiceId').value = state.video.heygenVoiceId;
+    $('#heygenMotionPrompt').value = state.video.heygenMotionPrompt;
+    $('#heygenExpressiveness').value = state.video.heygenExpressiveness;
+    $('#heygenVideoAuthStatus').textContent = state.video.heygenAuthMode === 'oauth'
+      ? (state.heygenOAuth.connected ? 'OAuth conectado' : 'OAuth sin conectar; hacelo desde Configuración')
+      : (state.config?.keys?.heygen ? 'API key configurada' : 'Falta guardar la API key');
+    $('#promptBox').placeholder = 'Escribí el texto que dirá el avatar…';
+  } else if (state.mode === 'video') {
+    $('#promptBox').placeholder = 'Describí el video que querés manifestar…';
+  }
   $('#videoModelNote').textContent = m.notes || '';
   renderRefs();
   updateEstimate();
 }
 
 $('#videoAudio').addEventListener('change', (e) => { state.video.audio = e.target.checked; });
+$('#heygenAuthMode').addEventListener('change', (e) => { state.video.heygenAuthMode = e.target.value; renderVideoControls(); });
+$('#heygenCharacterSelect').addEventListener('change', (e) => { state.video.heygenCharacterId = e.target.value; });
+$('#heygenVoiceId').addEventListener('input', (e) => { state.video.heygenVoiceId = e.target.value.trim(); });
+$('#heygenMotionPrompt').addEventListener('input', (e) => { state.video.heygenMotionPrompt = e.target.value; });
+$('#heygenExpressiveness').addEventListener('change', (e) => { state.video.heygenExpressiveness = e.target.value; });
 
 function renderRefs() {
   const isVideo = state.mode === 'video';
@@ -594,6 +635,16 @@ function applyPinnedCharacterPhotos() {
   state.refs = state.refs.filter((r) => !r.fromChar);
   const pc = pinnedChar();
   if (!pc) return;
+  const videoModel = state.mode === 'video' ? currentVideoModel() : null;
+  if (videoModel?.provider === 'heygen') {
+    if (videoModel.requiresRegisteredCharacter) {
+      if (pc.heygen?.avatarId && pc.heygen?.imageKey) state.video.heygenCharacterId = pc.id;
+      return;
+    }
+    const key = pc.heygen?.imageKey || pc.photos?.[0];
+    if (key && state.refs.length < activeRefLimit()) state.refs.push({ key, fromChar: true, label: pc.name });
+    return;
+  }
   // En video, un personaje con rostro real verificado va como asset://
   // (Seedance rechaza fotos con caras reales como input directo).
   if (state.mode === 'video' && pc.arkAssetId) {
@@ -933,6 +984,19 @@ async function generate() {
   const voice = (state.voices || []).find((v) => v.id === voiceId);
   const audioModel = (state.audioModels || []).find((candidate) => candidate.id === state.audioModelId) || state.audioModels?.[0];
   const model = isVideo ? currentVideoModel() : currentModel();
+  const isHeyGen = isVideo && model?.provider === 'heygen';
+  if (isHeyGen && model.requiresRegisteredCharacter) {
+    const character = state.characters.find((item) => item.id === state.video.heygenCharacterId);
+    if (!character?.heygen?.avatarId || !character?.heygen?.imageKey) {
+      return toast('Este modelo necesita un personaje con variante HeyGen completa', 'err');
+    }
+  }
+  if (isHeyGen && !model.requiresRegisteredCharacter) {
+    if (state.refs.length !== 1 || state.refs[0].key.startsWith('asset://')) return toast('Elegí exactamente una imagen', 'err');
+    if (!state.video.heygenVoiceId.trim()) return toast('Pegá el código de una voz de HeyGen', 'err');
+  }
+  if (isHeyGen && state.video.heygenAuthMode === 'oauth' && !state.heygenOAuth.connected) return toast('Conectá HeyGen OAuth desde Configuración', 'err');
+  if (isHeyGen && state.video.heygenAuthMode === 'key' && !state.config?.keys?.heygen) return toast('Guardá la API key de HeyGen en Configuración', 'err');
   // las etiquetas se estampan acá, sobre copias: el asset guardado queda limpio
   const refsUsed = isImage ? state.refs : isVideo ? state.refs.slice(0, activeRefLimit()) : [];
   const labeledRefs = refsUsed.some((r) => r.label) ? await buildLabeledRefs(refsUsed) : {};
@@ -940,7 +1004,7 @@ async function generate() {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     status: 'queued', prompt, createdAt: Date.now(),
     label: isImage ? `${model.name} · ${state.resolution} · ×${state.batch}`
-      : isVideo ? `${model.name} · ${state.video.resolution} · ${state.video.duration}s`
+      : isVideo ? `${model.name} · ${state.video.resolution}${isHeyGen ? '' : ` · ${state.video.duration}s`}`
       : isMusic ? `Suno ${state.music.version}${state.music.instrumental ? ' · instrumental' : ''}`
       : `${audioModel?.name || 'ElevenLabs'} · ${voice?.name || pc?.voiceName || 'voz'}`,
     path: isImage ? '/api/generate/image' : isVideo ? '/api/generate/video' : isMusic ? '/api/generate/music' : '/api/generate/audio',
@@ -954,7 +1018,12 @@ async function generate() {
       aspectRatio: state.video.aspectRatio, resolution: state.video.resolution,
       duration: state.video.duration, audio: state.video.audio,
       refs: state.refs.slice(0, activeRefLimit()).map((r) => r.key), labeledRefs,
-      characterId: state.pinnedId || null
+      characterId: state.pinnedId || null,
+      heygenAuthMode: state.video.heygenAuthMode,
+      heygenCharacterId: state.video.heygenCharacterId,
+      heygenVoiceId: state.video.heygenVoiceId,
+      heygenMotionPrompt: state.video.heygenMotionPrompt,
+      heygenExpressiveness: state.video.heygenExpressiveness
     } : isMusic ? {
       model: state.music.version, prompt,
       style: state.music.style, title: state.music.title,
@@ -3489,6 +3558,7 @@ function renderCharacters() {
         <div class="char-voice">${c.voiceName ? IC('mic') + ' ' + esc(c.voiceName) : '<span style="color:#6f5f8d">sin voz</span>'}</div>
       </div></div>
       <div class="char-desc">${esc(c.description || '')}</div>
+      ${c.heygen?.avatarId && c.heygen?.imageKey ? `<div class="heygen-card-badge">HeyGen · ${esc(c.heygen.avatarId)}</div>` : ''}
       ${(c.variants || []).length ? `<div class="hint" style="margin-bottom:8px">${(c.variants || []).length} variante${c.variants.length === 1 ? '' : 's'} de outfit</div>` : ''}
       ${inSeries.length ? `<div class="char-series">${IC('layers')} ${inSeries.map((s) => esc(s.title)).join(' · ')}</div>` : ''}
       <div class="char-photos-mini">${minis}</div>
@@ -3610,7 +3680,7 @@ function openCharModal(id, assetKey = null) {
 
 function renderCharModal() {
   const id = state.editingCharId;
-  const c = state.characters.find((x) => x.id === id) || { name: '', description: '', voiceId: '', photos: [] };
+  const c = state.characters.find((x) => x.id === id) || { name: '', description: '', voiceId: '', photos: [], heygen: { avatarId: '', imageKey: '' } };
   const voices = state.voices || [];
   const body = $('#charModalBody');
   body.innerHTML = `
@@ -3627,6 +3697,17 @@ function renderCharModal() {
     <div><label>Asset ID de Seedance (rostro real verificado)</label>
       <input type="text" id="chArkAsset" value="${esc(c.arkAssetId || '')}" placeholder="ej: asset-20260222234430-mxpgh">
       <div class="hint" style="margin-top:4px">Para personas reales: verificá la identidad en la consola de ModelArk (Playground → My assets → Real-human) y pegá acá el asset ID. En video se usa en lugar de las fotos, que Seedance rechaza si tienen rostros reales.</div>
+    </div>
+    <div class="heygen-character-card">
+      <div class="variant-manager-head"><label>Variante especial · HeyGen</label>${c.heygen?.avatarId && c.heygen?.imageKey ? '<span class="heygen-ready">Lista para video</span>' : ''}</div>
+      <input type="text" id="chHeyGenAvatar" value="${esc(c.heygen?.avatarId || '')}" placeholder="Código del avatar registrado en HeyGen">
+      <div class="hint" style="margin-top:4px">Pegá el avatar_id remoto y guardá una imagen espejo de la misma identidad. Manifestador no registra ni sube este personaje automáticamente.</div>
+      ${id ? `<div class="heygen-mirror">
+        ${c.heygen?.imageKey ? `<img src="${fileUrl(c.heygen.imageKey)}" alt="Imagen espejo de HeyGen">` : '<div class="heygen-mirror-empty">Sin imagen espejo</div>'}
+        <div><button type="button" class="mini-btn" id="chHeyGenUpload">${IC('upload')} Subir imagen espejo</button>
+        ${c.photos?.[0] ? `<button type="button" class="mini-btn" id="chHeyGenUseCover">Usar portada</button>` : ''}
+        ${c.heygen?.imageKey ? `<button type="button" class="mini-btn danger" id="chHeyGenRemove">Quitar</button>` : ''}</div>
+      </div>` : '<p class="hint">Creá el personaje primero para subir su imagen espejo.</p>'}
     </div>
     ${id ? `
     ${c.photos.length ? '<div><label>Portada</label><div id="chCover"></div></div>' : ''}
@@ -3670,7 +3751,8 @@ function renderCharModal() {
       description: $('#chDesc').value,
       voiceId,
       voiceName: voices2.find((v) => v.id === voiceId)?.name || '',
-      arkAssetId: $('#chArkAsset').value.trim()
+      arkAssetId: $('#chArkAsset').value.trim(),
+      heygenAvatarId: $('#chHeyGenAvatar').value.trim()
     };
     try {
       if (id) {
@@ -4654,6 +4736,7 @@ async function generateAutomationResource(projectId, kind, role, card) {
     status.textContent = message;
     status.classList.toggle('warn', error);
   };
+  if (isHeyGen) job.body.idempotencyKey = job.id;
   try {
     button.disabled = true;
     await createAutomationResource({ projectId, kind, role, modelId, prompt, voiceId, setStatus });
@@ -4694,6 +4777,35 @@ async function generateAllAutomationResources(projectId) {
     detail: `Preparando el primer rol de ${tasks.length}…`,
     total: tasks.length,
     current: 1
+  });
+
+  $('#chHeyGenUpload')?.addEventListener('click', () => {
+    $('#fileInput').accept = 'image/png,image/jpeg,image/webp';
+    $('#fileInput').multiple = false;
+    $('#fileInput').onchange = async (event) => {
+      const file = event.target.files[0]; event.target.value = ''; event.target.multiple = true; event.target.accept = 'image/*';
+      if (!file) return;
+      try {
+        const updated = await api(`/api/characters/${id}/heygen-image`, { method: 'POST', body: { name: file.name, dataUrl: await readFileAsDataUrl(file) } });
+        state.characters[state.characters.findIndex((item) => item.id === id)] = updated;
+        renderCharModal(); renderCharacters(); renderVideoControls();
+      } catch (error) { toast(error.message, 'err'); }
+    };
+    $('#fileInput').click();
+  });
+  $('#chHeyGenUseCover')?.addEventListener('click', async () => {
+    try {
+      const updated = await api(`/api/characters/${id}/heygen-image`, { method: 'POST', body: { assetKey: c.photos[0] } });
+      state.characters[state.characters.findIndex((item) => item.id === id)] = updated;
+      renderCharModal(); renderCharacters(); renderVideoControls();
+    } catch (error) { toast(error.message, 'err'); }
+  });
+  $('#chHeyGenRemove')?.addEventListener('click', async () => {
+    try {
+      const updated = await api(`/api/characters/${id}/heygen-image`, { method: 'DELETE' });
+      state.characters[state.characters.findIndex((item) => item.id === id)] = updated;
+      renderCharModal(); renderCharacters(); renderVideoControls();
+    } catch (error) { toast(error.message, 'err'); }
   });
 
   const bulkButton = $('#autoGenerateAllResources');
@@ -4891,19 +5003,19 @@ function renderAutomationProject() {
           <label class="poser-toggle"><input type="checkbox" id="autoMusicEnabled"${music.enabled ? ' checked' : ''}> usar música</label>
         </div>
         <div class="automation-music-grid">
-          <label><span>Origen</span><select class="select" id="autoMusicSource">
+          <label class="automation-music-source"><span>Origen</span><select class="select" id="autoMusicSource">
             <option value="asset"${music.source === 'asset' ? ' selected' : ''}>Elegir de Assets / subida</option>
             <option value="auto"${music.source === 'auto' ? ' selected' : ''}>Elegir automáticamente por etiquetas</option>
             <option value="suno"${music.source === 'suno' ? ' selected' : ''}>Generar con Suno</option>
           </select></label>
           <label class="automation-music-track"><span>Pista</span><select class="select" id="autoMusicTrack"><option value="">— ninguna —</option>${musicAssets.map((asset) => `<option value="${esc(asset.key)}"${asset.key === music.assetKey ? ' selected' : ''}>${esc(asset.name)}</option>`).join('')}</select></label>
-          <label><span>Nivel musical · dB</span><input type="number" id="autoMusicGain" min="-60" max="0" step="1" value="${Number(music.gainDb).toFixed(1)}"></label>
-          <label><span>Modelo Suno</span><select class="select" id="autoMusicModel">${(state.musicModel?.versions || [music.sunoModel]).map((version) => `<option value="${esc(version)}"${version === music.sunoModel ? ' selected' : ''}>${esc(version)}</option>`).join('')}</select></label>
+          <label class="automation-music-gain"><span>Nivel musical · dB</span><input type="number" id="autoMusicGain" min="-60" max="0" step="1" value="${Number(music.gainDb).toFixed(1)}"></label>
+          <label class="automation-music-model"><span>Modelo Suno</span><select class="select" id="autoMusicModel">${(state.musicModel?.versions || [music.sunoModel]).map((version) => `<option value="${esc(version)}"${version === music.sunoModel ? ' selected' : ''}>${esc(version)}</option>`).join('')}</select></label>
           <label class="automation-music-toggle"><span>Final musical</span><span><input type="checkbox" id="autoMusicFadeOut"${music.fadeOut ? ' checked' : ''}> Fade out</span></label>
-          <label><span>Duración del fade · segundos</span><input type="number" id="autoMusicFadeSeconds" min="0.25" max="30" step="0.25" value="${music.fadeOutSeconds}"${music.fadeOut ? '' : ' disabled'}></label>
-          <label><span>Género</span><input type="text" id="autoMusicGenres" value="${esc((music.genres || []).join(', '))}" placeholder="ambient, orchestral"></label>
-          <label><span>Instrumentos</span><input type="text" id="autoMusicInstruments" value="${esc((music.instruments || []).join(', '))}" placeholder="piano, strings"></label>
-          <label><span>Sentimientos</span><input type="text" id="autoMusicMoods" value="${esc((music.moods || []).join(', '))}" placeholder="mysterious, tense"></label>
+          <label class="automation-music-fade"><span>Duración del fade · segundos</span><input type="number" id="autoMusicFadeSeconds" min="0.25" max="30" step="0.25" value="${music.fadeOutSeconds}"${music.fadeOut ? '' : ' disabled'}></label>
+          <label class="automation-music-genres"><span>Género</span><input type="text" id="autoMusicGenres" value="${esc((music.genres || []).join(', '))}" placeholder="ambient, orchestral"></label>
+          <label class="automation-music-instruments"><span>Instrumentos</span><input type="text" id="autoMusicInstruments" value="${esc((music.instruments || []).join(', '))}" placeholder="piano, strings"></label>
+          <label class="automation-music-moods"><span>Sentimientos</span><input type="text" id="autoMusicMoods" value="${esc((music.moods || []).join(', '))}" placeholder="mysterious, tense"></label>
         </div>
         <div class="automation-music-actions">
           <button type="button" class="mini-btn" id="autoMusicAuto">${IC('spark')} Elegir automáticamente</button>
@@ -6302,6 +6414,17 @@ function updateEstimate() {
     const p = imgPrice(state.modelId, state.resolution) * state.batch;
     el.textContent = p ? `≈ $${p.toFixed(3)}` : '';
   } else if (state.mode === 'video') {
+    const model = currentVideoModel();
+    if (model?.provider === 'heygen') {
+      if (state.video.heygenAuthMode === 'oauth') {
+        el.textContent = 'incluido según tu plan HeyGen';
+      } else {
+        const seconds = Math.max(1, Math.ceil(promptBox.value.trim().length / 14));
+        const amount = seconds * Number(model.apiPricePerSecond || 0);
+        el.textContent = `≈ $${amount.toFixed(3)} (~${seconds}s)`;
+      }
+      return;
+    }
     const t = state.pricing.video?.[state.video.modelId] || {};
     const perSec = t[state.video.resolution] ?? Object.values(t)[0] ?? 0;
     const p = perSec * state.video.duration;
@@ -6533,6 +6656,7 @@ function fillConfigForm() {
   f.key_elevenlabs.value = c.keys.elevenlabs || '';
   f.key_openai.value = c.keys.openai || '';
   f.key_suno.value = c.keys.suno || '';
+  f.key_heygen.value = c.keys.heygen || '';
   f.openaiModel.value = c.openaiModel || 'gpt-5-mini';
   f.path_generated.value = c.paths.generated || '';
   f.path_uploads.value = c.paths.uploads || '';
@@ -6552,6 +6676,44 @@ function fillConfigForm() {
     ? 'La aplicación está protegida. Escribí una nueva clave solo si querés cambiarla.'
     : 'Todavía no hay clave: establecé una de al menos 6 caracteres.';
 }
+
+async function loadHeyGenOAuthStatus(showError = false) {
+  try {
+    state.heygenOAuth = await api('/api/heygen/oauth/status');
+  } catch (error) {
+    state.heygenOAuth = { connected: false, localhostSupported: true, error: error.message };
+    if (showError) toast(error.message, 'err');
+  }
+  const title = $('#heygenOauthTitle');
+  const status = $('#heygenOauthStatus');
+  if (title) title.textContent = state.heygenOAuth.connected ? 'HeyGen conectado' : 'HeyGen sin conectar';
+  if (status) status.textContent = state.heygenOAuth.connected
+    ? [state.heygenOAuth.account?.email || state.heygenOAuth.account?.name, state.heygenOAuth.account?.billingType].filter(Boolean).join(' · ') || 'Sesión OAuth activa'
+    : state.heygenOAuth.error || 'Usa tu plan web de HeyGen. El retorno OAuth funciona en localhost.';
+  if ($('#heygenOauthConnect')) $('#heygenOauthConnect').textContent = state.heygenOAuth.connected ? 'Reconectar' : 'Conectar HeyGen';
+  if ($('#heygenOauthDisconnect')) $('#heygenOauthDisconnect').hidden = !state.heygenOAuth.connected;
+  if (state.mode === 'video' && currentVideoModel()?.provider === 'heygen') renderVideoControls();
+}
+
+$('#heygenOauthConnect').addEventListener('click', async () => {
+  const popup = window.open('about:blank', 'manifestador-heygen-oauth', 'width=720,height=780');
+  try {
+    const result = await api('/api/heygen/oauth/start', { method: 'POST' });
+    if (!popup) throw new Error('El navegador bloqueó la ventana OAuth. Habilitá popups para localhost.');
+    popup.location = result.url;
+  } catch (error) {
+    popup?.close(); toast(error.message, 'err');
+  }
+});
+$('#heygenOauthDisconnect').addEventListener('click', async () => {
+  try { await api('/api/heygen/oauth/disconnect', { method: 'POST' }); await loadHeyGenOAuthStatus(); }
+  catch (error) { toast(error.message, 'err'); }
+});
+window.addEventListener('message', async (event) => {
+  if (event.origin !== location.origin || event.data?.type !== 'manifestador-heygen-oauth') return;
+  if (event.data.ok) { await loadHeyGenOAuthStatus(); toast('HeyGen conectado con OAuth'); }
+  else toast(event.data.detail || 'No se pudo conectar HeyGen', 'err');
+});
 
 // Probar conexión: usa lo que haya en el formulario (aunque no esté guardado);
 // si el campo está vacío, el servidor prueba con la key ya guardada.
@@ -6619,7 +6781,8 @@ $('#configForm').addEventListener('submit', async (e) => {
           ark: f.key_ark.value.trim(),
           elevenlabs: f.key_elevenlabs.value.trim(),
           openai: f.key_openai.value.trim(),
-          suno: f.key_suno.value.trim()
+          suno: f.key_suno.value.trim(),
+          heygen: f.key_heygen.value.trim()
         },
         openaiModel: f.openaiModel.value.trim() || 'gpt-5-mini',
         paths: {
@@ -6684,6 +6847,7 @@ async function init() {
     state.history = s.history;
     state.pricing = s.pricing;
     state.modelId = s.models[0]?.id;
+    await loadHeyGenOAuthStatus(false);
   } catch (e) {
     toast('No pude cargar el estado: ' + e.message, 'err');
     return;
