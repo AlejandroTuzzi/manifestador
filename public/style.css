@@ -535,12 +535,16 @@ h3 { font-size: 15px; }
 .automation-assets-pick { position: relative; display: grid; grid-template-rows: 92px auto; gap: 5px; min-width: 0; padding: 6px; border: 1px solid var(--border-soft); background: rgba(10,5,18,.72); color: var(--text); text-align: left; cursor: pointer; }
 .automation-assets-pick:hover, .automation-assets-pick.selected { border-color: rgba(34,211,238,.68); background: rgba(34,211,238,.08); }
 .automation-assets-pick img, .automation-assets-pick video { width: 100%; height: 92px; object-fit: cover; background: #050208; }
+.automation-assets-audio { width: 100%; height: 92px; display: grid; place-items: center; color: var(--pink); background: radial-gradient(circle at center, rgba(236,72,153,.16), #050208 72%); }
+.automation-assets-pick > .automation-assets-audio { white-space: normal; font-size: inherit; }
 .automation-assets-pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .automation-assets-pick > b { position: absolute; right: 9px; top: 9px; min-width: 23px; height: 23px; padding: 0 5px; display: grid; place-items: center; border-radius: 30px; background: rgba(0,0,0,.82); color: #67e8f9; }
 .automation-assets-order-head { display: flex; align-items: center; justify-content: space-between; }
 .automation-assets-order { display: flex; flex-direction: column; gap: 5px; max-height: 24vh; overflow-y: auto; }
 .automation-assets-order-item { display: grid; grid-template-columns: 24px 46px minmax(100px, 1fr) 30px 30px 30px; align-items: center; gap: 7px; padding: 5px 8px; border: 1px solid var(--border-soft); background: rgba(10,5,18,.55); }
 .automation-assets-order-item > img, .automation-assets-order-item > video { width: 46px; height: 36px; object-fit: cover; }
+.automation-assets-order-item > .automation-assets-audio { width: 46px; height: 36px; }
+.auto-block-h3-settings { border-color: rgba(236,72,153,.3); background: rgba(236,72,153,.04); }
 .automation-assets-order-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .auto-block-editor > label, .auto-block-script-items label { display: grid; gap: 5px; }
 .auto-block-editor label > span { color: var(--muted); font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .45px; }

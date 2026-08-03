@@ -217,9 +217,20 @@
           <div id="videoModeChips" class="chips"></div>
         </div>
         <div class="control-row refs-row">
-          <label>Imágenes <span id="videoRefsCount" class="refs-count"></span></label>
+          <label><span id="videoRefsLabel">Imágenes</span> <span id="videoRefsCount" class="refs-count"></span></label>
           <div id="videoRefsStrip" class="refs-strip"></div>
           <span class="hint" id="videoRefsHint"></span>
+        </div>
+        <div id="h3VideoControls" class="heygen-video-controls" hidden>
+          <div class="control-row">
+            <label>Context-IR</label>
+            <label class="poser-toggle"><input type="checkbox" id="h3ContextIr"> analizar todas las referencias y enriquecer el prompt antes de generar</label>
+          </div>
+          <div class="control-row" id="h3MediaRow">
+            <label>Multimedia</label>
+            <button type="button" class="tool-btn" id="h3PickMedia"><svg class="ic"><use href="#i-folder"/></svg> Elegir imágenes, videos y audios</button>
+            <span class="hint">En Referencias: 9 imágenes, 3 videos y 3 audios; máximo 12 archivos. El audio necesita una imagen o video.</span>
+          </div>
         </div>
         <div id="heygenVideoControls" class="heygen-video-controls" hidden>
           <div class="control-row"><label>Conexión</label><select id="heygenAuthMode" class="select"><option value="oauth">OAuth · plan web</option><option value="key">API key · saldo API</option></select><span id="heygenVideoAuthStatus" class="hint"></span></div>
@@ -617,6 +628,10 @@
             <span class="key-row"><input type="password" name="key_ark" placeholder="key de Ark"><button type="button" class="tool-btn test-btn" data-service="ark">Probar</button></span>
             <span class="test-result" data-result="ark"></span>
           </label>
+          <label>MiniMax H3
+            <span class="key-row"><input type="password" name="key_minimax" placeholder="API key de MiniMax"><button type="button" class="tool-btn test-btn" data-service="minimax">Probar</button></span>
+            <span class="test-result" data-result="minimax"></span>
+          </label>
           <label>ElevenLabs
             <span class="key-row"><input type="password" name="key_elevenlabs" placeholder="xi-…"><button type="button" class="tool-btn test-btn" data-service="elevenlabs">Probar</button></span>
             <span class="test-result" data-result="elevenlabs"></span>
@@ -689,6 +704,7 @@
           <label>ID de modelo Seedance 2.0 <input type="text" name="seedanceModelId" placeholder="dreamina-seedance-2-0"></label>
           <label>ID de modelo Seedance 2.0 Mini <input type="text" name="seedanceMiniModelId" placeholder="dreamina-seedance-2-0-mini-260615"></label>
           <label>Endpoint Ark <input type="text" name="endpoint_ark"></label>
+          <label>Endpoint MiniMax <input type="text" name="endpoint_minimax" placeholder="https://api.minimax.io"></label>
           <label>Endpoint Suno <input type="text" name="endpoint_suno" placeholder="https://api.sunoapi.org"></label>
           <label>Modelo Suno por defecto <input type="text" name="sunoModelId" placeholder="V5_5"></label>
           <label>Modelo de OpenAI (precios) <input type="text" name="openaiModel" placeholder="gpt-5-mini"></label>
@@ -865,6 +881,7 @@
         <button class="tab" data-auto-assets-zone="generated">Generadas</button>
         <button class="tab" data-auto-assets-zone="uploads">Subidas</button>
         <button class="tab" data-auto-assets-zone="video">Videos</button>
+        <button class="tab" data-auto-assets-zone="audio" id="automationAssetsAudioTab" hidden>Audio</button>
       </div>
       <input type="search" id="automationAssetsSearch" placeholder="Buscar por nombre…">
     </div>

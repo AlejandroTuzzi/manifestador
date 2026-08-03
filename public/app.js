@@ -344,10 +344,17 @@ function heygenCharacterReady(character) {
   return Boolean(heygenWideAvatarId(character));
 }
 
+function referenceKind(ref) {
+  if (['image', 'video', 'audio'].includes(ref?.kind)) return ref.kind;
+  const key = String(ref?.key || '');
+  return key.startsWith('video/') ? 'video' : key.startsWith('audio/') ? 'audio' : 'image';
+}
+
 function renderVideoControls() {
   const m = currentVideoModel();
   if (!m) return;
   const isHeyGen = m.provider === 'heygen';
+  const isH3 = m.provider === 'minimax';
   state.video.modelId = m.id;
   if (!m.aspectRatios.includes(state.video.aspectRatio)) state.video.aspectRatio = m.aspectRatios[0];
   if (!m.resolutions.includes(state.video.resolution)) state.video.resolution = m.resolutions[0];
@@ -355,16 +362,24 @@ function renderVideoControls() {
   if (state.refs.length > activeRefLimit()) state.refs = state.refs.slice(0, activeRefLimit());
 
   chipRow($('#videoModelChips'), state.videoModels.map((x) => x.id), m.id,
-    (id) => { state.video.modelId = id; applyPinnedCharacterPhotos(); renderVideoControls(); },
+    (id) => {
+      state.video.modelId = id;
+      const next = state.videoModels.find((model) => model.id === id);
+      if (next?.provider !== 'minimax') state.refs = state.refs.filter((ref) => referenceKind(ref) === 'image');
+      applyPinnedCharacterPhotos(); renderVideoControls();
+    },
     (id) => state.videoModels.find((x) => x.id === id).name);
   chipRow($('#videoModeChips'), ['reference', 'frames'], state.video.mode,
     (v) => { state.video.mode = v; renderVideoControls(); },
     (v) => (v === 'reference' ? 'Referencias (@)' : 'Inicio → Fin'));
   $('#videoRefsHint').textContent = isHeyGen
     ? 'Usá una imagen JPG o PNG: puede venir de cualquier asset o personaje.'
+    : isH3 && state.video.mode === 'reference'
+    ? 'Citá las referencias como Image 1, Video 1 o Audio 1. Podés combinar estética, personaje, movimiento, cámara, voz y ritmo.'
     : state.video.mode === 'reference'
     ? 'mencionalas en el prompt con @image1, @image2… (botón @ en cada miniatura)'
     : '1ª imagen = fotograma inicial · 2ª = final';
+  $('#videoRefsLabel').textContent = isH3 ? 'Referencias' : 'Imágenes';
   chipRow($('#videoArChips'), m.aspectRatios, state.video.aspectRatio,
     (v) => { state.video.aspectRatio = v; renderVideoControls(); });
   chipRow($('#videoResChips'), m.resolutions, state.video.resolution,
@@ -379,12 +394,17 @@ function renderVideoControls() {
     },
     (v) => `${v}s`);
 
+  if (isH3) state.video.audio = true;
   $('#videoAudioRow').hidden = !m.audio;
   $('#videoAudio').checked = m.audio && state.video.audio;
+  $('#videoAudio').disabled = isH3;
   $('#videoDurationRow').hidden = isHeyGen;
   $('#videoModeRow').hidden = isHeyGen;
   $('#videoAudioRow').hidden = isHeyGen || !m.audio;
   $('#heygenVideoControls').hidden = !isHeyGen;
+  $('#h3VideoControls').hidden = !isH3;
+  $('#h3MediaRow').hidden = !isH3 || state.video.mode !== 'reference';
+  $('#h3ContextIr').checked = isH3 && state.video.h3ContextIr;
   $('#videoRefsStrip').closest('.control-row').hidden = isHeyGen && m.requiresRegisteredCharacter;
   $('#btnShotList').hidden = isHeyGen;
   if (isHeyGen) {
@@ -420,6 +440,7 @@ function renderVideoControls() {
 }
 
 $('#videoAudio').addEventListener('change', (e) => { state.video.audio = e.target.checked; });
+$('#h3ContextIr').addEventListener('change', (e) => { state.video.h3ContextIr = e.target.checked; });
 $('#heygenAuthMode').addEventListener('change', (e) => { state.video.heygenAuthMode = e.target.value; renderVideoControls(); });
 $('#heygenCharacterSelect').addEventListener('change', (e) => { state.video.heygenCharacterId = e.target.value; });
 $('#heygenVoiceId').addEventListener('input', (e) => { state.video.heygenVoiceId = e.target.value.trim(); });
@@ -437,18 +458,25 @@ function renderRefs() {
   const refMode = isVideo ? state.video.mode : null;
   state.refs.forEach((r, i) => {
     const isAsset = r.key.startsWith('asset://');
+    const kind = referenceKind(r);
+    const isH3 = isVideo && currentVideoModel()?.provider === 'minimax';
+    const typeNumber = state.refs.slice(0, i + 1).filter((ref) => referenceKind(ref) === kind).length;
     const d = document.createElement('div');
-    d.className = 'ref-thumb' + (r.fromChar ? ' from-char' : '') + (isAsset ? ' verified-asset' : '');
+    d.className = `ref-thumb ref-${kind}` + (r.fromChar ? ' from-char' : '') + (isAsset ? ' verified-asset' : '');
     // cómo se cita esta ref en el prompt: en video Seedance exige @imageN;
     // en imagen se cita por su etiqueta (si tiene) para decirle quién es quién
-    const mention = refMode === 'reference' || !r.label ? `@image${i + 1}` : `@${r.label}`;
-    const badge = refMode === 'reference' ? `<button class="ref-at" title="Insertar @image${i + 1} en el prompt">@${i + 1}</button>`
+    const h3Mention = `${kind[0].toUpperCase()}${kind.slice(1)} ${typeNumber}`;
+    const mention = isH3 && refMode === 'reference' ? h3Mention : refMode === 'reference' || !r.label ? `@image${i + 1}` : `@${r.label}`;
+    const badge = isH3 && refMode === 'reference' ? `<button class="ref-at" title="Insertar ${h3Mention} en el prompt">${kind === 'image' ? 'IMG' : kind === 'video' ? 'VID' : 'AUD'} ${typeNumber}</button>`
+      : refMode === 'reference' ? `<button class="ref-at" title="Insertar @image${i + 1} en el prompt">@${i + 1}</button>`
       : refMode === 'frames' ? `<span class="ref-badge">${i === 0 ? 'inicio' : 'fin'}</span>`
       : !isVideo && !isAsset ? `<button class="ref-at" title="Insertar ${esc(mention)} en el prompt">@${i + 1}</button>`
       : '';
     d.innerHTML = isAsset
       ? `<div class="asset-face" title="${esc(r.key)}">${IC('user', 'ic ic-lg')}<span>verificado</span></div>${badge}<button class="rm" title="Quitar">×</button>`
-      : `<img src="${fileUrl(r.key)}" alt="">${r.label ? `<span class="ref-label-tag" title="La IA verá este texto sobre la imagen">${esc(r.label)}</span>` : ''}${badge}<button class="rm" title="Quitar">×</button><button class="ref-replace" title="Reemplazar imagen (conserva su posición y cita)">${IC('refresh')}</button><button class="ref-label-btn${r.label ? ' on' : ''}" title="${r.label ? `Etiqueta: ${esc(r.label)}` : 'Etiquetar para la IA (quién es quién)'}">T</button>`;
+      : `${kind === 'video' ? `<video src="${fileUrl(r.key)}" muted preload="metadata"></video>`
+        : kind === 'audio' ? `<div class="asset-face" title="${esc(r.key)}">${IC('mic', 'ic ic-lg')}<span>audio</span></div>`
+          : `<img src="${fileUrl(r.key)}" alt="">`}${kind === 'image' && r.label ? `<span class="ref-label-tag" title="La IA verá este texto sobre la imagen">${esc(r.label)}</span>` : ''}${badge}<button class="rm" title="Quitar">×</button>${kind === 'image' ? `<button class="ref-replace" title="Reemplazar imagen (conserva su posición y cita)">${IC('refresh')}</button><button class="ref-label-btn${r.label ? ' on' : ''}" title="${r.label ? `Etiqueta: ${esc(r.label)}` : 'Etiquetar para la IA (quién es quién)'}">T</button>` : ''}`;
     d.querySelector('.rm').addEventListener('click', () => {
       state.refs.splice(i, 1);
       renderRefs();
@@ -466,6 +494,7 @@ function renderRefs() {
     });
     d.querySelector('.ref-at')?.addEventListener('click', () => insertAtCursor(`${mention} `));
     d.querySelector('img')?.addEventListener('click', () => openLightbox(r.key, state.refs.filter((ref) => !ref.key.startsWith('asset://')).map((ref) => ref.key)));
+    d.querySelector('video')?.addEventListener('click', () => openLightbox(r.key));
     strip.appendChild(d);
   });
   if (state.refs.length < maxRefs) {
@@ -486,7 +515,7 @@ function addRef(key, fromChar = false) {
     return toast(`${m.name} admite hasta ${maxRefs} referencia(s) en este modo`, 'err');
   }
   // las fotos de personajes llevan siempre el nombre como etiqueta (editable con T)
-  state.refs.push({ key, fromChar, label: refLabelSuggestion(key) });
+  state.refs.push({ key, fromChar, kind: 'image', label: refLabelSuggestion(key) });
   renderRefs();
 }
 
@@ -548,7 +577,7 @@ function stampLabel(key, text) {
 async function buildLabeledRefs(refItems) {
   const out = {};
   for (const r of refItems) {
-    if (!r.label || r.key.startsWith('asset://')) continue;
+    if (referenceKind(r) !== 'image' || !r.label || r.key.startsWith('asset://')) continue;
     try {
       out[r.key] = await stampLabel(r.key, r.label);
     } catch {
@@ -659,6 +688,19 @@ function applyPinnedCharacterPhotos() {
     if (key && state.refs.length < activeRefLimit()) state.refs.push({ key, fromChar: true, label: pc.name });
     return;
   }
+  if (videoModel?.provider === 'minimax') {
+    const variant = (pc.variants || []).find((v) => v.id === state.characterVariantId);
+    const photos = variant?.photos?.length ? variant.photos : pc.photos;
+    const currentImages = state.refs.filter((ref) => referenceKind(ref) === 'image').length;
+    const availableImages = Math.max(0, Math.min(
+      activeRefLimit() - state.refs.length,
+      (videoModel.mediaLimits?.image || 9) - currentImages
+    ));
+    for (const photo of photos.slice(0, availableImages)) {
+      state.refs.push({ key: photo, fromChar: true, kind: 'image', label: pc.name });
+    }
+    return;
+  }
   // En video, un personaje con rostro real verificado va como asset://
   // (Seedance rechaza fotos con caras reales como input directo).
   if (state.mode === 'video' && pc.arkAssetId) {
@@ -714,6 +756,8 @@ function renderPinnedHint() {
   const variant = (pc.variants || []).find((v) => v.id === state.characterVariantId);
   hint.textContent = state.mode === 'image'
     ? `${pc.name}${variant ? ` · ${variant.name}` : ' · Original'}: sus fotos van como referencia`
+    : state.mode === 'video' && currentVideoModel()?.provider === 'minimax'
+    ? `${pc.name}: sus fotos locales van como referencias de MiniMax H3`
     : state.mode === 'video' && pc.arkAssetId
     ? `${pc.name}: va como rostro real verificado (asset de ModelArk)`
     : `${pc.name}: ${pc.voiceName ? 'habla con su voz (' + pc.voiceName + ')' : 'no tiene voz asignada'}`;
@@ -999,6 +1043,7 @@ async function generate() {
   const audioModel = (state.audioModels || []).find((candidate) => candidate.id === state.audioModelId) || state.audioModels?.[0];
   const model = isVideo ? currentVideoModel() : currentModel();
   const isHeyGen = isVideo && model?.provider === 'heygen';
+  const isH3 = isVideo && model?.provider === 'minimax';
   if (isHeyGen && model.requiresRegisteredCharacter) {
     const character = state.characters.find((item) => item.id === state.video.heygenCharacterId);
     if (!heygenCharacterReady(character)) {
@@ -1011,9 +1056,23 @@ async function generate() {
   }
   if (isHeyGen && state.video.heygenAuthMode === 'oauth' && !state.heygenOAuth.connected) return toast('Conectá HeyGen OAuth desde Configuración', 'err');
   if (isHeyGen && state.video.heygenAuthMode === 'key' && !state.config?.keys?.heygen) return toast('Guardá la API key de HeyGen en Configuración', 'err');
+  if (isH3 && !state.config?.keys?.minimax) return toast('Guardá la API key de MiniMax en Configuración', 'err');
+  if (isH3) {
+    const counts = state.refs.reduce((out, ref) => {
+      out[referenceKind(ref)] += 1;
+      return out;
+    }, { image: 0, video: 0, audio: 0 });
+    if (state.video.mode === 'frames' && (counts.video || counts.audio)) return toast('Inicio → Fin sólo admite imágenes.', 'err');
+    if (counts.image > 9 || counts.video > 3 || counts.audio > 3 || state.refs.length > 12) return toast('H3 admite 9 imágenes, 3 videos y 3 audios; máximo 12 referencias.', 'err');
+    if (state.video.mode === 'reference' && counts.audio && !counts.image && !counts.video) return toast('El audio H3 necesita al menos una imagen o video de referencia.', 'err');
+  }
+  if (isVideo && !isHeyGen && state.video.mode === 'frames' && state.refs.length !== 2) {
+    return toast('Inicio → Fin necesita exactamente dos imágenes: la primera es entrada y la segunda es salida.', 'err');
+  }
   // las etiquetas se estampan acá, sobre copias: el asset guardado queda limpio
   const refsUsed = isImage ? state.refs : isVideo ? state.refs.slice(0, activeRefLimit()) : [];
-  const labeledRefs = refsUsed.some((r) => r.label) ? await buildLabeledRefs(refsUsed) : {};
+  const labeledRefs = !isH3 && !(isVideo && state.video.mode === 'frames') && refsUsed.some((r) => r.label)
+    ? await buildLabeledRefs(refsUsed) : {};
   const job = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     status: 'queued', prompt, createdAt: Date.now(),
@@ -1032,6 +1091,8 @@ async function generate() {
       aspectRatio: state.video.aspectRatio, resolution: state.video.resolution,
       duration: state.video.duration, audio: state.video.audio,
       refs: state.refs.slice(0, activeRefLimit()).map((r) => r.key), labeledRefs,
+      refKinds: state.refs.slice(0, activeRefLimit()).map(referenceKind),
+      h3ContextIr: isH3 && state.video.h3ContextIr,
       characterId: state.pinnedId || null,
       heygenAuthMode: state.video.heygenAuthMode,
       heygenCharacterId: state.video.heygenCharacterId,
@@ -1050,6 +1111,7 @@ async function generate() {
       characterId: state.pinnedId || null
     }
   };
+  if (isHeyGen) job.body.idempotencyKey = job.id;
   state.generationJobs.unshift(job);
   renderGenerationQueue();
   pumpGenerationQueue();
@@ -1146,6 +1208,7 @@ function showEntry(entry, outputIdx = 0) {
       <div class="bv-actions">
         <button class="mini-btn" data-act="copy">${IC('copy')} Copiar prompt</button>
         <button class="mini-btn" data-act="regen">${IC('refresh')} Regenerar</button>
+        ${entry.modelId === 'minimax-h3' && entry.resolution === '768P' ? `<button class="mini-btn accent" data-act="h3-2k">${IC('spark')} Promover a 2K</button>` : ''}
         <button class="mini-btn" data-act="edit">${IC('edit')} Editar envío</button>
         <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} Descargar</a>
       </div>`;
@@ -1182,13 +1245,26 @@ function showEntry(entry, outputIdx = 0) {
     }));
   }
   $$('#bigView [data-act]').forEach((b) => {
-    b.addEventListener('click', () => {
+    b.addEventListener('click', async () => {
       const act = b.dataset.act;
       if (act === 'regen') regenerate(entry);
       if (act === 'copy') copyPrompt(entry.prompt);
       if (act === 'edit') editEntry(entry);
       if (act === 'ref') { addRef(entry.outputs[state.currentOutput]); toast('Agregada como referencia'); }
       if (act === 'character') openCharModal(null, entry.outputs[state.currentOutput]);
+      if (act === 'h3-2k') {
+        if (!confirm('¿Crear la versión 2K aprobada de este video H3? La regeneración cuesta USD 0,05 por segundo, más las referencias facturables.')) return;
+        b.disabled = true;
+        try {
+          const upgraded = await api('/api/generate/video/h3-regenerate-2k', { method: 'POST', body: { historyId: entry.id } });
+          state.history.unshift(upgraded);
+          showEntry(upgraded);
+          toast('Versión MiniMax H3 2K terminada');
+        } catch (error) {
+          b.disabled = false;
+          toast(error.message, 'err');
+        }
+      }
     });
   });
 }
@@ -1213,7 +1289,7 @@ async function regenerate(entry) {
     state.video.mode = entry.mode || 'reference';
     state.video.duration = entry.duration || 5;
     state.video.audio = Boolean(entry.audio);
-    state.refs = (entry.refs || []).map((k) => ({ key: k, fromChar: false }));
+    state.refs = (entry.refs || []).map((k) => ({ key: k, fromChar: false, kind: 'image' }));
     renderVideoControls();
   } else {
     setMode('image');
@@ -1221,7 +1297,8 @@ async function regenerate(entry) {
     state.aspectRatio = entry.aspectRatio;
     state.resolution = entry.resolution;
     state.batch = entry.batch || 1;
-    state.refs = (entry.refs || []).map((k) => ({ key: k, fromChar: false }));
+    state.video.h3ContextIr = entry.h3ContextIr === true;
+    state.refs = (entry.refs || []).map((k, index) => ({ key: k, fromChar: false, kind: entry.refKinds?.[index] }));
     renderImageControls();
   }
   goToCreate();
@@ -1242,7 +1319,8 @@ function editEntry(entry) {
     state.video.mode = entry.mode || 'reference';
     state.video.duration = entry.duration || 5;
     state.video.audio = Boolean(entry.audio);
-    state.refs = (entry.refs || []).map((k) => ({ key: k, fromChar: false }));
+    state.video.h3ContextIr = entry.h3ContextIr === true;
+    state.refs = (entry.refs || []).map((k, index) => ({ key: k, fromChar: false, kind: entry.refKinds?.[index] }));
     renderVideoControls();
   } else {
     setMode('image');
@@ -5086,16 +5164,27 @@ function automationVisualAssets() {
     .filter((item) => item?.key && !seen.has(item.key) && seen.add(item.key));
 }
 
+function automationReferenceAssets() {
+  const seen = new Set();
+  return ['generated', 'uploads', 'video', 'audio']
+    .flatMap((zone) => (state.assets[zone] || []).map((item) => ({ ...item, zone })))
+    .filter((item) => item?.key && !seen.has(item.key) && seen.add(item.key));
+}
+
 function automationVisualAsset(key) {
-  return automationVisualAssets().find((item) => item.key === key) || { key, name: String(key).split('/').pop(), zone: String(key).split('/')[0] };
+  return automationReferenceAssets().find((item) => item.key === key) || { key, name: String(key).split('/').pop(), zone: String(key).split('/')[0] };
+}
+
+function automationAssetPreview(item, key = item.key) {
+  if (item.zone === 'video') return `<video src="${fileUrl(key)}" muted preload="metadata"></video>`;
+  if (item.zone === 'audio') return `<span class="automation-assets-audio">${IC('mic', 'ic ic-lg')}</span>`;
+  return `<img src="${fileUrl(key)}" loading="lazy" alt="">`;
 }
 
 function automationBlockAssetSelectionMarkup(keys = []) {
   return keys.length ? keys.map((key, index) => {
     const item = automationVisualAsset(key);
-    const preview = item.zone === 'video'
-      ? `<video src="${fileUrl(key)}" muted preload="metadata"></video>`
-      : `<img src="${fileUrl(key)}" loading="lazy" alt="">`;
+    const preview = automationAssetPreview(item, key);
     return `<span class="auto-block-asset-chip" title="${esc(item.name || key)}"><b>${index + 1}</b>${preview}</span>`;
   }).join('') : '<span class="hint">Todavía no elegiste imágenes o videos.</span>';
 }
@@ -5304,7 +5393,6 @@ async function generateAutomationResource(projectId, kind, role, card) {
     status.textContent = message;
     status.classList.toggle('warn', error);
   };
-  if (isHeyGen) job.body.idempotencyKey = job.id;
   try {
     button.disabled = true;
     await createAutomationResource({ projectId, kind, role, modelId, prompt, voiceId, setStatus });
@@ -5430,7 +5518,9 @@ function renderAutomationAssetsPicker() {
   if (!picker) return;
   const search = String(picker.search || '').trim().toLocaleLowerCase('es');
   const selected = new Set(picker.keys);
-  const items = automationVisualAssets().filter((item) =>
+  const h3Picker = picker.purpose === 'h3' || picker.purpose === 'h3-block';
+  const sourceItems = h3Picker ? automationReferenceAssets() : automationVisualAssets();
+  const items = sourceItems.filter((item) =>
     (picker.zone === 'all' || item.zone === picker.zone)
     && (!search || String(item.name || item.key).toLocaleLowerCase('es').includes(search))
   );
@@ -5438,27 +5528,35 @@ function renderAutomationAssetsPicker() {
     button.classList.toggle('active', button.dataset.autoAssetsZone === picker.zone));
   $('#automationAssetsSearch').value = picker.search || '';
   $('#automationAssetsPickerGrid').innerHTML = items.length ? items.map((item) => {
-    const preview = item.zone === 'video'
-      ? `<video src="${fileUrl(item.key)}" muted preload="metadata"></video>`
-      : `<img src="${fileUrl(item.key)}" loading="lazy" alt="">`;
+    const preview = automationAssetPreview(item);
     return `<button type="button" class="automation-assets-pick${selected.has(item.key) ? ' selected' : ''}" data-auto-asset-key="${esc(item.key)}">${preview}<span>${esc(item.name || item.key)}</span><b>${selected.has(item.key) ? picker.keys.indexOf(item.key) + 1 : '+'}</b></button>`;
   }).join('') : '<div class="empty-note">No hay Assets que coincidan con este filtro.</div>';
   $('#automationAssetsPickerGrid').querySelectorAll('[data-auto-asset-key]').forEach((button) => button.addEventListener('click', () => {
     const key = button.dataset.autoAssetKey;
     const index = picker.keys.indexOf(key);
     if (index >= 0) picker.keys.splice(index, 1);
-    else picker.keys.push(key);
+    else {
+      const item = automationVisualAsset(key);
+      const next = [...picker.keys, key].map(automationVisualAsset);
+      const counts = {
+        image: next.filter((candidate) => !['video', 'audio'].includes(candidate.zone)).length,
+        video: next.filter((candidate) => candidate.zone === 'video').length,
+        audio: next.filter((candidate) => candidate.zone === 'audio').length
+      };
+      if (h3Picker && (next.length > 12 || counts.image > 9 || counts.video > 3 || counts.audio > 3)) {
+        return toast('MiniMax H3 admite hasta 12 referencias: 9 imágenes, 3 videos y 3 audios.', 'err');
+      }
+      picker.keys.push(item.key);
+    }
     renderAutomationAssetsPicker();
   }));
 
   $('#automationAssetsCount').textContent = `${picker.keys.length} seleccionado${picker.keys.length === 1 ? '' : 's'}`;
   $('#automationAssetsOrder').innerHTML = picker.keys.length ? picker.keys.map((key, index) => {
     const item = automationVisualAsset(key);
-    const preview = item.zone === 'video'
-      ? `<video src="${fileUrl(key)}" muted preload="metadata"></video>`
-      : `<img src="${fileUrl(key)}" loading="lazy" alt="">`;
+    const preview = automationAssetPreview(item, key);
     return `<div class="automation-assets-order-item" data-order-key="${esc(key)}"><b>${index + 1}</b>${preview}<span title="${esc(item.name || key)}">${esc(item.name || key)}</span><button type="button" class="icon-btn" data-order-up${index ? '' : ' disabled'} title="Subir">↑</button><button type="button" class="icon-btn" data-order-down${index < picker.keys.length - 1 ? '' : ' disabled'} title="Bajar">↓</button><button type="button" class="icon-btn" data-order-remove title="Quitar">×</button></div>`;
-  }).join('') : '<span class="hint">Elegí al menos una imagen o video.</span>';
+  }).join('') : `<span class="hint">${h3Picker ? 'Sin referencias: H3 generará desde texto si el modo lo permite.' : 'Elegí al menos una imagen o video.'}</span>`;
   $('#automationAssetsOrder').querySelectorAll('[data-order-key]').forEach((row) => {
     const key = row.dataset.orderKey;
     row.querySelector('[data-order-up]')?.addEventListener('click', () => {
@@ -5486,6 +5584,7 @@ async function openAutomationAssetsPicker(blockElement, block) {
   let keys = [];
   try { keys = JSON.parse(settings?.dataset.assetKeys || '[]'); } catch { keys = []; }
   state.automationAssetPicker = {
+    purpose: 'assets-block',
     blockElement,
     blockId: block.id,
     keys: Array.isArray(keys) ? [...keys] : [],
@@ -5497,14 +5596,48 @@ async function openAutomationAssetsPicker(blockElement, block) {
   $('#automationAssetsModal').hidden = false;
 }
 
+async function openH3AssetsPicker({ blockElement = null, block = null } = {}) {
+  try { await refreshAssets(); } catch { /* el modal mostrará el último estado disponible */ }
+  const isBlock = Boolean(blockElement && block);
+  let keys;
+  if (isBlock) {
+    const settings = blockElement.querySelector('[data-block-h3-settings]');
+    try { keys = JSON.parse(settings?.dataset.h3ReferenceKeys || '[]'); } catch { keys = []; }
+  } else {
+    keys = state.refs.map((ref) => ref.key);
+  }
+  state.automationAssetPicker = {
+    purpose: isBlock ? 'h3-block' : 'h3', blockElement, blockId: block?.id || '',
+    keys: Array.isArray(keys) ? [...keys] : [], zone: 'all', search: ''
+  };
+  $('#automationAssetsAudioTab').hidden = false;
+  $('#automationAssetsTitle').textContent = isBlock
+    ? `Referencias H3 · ${block.title || 'Bloque'}`
+    : 'Referencias multimedia · MiniMax H3';
+  renderAutomationAssetsPicker();
+  $('#automationAssetsModal').hidden = false;
+}
+
 function closeAutomationAssetsPicker(commit = false) {
   const picker = state.automationAssetPicker;
-  if (commit && picker?.blockElement) {
+  if (commit && picker?.purpose === 'h3') {
+    const previous = new Map(state.refs.map((ref) => [ref.key, ref]));
+    state.refs = picker.keys.map((key) => ({
+      ...(previous.get(key) || { key, label: '', fromChar: false }),
+      kind: automationVisualAsset(key).zone === 'video' ? 'video' : automationVisualAsset(key).zone === 'audio' ? 'audio' : 'image'
+    }));
+    renderRefs();
+  } else if (commit && picker?.purpose === 'h3-block' && picker.blockElement) {
+    const settings = picker.blockElement.querySelector('[data-block-h3-settings]');
+    settings.dataset.h3ReferenceKeys = JSON.stringify(picker.keys);
+    settings.querySelector('[data-block-h3-list]').innerHTML = automationBlockAssetSelectionMarkup(picker.keys);
+  } else if (commit && picker?.blockElement) {
     const settings = picker.blockElement.querySelector('[data-block-assets-settings]');
     settings.dataset.assetKeys = JSON.stringify(picker.keys);
     settings.querySelector('[data-block-assets-list]').innerHTML = automationBlockAssetSelectionMarkup(picker.keys);
   }
   $('#automationAssetsModal').hidden = true;
+  $('#automationAssetsAudioTab').hidden = true;
   state.automationAssetPicker = null;
 }
 
@@ -5521,9 +5654,10 @@ $('#automationAssetsSearch').addEventListener('input', () => {
 $('#automationAssetsClose').addEventListener('click', () => closeAutomationAssetsPicker(false));
 $('#automationAssetsCancel').addEventListener('click', () => closeAutomationAssetsPicker(false));
 $('#automationAssetsDone').addEventListener('click', () => {
-  if (!state.automationAssetPicker?.keys.length) return toast('Elegí al menos una imagen o video.', 'err');
+  if (!state.automationAssetPicker?.keys.length && state.automationAssetPicker?.purpose !== 'h3') return toast('Elegí al menos un archivo.', 'err');
   closeAutomationAssetsPicker(true);
 });
+$('#h3PickMedia')?.addEventListener('click', () => openH3AssetsPicker());
 $('#automationAssetsModal').addEventListener('click', (event) => {
   if (event.target.id === 'automationAssetsModal') closeAutomationAssetsPicker(false);
 });
@@ -5868,11 +6002,11 @@ function renderAutomationProject() {
       ${pr.blocks.length ? pr.blocks.map((b, i) => {
         const out = pr.outputs?.[b.id] || null;
         const done = Boolean(out?.videoKey);
-        const partial = !done && Boolean(out?.imageKey || out?.textImageKey || out?.textLayerKey || out?.motionOverlayKey || out?.audioKeys?.length);
+        const partial = !done && Boolean(out?.imageKey || out?.textImageKey || out?.textLayerKey || out?.motionOverlayKey || out?.audioKeys?.length || out?.h3SegmentVideoKeys?.length);
         const reusableAudioReady = Array.isArray(out?.audioKeys) && out.audioKeys.length >= (b.items || []).length;
         const heygenCharacters = automationHeyGenCharacters();
         const selectedHeyGenCharacter = automationBlockHeyGenCharacter(pr, b);
-        const blockGenerator = ['heygen', 'assets'].includes(b.generator) ? b.generator : 'image';
+        const blockGenerator = ['heygen', 'assets', 'h3'].includes(b.generator) ? b.generator : 'image';
         return `
         <div class="auto-block${done ? ' is-done' : ''}" data-block="${b.id}">
           <div class="auto-block-head">
@@ -5885,11 +6019,26 @@ function renderAutomationProject() {
           </div>
           <div class="auto-block-editor">
             <div class="auto-block-generator">
-              <label><span>Generador de la toma</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>Imagen + audio</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + audio de ElevenLabs</option><option value="assets"${blockGenerator === 'assets' ? ' selected' : ''}>Assets · imágenes y videos</option></select></label>
+              <label><span>Generador de la toma</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>Imagen + audio</option><option value="h3"${blockGenerator === 'h3' ? ' selected' : ''}>MiniMax H3 · video multimodal</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + audio de ElevenLabs</option><option value="assets"${blockGenerator === 'assets' ? ' selected' : ''}>Assets · imágenes y videos</option></select></label>
               <div class="auto-block-heygen-settings" data-block-heygen-settings${blockGenerator === 'heygen' ? '' : ' hidden'}>
                 <label><span>Personaje · variante HeyGen</span><select class="select" data-block-heygen-character>${heygenCharacters.length ? heygenCharacters.map((character) => `<option value="${character.id}"${character.id === selectedHeyGenCharacter?.id ? ' selected' : ''}>${esc(character.name)} · HeyGen · ${character.heygen?.closeAvatarId ? '2 planos' : '1 plano'}</option>`).join('') : '<option value="">— no hay personajes HeyGen listos —</option>'}</select></label>
                 <label><span>Encuadre</span><select class="select" data-block-heygen-framing><option value="wide"${b.heygenFraming === 'wide' || !b.heygenFraming ? ' selected' : ''}>Plano general</option><option value="close"${b.heygenFraming === 'close' ? ' selected' : ''}>Primer plano</option><option value="split"${b.heygenFraming === 'split' ? ' selected' : ''}>Alternar general → primer plano</option></select></label>
                 <span class="hint" data-block-heygen-hint>${selectedHeyGenCharacter?.heygen?.closeAvatarId ? 'La alternancia corta el texto cerca del punto medio y une ambos videos.' : 'Este personaje solo tiene código de plano general.'}</span>
+              </div>
+              <div class="auto-block-assets-settings auto-block-h3-settings" data-block-h3-settings${blockGenerator === 'h3' ? '' : ' hidden'} data-h3-reference-keys="${esc(JSON.stringify(b.h3ReferenceKeys || []))}">
+                <div class="auto-block-assets-head">
+                  <div><strong>MiniMax H3</strong><span class="hint">Video generativo multimodal por cada tramo de narración, luego ensamblado con el texto del proyecto.</span></div>
+                  <button type="button" class="mini-btn" data-pick-block-h3>${IC('image')} Referencias adicionales</button>
+                </div>
+                <div class="auto-block-assets-list" data-block-h3-list>${automationBlockAssetSelectionMarkup(b.h3ReferenceKeys || [])}</div>
+                <div class="auto-block-create-grid">
+                  <label><span>Modo</span><select class="select" data-block-h3-mode><option value="reference"${b.h3Mode !== 'frames' ? ' selected' : ''}>Referencias multimodales</option><option value="frames"${b.h3Mode === 'frames' ? ' selected' : ''}>Fotograma de entrada → salida</option></select></label>
+                  <label><span>Resolución H3</span><select class="select" data-block-h3-resolution><option value="768P"${b.h3Resolution !== '2K' ? ' selected' : ''}>768P</option><option value="2K"${b.h3Resolution === '2K' ? ' selected' : ''}>2K</option></select></label>
+                </div>
+                <label class="poser-toggle"><input type="checkbox" data-block-h3-context${b.h3ContextIr ? ' checked' : ''}> enriquecer instrucciones con Context-IR</label>
+                <label class="poser-toggle"><input type="checkbox" data-block-h3-narration${b.h3UseNarrationReference !== false ? ' checked' : ''}> enviar la narración a H3 como referencia de audio</label>
+                <label class="poser-toggle"><input type="checkbox" data-block-h3-native-audio${b.h3KeepGeneratedAudio ? ' checked' : ''}> conservar el audio generado por H3 en lugar del archivo original de ElevenLabs</label>
+                <span class="hint" data-block-h3-hint>En Referencias, la imagen base del bloque y la voz se envían a H3. En Inicio → Fin debés elegir exactamente dos imágenes; la voz se añade durante el ensamblado.</span>
               </div>
               <div class="auto-block-assets-settings" data-block-assets-settings${blockGenerator === 'assets' ? '' : ' hidden'} data-asset-keys="${esc(JSON.stringify(b.assetKeys || []))}">
                 <div class="auto-block-assets-head">
@@ -6591,12 +6740,14 @@ function renderAutomationProject() {
     const blockElement = select.closest('.auto-block');
     const settings = blockElement.querySelector('[data-block-heygen-settings]');
     const assetSettings = blockElement.querySelector('[data-block-assets-settings]');
+    const h3Settings = blockElement.querySelector('[data-block-h3-settings]');
     const characterSelect = blockElement.querySelector('[data-block-heygen-character]');
     const framingSelect = blockElement.querySelector('[data-block-heygen-framing]');
     const hint = blockElement.querySelector('[data-block-heygen-hint]');
     const sync = () => {
       settings.hidden = select.value !== 'heygen';
       assetSettings.hidden = select.value !== 'assets';
+      h3Settings.hidden = select.value !== 'h3';
       blockElement.querySelectorAll('[data-block-prompt-field]').forEach((field) => { field.hidden = select.value === 'assets'; });
       const character = state.characters.find((item) => item.id === characterSelect?.value);
       if (hint) hint.textContent = character?.heygen?.closeAvatarId
@@ -6614,6 +6765,11 @@ function renderAutomationProject() {
     const block = pr.blocks.find((item) => item.id === blockElement?.dataset.block);
     if (blockElement && block) openAutomationAssetsPicker(blockElement, block);
   }));
+  $('#automationRoot').querySelectorAll('[data-pick-block-h3]').forEach((button) => button.addEventListener('click', () => {
+    const blockElement = button.closest('.auto-block');
+    const block = pr.blocks.find((item) => item.id === blockElement?.dataset.block);
+    if (blockElement && block) openH3AssetsPicker({ blockElement, block });
+  }));
 
   $('#automationRoot').querySelectorAll('[data-save-block]').forEach((button) => button.addEventListener('click', async () => {
     const blockElement = button.closest('.auto-block');
@@ -6624,7 +6780,7 @@ function renderAutomationProject() {
     const negativePrompt = blockElement.querySelector('[data-block-negative]').value.trim();
     const title = blockElement.querySelector('[data-block-title]').value.trim() || currentBlock.title || 'Bloque';
     const selectedGenerator = blockElement.querySelector('[data-block-generator]').value;
-    const generator = ['image', 'heygen', 'assets'].includes(selectedGenerator) ? selectedGenerator : 'image';
+    const generator = ['image', 'heygen', 'assets', 'h3'].includes(selectedGenerator) ? selectedGenerator : 'image';
     const heygenCharacterId = generator === 'heygen' ? (blockElement.querySelector('[data-block-heygen-character]').value || '') : '';
     const heygenFraming = generator === 'heygen' ? blockElement.querySelector('[data-block-heygen-framing]').value : 'wide';
     const heygenCharacter = state.characters.find((character) => character.id === heygenCharacterId);
@@ -6632,6 +6788,14 @@ function renderAutomationProject() {
     let assetKeys = [];
     try { assetKeys = JSON.parse(assetSettings?.dataset.assetKeys || '[]'); } catch { assetKeys = []; }
     const assetMuteOriginal = assetSettings?.querySelector('[data-block-assets-mute]')?.checked !== false;
+    const h3Settings = blockElement.querySelector('[data-block-h3-settings]');
+    let h3ReferenceKeys = [];
+    try { h3ReferenceKeys = JSON.parse(h3Settings?.dataset.h3ReferenceKeys || '[]'); } catch { h3ReferenceKeys = []; }
+    const h3Mode = h3Settings?.querySelector('[data-block-h3-mode]')?.value === 'frames' ? 'frames' : 'reference';
+    const h3Resolution = h3Settings?.querySelector('[data-block-h3-resolution]')?.value === '2K' ? '2K' : '768P';
+    const h3ContextIr = h3Settings?.querySelector('[data-block-h3-context]')?.checked === true;
+    const h3UseNarrationReference = h3Settings?.querySelector('[data-block-h3-narration]')?.checked !== false;
+    const h3KeepGeneratedAudio = h3Settings?.querySelector('[data-block-h3-native-audio]')?.checked === true;
     const items = currentBlock.items.map((item, index) => ({
       ...item,
       text: blockElement.querySelector(`[data-block-item="${index}"]`)?.value.trim() || ''
@@ -6641,10 +6805,17 @@ function renderAutomationProject() {
     if (generator === 'heygen' && !heygenCharacterReady(heygenCharacter)) return toast('Elegí un personaje con variante HeyGen completa.', 'err');
     if (generator === 'heygen' && ['close', 'split'].includes(heygenFraming) && !heygenCharacter.heygen?.closeAvatarId) return toast('Ese personaje no tiene código de primer plano.', 'err');
     if (generator === 'assets' && !assetKeys.length) return toast('Elegí al menos una imagen o video para este bloque.', 'err');
+    if (generator === 'h3' && h3Mode === 'frames') {
+      const frameItems = h3ReferenceKeys.map(automationVisualAsset);
+      if (frameItems.length !== 2 || frameItems.some((item) => ['video', 'audio'].includes(item.zone))) {
+        return toast('Inicio → Fin de H3 necesita exactamente dos imágenes, en orden: entrada y salida.', 'err');
+      }
+    }
     button.disabled = true;
     const updated = await saveAutomation({
       blocks: pr.blocks.map((block) => block.id === blockId
-        ? { ...block, title, imagePrompt, negativePrompt, items, generator, heygenCharacterId, heygenFraming, assetKeys, assetMuteOriginal }
+        ? { ...block, title, imagePrompt, negativePrompt, items, generator, heygenCharacterId, heygenFraming, assetKeys, assetMuteOriginal,
+          h3Mode, h3Resolution, h3ContextIr, h3UseNarrationReference, h3KeepGeneratedAudio, h3ReferenceKeys }
         : block)
     });
     if (updated) {
@@ -6660,6 +6831,7 @@ function renderAutomationProject() {
     const force = btn.dataset.force === '1';
     const newMaterials = block?.generator === 'heygen'
       ? 'audios y videos HeyGen nuevos'
+      : block?.generator === 'h3' ? 'audios y videos MiniMax H3 nuevos'
       : block?.generator === 'assets' ? 'audios nuevos y un montaje local de los Assets elegidos' : 'una imagen y audios nuevos';
     if (force && !confirm(`¿Regenerar “${block?.title || 'este bloque'}” desde cero? Se crearán ${newMaterials}.`)) return;
     if (block) await runAutomationBlock(pr.id, block, btn.closest('.auto-block'), { regenerate: force });
@@ -6671,11 +6843,18 @@ function renderAutomationProject() {
     if (block.generator === 'assets' && !(block.assetKeys || []).length) return toast('Este bloque ya no tiene Assets seleccionados.', 'err');
     const existingAudioKeys = Array.isArray(output.audioKeys) ? output.audioKeys.slice(0, block.items.length) : [];
     if (existingAudioKeys.length !== block.items.length) return toast('Este bloque no tiene todos sus audios guardados para reensamblar.', 'err');
-    const visualDescription = block.generator === 'assets' ? `los ${(block.assetKeys || []).length} Assets seleccionados` : 'la imagen limpia';
+    const visualDescription = block.generator === 'assets' ? `los ${(block.assetKeys || []).length} Assets seleccionados`
+      : block.generator === 'h3' ? `los ${(output.h3SegmentVideoKeys || []).length} tramos H3 y la imagen base` : 'la imagen limpia';
     if (!confirm(`¿Rehacer el texto y el video de “${block.title || 'este bloque'}”? Se conservarán exactamente ${visualDescription} y los ${existingAudioKeys.length} audio${existingAudioKeys.length === 1 ? '' : 's'} existentes; no se llamará a ElevenLabs.`)) return;
     const preservedOutput = {
       ...(block.generator === 'assets' ? {
         generator: 'assets', assetKeys: [...block.assetKeys], assetMuteOriginal: block.assetMuteOriginal !== false
+      } : block.generator === 'h3' ? {
+        generator: 'h3', imageKey: output.imageKey,
+        imageModelId: output.imageModelId || '', imageModelName: output.imageModelName || '',
+        h3SegmentVideoKeys: [...(output.h3SegmentVideoKeys || [])],
+        h3SegmentDurations: [...(output.h3SegmentDurations || [])],
+        h3Resolution: output.h3Resolution || block.h3Resolution || '768P'
       } : {
         imageKey: output.imageKey,
         imageModelId: output.imageModelId || '',
@@ -7028,15 +7207,19 @@ function burnOverlayText(imageKey, caption, ov, { transparent = false, title = n
 }
 
 function automationBlockOutHtml(out, block = null) {
-  if (!out || (!out.imageKey && !out.textImageKey && !out.textLayerKey && !out.motionOverlayKey && !out.audioKeys?.length && !out.videoKey)) return '';
+  if (!out || (!out.imageKey && !out.textImageKey && !out.textLayerKey && !out.motionOverlayKey && !out.audioKeys?.length && !out.h3SegmentVideoKeys?.length && !out.videoKey)) return '';
   const audioKeys = Array.isArray(out.audioKeys) ? out.audioKeys : [];
   const segmentVideoKeys = Array.isArray(out.heygenSegmentVideoKeys) ? out.heygenSegmentVideoKeys : [];
+  const h3SegmentVideoKeys = Array.isArray(out.h3SegmentVideoKeys) ? out.h3SegmentVideoKeys : [];
   const expected = Number(out.audioCountExpected) || audioKeys.length;
   const isHeyGen = out.generator === 'heygen';
   const isAssets = out.generator === 'assets';
+  const isH3 = out.generator === 'h3';
   const canRegenerateHeyGenPlanes = isHeyGen && out.heygenFraming === 'split' && segmentVideoKeys.length === 2 && block?.id;
   const sourceStatus = isHeyGen
     ? `HeyGen · ${out.heygenFraming === 'split' ? '2 planos' : '1 plano'}`
+    : isH3
+      ? `MiniMax H3 · ${out.h3Resolution || '768P'} · ${h3SegmentVideoKeys.length} tramo${h3SegmentVideoKeys.length === 1 ? '' : 's'}`
     : isAssets
       ? `Assets · ${(out.assetKeys || []).length} visuales · ${out.assetMuteOriginal !== false ? 'audio original silenciado' : 'audio original mezclado'} · ${out.motionOverlayKey ? 'texto dinámico ✓' : `capa ${out.textLayerKey ? '✓' : '—'}`}`
       : `Imagen ${out.imageKey ? '✓' : '—'} · ${out.motionOverlayKey ? 'Texto dinámico ✓' : `Texto ${out.textImageKey ? '✓' : '—'} · Capa ${out.textLayerKey ? '✓' : '—'}`}`;
@@ -7054,6 +7237,7 @@ function automationBlockOutHtml(out, block = null) {
       const label = out.heygenFraming === 'split' ? (index === 0 ? 'Plano general' : 'Primer plano') : 'Toma HeyGen';
       return `<span class="heygen-segment-row"><button type="button" class="mini-btn" data-open-asset="${esc(key)}">${label}</button>${canRegenerateHeyGenPlanes ? `<button type="button" class="mini-btn accent" data-regenerate-heygen-segment data-block-id="${esc(block.id)}" data-segment-index="${index}">${IC('refresh')} Regenerar</button>` : ''}</span>`;
     }).join('')}</span>` : ''}
+    ${h3SegmentVideoKeys.length ? `<span class="heygen-segment-list"><small>Tramos MiniMax H3</small>${h3SegmentVideoKeys.map((key, index) => `<span class="heygen-segment-row"><button type="button" class="mini-btn" data-open-asset="${esc(key)}">Tramo ${index + 1}</button></span>`).join('')}</span>` : ''}
     ${out.videoKey ? `<span class="auto-output-video"><video src="${fileUrl(out.videoKey)}" controls preload="metadata"></video><button type="button" class="mini-btn" data-open-asset="${esc(out.videoKey)}">Acciones del video</button></span>` : ''}`;
 }
 
@@ -7439,6 +7623,13 @@ async function runAutomationBlock(projectId, block, blockEl, {
     const { refs, labeledRefs, prompt } = await automationRefsAndPrompt(pr, block);
     let historyLoaded = false;
     let imageKey = output.imageKey;
+    if (!imageKey && block.generator === 'h3' && block.h3Mode === 'frames') {
+      imageKey = (block.h3ReferenceKeys || [])[0] || '';
+      if (imageKey) output = await persistAutomationBlockOutput(projectId, block.id, {
+        imageKey, imageModelId: 'minimax-h3-frame', imageModelName: 'Fotograma de entrada H3',
+        fallbackUsed: false, recoveredImage: true, audioCountExpected: block.items.length
+      });
+    }
     if (!imageKey && !regenerate) {
       setStatus('Buscando una imagen ya generada para este bloque…');
       await refreshAutomationHistory();
@@ -7538,24 +7729,35 @@ async function runAutomationBlock(projectId, block, blockEl, {
       await tagAutomationStage(pr, block, [audioKeys[audioKeys.length - 1]]);
     }
 
-    setStatus(dynamicTextEnabled ? 'Animando títulos y subtítulos con Remotion…' : 'Armando el video…');
+    setStatus(block.generator === 'h3'
+      ? 'Generando y ensamblando los tramos MiniMax H3…'
+      : dynamicTextEnabled ? 'Animando títulos y subtítulos con Remotion…' : 'Armando el video…');
     const category = `Auto: ${pr.name}`;
-    const v = await api(`/api/automations/${pr.id}/video`, { method: 'POST', body: {
-      blockId: block.id, imageKey: dynamicTextEnabled ? imageKey : textImageKey, audioKeys, category
-    } });
+    const v = block.generator === 'h3'
+      ? await api(`/api/automations/${pr.id}/h3-block`, { method: 'POST', body: {
+        blockId: block.id, imageKey, audioKeys, textLayerKey,
+        reuseSegmentKeys: !regenerate ? (output.h3SegmentVideoKeys || []) : []
+      } })
+      : await api(`/api/automations/${pr.id}/video`, { method: 'POST', body: {
+        blockId: block.id, imageKey: dynamicTextEnabled ? imageKey : textImageKey, audioKeys, category
+      } });
     output = await persistAutomationBlockOutput(projectId, block.id, {
       videoKey: v.videoKey,
       motionOverlayKey: v.motionOverlayKey || null,
+      ...(block.generator === 'h3' ? {
+        h3SegmentVideoKeys: v.segmentVideoKeys || [], generator: 'h3',
+        h3SegmentDurations: v.segmentDurations || [], h3Resolution: block.h3Resolution || '768P'
+      } : {}),
       completedAt: Date.now()
     });
-    await tagAutomationStage(pr, block, [imageKey, textImageKey, textLayerKey, v.motionOverlayKey, ...audioKeys, v.videoKey]);
-    if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: 'Toma terminada.' });
+    await tagAutomationStage(pr, block, [imageKey, textImageKey, textLayerKey, v.motionOverlayKey, ...(v.segmentVideoKeys || []), ...audioKeys, v.videoKey]);
+    if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: block.generator === 'h3' ? 'Toma MiniMax H3 terminada.' : 'Toma terminada.' });
     renderAutomationProject();
     return true;
   } catch (err) {
     if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { error: err.message });
     toast(err.message, 'err');
-    if (block.generator === 'heygen') {
+    if (block.generator === 'heygen' || block.generator === 'h3') {
       try {
         const snapshot = await api('/api/state');
         state.automations = snapshot.automations || state.automations;
@@ -7851,7 +8053,7 @@ function renderProjectCostEstimate(projects) {
       </div>
       <div class="project-cost-stat">
         <span>Material previsto</span>
-        <strong>${detail.resourceImages + detail.blockImages} imágenes · ${detail.audioItems} voces${detail.musicEnabled ? ' · 1 música' : ''}</strong>
+        <strong>${detail.resourceImages + detail.blockImages} imágenes · ${detail.audioItems} voces${detail.h3Blocks ? ` · ${detail.h3Blocks} toma${detail.h3Blocks === 1 ? '' : 's'} H3` : ''}${detail.musicEnabled ? ' · 1 música' : ''}</strong>
       </div>
     </div>
     <div class="project-cost-breakdown">
@@ -7867,12 +8069,16 @@ function renderProjectCostEstimate(projects) {
         <span class="cr-label">Voces de narración y diálogo<span class="cr-sub">${detail.audioItems} audios · ${detail.audioCharacters.toLocaleString('es-AR')} caracteres · ${esc(detail.audioModelName || 'ElevenLabs')}</span></span>
         <span class="cr-value">${fmtUsd(detail.audioCost)}</span>
       </div>
+      ${detail.h3Blocks ? `<div class="cost-row">
+        <span class="cr-label">Video generativo MiniMax H3<span class="cr-sub">${detail.h3Blocks} bloque${detail.h3Blocks === 1 ? '' : 's'} · ~${Math.round(detail.h3EstimatedSeconds || 0)} segundos facturables · resolución según cada bloque</span></span>
+        <span class="cr-value">${fmtUsd(detail.h3VideoCost)}</span>
+      </div>` : ''}
       ${detail.musicEnabled ? `<div class="cost-row">
         <span class="cr-label">Música de fondo<span class="cr-sub">${detail.musicSource === 'suno' ? `${detail.generatedMusicTracks} variantes generadas con Suno` : detail.musicSource === 'auto' ? 'Selección automática desde Assets' : 'Pista existente de Assets'}</span></span>
         <span class="cr-value">${fmtUsd(detail.musicCost)}</span>
       </div>` : ''}
       <div class="cost-row">
-        <span class="cr-label">Videos de bloque y ensamble final<span class="cr-sub">Procesamiento local con FFmpeg</span></span>
+        <span class="cr-label">Ensamble, subtítulos y posproducción<span class="cr-sub">Procesamiento local con FFmpeg y Remotion</span></span>
         <span class="cr-value">${fmtUsd(detail.localVideoCost)}</span>
       </div>
     </div>
@@ -8023,6 +8229,7 @@ function fillConfigForm() {
   f.key_ark.value = c.keys.ark || '';
   f.key_elevenlabs.value = c.keys.elevenlabs || '';
   f.key_openai.value = c.keys.openai || '';
+  f.key_minimax.value = c.keys.minimax || '';
   f.key_suno.value = c.keys.suno || '';
   f.key_heygen.value = c.keys.heygen || '';
   f.openaiModel.value = c.openaiModel || 'gpt-5-mini';
@@ -8036,6 +8243,7 @@ function fillConfigForm() {
   f.sunoModelId.value = c.sunoModelId || 'V5_5';
   f.endpoint_ark.value = c.endpoints.ark || '';
   f.endpoint_suno.value = c.endpoints.suno || '';
+  f.endpoint_minimax.value = c.endpoints.minimax || '';
   f.poserPrompt.value = c.poserPrompt || '';
   f.photoshopPath.value = c.photoshopPath || '';
   f.ffmpegPath.value = c.ffmpegPath || '';
@@ -8100,6 +8308,7 @@ $$('.test-btn').forEach((btn) => {
         body.seedreamModelId = f.seedreamModelId.value.trim();
       }
       if (service === 'suno') body.endpoint = f.endpoint_suno.value.trim();
+      if (service === 'minimax') body.endpoint = f.endpoint_minimax.value.trim();
       const r = await api('/api/test', { method: 'POST', body });
       out.className = `test-result ${r.ok ? 'ok' : 'err'}`;
       out.textContent = `${r.ok ? '✓' : '✗'} ${r.detail}`;
@@ -8149,6 +8358,7 @@ $('#configForm').addEventListener('submit', async (e) => {
           ark: f.key_ark.value.trim(),
           elevenlabs: f.key_elevenlabs.value.trim(),
           openai: f.key_openai.value.trim(),
+          minimax: f.key_minimax.value.trim(),
           suno: f.key_suno.value.trim(),
           heygen: f.key_heygen.value.trim()
         },
@@ -8161,7 +8371,8 @@ $('#configForm').addEventListener('submit', async (e) => {
         },
         endpoints: {
           ark: f.endpoint_ark.value.trim(),
-          suno: f.endpoint_suno.value.trim()
+          suno: f.endpoint_suno.value.trim(),
+          minimax: f.endpoint_minimax.value.trim()
         },
         seedreamModelId: f.seedreamModelId.value.trim(),
         seedanceModelId: f.seedanceModelId.value.trim(),

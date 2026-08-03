@@ -10,7 +10,8 @@ import { spawn, execFile } from 'node:child_process';
 
 import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel, getAudioModel } from './lib/models.js';
 import {
-  generateGemini, analyzeArtStyle, generateSeedream, generateOpenAIImage, generateSeedanceVideo, generateScreenplay,
+  generateGemini, analyzeArtStyle, generateSeedream, generateOpenAIImage, generateSeedanceVideo,
+  generateMiniMaxH3Video, regenerateMiniMaxH3Video, generateScreenplay,
   listVoices, generateSpeech, generateMusic, translateText, searchUpdatedPricing, testService
 } from './lib/providers.js';
 import { mergePricing, imagePrice, videoPrice, audioPrice, musicPrice, translatePrice, scriptPrice } from './lib/pricing.js';
@@ -56,7 +57,7 @@ const DEFAULT_CONFIG = {
   poserPrompt: DEFAULT_POSER_PROMPT,
   photoshopPath: '',
   ffmpegPath: '',
-  keys: { gemini: '', googleTranslate: '', ark: '', elevenlabs: '', openai: '', suno: '', heygen: '' },
+  keys: { gemini: '', googleTranslate: '', ark: '', minimax: '', elevenlabs: '', openai: '', suno: '', heygen: '' },
   openaiModel: 'gpt-5-mini',
   audioModelId: AUDIO_MODEL.id,
   heygenAuthMode: 'key',
@@ -69,6 +70,7 @@ const DEFAULT_CONFIG = {
   },
   endpoints: {
     ark: 'https://ark.ap-southeast.bytepluses.com/api/v3',
+    minimax: 'https://api.minimax.io',
     suno: 'https://api.sunoapi.org'
   },
   seedreamModelId: 'seedream-5-0-lite',
@@ -97,9 +99,26 @@ async function writeJson(file, value) {
   // escritura atómica: si el proceso muere a mitad, el archivo original queda
   // intacto (nunca un JSON a medio escribir). El rename es atómico en el mismo
   // volumen; el tmp lleva el pid para no chocar entre escrituras simultáneas.
-  const tmp = `${dest}.${process.pid}.tmp`;
+  const tmp = `${dest}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(value, null, 2), 'utf8');
-  await fs.rename(tmp, dest);
+  let renamed = false;
+  try {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      try {
+        await fs.rename(tmp, dest);
+        renamed = true;
+        break;
+      } catch (error) {
+        if (!['EPERM', 'EACCES', 'EBUSY'].includes(error?.code) || attempt === 5) throw error;
+        // Windows puede bloquear el destino durante unos milisegundos por el
+        // antivirus, el indexador o una vista previa. Reintentamos sin perder
+        // el JSON original ni reutilizar el mismo temporal entre escrituras.
+        await new Promise((resolve) => setTimeout(resolve, 40 * (2 ** attempt)));
+      }
+    }
+  } finally {
+    if (!renamed) await fs.unlink(tmp).catch(() => {});
+  }
 }
 
 const jsonLocks = new Map();
@@ -556,6 +575,37 @@ function normalizeAutomationVideoEffect(saved = {}) {
   };
 }
 
+async function validateMiniMaxH3Media(mediaRefs, ffmpegExecutable) {
+  const limits = { image: 30, video: 50, audio: 15 };
+  const allowed = {
+    image: new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif']),
+    video: new Set(['.mp4', '.mov']),
+    audio: new Set(['.mp3', '.wav'])
+  };
+  const totals = { video: 0, audio: 0 };
+  for (const ref of mediaRefs) {
+    if (String(ref.path || '').startsWith('data:')) continue;
+    const kind = ['image', 'video', 'audio'].includes(ref.kind) ? ref.kind : 'image';
+    const extension = path.extname(ref.path).toLowerCase();
+    if (!allowed[kind].has(extension)) {
+      throw new Error(`MiniMax H3 no admite ${extension || 'ese formato'} como ${kind === 'image' ? 'imagen' : kind === 'video' ? 'video' : 'audio'} de referencia.`);
+    }
+    const stat = await fs.stat(ref.path);
+    if (stat.size > limits[kind] * 1024 * 1024) {
+      throw new Error(`Una referencia de ${kind === 'image' ? 'imagen' : kind === 'video' ? 'video' : 'audio'} supera ${limits[kind]} MB, el máximo de MiniMax H3.`);
+    }
+    if (kind === 'video' || kind === 'audio') {
+      const duration = await probeMediaDuration(ffmpegExecutable, ref.path);
+      if (!duration || duration < 2 || duration > 15.01) {
+        throw new Error(`Cada ${kind === 'video' ? 'video' : 'audio'} de referencia H3 debe durar entre 2 y 15 segundos.`);
+      }
+      totals[kind] += duration;
+    }
+  }
+  if (totals.video > 15.01) throw new Error('Los videos de referencia H3 no pueden superar 15 segundos en total.');
+  if (totals.audio > 15.01) throw new Error('Los audios de referencia H3 no pueden superar 15 segundos en total.');
+}
+
 async function probeHasAudioStream(ffmpegExecutable, mediaPath) {
   const extension = path.extname(ffmpegExecutable).toLowerCase() === '.exe' ? '.exe' : '';
   const ffprobe = path.join(path.dirname(ffmpegExecutable), `ffprobe${extension}`);
@@ -790,7 +840,7 @@ async function runImageGeneration(req) {
   const hasPoserRef = refs.some((key) => String(key).startsWith('poser/'));
   // la nota de las etiquetas va adelante (los modelos de imagen pesan más lo
   // que leen primero); el prompt del Poser sigue yendo detrás del pedido
-  const preface = refs.some((key) => validStamp(labeledRefs[key])) ? LABELED_REFS_PROMPT : '';
+  const preface = mode !== 'frames' && refs.some((key) => validStamp(labeledRefs[key])) ? LABELED_REFS_PROMPT : '';
   const suffix = hasPoserRef && cfg.poserPrompt?.trim() ? cfg.poserPrompt.trim() : '';
   const sentPrompt = [prompt, suffix].filter(Boolean).join('\n\n');
 
@@ -979,12 +1029,23 @@ async function runVideoGeneration(req) {
   const refs = Array.isArray(req.refs) ? req.refs.slice(0, refLimit) : [];
   const labeledRefs = req.labeledRefs && typeof req.labeledRefs === 'object' ? req.labeledRefs : {};
   const validStamp = (v) => typeof v === 'string' && v.startsWith('data:image/') && v.length < 40 * 1024 * 1024;
+  const refKinds = Array.isArray(req.refKinds) ? req.refKinds.slice(0, refs.length) : [];
   const refPaths = [];
-  for (const key of refs) {
+  const mediaRefs = [];
+  for (const [index, key] of refs.entries()) {
     // "asset://<id>": rostro verificado de ModelArk, va directo a la API
-    if (/^asset:\/\/[A-Za-z0-9._-]+$/.test(key)) refPaths.push(key);
-    else if (validStamp(labeledRefs[key])) refPaths.push(labeledRefs[key]);
-    else refPaths.push(await resolveAssetKey(key));
+    let resolved;
+    if (/^asset:\/\/[A-Za-z0-9._-]+$/.test(key)) resolved = key;
+    // Los fotogramas deben llegar limpios: una etiqueta estampada cambia el
+    // frame exacto y puede hacer que el proveedor degrade el control del final.
+    else if (mode !== 'frames' && validStamp(labeledRefs[key])) resolved = labeledRefs[key];
+    else resolved = await resolveAssetKey(key);
+    refPaths.push(resolved);
+    const inferredKind = key.startsWith('video/') ? 'video' : key.startsWith('audio/') ? 'audio' : 'image';
+    mediaRefs.push({ path: resolved, kind: ['image', 'video', 'audio'].includes(refKinds[index]) ? refKinds[index] : inferredKind, key });
+  }
+  if (mode === 'frames' && mediaRefs.length !== 2) {
+    throw new Error('Inicio → Fin necesita exactamente dos imágenes: entrada y salida, en ese orden.');
   }
 
   const aspectRatio = model.aspectRatios.includes(req.aspectRatio) ? req.aspectRatio : model.aspectRatios[0];
@@ -996,6 +1057,58 @@ async function runVideoGeneration(req) {
   const preface = refs.some((key) => validStamp(labeledRefs[key])) ? LABELED_REFS_PROMPT : '';
   const suffix = hasPoserRef && cfg.poserPrompt?.trim() ? cfg.poserPrompt.trim() : '';
   const sentPrompt = [preface, prompt, suffix].filter(Boolean).join('\n\n');
+
+  if (model.provider === 'minimax') {
+    if (mediaRefs.some((ref) => String(ref.path || '').startsWith('asset://'))) {
+      throw new Error('MiniMax H3 no puede leer IDs privados de ModelArk. Elegí las fotos locales del personaje desde Assets.');
+    }
+    if (mode === 'frames' && mediaRefs.some((ref) => ref.kind !== 'image')) {
+      throw new Error('El modo Inicio → Fin de MiniMax H3 sólo acepta imágenes. Usá Referencias para video o audio.');
+    }
+    const h3Ffmpeg = mediaRefs.some((ref) => ref.kind === 'video' || ref.kind === 'audio')
+      ? await resolveFfmpegExecutable(cfg.ffmpegPath)
+      : null;
+    await validateMiniMaxH3Media(mediaRefs, h3Ffmpeg);
+    const video = await generateMiniMaxH3Video({
+      apiKey: cfg.keys.minimax,
+      endpoint: cfg.endpoints.minimax,
+      apiModel: model.apiModel,
+      prompt: sentPrompt,
+      mediaRefs,
+      mode,
+      aspectRatio,
+      resolution,
+      duration,
+      contextIr: req.h3ContextIr === true
+    });
+    const name = `${ts()}-${model.id}-${newId()}.mp4`;
+    const key = await saveBuffer('video', name, video.buffer);
+    const pricing = await getPricing();
+    const perSecond = videoPrice(pricing, model.id, resolution);
+    const outputSeconds = Number(video.usage?.output_seconds) || duration;
+    const inputSeconds = Number(video.usage?.input_seconds) || 0;
+    const inputImages = Number(video.usage?.input_image_count) || mediaRefs.filter((ref) => ref.kind === 'image').length;
+    const generationCost = perSecond * (outputSeconds + inputSeconds) + Math.max(0, inputImages - 5) * 0.04;
+    const contextCost = video.contextUsage
+      ? (Number(video.contextUsage.prompt_tokens) || 0) * 0.9 / 1_000_000
+        + (Number(video.contextUsage.completion_tokens) || 0) * 3.6 / 1_000_000
+      : 0;
+    const cost = generationCost + contextCost;
+    await recordCost({
+      type: 'video', modelId: model.id, label: `${model.name} ${resolution}`,
+      units: outputSeconds, unitLabel: 'segundo(s)', cost
+    });
+    const entry = {
+      id: newId(), ts: Date.now(), type: 'video', modelId: model.id, modelName: model.name,
+      prompt, sentPrompt: video.finalPrompt, mode, aspectRatio: video.ratio || aspectRatio,
+      resolution, duration: outputSeconds, audio: true, refs, refKinds: mediaRefs.map((ref) => ref.kind),
+      characterId: req.characterId || null, outputs: [key], errors: [], cost: Number(cost.toFixed(6)),
+      h3TaskId: video.taskId, h3ContextTaskId: video.contextTaskId || '', h3ContextIr: req.h3ContextIr === true
+    };
+    await updateJson('history.json', [], (history) => [entry, ...history].slice(0, 1000));
+    await recordAssetMetadata(entry);
+    return entry;
+  }
 
   const apiModel = model.id === 'seedance-2'
     ? (cfg.seedanceModelId || model.apiModel)
@@ -1572,7 +1685,7 @@ function automationDynamicTextRenderSignature(saved = {}) {
   return JSON.stringify(normalizeAutomationDynamicText(saved));
 }
 
-function invalidateAutomationOutput(output = {}, { image = false, text = false, audio = false } = {}) {
+function invalidateAutomationOutput(output = {}, { image = false, text = false, audio = false, video = false } = {}) {
   const next = { ...(output || {}) };
   if (image) {
     delete next.imageKey;
@@ -1591,7 +1704,7 @@ function invalidateAutomationOutput(output = {}, { image = false, text = false, 
     delete next.audioKeys;
     delete next.audioCountExpected;
   }
-  if (image || text || audio) {
+  if (image || text || audio || video) {
     delete next.videoKey;
     delete next.completedAt;
   }
@@ -1600,6 +1713,8 @@ function invalidateAutomationOutput(output = {}, { image = false, text = false, 
   // audio nuevo invalida esos segmentos de origen.
   if (image || audio) {
     delete next.heygenSegmentVideoKeys;
+    delete next.h3SegmentVideoKeys;
+    delete next.h3SegmentDurations;
     delete next.heygenFraming;
     delete next.generator;
   }
@@ -1884,7 +1999,7 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
     (project.requirements?.characters?.length || 0) +
     (project.requirements?.locations?.length || 0) +
     (project.requirements?.objects?.length || 0);
-  const blockImages = (project.blocks || []).filter((block) => block.generator !== 'heygen' && block.generator !== 'assets').length;
+  const blockImages = (project.blocks || []).filter((block) => block.generator === 'image' || (block.generator === 'h3' && block.h3Mode !== 'frames')).length;
   const audioModel = getAudioModel(project.config?.audioModelId);
   const audioTexts = (project.blocks || []).flatMap((block) =>
     (block.items || []).map((item) => audioModel.supportsAudioTags ? automationAudioText(item.text) : stripTags(item.text)).filter(Boolean)
@@ -1896,7 +2011,30 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
   const music = normalizeAutomationMusic(project.config?.music, project.requirements?.music);
   const generatedMusicTracks = music.enabled && music.source === 'suno' ? 2 : 0;
   const generatedMusicCost = generatedMusicTracks * musicPrice(pricing);
-  const estimatedTotal = resourceImageCost + blockImageCost + audioCost + generatedMusicCost;
+  const h3Blocks = (project.blocks || []).filter((block) => block.generator === 'h3');
+  let h3EstimatedSeconds = 0;
+  for (const block of h3Blocks) {
+    const approximate = Number(block.estimatedDuration) > 0
+      ? Number(block.estimatedDuration)
+      : Math.max(1, (block.items || []).reduce((sum, item) => sum + String(item.text || '').length, 0) / 14);
+    let remaining = approximate;
+    while (remaining > 0.001) {
+      const chunk = Math.min(15, remaining);
+      h3EstimatedSeconds += Math.max(4, Math.ceil(chunk));
+      remaining -= chunk;
+    }
+  }
+  const h3ResolutionCosts = h3Blocks.reduce((sum, block) => {
+    const approximate = Number(block.estimatedDuration) > 0
+      ? Number(block.estimatedDuration)
+      : Math.max(1, (block.items || []).reduce((total, item) => total + String(item.text || '').length, 0) / 14);
+    let billedSeconds = 0;
+    for (let remaining = approximate; remaining > 0.001; remaining -= Math.min(15, remaining)) {
+      billedSeconds += Math.max(4, Math.ceil(Math.min(15, remaining)));
+    }
+    return sum + billedSeconds * videoPrice(pricing, 'minimax-h3', block.h3Resolution === '2K' ? '2K' : '768P');
+  }, 0);
+  const estimatedTotal = resourceImageCost + blockImageCost + audioCost + generatedMusicCost + h3ResolutionCosts;
 
   const linkedMetadata = Object.values(assetMetadata || {}).filter((metadata) =>
     metadata?.automationId === project.id
@@ -1920,6 +2058,9 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
       blockImages,
       blockResolution,
       blockImageCost: Number(blockImageCost.toFixed(6)),
+      h3Blocks: h3Blocks.length,
+      h3EstimatedSeconds,
+      h3VideoCost: Number(h3ResolutionCosts.toFixed(6)),
       audioItems: audioTexts.length,
       audioCharacters,
       audioModelId: audioModel.id,
@@ -2014,11 +2155,17 @@ function sanitizeAutomation(src, prev = {}) {
       sourceQuote: String(b.sourceQuote || '').slice(0, 4000),
       quoteReference: String(b.quoteReference || '').slice(0, 80),
       estimatedDuration: Math.max(0, Math.min(3600, Number(b.estimatedDuration) || 0)),
-      generator: ['image', 'heygen', 'assets'].includes(b.generator) ? b.generator : 'image',
+      generator: ['image', 'heygen', 'assets', 'h3'].includes(b.generator) ? b.generator : 'image',
       heygenCharacterId: /^[a-z0-9]+$/.test(String(b.heygenCharacterId || '')) ? String(b.heygenCharacterId) : '',
       heygenFraming: ['wide', 'close', 'split'].includes(b.heygenFraming) ? b.heygenFraming : 'wide',
       assetKeys: normalizeAutomationAssetKeys(b.assetKeys),
-      assetMuteOriginal: b.assetMuteOriginal !== false
+      assetMuteOriginal: b.assetMuteOriginal !== false,
+      h3Mode: b.h3Mode === 'frames' ? 'frames' : 'reference',
+      h3Resolution: b.h3Resolution === '2K' ? '2K' : '768P',
+      h3ContextIr: b.h3ContextIr === true,
+      h3UseNarrationReference: b.h3UseNarrationReference !== false,
+      h3KeepGeneratedAudio: b.h3KeepGeneratedAudio === true,
+      h3ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.h3ReferenceKeys)
     };
   });
 
@@ -2199,6 +2346,16 @@ function normalizeAutomationAssetKeys(value) {
     seen.add(key);
     return true;
   }).slice(0, 60);
+}
+
+function normalizeAutomationH3ReferenceKeys(value) {
+  const seen = new Set();
+  return (Array.isArray(value) ? value : []).map((item) => String(item || '').trim()).filter((key) => {
+    if (!/^(generated|uploads|video|audio)\//i.test(key) || key.length > 500 || key.includes('..')
+      || key.includes('\\') || /[\x00-\x1f]/.test(key) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 12);
 }
 
 function validateAutomationSource(src) {
@@ -3371,9 +3528,20 @@ const server = http.createServer(async (req, res) => {
               } else {
                 const promptChanged = previousBlock.imagePrompt !== block.imagePrompt
                   || previousBlock.negativePrompt !== block.negativePrompt;
+                const h3IsRelevant = previousBlock.generator === 'h3' || block.generator === 'h3';
+                const h3GenerationChanged = h3IsRelevant && (
+                  previousBlock.h3Mode !== block.h3Mode
+                  || previousBlock.h3Resolution !== block.h3Resolution
+                  || previousBlock.h3ContextIr !== block.h3ContextIr
+                  || previousBlock.h3UseNarrationReference !== block.h3UseNarrationReference
+                  || JSON.stringify(previousBlock.h3ReferenceKeys || []) !== JSON.stringify(block.h3ReferenceKeys || [])
+                );
                 const generatorChanged = previousBlock.generator !== block.generator
                   || previousBlock.heygenCharacterId !== block.heygenCharacterId
-                  || previousBlock.heygenFraming !== block.heygenFraming;
+                  || previousBlock.heygenFraming !== block.heygenFraming
+                  || h3GenerationChanged;
+                const h3AudioOutputChanged = h3IsRelevant
+                  && previousBlock.h3KeepGeneratedAudio !== block.h3KeepGeneratedAudio;
                 const assetVisualChanged = JSON.stringify(previousBlock.assetKeys || []) !== JSON.stringify(block.assetKeys || [])
                   || previousBlock.assetMuteOriginal !== block.assetMuteOriginal;
                 const textChanged = JSON.stringify(previousBlock.items || []) !== JSON.stringify(block.items || []);
@@ -3381,15 +3549,16 @@ const server = http.createServer(async (req, res) => {
                   && next.config?.titleOverlay?.enabled === true
                   && next.config?.titleOverlay?.mode === 'block';
                 const titleOnlyRefresh = blockTitleChanged && next.finalOutput?.videoKey
-                  && !promptChanged && !generatorChanged && !assetVisualChanged && !textChanged;
+                  && !promptChanged && !generatorChanged && !assetVisualChanged && !textChanged && !h3AudioOutputChanged;
                 if (titleOnlyRefresh) {
                   next.textRefreshRequiredAt = Date.now();
                 } else {
-                  if (promptChanged || generatorChanged || assetVisualChanged || textChanged || blockTitleChanged) generationChanged = true;
+                  if (promptChanged || generatorChanged || assetVisualChanged || textChanged || blockTitleChanged || h3AudioOutputChanged) generationChanged = true;
                   output = invalidateAutomationOutput(output, {
                     image: promptChanged || generatorChanged,
                     text: textChanged || blockTitleChanged || generatorChanged || assetVisualChanged,
-                    audio: textChanged || generatorChanged
+                    audio: textChanged || generatorChanged,
+                    video: h3AudioOutputChanged
                   });
                 }
               }
@@ -3812,6 +3981,239 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { videoKey, segmentVideoKeys, framing, characterId: character.id, motionOverlayKey: motionOverlay?.key || '' });
       } finally {
         for (const tempPath of temporaryAudioPaths) await fs.unlink(tempPath).catch(() => {});
+      }
+    }
+
+    // MiniMax H3 dentro del Automatizador. Divide cada voz en tramos de hasta
+    // 15 segundos, conserva los clips originales para reensamblar textos sin
+    // volver a pagar el modelo y ajusta el master a la duración exacta de TTS.
+    const automationH3BlockMatch = /^\/api\/automations\/([a-z0-9]+)\/h3-block$/.exec(p);
+    if (automationH3BlockMatch && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const projectId = automationH3BlockMatch[1];
+      const projects = await readJson('automations.json', []);
+      const project = projects.find((item) => item.id === projectId);
+      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
+      const block = project.blocks?.find((item) => item.id === String(body.blockId || ''));
+      if (!block) return send(res, 404, { error: 'Bloque no encontrado.' });
+      if (block.generator !== 'h3') return send(res, 400, { error: 'Este bloque no está configurado para MiniMax H3.' });
+
+      const cfg = await getConfig();
+      if (!cfg.keys.minimax) return send(res, 400, { error: 'Falta la API key de MiniMax en Configuración.' });
+      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
+      const audioKeys = (Array.isArray(body.audioKeys) ? body.audioKeys : []).map(String).filter((key) => /^audio\//.test(key));
+      if (!audioKeys.length) return send(res, 400, { error: 'Falta la narración del bloque.' });
+      const audioPaths = await Promise.all(audioKeys.map((key) => resolveAssetKey(key)));
+      const audioDurations = await Promise.all(audioPaths.map((audioPath) => probeMediaDuration(ffmpegExecutable, audioPath)));
+      if (audioDurations.some((duration) => !Number.isFinite(duration) || duration <= 0)) {
+        return send(res, 400, { error: 'No pude calcular la duración de todos los audios del bloque.' });
+      }
+
+      const mode = block.h3Mode === 'frames' ? 'frames' : 'reference';
+      const configuredKeys = normalizeAutomationH3ReferenceKeys(block.h3ReferenceKeys);
+      const imageKey = String(body.imageKey || '');
+      let referenceKeys;
+      if (mode === 'frames') {
+        referenceKeys = configuredKeys;
+        if (referenceKeys.length !== 2 || referenceKeys.some((key) => /^(video|audio)\//.test(key))) {
+          return send(res, 400, { error: 'Inicio → Fin de H3 necesita exactamente dos imágenes: entrada y salida.' });
+        }
+      } else {
+        if (!/^(generated|uploads)\//.test(imageKey)) return send(res, 400, { error: 'Falta la imagen base del bloque H3.' });
+        referenceKeys = [...new Set([imageKey, ...configuredKeys])];
+      }
+      const referencePaths = await Promise.all(referenceKeys.map((key) => resolveAssetKey(key)));
+      const allStats = await Promise.all([...referencePaths, ...audioPaths].map((filePath) => fs.stat(filePath).catch(() => null)));
+      if (allStats.some((stat) => !stat?.isFile())) return send(res, 400, { error: 'No encuentro una o más referencias de MiniMax H3.' });
+
+      const chunks = [];
+      for (const [audioIndex, audioDuration] of audioDurations.entries()) {
+        let start = 0;
+        while (start < audioDuration - 0.001) {
+          const duration = Math.min(15, audioDuration - start);
+          chunks.push({ audioIndex, start, duration, requestDuration: Math.max(4, Math.min(15, Math.ceil(duration))) });
+          start += duration;
+        }
+      }
+      if (!chunks.length) return send(res, 400, { error: 'La narración no contiene audio utilizable.' });
+
+      const model = getVideoModel('minimax-h3');
+      const resolution = block.h3Resolution === '2K' ? '2K' : '768P';
+      const aspectRatio = model.aspectRatios.includes(project.config?.aspectRatio) ? project.config.aspectRatio : '9:16';
+      const { width, height } = automationVideoDimensions(aspectRatio);
+      const outDir = resolveDir(cfg.paths.video);
+      await fs.mkdir(outDir, { recursive: true });
+      const temporaryPaths = [];
+      const storedKeys = (Array.isArray(body.reuseSegmentKeys) ? body.reuseSegmentKeys : [])
+        .map((key) => String(key || '').trim())
+        .filter((key) => /^video\//.test(key) && key.length <= 500 && !key.includes('..') && !key.includes('\\'))
+        .slice(0, 500);
+      const clipResults = Array(chunks.length).fill(null);
+      for (const [index, key] of storedKeys.slice(0, chunks.length).entries()) {
+        const exists = await fs.access(await resolveAssetKey(key)).then(() => true).catch(() => false);
+        if (!exists) break;
+        clipResults[index] = { key, reused: true };
+      }
+
+      try {
+        for (const [index, chunk] of chunks.entries()) {
+          if (clipResults[index]) continue;
+          const refs = [];
+          for (const [refIndex, key] of referenceKeys.entries()) {
+            refs.push({
+              key, path: referencePaths[refIndex],
+              kind: key.startsWith('video/') ? 'video' : key.startsWith('audio/') ? 'audio' : 'image'
+            });
+          }
+          if (mode === 'reference' && block.h3UseNarrationReference !== false) {
+            const chunkPath = path.join(outDir, `.h3-voice-${projectId}-${block.id}-${index}-${newId()}.mp3`);
+            await runFfmpeg(ffmpegExecutable, [
+              '-y', '-ss', chunk.start.toFixed(6), '-i', audioPaths[chunk.audioIndex],
+              '-af', 'apad', '-t', String(chunk.requestDuration), '-c:a', 'libmp3lame', '-b:a', '192k', chunkPath
+            ]);
+            temporaryPaths.push(chunkPath);
+            refs.push({ key: audioKeys[chunk.audioIndex], path: chunkPath, kind: 'audio' });
+          }
+          const counts = {
+            image: refs.filter((ref) => ref.kind === 'image').length,
+            video: refs.filter((ref) => ref.kind === 'video').length,
+            audio: refs.filter((ref) => ref.kind === 'audio').length
+          };
+          if (refs.length > 12 || counts.image > 9 || counts.video > 3 || counts.audio > 3) {
+            throw new Error('Las referencias del bloque superan los límites de H3: 9 imágenes, 3 videos, 3 audios y 12 archivos en total.');
+          }
+          await validateMiniMaxH3Media(refs, ffmpegExecutable);
+          const prompt = [
+            project.config?.artStyle ? `GLOBAL ART DIRECTION — preserve this aesthetic consistently: ${String(project.config.artStyle).slice(0, 1200)}` : '',
+            block.imagePrompt,
+            block.negativePrompt ? `Avoid: ${block.negativePrompt}` : '',
+            block.h3UseNarrationReference !== false && mode === 'reference'
+              ? 'Use the supplied voice audio as the exact performance and timing reference. Preserve speaker identity and synchronize visible speech when a person is on screen.'
+              : ''
+          ].filter(Boolean).join('\n\n').slice(0, 7000);
+          const generated = await generateMiniMaxH3Video({
+            apiKey: cfg.keys.minimax, endpoint: cfg.endpoints.minimax, apiModel: model.apiModel,
+            prompt, mediaRefs: refs, mode, aspectRatio, resolution,
+            duration: chunk.requestDuration, contextIr: block.h3ContextIr === true
+          });
+          const key = await saveBuffer('video', `${ts()}-auto-h3-${index + 1}-${newId()}.mp4`, generated.buffer);
+          const pricing = await getPricing();
+          const outputSeconds = Number(generated.usage?.output_seconds) || chunk.requestDuration;
+          const inputSeconds = Number(generated.usage?.input_seconds) || 0;
+          const inputImages = Number(generated.usage?.input_image_count) || counts.image;
+          const contextCost = generated.contextUsage
+            ? (Number(generated.contextUsage.prompt_tokens) || 0) * 0.9 / 1_000_000
+              + (Number(generated.contextUsage.completion_tokens) || 0) * 3.6 / 1_000_000
+            : 0;
+          const cost = videoPrice(pricing, model.id, resolution) * (outputSeconds + inputSeconds)
+            + Math.max(0, inputImages - 5) * 0.04 + contextCost;
+          await recordCost({
+            type: 'video', modelId: model.id, label: `${model.name} ${resolution} · Automatizador`,
+            units: outputSeconds, unitLabel: 'segundo(s)', cost
+          });
+          clipResults[index] = { key, taskId: generated.taskId, finalPrompt: generated.finalPrompt, cost, reused: false };
+          const partialKeys = clipResults.map((item) => item?.key || '').filter(Boolean);
+          await updateJson('automations.json', [], (all) => all.map((item) => item.id !== projectId ? item : ({
+            ...item, outputs: { ...(item.outputs || {}), [block.id]: {
+              ...(item.outputs?.[block.id] || {}), h3SegmentVideoKeys: partialKeys,
+              generator: 'h3', h3Resolution: resolution, ts: Date.now()
+            } }, updatedAt: Date.now()
+          })));
+          await updateJson('asset-metadata.json', {}, (metadata) => {
+            metadata[key] = {
+              type: 'video', modelId: model.id, modelName: model.name, ts: Date.now(),
+              category: `Auto: ${project.name}`.slice(0, 80), automationId: projectId, blockId: block.id,
+              h3TaskId: generated.taskId, h3ContextIr: block.h3ContextIr === true,
+              h3ChunkIndex: index, h3Resolution: resolution, duration: chunk.duration,
+              cost: Number(cost.toFixed(6))
+            };
+            return metadata;
+          });
+        }
+
+        const segmentVideoKeys = clipResults.map((item) => item.key);
+        const segmentPaths = await Promise.all(segmentVideoKeys.map((key) => resolveAssetKey(key)));
+        const exactDuration = chunks.reduce((sum, chunk) => sum + chunk.duration, 0);
+        const motionOverlay = await renderAutomationMotionOverlay({
+          project, block, audioKeys, audioPaths, ffmpegExecutable, width, height, outDir,
+          textHints: (block.items || []).map((item) => item.text)
+        });
+        const name = `${ts()}-auto-h3-${sanitizeName(block.title || block.id)}-${newId()}.mp4`;
+        const outPath = path.join(outDir, name);
+        const args = ['-y'];
+        for (const segmentPath of segmentPaths) args.push('-i', segmentPath);
+        const firstAudioInput = segmentPaths.length;
+        for (const audioPath of audioPaths) args.push('-i', audioPath);
+        let layerInputIndex;
+        if (motionOverlay) {
+          args.push('-c:v', 'libvpx', '-i', motionOverlay.path);
+          layerInputIndex = segmentPaths.length + audioPaths.length;
+        } else {
+          const textLayerKey = String(body.textLayerKey || '');
+          if (!/^(generated|uploads)\//.test(textLayerKey)) return send(res, 400, { error: 'Falta la capa estática de títulos y subtítulos.' });
+          args.push('-loop', '1', '-framerate', '25', '-i', await resolveAssetKey(textLayerKey));
+          layerInputIndex = segmentPaths.length + audioPaths.length;
+        }
+
+        const filters = [];
+        const visualLabels = [];
+        for (const [index, chunk] of chunks.entries()) {
+          filters.push(`[${index}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+            `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
+            `trim=start=0:duration=${chunk.duration.toFixed(6)},setpts=PTS-STARTPTS,format=yuv420p[h3v${index}]`);
+          visualLabels.push(`[h3v${index}]`);
+        }
+        filters.push(`${visualLabels.join('')}concat=n=${visualLabels.length}:v=1:a=0[visual]`);
+
+        const useGeneratedAudio = block.h3KeepGeneratedAudio === true
+          && (await Promise.all(segmentPaths.map((segmentPath) => probeHasAudioStream(ffmpegExecutable, segmentPath)))).every(Boolean);
+        let audioLabel;
+        if (useGeneratedAudio) {
+          const labels = [];
+          for (const [index, chunk] of chunks.entries()) {
+            filters.push(`[${index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
+              `atrim=start=0:duration=${chunk.duration.toFixed(6)},asetpts=PTS-STARTPTS[h3a${index}]`);
+            labels.push(`[h3a${index}]`);
+          }
+          filters.push(`${labels.join('')}concat=n=${labels.length}:v=0:a=1[h3audio]`);
+          audioLabel = 'h3audio';
+        } else if (audioPaths.length > 1) {
+          const labels = [];
+          for (let index = 0; index < audioPaths.length; index++) {
+            filters.push(`[${firstAudioInput + index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[voice${index}]`);
+            labels.push(`[voice${index}]`);
+          }
+          filters.push(`${labels.join('')}concat=n=${labels.length}:v=0:a=1[voice]`);
+          audioLabel = 'voice';
+        } else {
+          filters.push(`[${firstAudioInput}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[voice]`);
+          audioLabel = 'voice';
+        }
+        filters.push(`[${layerInputIndex}:v:0]scale=${width}:${height},format=rgba,` +
+          `trim=start=0:duration=${exactDuration.toFixed(6)},setpts=PTS-STARTPTS[layer]`);
+        filters.push('[visual][layer]overlay=0:0:shortest=1:format=auto,format=yuv420p[vout]');
+        args.push('-filter_complex', filters.join(';'), '-map', '[vout]', '-map', `[${audioLabel}]`,
+          '-t', exactDuration.toFixed(6), '-r', '25', '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
+          '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-shortest', outPath);
+        await runFfmpeg(ffmpegExecutable, args);
+        const videoKey = `video/${name}`;
+        await updateJson('asset-metadata.json', {}, (metadata) => {
+          metadata[videoKey] = {
+            type: 'video', modelId: 'minimax-h3-assembly', modelName: 'Automatizador · MiniMax H3', ts: Date.now(),
+            category: `Auto: ${project.name}`.slice(0, 80), automationId: projectId, blockId: block.id,
+            h3SegmentVideoKeys: segmentVideoKeys, h3SegmentDurations: chunks.map((chunk) => chunk.duration), h3Resolution: resolution, h3Mode: mode,
+            h3KeepGeneratedAudio: useGeneratedAudio, motionOverlayKey: motionOverlay?.key || null,
+            width, height, duration: exactDuration, cost: 0
+          };
+          return metadata;
+        });
+        return send(res, 200, {
+          videoKey, segmentVideoKeys, segmentDurations: chunks.map((chunk) => chunk.duration), motionOverlayKey: motionOverlay?.key || '',
+          duration: exactDuration, h3Resolution: resolution, h3Mode: mode,
+          keptGeneratedAudio: useGeneratedAudio
+        });
+      } finally {
+        await Promise.all(temporaryPaths.map((filePath) => fs.unlink(filePath).catch(() => {})));
       }
     }
 
@@ -4452,16 +4854,26 @@ const server = http.createServer(async (req, res) => {
         const motionOverlayKey = String(output.motionOverlayKey || '');
         const blockVideoKey = String(output.videoKey || '');
         const isHeyGen = block.generator === 'heygen' || output.generator === 'heygen';
+        const isH3 = block.generator === 'h3' || output.generator === 'h3';
         const isAssetBlock = block.generator === 'assets' || output.generator === 'assets';
         const selectedAssetKeys = normalizeAutomationAssetKeys(block.assetKeys);
         const heygenSegmentKeys = (Array.isArray(output.heygenSegmentVideoKeys) ? output.heygenSegmentVideoKeys : [])
           .map(String)
           .filter((key) => /^video\//.test(key));
-        if (!isHeyGen && !isAssetBlock && !/^(generated|uploads)\//.test(imageKey)) {
+        const h3SegmentKeys = (Array.isArray(output.h3SegmentVideoKeys) ? output.h3SegmentVideoKeys : [])
+          .map(String)
+          .filter((key) => /^video\//.test(key));
+        const h3SegmentDurations = (Array.isArray(output.h3SegmentDurations) ? output.h3SegmentDurations : [])
+          .map(Number)
+          .filter((duration) => Number.isFinite(duration) && duration > 0);
+        if (!isHeyGen && !isH3 && !isAssetBlock && !/^(generated|uploads)\//.test(imageKey)) {
           return send(res, 400, { error: `Falta la imagen limpia de “${block.title || block.id}”.` });
         }
         if (isHeyGen && !heygenSegmentKeys.length) {
           return send(res, 400, { error: `Faltan los planos originales de HeyGen de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.` });
+        }
+        if (isH3 && !h3SegmentKeys.length) {
+          return send(res, 400, { error: `Faltan los tramos originales de MiniMax H3 de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.` });
         }
         if (isAssetBlock && !selectedAssetKeys.length) {
           return send(res, 400, { error: `Faltan los Assets seleccionados de “${block.title || block.id}”.` });
@@ -4474,7 +4886,7 @@ const server = http.createServer(async (req, res) => {
         if (!/^video\//.test(blockVideoKey)) {
           return send(res, 400, { error: `Falta el video terminado de “${block.title || block.id}”.` });
         }
-        const visualKeys = isHeyGen ? heygenSegmentKeys : isAssetBlock ? selectedAssetKeys : [imageKey];
+        const visualKeys = isHeyGen ? heygenSegmentKeys : isH3 ? h3SegmentKeys : isAssetBlock ? selectedAssetKeys : [imageKey];
         const visualKinds = visualKeys.map((key) => key.startsWith('video/') ? 'video' : 'image');
         const [visualPaths, textLayerPath, blockVideoPath] = await Promise.all([
           Promise.all(visualKeys.map((key) => resolveAssetKey(key))),
@@ -4491,8 +4903,9 @@ const server = http.createServer(async (req, res) => {
         }
         blockSources.push({
           block,
-          kind: isHeyGen ? 'heygen' : isAssetBlock ? 'assets' : 'image',
-          visualPaths, visualKinds, textLayerPath, layerIsVideo, blockVideoPath
+          kind: isHeyGen ? 'heygen' : isH3 ? 'h3' : isAssetBlock ? 'assets' : 'image',
+          visualPaths, visualKinds, textLayerPath, layerIsVideo, blockVideoPath,
+          segmentDurations: isH3 ? h3SegmentDurations : []
         });
       }
       if (!blockSources.length) return send(res, 400, { error: 'El proyecto no tiene tomas para procesar.' });
@@ -4560,10 +4973,13 @@ const server = http.createServer(async (req, res) => {
           const segmentLabels = [];
           for (const [segmentIndex, inputIndex] of source.visualInputIndexes.entries()) {
             const label = `heygen${index}_${segmentIndex}`;
+            const h3Trim = source.kind === 'h3' && Number(source.segmentDurations?.[segmentIndex]) > 0
+              ? `trim=start=0:duration=${Number(source.segmentDurations[segmentIndex]).toFixed(6)},`
+              : '';
             filters.push(
               `[${inputIndex}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
               `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
-              `format=yuv420p,setpts=PTS-STARTPTS[${label}]`
+              `format=yuv420p,${h3Trim}setpts=PTS-STARTPTS[${label}]`
             );
             segmentLabels.push(`[${label}]`);
           }
@@ -4793,6 +5209,47 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, entry);
     }
 
+    if (p === '/api/generate/video/h3-regenerate-2k' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const history = await readJson('history.json', []);
+      const source = history.find((entry) => entry.id === String(body.historyId || ''));
+      if (!source || source.modelId !== 'minimax-h3') return send(res, 404, { error: 'No encuentro la generación MiniMax H3 original.' });
+      if (source.resolution !== '768P') return send(res, 400, { error: 'Sólo se pueden promover a 2K los videos H3 generados en 768P.' });
+      const sourceKey = source.outputs?.[0];
+      if (!/^video\//.test(String(sourceKey || ''))) return send(res, 400, { error: 'Falta el MP4 768P original.' });
+      const refs = Array.isArray(source.refs) ? source.refs : [];
+      const refKinds = Array.isArray(source.refKinds) ? source.refKinds : [];
+      const mediaRefs = [];
+      for (const [index, key] of refs.entries()) {
+        if (/^asset:\/\//.test(key)) return send(res, 400, { error: 'La regeneración 2K no admite referencias remotas de ModelArk.' });
+        mediaRefs.push({
+          path: await resolveAssetKey(key), key,
+          kind: ['image', 'video', 'audio'].includes(refKinds[index]) ? refKinds[index]
+            : key.startsWith('video/') ? 'video' : key.startsWith('audio/') ? 'audio' : 'image'
+        });
+      }
+      const cfg = await getConfig();
+      const regenerated = await regenerateMiniMaxH3Video({
+        apiKey: cfg.keys.minimax, endpoint: cfg.endpoints.minimax,
+        prompt: source.sentPrompt || source.prompt, mediaRefs, mode: source.mode,
+        baseVideoPath: await resolveAssetKey(sourceKey)
+      });
+      const key = await saveBuffer('video', `${ts()}-minimax-h3-2k-${newId()}.mp4`, regenerated.buffer);
+      const outputSeconds = Number(regenerated.usage?.output_seconds) || Number(source.duration) || 0;
+      const inputSeconds = Number(regenerated.usage?.input_seconds) || 0;
+      const inputImages = Number(regenerated.usage?.input_image_count) || mediaRefs.filter((ref) => ref.kind === 'image').length;
+      const cost = 0.05 * (outputSeconds + inputSeconds) + Math.max(0, inputImages - 5) * 0.025;
+      await recordCost({ type: 'video', modelId: 'minimax-h3-regeneration', label: 'MiniMax H3 · 768P → 2K', units: outputSeconds, unitLabel: 'segundo(s)', cost });
+      const entry = {
+        ...source, id: newId(), ts: Date.now(), resolution: '2K', outputs: [key],
+        cost: Number(cost.toFixed(6)), h3TaskId: regenerated.taskId,
+        h3RegeneratedFrom: source.id, errors: []
+      };
+      await updateJson('history.json', [], (items) => [entry, ...items].slice(0, 1000));
+      await recordAssetMetadata(entry);
+      return send(res, 200, entry);
+    }
+
     if (p === '/api/generate/audio' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const entry = await runAudioGeneration(body);
@@ -4897,7 +5354,9 @@ const server = http.createServer(async (req, res) => {
         const label = account.email || account.name || account.id || 'cuenta válida';
         return send(res, 200, { ok: true, detail: `Conectado a ${label}${account.billingType ? ` · ${account.billingType}` : ''}`, account });
       }
-      const endpoint = body.endpoint || (service === 'ark' ? cfg.endpoints.ark : service === 'suno' ? cfg.endpoints.suno : '');
+      const endpoint = body.endpoint || (service === 'ark' ? cfg.endpoints.ark
+        : service === 'minimax' ? cfg.endpoints.minimax
+          : service === 'suno' ? cfg.endpoints.suno : '');
       const result = await testService({
         service,
         key: body.key || cfg.keys[service] || '',
