@@ -47,6 +47,11 @@ const state = {
   assetRange: { from: null, to: null },
   assetFilterCharacterId: '',
   assetFilterSeriesId: '',
+  assetFilterSearch: '',
+  assetFilterCategory: '',
+  assetFilterTags: '',
+  visualUploadKind: 'image',
+  visualClassifyKeys: [],
   series: [],
   editingSeriesId: null,
   seriesDraftCharacterIds: new Set(),
@@ -70,6 +75,7 @@ const state = {
   elementLinks: [],
   automations: [],           // proyectos del automatizador
   openAutomationId: null,    // proyecto abierto en la vista de detalle
+  automationAssetPicker: null, // { blockElement, keys, originalKeys, zone, search }
   costProjectId: '',         // proyecto elegido en la estimación de Consumo
   overlayBgPick: false,      // el picker está eligiendo fondo de referencia del overlay
   editingElementId: null,
@@ -208,6 +214,8 @@ function inferredApiTask(path, method, body) {
   if (path === '/api/generate/music' || /\/music\/generate$/.test(path)) return { title: 'Generando música', detail: 'Esperando a Suno…', total: 2, current: 1 };
   if (path === '/api/translate') return { title: 'Traduciendo texto', detail: 'Esperando la traducción…' };
   if (/\/automations\/[a-z0-9]+\/assemble$/.test(path)) return { title: 'Ensamblando video final', detail: 'Uniendo tomas, audio y música con FFmpeg…' };
+  if (/\/automations\/[a-z0-9]+\/text-layer$/.test(path)) return { title: 'Renderizando textos', detail: 'Creando una nueva capa animada con Remotion…' };
+  if (/\/automations\/[a-z0-9]+\/effect$/.test(path) && body?.textRefreshTarget) return { title: 'Actualizando textos del master', detail: 'Recomponiendo el video sin regenerar imágenes ni audio…' };
   if (/\/automations\/[a-z0-9]+\/effect$/.test(path)) return { title: 'Aplicando efecto final', detail: 'Procesando imagen y conservando subtítulos nítidos…' };
   if (/\/automations\/[a-z0-9]+\/video$/.test(path)) return { title: 'Armando toma', detail: 'Sincronizando imagen y audio con FFmpeg…' };
   if (/\/scripts\/[a-z0-9]+\/generate$/.test(path)) return { title: 'Generando guion', detail: 'Esperando la respuesta del modelo…' };

@@ -428,9 +428,10 @@
         <button class="mini-btn" data-audio-kind="sound">Sonidos</button>
       </div>
       <div class="assets-toolbar">
-        <button id="btnUploadAsset" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> Subir imagen</button>
+        <button id="btnUploadAsset" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> Subir imágenes</button>
         <button id="btnSelectVisible" class="tool-btn">Seleccionar visibles</button>
         <button id="btnSeriesSelected" class="tool-btn" disabled><svg class="ic"><use href="#i-layers"/></svg> Asociar a serie <span id="seriesSelectedCount">0</span></button>
+        <button id="btnClassifySelected" class="tool-btn" disabled><svg class="ic"><use href="#i-layers"/></svg> Categorizar <span id="classifySelectedCount">0</span></button>
         <button id="btnDownloadSelected" class="tool-btn" disabled><svg class="ic"><use href="#i-download"/></svg> Descargar <span id="downloadSelectedCount">0</span></button>
         <button id="btnDeleteSelected" class="tool-btn danger" disabled><svg class="ic"><use href="#i-trash"/></svg> Borrar <span id="selectedCount">0</span></button>
         <span id="assetsSummary" class="hint"></span>
@@ -444,6 +445,11 @@
         </div>
         <label>Personaje <select id="assetFilterCharacter" class="select"><option value="">Todos</option></select></label>
         <label>Serie <select id="assetFilterSeries" class="select"><option value="">Todas</option></select></label>
+        <label data-visual-asset-filter>Buscar <input id="assetFilterSearch" type="search" placeholder="Nombre o prompt"></label>
+        <label data-visual-asset-filter>Categoría <select id="assetFilterCategory" class="select"><option value="">Todas</option></select></label>
+        <label data-visual-asset-filter>Etiquetas <input id="assetFilterTags" type="search" list="assetTagsList" placeholder="noir, ciudad"></label>
+        <datalist id="assetTagsList"></datalist>
+        <datalist id="visualCategoryList"></datalist>
         <label>Desde <input id="assetFrom" type="datetime-local"></label>
         <label>Hasta <input id="assetTo" type="datetime-local"></label>
         <button id="btnApplyAssetRange" class="mini-btn">Aplicar rango</button>
@@ -719,6 +725,30 @@
   </div>
 </div>
 
+<!-- Subir imágenes o videos con clasificación -->
+<div id="visualUploadModal" class="modal" hidden>
+  <form id="visualUploadForm" class="modal-box form-modal-box visual-metadata-box">
+    <div class="modal-head"><div><h3 id="visualUploadTitle">Subir imágenes</h3><p class="hint" id="visualUploadHint">Clasificá el grupo para encontrarlo rápidamente después.</p></div><button type="button" class="icon-btn" id="visualUploadClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <label>Archivos<input id="visualUploadFiles" type="file" accept="image/png,image/jpeg,image/webp" multiple required></label>
+    <label>Categoría<input id="visualUploadCategory" type="text" maxlength="80" list="visualCategoryList" placeholder="Ej: Archivo histórico"></label>
+    <label>Etiquetas<input id="visualUploadTags" type="text" maxlength="500" placeholder="noir, ciudad, noche"></label>
+    <p class="hint">Separá múltiples etiquetas con comas. La misma clasificación se aplicará a todos los archivos de esta carga.</p>
+    <div id="visualUploadStatus" class="hint"></div>
+    <div class="form-modal-actions"><button type="button" class="mini-btn" id="visualUploadCancel">Cancelar</button><button type="submit" class="generate-btn small" id="visualUploadSubmit">Subir</button></div>
+  </form>
+</div>
+
+<!-- Clasificación de imágenes y videos ya existentes -->
+<div id="visualClassifyModal" class="modal" hidden>
+  <form id="visualClassifyForm" class="modal-box form-modal-box visual-metadata-box">
+    <div class="modal-head"><div><h3>Categorizar Assets</h3><p class="hint" id="visualClassifyHint">La clasificación se aplicará a la selección.</p></div><button type="button" class="icon-btn" id="visualClassifyClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <label>Categoría<input id="visualClassifyCategory" type="text" maxlength="80" list="visualCategoryList" placeholder="Ej: Recursos urbanos"></label>
+    <label>Etiquetas<input id="visualClassifyTags" type="text" maxlength="500" placeholder="ciudad, exterior, noche"></label>
+    <p class="hint">Guardá ambos campos vacíos si querés quitar la clasificación actual.</p>
+    <div class="form-modal-actions"><button type="button" class="mini-btn" id="visualClassifyCancel">Cancelar</button><button type="submit" class="generate-btn small">Guardar clasificación</button></div>
+  </form>
+</div>
+
 <!-- Subir y clasificar un audio -->
 <div id="audioUploadModal" class="modal" hidden>
   <form id="audioUploadForm" class="modal-box form-modal-box audio-metadata-box">
@@ -819,6 +849,32 @@
     </div>
     <div id="shotAssetsGrid" class="shot-assets-grid"></div>
     <div class="form-modal-actions"><button type="button" class="generate-btn small" id="shotAssetsDone">Listo</button></div>
+  </div>
+</div>
+
+<!-- Selector ordenado de imágenes y videos para bloques del Automatizador -->
+<div id="automationAssetsModal" class="modal" hidden>
+  <div class="modal-box automation-assets-picker-box">
+    <div class="modal-head">
+      <div><h3 id="automationAssetsTitle">Assets del bloque</h3><p class="hint">Seleccioná imágenes o videos; el orden inferior será el orden de aparición.</p></div>
+      <button class="icon-btn" id="automationAssetsClose"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="automation-assets-picker-tools">
+      <div class="tabs" id="automationAssetsTabs">
+        <button class="tab active" data-auto-assets-zone="all">Todos</button>
+        <button class="tab" data-auto-assets-zone="generated">Generadas</button>
+        <button class="tab" data-auto-assets-zone="uploads">Subidas</button>
+        <button class="tab" data-auto-assets-zone="video">Videos</button>
+      </div>
+      <input type="search" id="automationAssetsSearch" placeholder="Buscar por nombre…">
+    </div>
+    <div id="automationAssetsPickerGrid" class="automation-assets-picker-grid"></div>
+    <div class="automation-assets-order-head"><strong>Orden de reproducción</strong><span class="hint" id="automationAssetsCount">0 seleccionados</span></div>
+    <div id="automationAssetsOrder" class="automation-assets-order"></div>
+    <div class="form-modal-actions">
+      <button type="button" class="mini-btn" id="automationAssetsCancel">Cancelar</button>
+      <button type="button" class="generate-btn small" id="automationAssetsDone">Usar selección</button>
+    </div>
   </div>
 </div>
 

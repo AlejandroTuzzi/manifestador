@@ -1655,6 +1655,134 @@ document.addEventListener('paste', async (e) => {
 const AUDIO_KIND_LABELS = { voice: 'Voz', music: 'Música', sound: 'Sonido' };
 const splitMusicTags = (value) => [...new Set(String(value || '').split(',').map((tag) => tag.trim()).filter(Boolean))].slice(0, 30);
 const musicTagSummary = (tags = {}) => [...(tags.genres || []), ...(tags.instruments || []), ...(tags.moods || [])];
+const splitVisualTags = (value) => [...new Set(String(value || '').split(',').map((tag) => tag.trim()).filter(Boolean))].slice(0, 40);
+
+function visualAssetItems() {
+  return ['generated', 'uploads', 'video'].flatMap((zone) => state.assets[zone] || []);
+}
+
+function updateVisualTaxonomyOptions() {
+  const items = visualAssetItems();
+  const categories = [...new Set(items.map((item) => String(item.category || '').trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, 'es'));
+  const tags = [...new Set(items.flatMap((item) => item.tags || []).map((tag) => String(tag).trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, 'es'));
+  $('#visualCategoryList').innerHTML = categories.map((category) => `<option value="${esc(category)}"></option>`).join('');
+  $('#assetTagsList').innerHTML = tags.map((tag) => `<option value="${esc(tag)}"></option>`).join('');
+}
+
+function openVisualUpload(kind = 'image') {
+  state.visualUploadKind = kind === 'video' ? 'video' : 'image';
+  $('#visualUploadForm').reset();
+  $('#visualUploadTitle').textContent = state.visualUploadKind === 'video' ? 'Subir videos' : 'Subir imágenes';
+  $('#visualUploadHint').textContent = state.visualUploadKind === 'video'
+    ? 'MP4, MOV o WebM · hasta 100 MB por archivo.'
+    : 'PNG, JPG o WebP · hasta 100 MB por archivo.';
+  $('#visualUploadFiles').accept = state.visualUploadKind === 'video'
+    ? '.mp4,.mov,.m4v,.webm,video/mp4,video/quicktime,video/webm'
+    : '.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp';
+  $('#visualUploadStatus').textContent = '';
+  updateVisualTaxonomyOptions();
+  $('#visualUploadModal').hidden = false;
+}
+
+function closeVisualUpload() {
+  $('#visualUploadModal').hidden = true;
+  $('#visualUploadForm').reset();
+}
+
+$('#visualUploadClose').addEventListener('click', closeVisualUpload);
+$('#visualUploadCancel').addEventListener('click', closeVisualUpload);
+$('#visualUploadModal').addEventListener('click', (event) => { if (event.target.id === 'visualUploadModal') closeVisualUpload(); });
+$('#visualUploadForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const files = [...($('#visualUploadFiles').files || [])];
+  if (!files.length) return;
+  const invalidType = files.find((file) => state.visualUploadKind === 'video'
+    ? !file.type.startsWith('video/') && !/\.(mp4|mov|m4v|webm)$/i.test(file.name)
+    : !file.type.startsWith('image/') && !/\.(png|jpe?g|webp)$/i.test(file.name));
+  if (invalidType) return toast(`${invalidType.name}: el tipo de archivo no coincide con esta carga.`, 'err');
+  const oversized = files.find((file) => file.size > 100 * 1024 * 1024);
+  if (oversized) return toast(`${oversized.name}: supera el límite de 100 MB.`, 'err');
+  const submit = $('#visualUploadSubmit');
+  submit.disabled = true;
+  const category = $('#visualUploadCategory').value.trim();
+  const tags = splitVisualTags($('#visualUploadTags').value);
+  let uploaded = 0;
+  const failures = [];
+  for (const [index, file] of files.entries()) {
+    $('#visualUploadStatus').textContent = `Subiendo ${index + 1}/${files.length} · ${file.name}…`;
+    try {
+      await api('/api/assets/visual', {
+        method: 'POST',
+        body: { name: file.name, dataUrl: await readFileAsDataUrl(file), category, tags }
+      });
+      uploaded++;
+    } catch (error) {
+      failures.push(`${file.name}: ${error.message}`);
+    }
+  }
+  submit.disabled = false;
+  if (uploaded) {
+    closeVisualUpload();
+    state.assetsZone = state.visualUploadKind === 'video' ? 'video' : 'uploads';
+    $$('#view-assets .tabs .tab').forEach((tab) => tab.classList.toggle('active', tab.dataset.zone === state.assetsZone));
+    $('#audioKindTabs').hidden = true;
+    await refreshAssets();
+  }
+  if (failures.length) toast(`${uploaded}/${files.length} archivos subidos. ${failures[0]}`, 'err');
+  else {
+    const isVideo = state.visualUploadKind === 'video';
+    const noun = isVideo ? `video${uploaded === 1 ? '' : 's'}` : `imagen${uploaded === 1 ? '' : 'es'}`;
+    const adjective = isVideo
+      ? `subido${uploaded === 1 ? '' : 's'} y clasificado${uploaded === 1 ? '' : 's'}`
+      : `subida${uploaded === 1 ? '' : 's'} y clasificada${uploaded === 1 ? '' : 's'}`;
+    toast(`${uploaded} ${noun} ${adjective}.`);
+  }
+});
+
+function openVisualClassify(keys, { category = '', tags = [] } = {}) {
+  state.visualClassifyKeys = [...new Set(keys)].filter((key) => /^(generated|uploads|video)\//.test(key));
+  if (!state.visualClassifyKeys.length) return toast('Seleccioná imágenes o videos para categorizar.', 'err');
+  $('#visualClassifyForm').reset();
+  $('#visualClassifyCategory').value = category || '';
+  $('#visualClassifyTags').value = (tags || []).join(', ');
+  $('#visualClassifyHint').textContent = `La clasificación se aplicará a ${state.visualClassifyKeys.length} asset${state.visualClassifyKeys.length === 1 ? '' : 's'}.`;
+  updateVisualTaxonomyOptions();
+  $('#visualClassifyModal').hidden = false;
+}
+
+function closeVisualClassify() {
+  $('#visualClassifyModal').hidden = true;
+  state.visualClassifyKeys = [];
+}
+
+$('#visualClassifyClose').addEventListener('click', closeVisualClassify);
+$('#visualClassifyCancel').addEventListener('click', closeVisualClassify);
+$('#visualClassifyModal').addEventListener('click', (event) => { if (event.target.id === 'visualClassifyModal') closeVisualClassify(); });
+$('#visualClassifyForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const submit = event.submitter;
+  if (submit) submit.disabled = true;
+  try {
+    const result = await api('/api/assets/visual-metadata', {
+      method: 'POST',
+      body: {
+        keys: state.visualClassifyKeys,
+        category: $('#visualClassifyCategory').value.trim(),
+        tags: splitVisualTags($('#visualClassifyTags').value)
+      }
+    });
+    const count = result.keys?.length || state.visualClassifyKeys.length;
+    closeVisualClassify();
+    state.selectedAssets.clear();
+    await refreshAssets();
+    toast(`${count} asset${count === 1 ? '' : 's'} clasificado${count === 1 ? '' : 's'}.`);
+  } catch (error) {
+    if (submit) submit.disabled = false;
+    toast(error.message, 'err');
+  }
+});
 
 function openAudioUpload({ automationId = null, kind = 'voice', musicTags = {} } = {}) {
   state.audioUploadAutomationId = automationId;
@@ -1737,6 +1865,17 @@ function renderAssetFilterOptions() {
   seriesSel.value = state.series.some((s) => s.id === state.assetFilterSeriesId) ? state.assetFilterSeriesId : '';
   state.assetFilterCharacterId = charSel.value;
   state.assetFilterSeriesId = seriesSel.value;
+  const visualItems = state.assetsZone === 'audio' ? [] : (state.assets[state.assetsZone] || []);
+  const categories = [...new Set(visualItems.map((item) => String(item.category || '').trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, 'es'));
+  $('#assetFilterCategory').innerHTML = '<option value="">Todas</option>' + categories.map((category) =>
+    `<option value="${esc(category)}">${esc(category)}</option>`).join('');
+  $('#assetFilterCategory').value = categories.includes(state.assetFilterCategory) ? state.assetFilterCategory : '';
+  state.assetFilterCategory = $('#assetFilterCategory').value;
+  $('#assetFilterSearch').value = state.assetFilterSearch;
+  $('#assetFilterTags').value = state.assetFilterTags;
+  $$('[data-visual-asset-filter]').forEach((field) => { field.hidden = state.assetsZone === 'audio'; });
+  updateVisualTaxonomyOptions();
 }
 
 $('#assetFilterCharacter').addEventListener('change', () => {
@@ -1745,6 +1884,18 @@ $('#assetFilterCharacter').addEventListener('change', () => {
 });
 $('#assetFilterSeries').addEventListener('change', () => {
   state.assetFilterSeriesId = $('#assetFilterSeries').value;
+  renderAssetsGrid();
+});
+$('#assetFilterSearch').addEventListener('input', () => {
+  state.assetFilterSearch = $('#assetFilterSearch').value;
+  renderAssetsGrid();
+});
+$('#assetFilterCategory').addEventListener('change', () => {
+  state.assetFilterCategory = $('#assetFilterCategory').value;
+  renderAssetsGrid();
+});
+$('#assetFilterTags').addEventListener('input', () => {
+  state.assetFilterTags = $('#assetFilterTags').value;
   renderAssetsGrid();
 });
 
@@ -1756,7 +1907,8 @@ $$('#view-assets .tabs .tab').forEach((t) => {
     $('#audioKindTabs').hidden = state.assetsZone !== 'audio';
     $('#btnUploadAsset').innerHTML = state.assetsZone === 'audio'
       ? `${IC('upload')} Subir audio`
-      : `${IC('upload')} Subir imagen`;
+      : state.assetsZone === 'video' ? `${IC('upload')} Subir videos` : `${IC('upload')} Subir imágenes`;
+    renderAssetFilterOptions();
     renderAssetsGrid();
   });
 });
@@ -1773,10 +1925,14 @@ $('#btnUploadAsset').addEventListener('click', () => {
     const kind = state.assetAudioKind === 'all' ? 'voice' : state.assetAudioKind;
     return openAudioUpload({ kind });
   }
-  $('#fileInput').accept = 'image/*';
-  $('#fileInput').onchange = async (e) => { await uploadFiles([...e.target.files], false); e.target.value = ''; };
-  $('#fileInput').click();
+  openVisualUpload(state.assetsZone === 'video' ? 'video' : 'image');
 });
+
+function automationAssetProjectLabel(asset) {
+  if (!asset?.automationId) return '';
+  const project = state.automations.find((item) => item.id === asset.automationId);
+  return project?.name || asset.automationName || String(asset.category || '').replace(/^Auto:\s*/i, '') || 'Proyecto';
+}
 
 function renderAssetsGrid() {
   const grid = $('#assetsGrid');
@@ -1807,6 +1963,8 @@ function renderAssetsGrid() {
       const card = document.createElement('div');
       card.className = `asset-card${state.selectedAssets.has(a.key) ? ' selected' : ''}`;
       card.innerHTML = `<button class="asset-check" title="Seleccionar">${state.selectedAssets.has(a.key) ? '✓' : ''}</button><button class="asset-series" title="Asociar a serie">${IC('layers')}</button><a class="asset-download" href="${fileUrl(a.key)}" download="${esc(a.name)}" title="Descargar">${IC('download')}</a><button class="asset-info" title="Información">${IC('info')}</button>${a.prompt ? `<button class="asset-copy" title="Copiar prompt">${IC('copy')}</button>` : ''}<button class="asset-delete" title="Borrar">${IC('trash')}</button>`;
+      const automationProjectLabel = automationAssetProjectLabel(a);
+      if (automationProjectLabel) card.insertAdjacentHTML('beforeend', `<span class="asset-project-badge" title="Generado por el Automatizador · ${esc(automationProjectLabel)}">${IC('spark')} ${esc(automationProjectLabel)}</span>`);
       if (state.assetsZone === 'audio') {
         const kind = a.audioKind || 'voice';
         const tags = kind === 'music' ? musicTagSummary(a.musicTags).slice(0, 4) : [];
@@ -1818,6 +1976,9 @@ function renderAssetsGrid() {
       } else {
         card.insertAdjacentHTML('beforeend', `<img src="${fileUrl(a.key)}" loading="lazy" alt=""><div class="a-name">${esc(a.name)}</div>`);
         card.querySelector('img').addEventListener('click', () => openLightbox(a.key, items.map((item) => item.key)));
+      }
+      if (state.assetsZone !== 'audio' && (a.category || a.tags?.length)) {
+        card.insertAdjacentHTML('beforeend', `<div class="asset-card-taxonomy">${a.category ? `<span class="category">${esc(a.category)}</span>` : ''}${(a.tags || []).slice(0, 3).map((tag) => `<span>${esc(tag)}</span>`).join('')}</div>`);
       }
       card.querySelector('.asset-check').addEventListener('click', () => toggleAssetSelection(a.key));
       card.querySelector('.asset-series').addEventListener('click', () => openSeriesAssign(a.key));
@@ -2087,11 +2248,22 @@ function assetMatchesSeries(a, seriesId) {
   return Boolean(s && (s.assetKeys || []).includes(a.key));
 }
 
+function normalizedAssetFilterText(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es').trim();
+}
+
 function visibleAssets() {
+  const search = normalizedAssetFilterText(state.assetFilterSearch);
+  const category = normalizedAssetFilterText(state.assetFilterCategory);
+  const requiredTags = splitVisualTags(state.assetFilterTags).map(normalizedAssetFilterText);
   return (state.assets[state.assetsZone] || []).filter((a) =>
     (!state.assetRange.from || a.mtime >= state.assetRange.from)
     && (!state.assetRange.to || a.mtime <= state.assetRange.to)
     && (state.assetsZone !== 'audio' || state.assetAudioKind === 'all' || (a.audioKind || 'voice') === state.assetAudioKind)
+    && (state.assetsZone === 'audio' || !search || normalizedAssetFilterText([a.name, a.prompt, a.category, ...(a.tags || [])].join(' ')).includes(search))
+    && (state.assetsZone === 'audio' || !category || normalizedAssetFilterText(a.category) === category)
+    && (state.assetsZone === 'audio' || !requiredTags.length || requiredTags.every((wanted) =>
+      (a.tags || []).some((tag) => normalizedAssetFilterText(tag).includes(wanted))))
     && assetMatchesCharacter(a, state.assetFilterCharacterId)
     && assetMatchesSeries(a, state.assetFilterSeriesId));
 }
@@ -2109,6 +2281,8 @@ function updateAssetSelection() {
   $('#btnSeriesSelected').disabled = !n;
   $('#downloadSelectedCount').textContent = n;
   $('#btnDownloadSelected').disabled = !n;
+  $('#classifySelectedCount').textContent = n;
+  $('#btnClassifySelected').disabled = !n || state.assetsZone === 'audio';
 }
 
 // descarga en lote: pide el ZIP y lo baja vía blob (el POST no puede ser un link)
@@ -2143,11 +2317,16 @@ async function deleteAssets(keys) {
   keys.forEach((key) => state.selectedAssets.delete(key));
   state.series.forEach((s) => { s.assetKeys = (s.assetKeys || []).filter((key) => !keys.includes(key)); });
   state.automations.forEach((project) => {
+    (project.blocks || []).forEach((block) => {
+      block.assetKeys = (block.assetKeys || []).filter((key) => !keys.includes(key));
+    });
     Object.values(project.outputs || {}).forEach((output) => {
       if (keys.includes(output.imageKey)) output.imageKey = null;
       if (keys.includes(output.textImageKey)) output.textImageKey = null;
       if (keys.includes(output.textLayerKey)) output.textLayerKey = null;
+      if (keys.includes(output.motionOverlayKey)) output.motionOverlayKey = null;
       if (keys.includes(output.videoKey)) output.videoKey = null;
+      output.assetKeys = (output.assetKeys || []).filter((key) => !keys.includes(key));
       output.audioKeys = (output.audioKeys || []).filter((key) => !keys.includes(key));
     });
     if (keys.includes(project.config?.music?.assetKey)) project.config.music.assetKey = '';
@@ -2165,6 +2344,7 @@ async function deleteAssets(keys) {
 
 $('#btnDeleteSelected').addEventListener('click', () => deleteAssets([...state.selectedAssets]));
 $('#btnSeriesSelected').addEventListener('click', () => openSeriesAssign([...state.selectedAssets]));
+$('#btnClassifySelected').addEventListener('click', () => openVisualClassify([...state.selectedAssets]));
 $('#btnSelectVisible').addEventListener('click', () => {
   const visible = visibleAssets();
   const every = visible.length && visible.every((a) => state.selectedAssets.has(a.key));
@@ -2450,13 +2630,17 @@ window.addEventListener('mouseup', () => { lbPan = null; });
 function openAssetInfo(asset) {
   closeLightbox();
   const isAudio = asset.key?.startsWith('audio/');
+  const isVideo = asset.key?.startsWith('video/');
   const audioKind = asset.audioKind || 'voice';
   const musicTags = asset.musicTags || { genres: [], instruments: [], moods: [] };
+  const automationProjectLabel = automationAssetProjectLabel(asset);
   const character = state.characters.find((c) => c.id === asset.characterId);
   const variant = (character?.variants || []).find((v) => v.id === asset.characterVariantId);
   const rows = [
     ['Modelo', asset.modelName || asset.modelId || 'Sin información'],
-    ['Tipo', isAudio ? AUDIO_KIND_LABELS[audioKind] || 'Audio' : asset.type || 'imagen'],
+    ['Tipo', isAudio ? AUDIO_KIND_LABELS[audioKind] || 'Audio' : isVideo ? 'Video' : asset.type || 'Imagen'],
+    ...(automationProjectLabel ? [['Proyecto', automationProjectLabel], ['Origen', 'Generado por el Automatizador']] : []),
+    ...(!isAudio ? [['Categoría', asset.category || '—'], ['Etiquetas', (asset.tags || []).join(', ') || '—']] : []),
     ...(isAudio ? [['Duración', '__DUR__']] : []),
     ['Proporción', asset.aspectRatio || '—'], ['Resolución', asset.resolution || '—'],
     ['Lote', asset.batch || 1], ['Referencias', (asset.refs || []).length],
@@ -2466,7 +2650,9 @@ function openAssetInfo(asset) {
   const baseName = decodeURIComponent(asset.key.split('/').pop() || '').replace(/\.[^.]+$/, '');
   const ext = (asset.key.match(/\.[^.]+$/) || [''])[0];
   $('#assetInfoBody').innerHTML = `
-    ${asset.key && !asset.key.startsWith('audio/') ? `<img class="asset-info-preview" src="${fileUrl(asset.key)}" alt="">` : ''}
+    ${asset.key && !isAudio ? (isVideo
+      ? `<video class="asset-info-preview" src="${fileUrl(asset.key)}" controls preload="metadata"></video>`
+      : `<img class="asset-info-preview" src="${fileUrl(asset.key)}" alt="">`) : ''}
     <div class="asset-info-rename">
       <span>Nombre del archivo</span>
       <div><input id="assetRenameInput" type="text" maxlength="80" value="${esc(baseName)}"><span class="asset-info-ext">${esc(ext)}</span><button class="mini-btn" id="assetRenameBtn">Renombrar</button></div>
@@ -2481,6 +2667,13 @@ function openAssetInfo(asset) {
         <label>Sentimientos<input id="assetMusicMoods" type="text" value="${esc((musicTags.moods || []).join(', '))}" placeholder="mysterious, tense"></label>
       </div>
       <button type="button" class="mini-btn" id="assetAudioMetadataSave">Guardar clasificación</button>
+    </div>` : ''}
+    ${!isAudio ? `<div class="visual-metadata-editor">
+      <h4>Clasificación visual</h4>
+      <label>Categoría<input id="assetVisualCategory" type="text" maxlength="80" list="visualCategoryList" value="${esc(asset.category || '')}" placeholder="Ej: Archivo histórico"></label>
+      <label>Etiquetas<input id="assetVisualTags" type="text" maxlength="500" value="${esc((asset.tags || []).join(', '))}" placeholder="noir, ciudad, noche"></label>
+      <span class="hint">Separá las etiquetas con comas. Podrás combinarlas desde los filtros de Assets.</span>
+      <button type="button" class="mini-btn" id="assetVisualMetadataSave">Guardar clasificación</button>
     </div>` : ''}
     <div class="asset-info-prompt"><div><span>Prompt utilizado</span>${asset.prompt ? `<button class="mini-btn" id="assetInfoCopy">${IC('copy')} Copiar</button>` : ''}</div><pre>${esc(asset.prompt || 'No hay prompt guardado para este asset.')}</pre></div>`;
   fillAudioDurations($('#assetInfoBody'));
@@ -3927,6 +4120,26 @@ function renderCharModal() {
     };
     $('#fileInput').click();
   });
+  $('#assetVisualMetadataSave')?.addEventListener('click', async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      const result = await api('/api/assets/visual-metadata', {
+        method: 'POST',
+        body: {
+          key: asset.key,
+          category: $('#assetVisualCategory').value.trim(),
+          tags: splitVisualTags($('#assetVisualTags').value)
+        }
+      });
+      Object.assign(asset, result.metadata?.[asset.key] || {});
+      await refreshAssets();
+      openAssetInfo(asset);
+      toast('Clasificación visual guardada.');
+    } catch (error) {
+      event.currentTarget.disabled = false;
+      toast(error.message, 'err');
+    }
+  });
 
   $('#chHeyGenUpload')?.addEventListener('click', () => $('#chHeyGenFileInput').click());
   $('#chHeyGenFileInput')?.addEventListener('change', async (event) => {
@@ -4646,6 +4859,58 @@ function currentAutomation() {
   return state.automations.find((x) => x.id === state.openAutomationId) || null;
 }
 
+function formatAutomationBytes(value) {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+}
+
+async function finalizeAutomationProject(projectId) {
+  const project = state.automations.find((item) => item.id === projectId);
+  const button = $('#autoFinalize');
+  if (!project || !button) return;
+  const originalHtml = button.innerHTML;
+  try {
+    button.disabled = true;
+    button.textContent = 'Calculando material descartado…';
+    const preview = await api(`/api/automations/${projectId}/finalize`);
+    if (preview.deleteCount) {
+      const detail = [
+        `${preview.deleteCount} archivo${preview.deleteCount === 1 ? '' : 's'} descartado${preview.deleteCount === 1 ? '' : 's'}`,
+        `${formatAutomationBytes(preview.deleteBytes)} recuperables`,
+        `${preview.activeCount} materiales vigentes preservados`,
+        preview.sharedCount ? `${preview.sharedCount} reutilizados en otras secciones preservados` : ''
+      ].filter(Boolean).join('\n');
+      if (!confirm(`¿Finalizar “${project.name}” y limpiar sus descartes?\n\n${detail}\n\nLos archivos eliminados no se pueden recuperar.`)) {
+        button.disabled = false;
+        button.innerHTML = originalHtml;
+        return;
+      }
+    }
+    button.textContent = preview.deleteCount ? 'Eliminando descartes…' : 'Comprobando proyecto…';
+    const result = await api(`/api/automations/${projectId}/finalize`, { method: 'POST' });
+    const index = state.automations.findIndex((item) => item.id === projectId);
+    if (index !== -1) state.automations[index] = result.project;
+    state.history = result.history || state.history;
+    renderHistory();
+    await refreshAssets();
+    if (state.openAutomationId === projectId) renderAutomationProject();
+    if (result.failed?.length) {
+      toast(`${result.deleted} archivos eliminados; ${result.failed.length} no pudieron borrarse y se intentarán en la próxima finalización.`, 'err');
+    } else if (result.deleted) {
+      toast(`Proyecto finalizado: ${result.deleted} descarte${result.deleted === 1 ? '' : 's'} eliminado${result.deleted === 1 ? '' : 's'} y ${formatAutomationBytes(result.project.finalization?.deletedBytes)} liberados.`, 'ok');
+    } else {
+      toast('Proyecto finalizado: no había material descartado para eliminar.', 'ok');
+    }
+  } catch (error) {
+    button.disabled = false;
+    button.innerHTML = originalHtml;
+    toast(error.message, 'err');
+  }
+}
+
 function openAutomation(id) {
   state.openAutomationId = id;
   $$('.nav-btn').forEach((b) => b.classList.remove('active'));
@@ -4815,6 +5080,26 @@ function automationBlockHeyGenCharacter(pr, block) {
   return automationHeyGenCharacters()[0] || null;
 }
 
+function automationVisualAssets() {
+  const seen = new Set();
+  return ['generated', 'uploads', 'video'].flatMap((zone) => (state.assets[zone] || []).map((item) => ({ ...item, zone })))
+    .filter((item) => item?.key && !seen.has(item.key) && seen.add(item.key));
+}
+
+function automationVisualAsset(key) {
+  return automationVisualAssets().find((item) => item.key === key) || { key, name: String(key).split('/').pop(), zone: String(key).split('/')[0] };
+}
+
+function automationBlockAssetSelectionMarkup(keys = []) {
+  return keys.length ? keys.map((key, index) => {
+    const item = automationVisualAsset(key);
+    const preview = item.zone === 'video'
+      ? `<video src="${fileUrl(key)}" muted preload="metadata"></video>`
+      : `<img src="${fileUrl(key)}" loading="lazy" alt="">`;
+    return `<span class="auto-block-asset-chip" title="${esc(item.name || key)}"><b>${index + 1}</b>${preview}</span>`;
+  }).join('') : '<span class="hint">Todavía no elegiste imágenes o videos.</span>';
+}
+
 function overlayPresetOptions() {
   const items = state.overlayPresets || [];
   return `<option value="">— elegí un estilo guardado —</option>` + items.map((item) =>
@@ -4980,6 +5265,7 @@ async function createAutomationResource({ projectId, kind, role, modelId, prompt
         keys: [assetKey],
         category: `Automatizador · ${pr.name}`,
         automationId: pr.id,
+        automationName: pr.name,
         autoKind: kind === 'characters' ? 'character-sheet' : kind === 'locations' ? 'background-sheet' : 'object-sheet'
       }
     });
@@ -5139,6 +5425,109 @@ function bindAutomationHeyGenSegmentActions(root, project) {
   });
 }
 
+function renderAutomationAssetsPicker() {
+  const picker = state.automationAssetPicker;
+  if (!picker) return;
+  const search = String(picker.search || '').trim().toLocaleLowerCase('es');
+  const selected = new Set(picker.keys);
+  const items = automationVisualAssets().filter((item) =>
+    (picker.zone === 'all' || item.zone === picker.zone)
+    && (!search || String(item.name || item.key).toLocaleLowerCase('es').includes(search))
+  );
+  $$('#automationAssetsTabs [data-auto-assets-zone]').forEach((button) =>
+    button.classList.toggle('active', button.dataset.autoAssetsZone === picker.zone));
+  $('#automationAssetsSearch').value = picker.search || '';
+  $('#automationAssetsPickerGrid').innerHTML = items.length ? items.map((item) => {
+    const preview = item.zone === 'video'
+      ? `<video src="${fileUrl(item.key)}" muted preload="metadata"></video>`
+      : `<img src="${fileUrl(item.key)}" loading="lazy" alt="">`;
+    return `<button type="button" class="automation-assets-pick${selected.has(item.key) ? ' selected' : ''}" data-auto-asset-key="${esc(item.key)}">${preview}<span>${esc(item.name || item.key)}</span><b>${selected.has(item.key) ? picker.keys.indexOf(item.key) + 1 : '+'}</b></button>`;
+  }).join('') : '<div class="empty-note">No hay Assets que coincidan con este filtro.</div>';
+  $('#automationAssetsPickerGrid').querySelectorAll('[data-auto-asset-key]').forEach((button) => button.addEventListener('click', () => {
+    const key = button.dataset.autoAssetKey;
+    const index = picker.keys.indexOf(key);
+    if (index >= 0) picker.keys.splice(index, 1);
+    else picker.keys.push(key);
+    renderAutomationAssetsPicker();
+  }));
+
+  $('#automationAssetsCount').textContent = `${picker.keys.length} seleccionado${picker.keys.length === 1 ? '' : 's'}`;
+  $('#automationAssetsOrder').innerHTML = picker.keys.length ? picker.keys.map((key, index) => {
+    const item = automationVisualAsset(key);
+    const preview = item.zone === 'video'
+      ? `<video src="${fileUrl(key)}" muted preload="metadata"></video>`
+      : `<img src="${fileUrl(key)}" loading="lazy" alt="">`;
+    return `<div class="automation-assets-order-item" data-order-key="${esc(key)}"><b>${index + 1}</b>${preview}<span title="${esc(item.name || key)}">${esc(item.name || key)}</span><button type="button" class="icon-btn" data-order-up${index ? '' : ' disabled'} title="Subir">↑</button><button type="button" class="icon-btn" data-order-down${index < picker.keys.length - 1 ? '' : ' disabled'} title="Bajar">↓</button><button type="button" class="icon-btn" data-order-remove title="Quitar">×</button></div>`;
+  }).join('') : '<span class="hint">Elegí al menos una imagen o video.</span>';
+  $('#automationAssetsOrder').querySelectorAll('[data-order-key]').forEach((row) => {
+    const key = row.dataset.orderKey;
+    row.querySelector('[data-order-up]')?.addEventListener('click', () => {
+      const index = picker.keys.indexOf(key);
+      if (index > 0) [picker.keys[index - 1], picker.keys[index]] = [picker.keys[index], picker.keys[index - 1]];
+      renderAutomationAssetsPicker();
+    });
+    row.querySelector('[data-order-down]')?.addEventListener('click', () => {
+      const index = picker.keys.indexOf(key);
+      if (index >= 0 && index < picker.keys.length - 1) [picker.keys[index], picker.keys[index + 1]] = [picker.keys[index + 1], picker.keys[index]];
+      renderAutomationAssetsPicker();
+    });
+    row.querySelector('[data-order-remove]')?.addEventListener('click', () => {
+      picker.keys = picker.keys.filter((candidate) => candidate !== key);
+      renderAutomationAssetsPicker();
+    });
+  });
+}
+
+async function openAutomationAssetsPicker(blockElement, block) {
+  if (!automationVisualAssets().length) {
+    try { await refreshAssets(); } catch { /* el modal mostrará el estado vacío */ }
+  }
+  const settings = blockElement.querySelector('[data-block-assets-settings]');
+  let keys = [];
+  try { keys = JSON.parse(settings?.dataset.assetKeys || '[]'); } catch { keys = []; }
+  state.automationAssetPicker = {
+    blockElement,
+    blockId: block.id,
+    keys: Array.isArray(keys) ? [...keys] : [],
+    zone: 'all',
+    search: ''
+  };
+  $('#automationAssetsTitle').textContent = `Assets · ${block.title || 'Bloque'}`;
+  renderAutomationAssetsPicker();
+  $('#automationAssetsModal').hidden = false;
+}
+
+function closeAutomationAssetsPicker(commit = false) {
+  const picker = state.automationAssetPicker;
+  if (commit && picker?.blockElement) {
+    const settings = picker.blockElement.querySelector('[data-block-assets-settings]');
+    settings.dataset.assetKeys = JSON.stringify(picker.keys);
+    settings.querySelector('[data-block-assets-list]').innerHTML = automationBlockAssetSelectionMarkup(picker.keys);
+  }
+  $('#automationAssetsModal').hidden = true;
+  state.automationAssetPicker = null;
+}
+
+$$('#automationAssetsTabs [data-auto-assets-zone]').forEach((button) => button.addEventListener('click', () => {
+  if (!state.automationAssetPicker) return;
+  state.automationAssetPicker.zone = button.dataset.autoAssetsZone;
+  renderAutomationAssetsPicker();
+}));
+$('#automationAssetsSearch').addEventListener('input', () => {
+  if (!state.automationAssetPicker) return;
+  state.automationAssetPicker.search = $('#automationAssetsSearch').value;
+  renderAutomationAssetsPicker();
+});
+$('#automationAssetsClose').addEventListener('click', () => closeAutomationAssetsPicker(false));
+$('#automationAssetsCancel').addEventListener('click', () => closeAutomationAssetsPicker(false));
+$('#automationAssetsDone').addEventListener('click', () => {
+  if (!state.automationAssetPicker?.keys.length) return toast('Elegí al menos una imagen o video.', 'err');
+  closeAutomationAssetsPicker(true);
+});
+$('#automationAssetsModal').addEventListener('click', (event) => {
+  if (event.target.id === 'automationAssetsModal') closeAutomationAssetsPicker(false);
+});
+
 function renderAutomationProject() {
   const pr = currentAutomation();
   if (!pr) return;
@@ -5155,6 +5544,10 @@ function renderAutomationProject() {
   const allVideosReady = pr.blocks.length > 0 && completedVideos === pr.blocks.length;
   const finalOutput = pr.finalOutput?.videoKey ? pr.finalOutput : null;
   const effectOutput = pr.effectOutput?.videoKey ? pr.effectOutput : null;
+  const textRefreshOutput = effectOutput || finalOutput;
+  const textRefreshTargetLabel = effectOutput ? 'la versión con efectos' : 'el video final limpio';
+  const textRefreshPending = Boolean(pr.textRefreshRequiredAt);
+  const finalization = pr.finalization || null;
   const includeLogos = pr.config?.includeLogos === true;
   const videoEffect = {
     enabled: false,
@@ -5164,6 +5557,13 @@ function renderAutomationProject() {
     maskColor: '#000000',
     maskOpacity: 10,
     ...(pr.config?.videoEffect || {})
+  };
+  const dynamicText = {
+    enabled: false,
+    titleAnimation: 'rise',
+    captionAnimation: 'word-pop',
+    wordsPerPage: 5,
+    ...(pr.config?.dynamicText || {})
   };
   const automationAudioModel = (state.audioModels || []).find((candidate) => candidate.id === pr.config?.audioModelId)
     || state.audioModels?.[0];
@@ -5332,11 +5732,34 @@ function renderAutomationProject() {
         </div>
       </div>
       <div class="overlay-preset-bar">
-        <div><h4>Estilos de títulos y textos</h4><span class="hint">Guarda texto normal, resaltado, título, posición, caja, colores y bordes como un preset reutilizable.</span></div>
+        <div><h4>Estilos de títulos y textos</h4><span class="hint">Guarda tipografía, resaltado, posiciones y animaciones como un preset reutilizable.</span></div>
         <select class="select" id="overlayPresetSelect">${overlayPresetOptions()}</select>
         <button type="button" class="mini-btn" id="overlayPresetApply"${(state.overlayPresets || []).length ? '' : ' disabled'}>${IC('check')} Aplicar</button>
         <button type="button" class="mini-btn accent" id="overlayPresetSave">${IC('save')} Guardar estilo actual</button>
         <button type="button" class="mini-btn danger" id="overlayPresetDelete" disabled>${IC('trash')}</button>
+      </div>
+      <div class="automation-dynamic-text-panel${dynamicText.enabled ? ' enabled' : ''}" id="autoDynamicTextPanel">
+        <div class="automation-dynamic-text-head">
+          <div>
+            <h4>Texto dinámico · Remotion</h4>
+            <span class="hint">Genera una capa transparente animada, sincronizada palabra por palabra con la voz, y la integra tanto en imágenes como en HeyGen.</span>
+          </div>
+          <label class="poser-toggle"><input type="checkbox" id="autoDynamicTextEnabled"${dynamicText.enabled ? ' checked' : ''}> activar</label>
+        </div>
+        <div class="automation-dynamic-text-grid">
+          <label><span>Animación del título</span><select class="select" id="autoTitleAnimation">
+            <option value="rise"${dynamicText.titleAnimation === 'rise' ? ' selected' : ''}>Ascenso suave</option>
+            <option value="slam"${dynamicText.titleAnimation === 'slam' ? ' selected' : ''}>Impacto</option>
+            <option value="typewriter"${dynamicText.titleAnimation === 'typewriter' ? ' selected' : ''}>Máquina de escribir</option>
+          </select></label>
+          <label><span>Animación de subtítulos</span><select class="select" id="autoCaptionAnimation">
+            <option value="word-pop"${dynamicText.captionAnimation === 'word-pop' ? ' selected' : ''}>Palabra con impacto</option>
+            <option value="karaoke"${dynamicText.captionAnimation === 'karaoke' ? ' selected' : ''}>Resaltado karaoke</option>
+            <option value="bounce"${dynamicText.captionAnimation === 'bounce' ? ' selected' : ''}>Rebote</option>
+          </select></label>
+          <label><span>Palabras visibles por grupo</span><input type="number" id="autoWordsPerPage" min="1" max="12" step="1" value="${dynamicText.wordsPerPage}"></label>
+        </div>
+        <span class="hint automation-dynamic-text-note">Los audios nuevos de ElevenLabs usan sus marcas temporales exactas. Los audios antiguos se sincronizan por estimación hasta que vuelvan a generarse.</span>
       </div>
       <h4>Texto sobreimpreso</h4>
       <div class="overlay-typography-grid">
@@ -5445,33 +5868,42 @@ function renderAutomationProject() {
       ${pr.blocks.length ? pr.blocks.map((b, i) => {
         const out = pr.outputs?.[b.id] || null;
         const done = Boolean(out?.videoKey);
-        const partial = !done && Boolean(out?.imageKey || out?.textImageKey || out?.textLayerKey || out?.audioKeys?.length);
+        const partial = !done && Boolean(out?.imageKey || out?.textImageKey || out?.textLayerKey || out?.motionOverlayKey || out?.audioKeys?.length);
         const reusableAudioReady = Array.isArray(out?.audioKeys) && out.audioKeys.length >= (b.items || []).length;
         const heygenCharacters = automationHeyGenCharacters();
         const selectedHeyGenCharacter = automationBlockHeyGenCharacter(pr, b);
-        const blockGenerator = b.generator === 'heygen' ? 'heygen' : 'image';
+        const blockGenerator = ['heygen', 'assets'].includes(b.generator) ? b.generator : 'image';
         return `
         <div class="auto-block${done ? ' is-done' : ''}" data-block="${b.id}">
           <div class="auto-block-head">
             <strong>Bloque ${i + 1}${b.title ? ` · ${esc(b.title)}` : ''}</strong> <span class="hint">${esc([b.characters.join(', '), b.location, b.prop].filter(Boolean).join(' · '))}</span>
             <span class="auto-block-btns">
               <button class="mini-btn" data-genblock="${b.id}" data-force="${done ? '1' : '0'}"${missing.length ? ' disabled' : ''}>${IC('spark')} ${done ? 'Regenerar' : partial ? 'Continuar' : 'Generar / continuar'}</button>
-              ${out?.imageKey && reusableAudioReady ? `<button class="mini-btn" data-regen-downstream="${b.id}"${missing.length ? ' disabled' : ''} title="Conserva la imagen y los audios existentes; sólo rehace el texto y ensambla el video">${IC('film')} Rehacer texto + video</button>` : ''}
+              ${(out?.imageKey || blockGenerator === 'assets') && reusableAudioReady ? `<button class="mini-btn" data-regen-downstream="${b.id}"${missing.length ? ' disabled' : ''} title="Conserva los visuales y audios existentes; sólo rehace el texto y ensambla el video">${IC('film')} Rehacer texto + video</button>` : ''}
               ${partial ? `<button class="mini-btn danger" data-regenblock="${b.id}"${missing.length ? ' disabled' : ''}>Regenerar desde cero</button>` : ''}
             </span>
           </div>
           <div class="auto-block-editor">
             <div class="auto-block-generator">
-              <label><span>Generador de la toma</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>Imagen + audio</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + audio de ElevenLabs</option></select></label>
+              <label><span>Generador de la toma</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>Imagen + audio</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + audio de ElevenLabs</option><option value="assets"${blockGenerator === 'assets' ? ' selected' : ''}>Assets · imágenes y videos</option></select></label>
               <div class="auto-block-heygen-settings" data-block-heygen-settings${blockGenerator === 'heygen' ? '' : ' hidden'}>
                 <label><span>Personaje · variante HeyGen</span><select class="select" data-block-heygen-character>${heygenCharacters.length ? heygenCharacters.map((character) => `<option value="${character.id}"${character.id === selectedHeyGenCharacter?.id ? ' selected' : ''}>${esc(character.name)} · HeyGen · ${character.heygen?.closeAvatarId ? '2 planos' : '1 plano'}</option>`).join('') : '<option value="">— no hay personajes HeyGen listos —</option>'}</select></label>
                 <label><span>Encuadre</span><select class="select" data-block-heygen-framing><option value="wide"${b.heygenFraming === 'wide' || !b.heygenFraming ? ' selected' : ''}>Plano general</option><option value="close"${b.heygenFraming === 'close' ? ' selected' : ''}>Primer plano</option><option value="split"${b.heygenFraming === 'split' ? ' selected' : ''}>Alternar general → primer plano</option></select></label>
                 <span class="hint" data-block-heygen-hint>${selectedHeyGenCharacter?.heygen?.closeAvatarId ? 'La alternancia corta el texto cerca del punto medio y une ambos videos.' : 'Este personaje solo tiene código de plano general.'}</span>
               </div>
+              <div class="auto-block-assets-settings" data-block-assets-settings${blockGenerator === 'assets' ? '' : ' hidden'} data-asset-keys="${esc(JSON.stringify(b.assetKeys || []))}">
+                <div class="auto-block-assets-head">
+                  <div><strong>Secuencia de Assets</strong><span class="hint">Cada archivo recibe la misma parte de la duración total del audio.</span></div>
+                  <button type="button" class="mini-btn" data-pick-block-assets>${IC('image')} Elegir y ordenar</button>
+                </div>
+                <div class="auto-block-assets-list" data-block-assets-list>${automationBlockAssetSelectionMarkup(b.assetKeys || [])}</div>
+                <label class="poser-toggle auto-block-assets-mute"><input type="checkbox" data-block-assets-mute${b.assetMuteOriginal !== false ? ' checked' : ''}> silenciar el sonido original de los videos</label>
+                <span class="hint">Si un video es más corto que su tramo, se repite automáticamente hasta completarlo.</span>
+              </div>
             </div>
             <label><span>Título interno del bloque</span><input type="text" data-block-title maxlength="160" value="${esc(b.title || '')}"></label>
-            <label><span>Prompt visual · inglés</span><textarea data-block-prompt maxlength="4000" rows="5">${esc(b.imagePrompt)}</textarea></label>
-            <label><span>Prompt negativo · inglés</span><textarea data-block-negative maxlength="2000" rows="2">${esc(b.negativePrompt || '')}</textarea></label>
+            <label data-block-prompt-field><span>Prompt visual · inglés</span><textarea data-block-prompt maxlength="4000" rows="5">${esc(b.imagePrompt)}</textarea></label>
+            <label data-block-prompt-field><span>Prompt negativo · inglés</span><textarea data-block-negative maxlength="2000" rows="2">${esc(b.negativePrompt || '')}</textarea></label>
             <div class="auto-block-script-items">
               ${(b.items || []).map((it, itemIndex) => `<label><span>${it.kind === 'dialogue' ? `Diálogo · ${esc(it.character || 'sin personaje')}` : 'Narración'}</span><textarea data-block-item="${itemIndex}" maxlength="2000" rows="3">${esc(it.text)}</textarea></label>`).join('')}
             </div>
@@ -5542,6 +5974,26 @@ function renderAutomationProject() {
         <video src="${fileUrl(effectOutput.videoKey)}" controls preload="metadata"></video>
         <button type="button" class="mini-btn" data-open-asset="${esc(effectOutput.videoKey)}">Abrir versión y acciones</button>
       </div>` : ''}
+    </div>
+
+    <div class="automation-panel automation-text-refresh-panel${textRefreshPending ? ' is-pending' : ''}">
+      <div>
+        <h3>Actualizar todos los textos del video</h3>
+        <p id="autoRefreshTextStatus">${finalOutput
+          ? `${textRefreshPending ? 'Hay cambios de texto o diseño pendientes. ' : ''}Regenera títulos, subtítulos y resaltados y reemplaza únicamente ${textRefreshTargetLabel}. No vuelve a generar imágenes, voces, Assets ni planos HeyGen.`
+          : 'Esta opción estará disponible después de ensamblar el video final.'}</p>
+        ${textRefreshOutput?.textRefreshedAt ? `<span class="automation-stage-status">Última actualización de textos · ${fmtDate(textRefreshOutput.textRefreshedAt)}</span>` : ''}
+      </div>
+      <button type="button" class="mini-btn accent automation-text-refresh-button" id="autoRefreshAllText"${finalOutput ? '' : ' disabled'}>${IC('refresh')} ${textRefreshPending ? 'Aplicar cambios a todos los textos' : 'Regenerar todos los textos'}</button>
+    </div>
+
+    <div class="automation-panel automation-finalize-panel">
+      <div>
+        <h3>Finalizar proyecto</h3>
+        <p>Elimina del disco las regeneraciones y parciales descartados que pertenecen a este proyecto. Conserva los resultados vigentes de cada bloque, audios, capas, planos HeyGen, música y videos finales, además de cualquier material reutilizado en otra sección.</p>
+        ${finalization?.finalizedAt ? `<span class="automation-stage-status">Última limpieza · ${finalization.deletedCount || 0} archivo${finalization.deletedCount === 1 ? '' : 's'} · ${formatAutomationBytes(finalization.deletedBytes || 0)} liberados · ${fmtDate(finalization.finalizedAt)}${finalization.failedCount ? ` · ${finalization.failedCount} pendientes` : ''}</span>` : '<span class="hint">Antes de borrar se mostrará la cantidad exacta de archivos y espacio recuperable.</span>'}
+      </div>
+      <button type="button" class="mini-btn danger automation-finalize-button" id="autoFinalize">${IC('trash')} Finalizar proyecto</button>
     </div>`;
 
   $('#automationRoot').querySelectorAll('[data-assign]').forEach((sel) => sel.addEventListener('change', async () => {
@@ -5612,7 +6064,9 @@ function renderAutomationProject() {
       estimatedDuration: 0,
       generator: 'image',
       heygenCharacterId: '',
-      heygenFraming: 'wide'
+      heygenFraming: 'wide',
+      assetKeys: [],
+      assetMuteOriginal: true
     };
     const position = $('#autoNewBlockPosition').value;
     const blocks = [...pr.blocks];
@@ -5660,6 +6114,7 @@ function renderAutomationProject() {
     heygenAuthMode: $('#autoHeyGenAuth').value,
     includeLogos: $('#autoIncludeLogos').checked,
     videoEffect,
+    dynamicText,
     transitionSound,
     music,
     overlay: ov,
@@ -5681,7 +6136,8 @@ function renderAutomationProject() {
       text: titleOv.text
     };
     Object.assign(titleOv, preset.titleOverlay || {}, titleBehavior);
-    await saveAutomation({ config: { overlay: ov, titleOverlay: titleOv } });
+    Object.assign(dynamicText, preset.dynamicText || {});
+    await saveAutomation({ config: { overlay: ov, titleOverlay: titleOv, dynamicText } });
     renderAutomationProject();
     toast(`Estilo “${preset.name}” aplicado.`);
   });
@@ -5691,7 +6147,7 @@ function renderAutomationProject() {
     try {
       const item = await api('/api/overlay-presets', {
         method: 'POST',
-        body: { name: name.trim(), overlay: ov, titleOverlay: titleOv }
+        body: { name: name.trim(), overlay: ov, titleOverlay: titleOv, dynamicText }
       });
       state.overlayPresets.unshift(item);
       renderAutomationProject();
@@ -5776,6 +6232,23 @@ function renderAutomationProject() {
     $('#autoApplyEffect').disabled = !finalOutput || !videoEffect.enabled;
     return videoEffect;
   };
+  const readDynamicTextControls = () => {
+    dynamicText.enabled = $('#autoDynamicTextEnabled').checked;
+    dynamicText.titleAnimation = $('#autoTitleAnimation').value;
+    dynamicText.captionAnimation = $('#autoCaptionAnimation').value;
+    const wordsPerPage = Number($('#autoWordsPerPage').value);
+    dynamicText.wordsPerPage = Number.isFinite(wordsPerPage) ? Math.max(1, Math.min(12, Math.round(wordsPerPage))) : 5;
+    $('#autoWordsPerPage').value = dynamicText.wordsPerPage;
+    $('#autoDynamicTextPanel').classList.toggle('enabled', dynamicText.enabled);
+    return dynamicText;
+  };
+  ['autoDynamicTextEnabled', 'autoTitleAnimation', 'autoCaptionAnimation', 'autoWordsPerPage'].forEach((id) => {
+    $('#' + id).addEventListener('change', async () => {
+      readDynamicTextControls();
+      await saveAll();
+      renderAutomationProject();
+    });
+  });
   $('#autoEffectEnabled').addEventListener('change', async () => {
     readEffectControls();
     await saveAll();
@@ -6117,11 +6590,14 @@ function renderAutomationProject() {
   $('#automationRoot').querySelectorAll('[data-block-generator]').forEach((select) => {
     const blockElement = select.closest('.auto-block');
     const settings = blockElement.querySelector('[data-block-heygen-settings]');
+    const assetSettings = blockElement.querySelector('[data-block-assets-settings]');
     const characterSelect = blockElement.querySelector('[data-block-heygen-character]');
     const framingSelect = blockElement.querySelector('[data-block-heygen-framing]');
     const hint = blockElement.querySelector('[data-block-heygen-hint]');
     const sync = () => {
       settings.hidden = select.value !== 'heygen';
+      assetSettings.hidden = select.value !== 'assets';
+      blockElement.querySelectorAll('[data-block-prompt-field]').forEach((field) => { field.hidden = select.value === 'assets'; });
       const character = state.characters.find((item) => item.id === characterSelect?.value);
       if (hint) hint.textContent = character?.heygen?.closeAvatarId
         ? 'La alternancia corta el texto cerca del punto medio y une ambos videos.'
@@ -6133,6 +6609,12 @@ function renderAutomationProject() {
     sync();
   });
 
+  $('#automationRoot').querySelectorAll('[data-pick-block-assets]').forEach((button) => button.addEventListener('click', () => {
+    const blockElement = button.closest('.auto-block');
+    const block = pr.blocks.find((item) => item.id === blockElement?.dataset.block);
+    if (blockElement && block) openAutomationAssetsPicker(blockElement, block);
+  }));
+
   $('#automationRoot').querySelectorAll('[data-save-block]').forEach((button) => button.addEventListener('click', async () => {
     const blockElement = button.closest('.auto-block');
     const blockId = button.dataset.saveBlock;
@@ -6141,22 +6623,28 @@ function renderAutomationProject() {
     const imagePrompt = blockElement.querySelector('[data-block-prompt]').value.trim();
     const negativePrompt = blockElement.querySelector('[data-block-negative]').value.trim();
     const title = blockElement.querySelector('[data-block-title]').value.trim() || currentBlock.title || 'Bloque';
-    const generator = blockElement.querySelector('[data-block-generator]').value === 'heygen' ? 'heygen' : 'image';
+    const selectedGenerator = blockElement.querySelector('[data-block-generator]').value;
+    const generator = ['image', 'heygen', 'assets'].includes(selectedGenerator) ? selectedGenerator : 'image';
     const heygenCharacterId = generator === 'heygen' ? (blockElement.querySelector('[data-block-heygen-character]').value || '') : '';
     const heygenFraming = generator === 'heygen' ? blockElement.querySelector('[data-block-heygen-framing]').value : 'wide';
     const heygenCharacter = state.characters.find((character) => character.id === heygenCharacterId);
+    const assetSettings = blockElement.querySelector('[data-block-assets-settings]');
+    let assetKeys = [];
+    try { assetKeys = JSON.parse(assetSettings?.dataset.assetKeys || '[]'); } catch { assetKeys = []; }
+    const assetMuteOriginal = assetSettings?.querySelector('[data-block-assets-mute]')?.checked !== false;
     const items = currentBlock.items.map((item, index) => ({
       ...item,
       text: blockElement.querySelector(`[data-block-item="${index}"]`)?.value.trim() || ''
     })).filter((item) => item.text);
-    if (!imagePrompt) return toast('El bloque debe conservar un prompt visual.', 'err');
+    if (generator !== 'assets' && !imagePrompt) return toast('El bloque debe conservar un prompt visual.', 'err');
     if (!items.length) return toast('El bloque debe conservar al menos un texto de narración o diálogo.', 'err');
     if (generator === 'heygen' && !heygenCharacterReady(heygenCharacter)) return toast('Elegí un personaje con variante HeyGen completa.', 'err');
     if (generator === 'heygen' && ['close', 'split'].includes(heygenFraming) && !heygenCharacter.heygen?.closeAvatarId) return toast('Ese personaje no tiene código de primer plano.', 'err');
+    if (generator === 'assets' && !assetKeys.length) return toast('Elegí al menos una imagen o video para este bloque.', 'err');
     button.disabled = true;
     const updated = await saveAutomation({
       blocks: pr.blocks.map((block) => block.id === blockId
-        ? { ...block, title, imagePrompt, negativePrompt, items, generator, heygenCharacterId, heygenFraming }
+        ? { ...block, title, imagePrompt, negativePrompt, items, generator, heygenCharacterId, heygenFraming, assetKeys, assetMuteOriginal }
         : block)
     });
     if (updated) {
@@ -6170,23 +6658,31 @@ function renderAutomationProject() {
   $('#automationRoot').querySelectorAll('[data-genblock]').forEach((btn) => btn.addEventListener('click', async () => {
     const block = pr.blocks.find((b) => b.id === btn.dataset.genblock);
     const force = btn.dataset.force === '1';
-    const newMaterials = block?.generator === 'heygen' ? 'audios y videos HeyGen nuevos' : 'una imagen y audios nuevos';
+    const newMaterials = block?.generator === 'heygen'
+      ? 'audios y videos HeyGen nuevos'
+      : block?.generator === 'assets' ? 'audios nuevos y un montaje local de los Assets elegidos' : 'una imagen y audios nuevos';
     if (force && !confirm(`¿Regenerar “${block?.title || 'este bloque'}” desde cero? Se crearán ${newMaterials}.`)) return;
     if (block) await runAutomationBlock(pr.id, block, btn.closest('.auto-block'), { regenerate: force });
   }));
   $('#automationRoot').querySelectorAll('[data-regen-downstream]').forEach((button) => button.addEventListener('click', async () => {
     const block = pr.blocks.find((item) => item.id === button.dataset.regenDownstream);
     const output = block && pr.outputs?.[block.id];
-    if (!block || !output?.imageKey) return toast('Este bloque todavía no tiene una imagen limpia para reutilizar.', 'err');
+    if (!block || (block.generator !== 'assets' && !output?.imageKey)) return toast('Este bloque todavía no tiene visuales limpios para reutilizar.', 'err');
+    if (block.generator === 'assets' && !(block.assetKeys || []).length) return toast('Este bloque ya no tiene Assets seleccionados.', 'err');
     const existingAudioKeys = Array.isArray(output.audioKeys) ? output.audioKeys.slice(0, block.items.length) : [];
     if (existingAudioKeys.length !== block.items.length) return toast('Este bloque no tiene todos sus audios guardados para reensamblar.', 'err');
-    if (!confirm(`¿Rehacer el texto y el video de “${block.title || 'este bloque'}”? Se conservarán exactamente la imagen limpia y los ${existingAudioKeys.length} audio${existingAudioKeys.length === 1 ? '' : 's'} existentes; no se llamará a ElevenLabs.`)) return;
+    const visualDescription = block.generator === 'assets' ? `los ${(block.assetKeys || []).length} Assets seleccionados` : 'la imagen limpia';
+    if (!confirm(`¿Rehacer el texto y el video de “${block.title || 'este bloque'}”? Se conservarán exactamente ${visualDescription} y los ${existingAudioKeys.length} audio${existingAudioKeys.length === 1 ? '' : 's'} existentes; no se llamará a ElevenLabs.`)) return;
     const preservedOutput = {
-      imageKey: output.imageKey,
-      imageModelId: output.imageModelId || '',
-      imageModelName: output.imageModelName || '',
-      fallbackUsed: output.fallbackUsed === true,
-      recoveredImage: output.recoveredImage === true,
+      ...(block.generator === 'assets' ? {
+        generator: 'assets', assetKeys: [...block.assetKeys], assetMuteOriginal: block.assetMuteOriginal !== false
+      } : {
+        imageKey: output.imageKey,
+        imageModelId: output.imageModelId || '',
+        imageModelName: output.imageModelName || '',
+        fallbackUsed: output.fallbackUsed === true,
+        recoveredImage: output.recoveredImage === true
+      }),
       audioKeys: existingAudioKeys,
       audioCountExpected: block.items.length
     };
@@ -6201,7 +6697,7 @@ function renderAutomationProject() {
   }));
   $('#automationRoot').querySelectorAll('[data-regenblock]').forEach((btn) => btn.addEventListener('click', async () => {
     const block = pr.blocks.find((b) => b.id === btn.dataset.regenblock);
-    const materials = block?.generator === 'heygen' ? 'audios y videos HeyGen' : 'imagen y audios';
+    const materials = block?.generator === 'heygen' ? 'audios y videos HeyGen' : block?.generator === 'assets' ? 'audios y montaje local' : 'imagen y audios';
     if (!block || !confirm(`¿Descartar los parciales de “${block.title || 'este bloque'}” y regenerar ${materials}?`)) return;
     await runAutomationBlock(pr.id, block, btn.closest('.auto-block'), { regenerate: true });
   }));
@@ -6212,6 +6708,11 @@ function renderAutomationProject() {
     const saved = await saveAll();
     if (saved) applyAutomationVideoEffect(pr.id, videoEffect);
   });
+  $('#autoRefreshAllText')?.addEventListener('click', async () => {
+    const saved = await saveAll();
+    if (saved) refreshAutomationProjectText(pr.id);
+  });
+  $('#autoFinalize')?.addEventListener('click', () => finalizeAutomationProject(pr.id));
   if (state.voices === null) loadVoices(false).then(() => { if (currentAutomation()) renderAutomationProject(); });
 }
 
@@ -6527,20 +7028,27 @@ function burnOverlayText(imageKey, caption, ov, { transparent = false, title = n
 }
 
 function automationBlockOutHtml(out, block = null) {
-  if (!out || (!out.imageKey && !out.textImageKey && !out.textLayerKey && !out.audioKeys?.length && !out.videoKey)) return '';
+  if (!out || (!out.imageKey && !out.textImageKey && !out.textLayerKey && !out.motionOverlayKey && !out.audioKeys?.length && !out.videoKey)) return '';
   const audioKeys = Array.isArray(out.audioKeys) ? out.audioKeys : [];
   const segmentVideoKeys = Array.isArray(out.heygenSegmentVideoKeys) ? out.heygenSegmentVideoKeys : [];
   const expected = Number(out.audioCountExpected) || audioKeys.length;
   const isHeyGen = out.generator === 'heygen';
+  const isAssets = out.generator === 'assets';
   const canRegenerateHeyGenPlanes = isHeyGen && out.heygenFraming === 'split' && segmentVideoKeys.length === 2 && block?.id;
+  const sourceStatus = isHeyGen
+    ? `HeyGen · ${out.heygenFraming === 'split' ? '2 planos' : '1 plano'}`
+    : isAssets
+      ? `Assets · ${(out.assetKeys || []).length} visuales · ${out.assetMuteOriginal !== false ? 'audio original silenciado' : 'audio original mezclado'} · ${out.motionOverlayKey ? 'texto dinámico ✓' : `capa ${out.textLayerKey ? '✓' : '—'}`}`
+      : `Imagen ${out.imageKey ? '✓' : '—'} · ${out.motionOverlayKey ? 'Texto dinámico ✓' : `Texto ${out.textImageKey ? '✓' : '—'} · Capa ${out.textLayerKey ? '✓' : '—'}`}`;
   return `
     <span class="automation-stage-status">
-      ${isHeyGen ? `HeyGen · ${out.heygenFraming === 'split' ? '2 planos' : '1 plano'}` : `Imagen ${out.imageKey ? '✓' : '—'} · Texto ${out.textImageKey ? '✓' : '—'} · Capa ${out.textLayerKey ? '✓' : '—'}`} · Audio ${audioKeys.length}/${expected || '—'} · Video ${out.videoKey ? '✓' : '—'}
+      ${sourceStatus} · Audio ${audioKeys.length}/${expected || '—'} · Video ${out.videoKey ? '✓' : '—'}
     </span>
     ${out.fallbackUsed ? `<span class="hint warn">Imagen generada con respaldo: ${esc(out.imageModelName || out.imageModelId || '')}</span>` : ''}
     ${out.imageKey ? `<button type="button" class="auto-output-asset" data-open-asset="${esc(out.imageKey)}" title="Abrir asset y acciones"><img src="${fileUrl(out.imageKey)}" alt="imagen"></button>` : ''}
     ${out.textImageKey ? `<button type="button" class="auto-output-asset" data-open-asset="${esc(out.textImageKey)}" title="Abrir asset y acciones"><img src="${fileUrl(out.textImageKey)}" alt="con texto"></button>` : ''}
     ${out.textLayerKey ? `<button type="button" class="mini-btn" data-open-asset="${esc(out.textLayerKey)}">Capa de subtítulos</button>` : ''}
+    ${out.motionOverlayKey ? `<button type="button" class="mini-btn accent" data-open-asset="${esc(out.motionOverlayKey)}">Capa animada Remotion</button>` : ''}
     ${audioKeys.map((key, index) => `<span class="auto-output-audio"><small>Audio ${index + 1}</small><audio src="${fileUrl(key)}" controls preload="metadata"></audio></span>`).join('')}
     ${segmentVideoKeys.length ? `<span class="heygen-segment-list"><small>Segmentos HeyGen</small>${segmentVideoKeys.map((key, index) => {
       const label = out.heygenFraming === 'split' ? (index === 0 ? 'Plano general' : 'Primer plano') : 'Toma HeyGen';
@@ -6615,6 +7123,7 @@ async function tagAutomationStage(pr, block, keys) {
       keys: valid,
       category: `Auto: ${pr.name}`,
       automationId: pr.id,
+      automationName: pr.name,
       blockId: block.id
     }
   });
@@ -6707,6 +7216,80 @@ function recoverHistoryOutput(type, prompt, { voiceId = '', audioModelId = '', u
   return key ? { entry, key } : null;
 }
 
+async function runAutomationAssetBlock(pr, block, output, { regenerate = false, regenerateAudio = false, requireExistingAudio = false, setStatus }) {
+  const assetKeys = Array.isArray(block.assetKeys) ? block.assetKeys.filter((key) => /^(generated|uploads|video)\//.test(key)) : [];
+  if (!assetKeys.length) throw new Error('Elegí al menos una imagen o video para este bloque.');
+  const audioKeys = Array.isArray(output.audioKeys) ? output.audioKeys.slice(0, block.items.length) : [];
+  if (requireExistingAudio && audioKeys.length !== block.items.length) {
+    throw new Error('Faltan audios guardados; este reensamble no generará reemplazos con ElevenLabs.');
+  }
+  const usedAudioKeys = new Set(audioKeys);
+  let historyLoaded = false;
+  for (let index = audioKeys.length; index < block.items.length; index++) {
+    const spec = automationAudioSpec(pr, block.items[index]);
+    let recovered = null;
+    if (!regenerate && !regenerateAudio) {
+      if (!historyLoaded) {
+        setStatus('Buscando audios ya generados para este bloque…');
+        await refreshAutomationHistory();
+        historyLoaded = true;
+      }
+      recovered = recoverHistoryOutput('audio', spec.text, {
+        voiceId: spec.voiceId, audioModelId: spec.audioModelId, usedKeys: usedAudioKeys
+      });
+    }
+    if (recovered) {
+      audioKeys.push(recovered.key);
+      usedAudioKeys.add(recovered.key);
+      setStatus(`Reutilizando audio ${audioKeys.length}/${block.items.length}…`);
+    } else {
+      setStatus(`Generando audio ${index + 1}/${block.items.length}…`);
+      const generatedAudio = await api('/api/generate/audio', { method: 'POST', body: spec });
+      const audioKey = generatedAudio.outputs?.[0];
+      if (!audioKey) throw new Error(`No se generó el audio ${index + 1}.`);
+      state.history.unshift(generatedAudio);
+      audioKeys.push(audioKey);
+      usedAudioKeys.add(audioKey);
+    }
+    output = await persistAutomationBlockOutput(pr.id, block.id, {
+      audioKeys: [...audioKeys], audioCountExpected: block.items.length, generator: 'assets',
+      assetKeys, assetMuteOriginal: block.assetMuteOriginal !== false
+    });
+    await tagAutomationStage(pr, block, [audioKeys[audioKeys.length - 1]]);
+  }
+
+  const dynamicTextEnabled = pr.config?.dynamicText?.enabled === true;
+  let textLayerKey = dynamicTextEnabled ? '' : output.textLayerKey;
+  if (!dynamicTextEnabled && !textLayerKey) {
+    setStatus('Preparando la capa nítida de títulos y subtítulos…');
+    const caption = block.items.map((item) => item.text).join(' ');
+    const title = automationTitleForBlock(pr, block);
+    textLayerKey = await burnOverlayText('', caption, pr.config.overlay, {
+      transparent: true, title, aspectRatio: pr.config.aspectRatio || '9:16'
+    });
+    output = await persistAutomationBlockOutput(pr.id, block.id, { textLayerKey });
+    await tagAutomationStage(pr, block, [textLayerKey]);
+  }
+
+  setStatus(dynamicTextEnabled
+    ? `Distribuyendo ${assetKeys.length} Assets y animando el texto con Remotion…`
+    : `Distribuyendo ${assetKeys.length} Assets a lo largo del audio…`);
+  const result = await api(`/api/automations/${pr.id}/asset-block`, {
+    method: 'POST', body: { blockId: block.id, audioKeys, textLayerKey }
+  });
+  output = await persistAutomationBlockOutput(pr.id, block.id, {
+    videoKey: result.videoKey,
+    motionOverlayKey: result.motionOverlayKey || null,
+    assetKeys: result.assetKeys || assetKeys,
+    assetMuteOriginal: result.assetMuteOriginal !== false,
+    assetSegmentDuration: result.segmentDuration,
+    generator: 'assets',
+    completedAt: Date.now()
+  });
+  await tagAutomationStage(pr, block, [textLayerKey, result.motionOverlayKey, ...audioKeys, result.videoKey]);
+  return output;
+}
+
 async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false, regenerateAudio = false, requireExistingAudio = false, regenerateSegmentIndex = -1, setStatus }) {
   const character = state.characters.find((item) => item.id === block.heygenCharacterId);
   if (!heygenCharacterReady(character)) throw new Error('El bloque necesita un personaje con variante HeyGen completa.');
@@ -6756,8 +7339,9 @@ async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false,
     await tagAutomationStage(pr, block, [audioKeys[audioKeys.length - 1]]);
   }
 
-  let textLayerKey = output.textLayerKey;
-  if (!textLayerKey) {
+  const dynamicTextEnabled = pr.config?.dynamicText?.enabled === true;
+  let textLayerKey = dynamicTextEnabled ? '' : output.textLayerKey;
+  if (!dynamicTextEnabled && !textLayerKey) {
     setStatus('Preparando título, texto y resaltado para el video HeyGen…');
     const caption = block.items.map((item) => item.text).join(' ');
     const title = automationTitleForBlock(pr, block);
@@ -6793,12 +7377,13 @@ async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false,
   });
   output = await persistAutomationBlockOutput(pr.id, block.id, {
     videoKey: result.videoKey,
+    motionOverlayKey: result.motionOverlayKey || null,
     heygenSegmentVideoKeys: result.segmentVideoKeys || [],
     generator: 'heygen',
     heygenFraming: block.heygenFraming,
     completedAt: Date.now()
   });
-  await tagAutomationStage(pr, block, [textLayerKey, ...audioKeys, ...(result.segmentVideoKeys || []), result.videoKey]);
+  await tagAutomationStage(pr, block, [textLayerKey, result.motionOverlayKey, ...audioKeys, ...(result.segmentVideoKeys || []), result.videoKey]);
   return output;
 }
 
@@ -6827,6 +7412,15 @@ async function runAutomationBlock(projectId, block, blockEl, {
     if (regenerate) {
       output = await persistAutomationBlockOutput(projectId, block.id, {}, { replace: true });
       pr = state.automations.find((item) => item.id === projectId) || pr;
+    }
+
+    if (block.generator === 'assets') {
+      await runAutomationAssetBlock(pr, block, output, {
+        regenerate, regenerateAudio, requireExistingAudio, setStatus
+      });
+      if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: 'Montaje con Assets terminado.' });
+      renderAutomationProject();
+      return true;
     }
 
     if (block.generator === 'heygen') {
@@ -6887,18 +7481,19 @@ async function runAutomationBlock(projectId, block, blockEl, {
 
     const caption = block.items.map((it) => it.text).join(' ');
     const title = automationTitleForBlock(pr, block);
-    let textImageKey = output.textImageKey;
-    if (!textImageKey) {
+    const dynamicTextEnabled = pr.config?.dynamicText?.enabled === true;
+    let textImageKey = dynamicTextEnabled ? '' : output.textImageKey;
+    if (!dynamicTextEnabled && !textImageKey) {
       setStatus('Sobreimprimiendo el texto…');
       textImageKey = await burnOverlayText(imageKey, caption, pr.config.overlay, { title });
       output = await persistAutomationBlockOutput(projectId, block.id, { textImageKey });
       await tagAutomationStage(pr, block, [textImageKey]);
-    } else {
+    } else if (!dynamicTextEnabled) {
       setStatus('Reutilizando la imagen con texto guardada…');
     }
 
-    let textLayerKey = output.textLayerKey;
-    if (!textLayerKey) {
+    let textLayerKey = dynamicTextEnabled ? '' : output.textLayerKey;
+    if (!dynamicTextEnabled && !textLayerKey) {
       setStatus('Preparando la capa nítida de subtítulos…');
       textLayerKey = await burnOverlayText(imageKey, caption, pr.config.overlay, { transparent: true, title });
       output = await persistAutomationBlockOutput(projectId, block.id, { textLayerKey });
@@ -6943,16 +7538,17 @@ async function runAutomationBlock(projectId, block, blockEl, {
       await tagAutomationStage(pr, block, [audioKeys[audioKeys.length - 1]]);
     }
 
-    setStatus('Armando el video…');
+    setStatus(dynamicTextEnabled ? 'Animando títulos y subtítulos con Remotion…' : 'Armando el video…');
     const category = `Auto: ${pr.name}`;
     const v = await api(`/api/automations/${pr.id}/video`, { method: 'POST', body: {
-      blockId: block.id, imageKey: textImageKey, audioKeys, category
+      blockId: block.id, imageKey: dynamicTextEnabled ? imageKey : textImageKey, audioKeys, category
     } });
     output = await persistAutomationBlockOutput(projectId, block.id, {
       videoKey: v.videoKey,
+      motionOverlayKey: v.motionOverlayKey || null,
       completedAt: Date.now()
     });
-    await tagAutomationStage(pr, block, [imageKey, textImageKey, textLayerKey, ...audioKeys, v.videoKey]);
+    await tagAutomationStage(pr, block, [imageKey, textImageKey, textLayerKey, v.motionOverlayKey, ...audioKeys, v.videoKey]);
     if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: 'Toma terminada.' });
     renderAutomationProject();
     return true;
@@ -7035,19 +7631,34 @@ async function assembleAutomationProject(projectId) {
   }
 }
 
-async function ensureAutomationSubtitleLayers(projectId, taskId = '') {
+async function ensureAutomationSubtitleLayers(projectId, taskId = '', { force = false } = {}) {
   let pr = state.automations.find((item) => item.id === projectId);
   if (!pr) throw new Error('El proyecto ya no está disponible.');
+  const dynamicTextEnabled = pr.config?.dynamicText?.enabled === true;
   for (let index = 0; index < pr.blocks.length; index++) {
     const block = pr.blocks[index];
     let output = pr.outputs?.[block.id] || {};
     updateUiTask(taskId, {
       current: index + 1,
-      detail: output.textLayerKey
+      detail: force
+        ? `Regenerando textos ${index + 1}/${pr.blocks.length}…`
+        : (dynamicTextEnabled ? output.motionOverlayKey : output.textLayerKey)
         ? `Verificando subtítulos ${index + 1}/${pr.blocks.length}…`
         : `Creando capa de subtítulos ${index + 1}/${pr.blocks.length}…`
     });
-    if (!output.textLayerKey) {
+    if (dynamicTextEnabled && force) {
+      const result = await api(`/api/automations/${projectId}/text-layer`, {
+        method: 'POST',
+        body: { blockId: block.id }
+      });
+      const projectIndex = state.automations.findIndex((item) => item.id === projectId);
+      if (projectIndex !== -1) state.automations[projectIndex] = result.project;
+      pr = result.project;
+      output = pr.outputs?.[block.id] || output;
+    } else if (dynamicTextEnabled && !output.motionOverlayKey) {
+      throw new Error(`Falta la capa animada de “${block.title || block.id}”. Usá “Rehacer texto + video” en esa toma antes de aplicar el efecto.`);
+    }
+    if (!dynamicTextEnabled && (force || !output.textLayerKey)) {
       const caption = (block.items || []).map((item) => item.text).join(' ');
       const title = automationTitleForBlock(pr, block);
       const textLayerKey = await burnOverlayText(output.imageKey || '', caption, pr.config.overlay, {
@@ -7062,6 +7673,50 @@ async function ensureAutomationSubtitleLayers(projectId, taskId = '') {
     updateUiTask(taskId, { current: index + 1 });
   }
   return state.automations.find((item) => item.id === projectId) || pr;
+}
+
+async function refreshAutomationProjectText(projectId) {
+  let pr = state.automations.find((item) => item.id === projectId);
+  if (!pr?.finalOutput?.videoKey) return toast('Primero ensamblá el video final.', 'err');
+  const target = pr.effectOutput?.videoKey ? 'effect' : 'final';
+  const targetLabel = target === 'effect' ? 'la versión con efectos' : 'el video final limpio';
+  if (!confirm(`¿Regenerar todos los títulos, subtítulos y resaltados de ${targetLabel}?\n\nSe reemplazará solamente ese video. Se conservarán exactamente las imágenes, planos HeyGen, Assets, voces, música y duración actuales.`)) return;
+  const button = $('#autoRefreshAllText');
+  const status = $('#autoRefreshTextStatus');
+  const taskId = startUiTask({
+    title: 'Regenerando todos los textos',
+    detail: `Preparando el bloque 1 de ${pr.blocks.length}…`,
+    total: pr.blocks.length + 1,
+    current: 1
+  });
+  if (button) button.disabled = true;
+  if (status) status.textContent = `Regenerando capas de texto para ${targetLabel}; el resto del material no se modifica…`;
+  try {
+    pr = await ensureAutomationSubtitleLayers(projectId, taskId, { force: true });
+    updateUiTask(taskId, {
+      current: pr.blocks.length + 1,
+      detail: `Recomponiendo ${targetLabel} con las nuevas capas…`
+    });
+    const result = await api(`/api/automations/${projectId}/effect`, {
+      method: 'POST',
+      body: { textRefreshTarget: target }
+    });
+    const index = state.automations.findIndex((item) => item.id === projectId);
+    if (index !== -1) state.automations[index] = result.project;
+    try {
+      await refreshAssets();
+    } catch {
+      // El master actualizado ya quedó persistido aunque Assets no refresque.
+    }
+    finishUiTask(taskId, { detail: `Textos actualizados únicamente en ${targetLabel}.` });
+    renderAutomationProject();
+    toast(`Todos los textos fueron regenerados en ${targetLabel}. No se regeneraron imágenes, audios ni videos de origen.`, 'ok');
+  } catch (error) {
+    finishUiTask(taskId, { error: error.message });
+    if (button) button.disabled = false;
+    if (status) status.textContent = `Falló la actualización de textos: ${error.message}`;
+    toast(error.message, 'err');
+  }
 }
 
 async function applyAutomationVideoEffect(projectId, requestedEffect) {
@@ -7079,7 +7734,8 @@ async function applyAutomationVideoEffect(projectId, requestedEffect) {
   if (button) button.disabled = true;
   if (status) status.textContent = 'Preparando capas de subtítulos nítidas. No se regenerará ninguna imagen ni voz…';
   try {
-    pr = await ensureAutomationSubtitleLayers(projectId, taskId);
+    const refreshPendingText = Boolean(pr.textRefreshRequiredAt);
+    pr = await ensureAutomationSubtitleLayers(projectId, taskId, { force: refreshPendingText });
     updateUiTask(taskId, {
       current: pr.blocks.length + 1,
       detail: 'Aplicando el efecto debajo del texto con FFmpeg…'
@@ -7087,7 +7743,7 @@ async function applyAutomationVideoEffect(projectId, requestedEffect) {
     if (status) status.textContent = 'Aplicando el efecto sobre imágenes y tomas HeyGen, luego la máscara y el texto…';
     const result = await api(`/api/automations/${projectId}/effect`, {
       method: 'POST',
-      body: { videoEffect: requestedEffect || pr.config?.videoEffect }
+      body: { videoEffect: requestedEffect || pr.config?.videoEffect, textLayersRefreshed: refreshPendingText }
     });
     const index = state.automations.findIndex((item) => item.id === projectId);
     if (index !== -1) state.automations[index] = result.project;

@@ -47,6 +47,11 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
 ## Qué hace
 
 - Crear imágenes con modelo, proporción, resolución, referencias y lotes.
+- Subir a Assets imágenes PNG/JPG/WebP y videos MP4/MOV/WebM, individualmente
+  o en grupos de hasta 100 MB por archivo. La carga puede recibir una categoría
+  y etiquetas compartidas; esa clasificación también se edita por asset o de
+  forma masiva y permite filtrar por nombre, prompt, categoría y varias
+  etiquetas simultáneas.
 - Mantener una cola de generaciones: puedes seguir escribiendo mientras otras generaciones corren.
 - Pegar imágenes desde el portapapeles con Ctrl+V en la ventana Crear para añadirlas como referencias.
 - Elegir Eleven v3 o Eleven Multilingual v2 en cada flujo de generación de voz; v3 admite expresiones/emociones entre corchetes.
@@ -93,6 +98,13 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
 - Guardar como presets reutilizables toda la apariencia del título, el texto
   normal y el resaltado —tipografías, colores, bordes, cajas y posición— sin
   reemplazar el contenido ni el modo de aparición del título del proyecto.
+- Activar títulos y subtítulos dinámicos renderizados con Remotion. Los títulos
+  admiten ascenso, impacto o máquina de escribir; los subtítulos agrupan una
+  cantidad configurable de palabras y animan el resaltado con impacto, karaoke
+  o rebote. La capa WebM transparente se compone sobre bloques de imagen y
+  HeyGen y queda por encima de los efectos de posproducción. Los audios nuevos
+  usan la alineación exacta que devuelve ElevenLabs; para audios anteriores se
+  calcula una sincronización temporal estimada sin volver a consumir la API.
 - Elegir por bloque entre imagen fija con audio o un avatar HeyGen. Los
   personajes admiten una variante especial HeyGen con imagen espejo, código de
   plano general, código de primer plano e instrucciones de actuación separadas
@@ -102,6 +114,13 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
   Cada plano puede regenerarse por separado: se conserva el otro clip y todos
   los audios, se consume HeyGen sólo para la toma elegida y ambas se ensamblan
   otra vez automáticamente.
+- Elegir **Assets** como tercer generador de un bloque y construir la toma con
+  una secuencia ordenada de imágenes y videos de la biblioteca. El tiempo total
+  de la voz se divide en partes iguales entre los archivos; una imagen se
+  mantiene durante su tramo y un video corto se repite hasta completarlo. El
+  sonido original de los videos puede silenciarse o mezclarse con la narración.
+  Este montaje es local, admite títulos/subtítulos Remotion y puede reconstruirse
+  con los efectos de posproducción sin volver a generar imágenes ni voces.
 - Reanudar cada bloque por etapas: imagen, sobreimpresión y cada audio se
   persisten apenas terminan. Si FFmpeg o una etapa posterior falla, **Continuar**
   reutiliza esos parciales; **Regenerar desde cero** es la acción explícita que
@@ -125,12 +144,21 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
   mezcla de bloques de imagen y HeyGen, conservando el master limpio. Puede
   sumar una máscara de cualquier color y opacidad entre el visual procesado y
   las capas nítidas de títulos, texto y resaltado.
+- Regenerar de una vez todos los títulos, subtítulos y resaltados después del
+  ensamble, sin volver a generar imágenes, voces, Assets ni planos HeyGen. Si
+  existe una versión con efectos reemplaza solamente esa; en caso contrario,
+  reemplaza solamente el master limpio y conserva audio, música, duración y logo.
 - Consultar en Consumo la estimación completa de cada proyecto, desglosada en
   fichas, imágenes de bloques, voces y procesamiento local. Se abre el proyecto
   más reciente y los anteriores se eligen desde una lista.
 - Abrir fichas y resultados del Automatizador en el visor interno de Assets, con
   acciones para asociar a series, reutilizar como referencia, convertir en
   personaje, asociar a entidades, descargar o abrir en Photoshop.
+- Reconocer en Assets cada archivo creado por el Automatizador mediante una marca
+  con el nombre del proyecto. Al pulsar **Finalizar proyecto**, se calcula y
+  confirma una limpieza que elimina solamente regeneraciones y parciales ya no
+  referenciados; conserva los resultados vigentes y cualquier material reutilizado
+  por otros proyectos, series, guiones, personajes, elementos o prompts.
 
 ## Conectar Controversy Tracker
 
@@ -147,6 +175,7 @@ con **Importar guion (JSON)**. Ambos caminos validan el mismo contrato.
 
 - `data/config.json`: configuración local, keys y clave de acceso.
 - `data/history.json`: historial.
+- `data/audio-captions.json`: marcas temporales por palabra para Remotion.
 - `data/prompts.json`: biblioteca de prompts.
 - `data/characters.json` y `data/characters/`: personajes y fotos.
 - `data/poser/`: capturas y miniaturas de poses.

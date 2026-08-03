@@ -14,6 +14,7 @@ import {
   listVoices, generateSpeech, generateMusic, translateText, searchUpdatedPricing, testService
 } from './lib/providers.js';
 import { mergePricing, imagePrice, videoPrice, audioPrice, musicPrice, translatePrice, scriptPrice } from './lib/pricing.js';
+import { renderDynamicTextOverlay } from './lib/remotion-renderer.js';
 import { POSER_BODY_PARTS } from './public/poser-bodyparts.js';
 import {
   registerHeyGenOAuthClient, heyGenAuthorizationUrl, exchangeHeyGenOAuthCode,
@@ -359,6 +360,39 @@ function newId() {
   return crypto.randomBytes(6).toString('hex');
 }
 
+function sanitizeVisualCategory(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+}
+
+function normalizeVisualTags(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(',');
+  const seen = new Set();
+  return source.map((tag) => String(tag || '').trim().replace(/\s+/g, ' ').slice(0, 50))
+    .filter((tag) => tag && !seen.has(tag.toLocaleLowerCase('es')) && seen.add(tag.toLocaleLowerCase('es')))
+    .slice(0, 40);
+}
+
+function validateUploadedVisual(mime, buffer, originalName = '') {
+  const lowerMime = String(mime || '').toLowerCase();
+  const lowerName = String(originalName || '').toLowerCase();
+  const isPng = buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  const isJpeg = buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  const isWebp = buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+    && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
+  const isMp4Family = buffer.length >= 12 && buffer.subarray(4, 8).toString('ascii') === 'ftyp';
+  const isWebm = buffer.length >= 4 && buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3;
+  const looksLikeImage = lowerMime.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(lowerName);
+  if (isPng && looksLikeImage) return { kind: 'image', zone: 'uploads', extension: '.png', mime: 'image/png' };
+  if (isJpeg && looksLikeImage) return { kind: 'image', zone: 'uploads', extension: '.jpg', mime: 'image/jpeg' };
+  if (isWebp && looksLikeImage) return { kind: 'image', zone: 'uploads', extension: '.webp', mime: 'image/webp' };
+  if (isWebm && (lowerMime.startsWith('video/') || lowerName.endsWith('.webm'))) return { kind: 'video', zone: 'video', extension: '.webm', mime: 'video/webm' };
+  if (isMp4Family && (lowerMime.startsWith('video/') || /\.(mp4|mov|m4v)$/i.test(lowerName))) {
+    const isMov = lowerMime === 'video/quicktime' || lowerName.endsWith('.mov');
+    return { kind: 'video', zone: 'video', extension: isMov ? '.mov' : '.mp4', mime: isMov ? 'video/quicktime' : 'video/mp4' };
+  }
+  throw new Error('El archivo debe ser una imagen PNG/JPG/WebP o un video MP4/MOV/WebM válido.');
+}
+
 function heyGenMotionPromptValue(heygen = {}, field = 'wideMotionPrompt') {
   const source = heygen && typeof heygen === 'object' ? heygen : {};
   const value = Object.prototype.hasOwnProperty.call(source, field) ? source[field] : source.motionPrompt;
@@ -520,6 +554,21 @@ function normalizeAutomationVideoEffect(saved = {}) {
     maskColor,
     maskOpacity: Number.isFinite(enteredMaskOpacity) ? Math.max(0, Math.min(100, Math.round(enteredMaskOpacity))) : 10
   };
+}
+
+async function probeHasAudioStream(ffmpegExecutable, mediaPath) {
+  const extension = path.extname(ffmpegExecutable).toLowerCase() === '.exe' ? '.exe' : '';
+  const ffprobe = path.join(path.dirname(ffmpegExecutable), `ffprobe${extension}`);
+  const stat = await fs.stat(ffprobe).catch(() => null);
+  if (!stat?.isFile()) return false;
+  return new Promise((resolve) => {
+    execFile(ffprobe, [
+      '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=index',
+      '-of', 'default=noprint_wrappers=1:nokey=1', mediaPath
+    ], { windowsHide: true, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+      resolve(!error && String(stdout || '').trim() !== '');
+    });
+  });
 }
 
 function automationVideoMaskFilter(effect) {
@@ -990,6 +1039,55 @@ async function runVideoGeneration(req) {
   return entry;
 }
 
+function captionWordsFromAlignment(alignment) {
+  const characters = Array.isArray(alignment?.characters) ? alignment.characters : [];
+  const starts = Array.isArray(alignment?.character_start_times_seconds) ? alignment.character_start_times_seconds : [];
+  const ends = Array.isArray(alignment?.character_end_times_seconds) ? alignment.character_end_times_seconds : [];
+  const length = Math.min(characters.length, starts.length, ends.length);
+  const words = [];
+  let current = null;
+  let insideTag = false;
+  const flush = () => {
+    if (!current?.text.trim()) { current = null; return; }
+    words.push({
+      text: current.text.trim(),
+      start: Number(Math.max(0, current.start).toFixed(3)),
+      end: Number(Math.max(current.start, current.end).toFixed(3))
+    });
+    current = null;
+  };
+  for (let index = 0; index < length; index++) {
+    const character = String(characters[index] ?? '');
+    if (character === '[') { flush(); insideTag = true; continue; }
+    if (insideTag) {
+      if (character === ']') insideTag = false;
+      continue;
+    }
+    if (/\s/u.test(character)) { flush(); continue; }
+    const start = Number(starts[index]);
+    const end = Number(ends[index]);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+    if (!current) current = { text: '', start, end };
+    current.text += character;
+    current.end = Math.max(current.end, end);
+  }
+  flush();
+  return words.slice(0, 2000);
+}
+
+function approximateCaptionWords(text, duration) {
+  const tokens = stripTags(text).split(/\s+/u).filter(Boolean).slice(0, 2000);
+  const totalDuration = Math.max(0.2, Number(duration) || 0.2);
+  const weights = tokens.map((token) => Math.max(1, token.replace(/[^\p{L}\p{N}]/gu, '').length));
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+  let cursor = 0;
+  return tokens.map((token, index) => {
+    const start = cursor;
+    cursor += totalDuration * (weights[index] / totalWeight);
+    return { text: token, start: Number(start.toFixed(3)), end: Number(cursor.toFixed(3)) };
+  });
+}
+
 async function runAudioGeneration(req) {
   const cfg = await getConfig();
   const requestedText = String(req.text || '').trim();
@@ -999,7 +1097,7 @@ async function runAudioGeneration(req) {
   // Eleven v3. En Multilingual v2 se quitan para que nunca se locuten.
   const text = model.supportsAudioTags ? requestedText : stripTags(requestedText);
   if (!text) throw new Error('El texto sólo contiene etiquetas de expresión; escribí algo para locutar.');
-  const { buffer, mime } = await generateSpeech({
+  const { buffer, mime, alignment } = await generateSpeech({
     apiKey: cfg.keys.elevenlabs,
     voiceId: req.voiceId,
     text,
@@ -1018,6 +1116,18 @@ async function runAudioGeneration(req) {
   let name = `${base}${ext}`;
   for (let n = 2; existing.has(name); n++) name = `${base}-${n}${ext}`;
   const key = await saveBuffer('audio', name, buffer);
+  const captionWords = captionWordsFromAlignment(alignment);
+  await updateJson('audio-captions.json', {}, (captions) => ({
+    ...captions,
+    [key]: {
+      audioKey: key,
+      text: stripTags(requestedText),
+      speechText: text,
+      source: captionWords.length ? 'elevenlabs-alignment' : 'unavailable',
+      words: captionWords,
+      ts: Date.now()
+    }
+  }));
 
   const pricing = await getPricing();
   const cost = audioPrice(pricing, text.length, model.id);
@@ -1038,6 +1148,7 @@ async function runAudioGeneration(req) {
     voiceName: req.voiceName || '',
     audioKind: 'voice',
     characterId: req.characterId || null,
+    captionTiming: { source: captionWords.length ? 'elevenlabs-alignment' : 'unavailable', wordCount: captionWords.length },
     outputs: [key],
     errors: [],
     cost: Number(cost.toFixed(6))
@@ -1225,6 +1336,8 @@ const STATIC_MIME = {
   '.aac': 'audio/aac',
   '.ogg': 'audio/ogg',
   '.mp4': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.m4v': 'video/mp4',
   '.webm': 'video/webm',
   '.ico': 'image/x-icon',
   '.ttf': 'font/ttf',
@@ -1364,6 +1477,22 @@ const DEFAULT_TITLE_OVERLAY = {
   bgOpacity: 0.45
 };
 
+const DEFAULT_DYNAMIC_TEXT = {
+  enabled: false,
+  titleAnimation: 'rise',
+  captionAnimation: 'word-pop',
+  wordsPerPage: 5
+};
+
+function normalizeAutomationDynamicText(saved = {}) {
+  const dynamic = { ...DEFAULT_DYNAMIC_TEXT, ...(saved || {}) };
+  dynamic.enabled = dynamic.enabled === true;
+  dynamic.titleAnimation = ['rise', 'slam', 'typewriter'].includes(dynamic.titleAnimation) ? dynamic.titleAnimation : DEFAULT_DYNAMIC_TEXT.titleAnimation;
+  dynamic.captionAnimation = ['word-pop', 'karaoke', 'bounce'].includes(dynamic.captionAnimation) ? dynamic.captionAnimation : DEFAULT_DYNAMIC_TEXT.captionAnimation;
+  dynamic.wordsPerPage = Math.max(1, Math.min(12, Math.round(Number(dynamic.wordsPerPage) || DEFAULT_DYNAMIC_TEXT.wordsPerPage)));
+  return dynamic;
+}
+
 function normalizeAutomationOverlay(saved = {}) {
   const overlay = { ...DEFAULT_OVERLAY, ...(saved || {}) };
   // Migración desde las unidades antiguas: 1% de un lienzo de referencia de
@@ -1439,6 +1568,10 @@ function automationOverlayRenderSignature(saved = {}) {
   return JSON.stringify(normalized);
 }
 
+function automationDynamicTextRenderSignature(saved = {}) {
+  return JSON.stringify(normalizeAutomationDynamicText(saved));
+}
+
 function invalidateAutomationOutput(output = {}, { image = false, text = false, audio = false } = {}) {
   const next = { ...(output || {}) };
   if (image) {
@@ -1452,6 +1585,7 @@ function invalidateAutomationOutput(output = {}, { image = false, text = false, 
   if (text) {
     delete next.textImageKey;
     delete next.textLayerKey;
+    delete next.motionOverlayKey;
   }
   if (audio) {
     delete next.audioKeys;
@@ -1459,10 +1593,15 @@ function invalidateAutomationOutput(output = {}, { image = false, text = false, 
   }
   if (image || text || audio) {
     delete next.videoKey;
+    delete next.completedAt;
+  }
+  // Un cambio puramente visual (tipografía, animación o título) puede volver a
+  // componer localmente los planos HeyGen ya pagados. Sólo una imagen o un
+  // audio nuevo invalida esos segmentos de origen.
+  if (image || audio) {
     delete next.heygenSegmentVideoKeys;
     delete next.heygenFraming;
     delete next.generator;
-    delete next.completedAt;
   }
   return next;
 }
@@ -1507,7 +1646,8 @@ const DEFAULT_AUTOMATION_CONFIG = {
     sunoModel: MUSIC_MODEL.defaultVersion
   },
   overlay: { ...DEFAULT_OVERLAY },
-  titleOverlay: { ...DEFAULT_TITLE_OVERLAY }
+  titleOverlay: { ...DEFAULT_TITLE_OVERLAY },
+  dynamicText: { ...DEFAULT_DYNAMIC_TEXT }
 };
 
 function normalizeAutomationMusic(saved = {}, requirement = {}) {
@@ -1560,6 +1700,173 @@ function automationAudioText(text) {
   return tag ? `${tag} ${clean}` : clean;
 }
 
+function rgbaFromHex(hex, opacity) {
+  const normalized = /^#[0-9a-f]{6}$/i.test(String(hex || '')) ? String(hex).slice(1) : '000000';
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${red},${green},${blue},${Math.max(0, Math.min(1, Number(opacity) || 0)).toFixed(3)})`;
+}
+
+async function remotionFontFaces(families) {
+  const requested = new Set((families || []).map(String).filter((family) => family.startsWith('ManifestadorFont_')));
+  if (!requested.size) return [];
+  const fonts = await readJson('fonts.json', []);
+  const faces = [];
+  for (const font of fonts) {
+    if (!requested.has(font.family)) continue;
+    const fontPath = path.join(DATA_DIR, 'fonts', path.basename(String(font.file || '')));
+    const buffer = await fs.readFile(fontPath).catch(() => null);
+    if (!buffer) continue;
+    const format = font.format === 'otf' ? 'opentype' : font.format === 'ttf' ? 'truetype' : font.format;
+    const mime = font.format === 'woff2' ? 'font/woff2' : font.format === 'woff' ? 'font/woff' : 'font/ttf';
+    faces.push({ family: font.family, format, dataUrl: `data:${mime};base64,${buffer.toString('base64')}` });
+  }
+  return faces;
+}
+
+async function automationCaptionTimeline({ audioKeys, audioPaths, ffmpegExecutable, textHints = [] }) {
+  const [savedCaptions, history] = await Promise.all([
+    readJson('audio-captions.json', {}),
+    readJson('history.json', [])
+  ]);
+  const nextCaptions = { ...savedCaptions };
+  const words = [];
+  let offset = 0;
+  let changed = false;
+  for (let index = 0; index < audioKeys.length; index++) {
+    const key = audioKeys[index];
+    const duration = await probeMediaDuration(ffmpegExecutable, audioPaths[index]);
+    if (!duration) continue;
+    const saved = savedCaptions[key];
+    let localWords = Array.isArray(saved?.words) ? saved.words : [];
+    if (!localWords.length) {
+      const historyEntry = history.find((entry) => Array.isArray(entry.outputs) && entry.outputs.includes(key));
+      const fallbackText = historyEntry?.speechText || historyEntry?.prompt || textHints[index] || '';
+      localWords = approximateCaptionWords(fallbackText, duration);
+      nextCaptions[key] = {
+        audioKey: key,
+        text: stripTags(fallbackText),
+        speechText: fallbackText,
+        source: 'estimated-from-duration',
+        words: localWords,
+        ts: Date.now()
+      };
+      changed = true;
+    }
+    for (const word of localWords) {
+      const start = Math.max(0, Math.min(duration, Number(word.start) || 0));
+      const end = Math.max(start, Math.min(duration, Number(word.end) || start));
+      if (!String(word.text || '').trim()) continue;
+      words.push({
+        text: String(word.text).trim(),
+        start: Number((offset + start).toFixed(3)),
+        end: Number((offset + end).toFixed(3))
+      });
+    }
+    offset += duration;
+  }
+  if (changed) await writeJson('audio-captions.json', nextCaptions);
+  return { words, duration: offset };
+}
+
+function automationTitleText(project, block) {
+  const title = normalizeAutomationTitleOverlay(project.config?.titleOverlay, project.blocks, project.integration?.scriptTitle || project.name);
+  if (!title.enabled) return { text: '', config: title };
+  if (title.mode === 'block') return { text: String(block.title || ''), config: title };
+  if (String(title.blockId || '') !== String(block.id || '')) return { text: '', config: title };
+  return { text: title.text || project.integration?.scriptTitle || project.name, config: title };
+}
+
+async function renderAutomationMotionOverlay({ project, block, audioKeys, audioPaths, ffmpegExecutable, width, height, outDir, textHints = [] }) {
+  const dynamic = normalizeAutomationDynamicText(project.config?.dynamicText);
+  if (!dynamic.enabled) return null;
+  const timeline = await automationCaptionTimeline({ audioKeys, audioPaths, ffmpegExecutable, textHints });
+  const duration = timeline.duration || await Promise.all(audioPaths.map((audioPath) => probeMediaDuration(ffmpegExecutable, audioPath)))
+    .then((items) => items.reduce((sum, item) => sum + (item || 0), 0));
+  if (!duration) throw new Error('No pude calcular la duración para los subtítulos dinámicos.');
+  const overlay = normalizeAutomationOverlay(project.config?.overlay);
+  const { text: titleText, config: title } = automationTitleText(project, block);
+  const scale = height / 1080;
+  const fontFaces = await remotionFontFaces([
+    overlay.font,
+    overlay.highlightFont,
+    title.font
+  ]);
+  const styleFor = (highlighted) => ({
+    fontFamily: highlighted ? (overlay.highlightFont || overlay.font) : overlay.font,
+    fontSizePx: Number((Math.max(8, highlighted ? overlay.highlightFontSizePx : overlay.fontSizePx) * scale).toFixed(2)),
+    fontWeight: highlighted ? overlay.highlightFontWeight : overlay.fontWeight,
+    italic: highlighted ? overlay.highlightFontItalic : overlay.fontItalic,
+    underline: highlighted ? overlay.highlightFontUnderline : overlay.fontUnderline,
+    strikeThrough: highlighted ? overlay.highlightFontStrikeThrough : overlay.fontStrikeThrough,
+    textTransform: highlighted ? overlay.highlightTextTransform : overlay.textTransform,
+    color: highlighted ? overlay.highlightColor : overlay.color,
+    strokeColor: highlighted ? overlay.highlightStrokeColor : overlay.strokeColor,
+    strokeWidthPx: Number((Math.max(0, highlighted ? overlay.highlightStrokeWidthPx : overlay.strokeWidthPx) * scale).toFixed(2))
+  });
+  const inputProps = {
+    width,
+    height,
+    fps: 25,
+    durationSeconds: duration,
+    fontFaces,
+    title: {
+      enabled: Boolean(titleText),
+      text: titleText,
+      animation: dynamic.titleAnimation,
+      start: 0,
+      duration: Math.min(duration, 3.4),
+      x: title.x,
+      y: title.y,
+      align: title.align,
+      maxWidthPct: title.maxWidthPct,
+      style: {
+        fontFamily: title.font,
+        fontSizePx: Number((title.fontSizePx * scale).toFixed(2)),
+        fontWeight: title.fontWeight,
+        italic: title.fontItalic,
+        underline: title.fontUnderline,
+        strikeThrough: title.fontStrikeThrough,
+        textTransform: title.textTransform,
+        color: title.color,
+        strokeColor: title.strokeColor,
+        strokeWidthPx: Number((title.strokeWidthPx * scale).toFixed(2)),
+        background: title.bg,
+        backgroundColor: rgbaFromHex(title.bgColor, title.bgOpacity)
+      }
+    },
+    captions: {
+      enabled: timeline.words.length > 0,
+      words: timeline.words,
+      animation: dynamic.captionAnimation,
+      wordsPerPage: dynamic.wordsPerPage,
+      x: overlay.x,
+      y: overlay.y,
+      align: overlay.align,
+      maxWidthPct: overlay.maxWidthPct,
+      background: overlay.bg,
+      backgroundColor: rgbaFromHex(overlay.bgColor, overlay.bgOpacity),
+      style: styleFor(false),
+      activeStyle: styleFor(true)
+    }
+  };
+  await fs.mkdir(outDir, { recursive: true });
+  const name = `${ts()}-auto-remotion-${sanitizeName(block.title || block.id)}-${newId()}.webm`;
+  const outputPath = path.join(outDir, name);
+  await renderDynamicTextOverlay({ outputPath, inputProps });
+  const key = `video/${name}`;
+  await updateJson('asset-metadata.json', {}, (metadata) => ({
+    ...metadata,
+    [key]: {
+      type: 'video', modelId: 'remotion-dynamic-text', modelName: 'Remotion · texto dinámico', ts: Date.now(),
+      category: `Auto: ${project.name}`.slice(0, 80), automationId: project.id, blockId: block.id,
+      autoKind: 'dynamic-text-overlay', transparent: true, wordCount: timeline.words.length, duration, cost: 0
+    }
+  }));
+  return { key, path: outputPath, duration, wordCount: timeline.words.length };
+}
+
 function automationProjectCostEstimate(project, pricing, assetMetadata) {
   const imageModelId = String(project.config?.imageModelId || '');
   const imageModel = getImageModel(imageModelId);
@@ -1577,7 +1884,7 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
     (project.requirements?.characters?.length || 0) +
     (project.requirements?.locations?.length || 0) +
     (project.requirements?.objects?.length || 0);
-  const blockImages = project.blocks?.length || 0;
+  const blockImages = (project.blocks || []).filter((block) => block.generator !== 'heygen' && block.generator !== 'assets').length;
   const audioModel = getAudioModel(project.config?.audioModelId);
   const audioTexts = (project.blocks || []).flatMap((block) =>
     (block.items || []).map((item) => audioModel.supportsAudioTags ? automationAudioText(item.text) : stripTags(item.text)).filter(Boolean)
@@ -1707,9 +2014,11 @@ function sanitizeAutomation(src, prev = {}) {
       sourceQuote: String(b.sourceQuote || '').slice(0, 4000),
       quoteReference: String(b.quoteReference || '').slice(0, 80),
       estimatedDuration: Math.max(0, Math.min(3600, Number(b.estimatedDuration) || 0)),
-      generator: b.generator === 'heygen' ? 'heygen' : 'image',
+      generator: ['image', 'heygen', 'assets'].includes(b.generator) ? b.generator : 'image',
       heygenCharacterId: /^[a-z0-9]+$/.test(String(b.heygenCharacterId || '')) ? String(b.heygenCharacterId) : '',
-      heygenFraming: ['wide', 'close', 'split'].includes(b.heygenFraming) ? b.heygenFraming : 'wide'
+      heygenFraming: ['wide', 'close', 'split'].includes(b.heygenFraming) ? b.heygenFraming : 'wide',
+      assetKeys: normalizeAutomationAssetKeys(b.assetKeys),
+      assetMuteOriginal: b.assetMuteOriginal !== false
     };
   });
 
@@ -1732,6 +2041,7 @@ function sanitizeAutomation(src, prev = {}) {
       heygenAuthMode: prev.config?.heygenAuthMode === 'oauth' ? 'oauth' : 'key',
       includeLogos: prev.config?.includeLogos === true,
       videoEffect: normalizeAutomationVideoEffect(prev.config?.videoEffect),
+      dynamicText: normalizeAutomationDynamicText(prev.config?.dynamicText),
       transitionSound: normalizeAutomationTransitionSound(prev.config?.transitionSound),
       music: normalizeAutomationMusic(prev.config?.music, requirements.music),
       overlay: normalizeAutomationOverlay(prev.config?.overlay),
@@ -1768,6 +2078,7 @@ function automationForClient(project) {
       heygenAuthMode: project.config?.heygenAuthMode === 'oauth' ? 'oauth' : 'key',
       includeLogos: project.config?.includeLogos === true,
       videoEffect: normalizeAutomationVideoEffect(project.config?.videoEffect),
+      dynamicText: normalizeAutomationDynamicText(project.config?.dynamicText),
       audioModelId: getAudioModel(project.config?.audioModelId).id,
       transitionSound: normalizeAutomationTransitionSound(project.config?.transitionSound),
       music: normalizeAutomationMusic(project.config?.music, project.requirements?.music),
@@ -1781,10 +2092,84 @@ function automationForClient(project) {
   };
 }
 
+const AUTOMATION_CLEANUP_REFERENCE_FILES = [
+  'asset-links.json', 'element-links.json', 'series.json', 'scripts.json',
+  'characters.json', 'elements.json', 'prompts.json', 'overlay-presets.json'
+];
+
+function isCleanupAssetKey(value) {
+  const key = String(value || '');
+  return /^(generated|uploads|audio|video)\//.test(key)
+    && key.length <= 700
+    && !key.includes('..')
+    && !key.includes('\\')
+    && !/[\x00-\x1f]/.test(key);
+}
+
+function collectStoredAssetKeys(value, target = new Set()) {
+  if (typeof value === 'string') {
+    if (isCleanupAssetKey(value)) target.add(value);
+    return target;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectStoredAssetKeys(item, target);
+    return target;
+  }
+  if (value && typeof value === 'object') {
+    for (const item of Object.values(value)) collectStoredAssetKeys(item, target);
+  }
+  return target;
+}
+
+async function automationCleanupPlan(projectId) {
+  const [automations, metadata, ...referenceDocuments] = await Promise.all([
+    readJson('automations.json', []),
+    readJson('asset-metadata.json', {}),
+    ...AUTOMATION_CLEANUP_REFERENCE_FILES.map((file) => readJson(file, []))
+  ]);
+  const project = automations.find((item) => item.id === projectId);
+  if (!project) return null;
+
+  // Lo que el proyecto todavía referencia es material vigente: imágenes
+  // limpias, capas, audios, tomas, planos HeyGen, música y masters finales.
+  const activeKeys = collectStoredAssetKeys(project);
+  // También se preserva cualquier resultado que el usuario haya reutilizado
+  // en otro proyecto, serie, guion, personaje, elemento, prompt o preset.
+  const sharedKeys = new Set();
+  for (const other of automations) if (other.id !== projectId) collectStoredAssetKeys(other, sharedKeys);
+  for (const document of referenceDocuments) collectStoredAssetKeys(document, sharedKeys);
+
+  const candidates = Object.entries(metadata)
+    .filter(([key, item]) => isCleanupAssetKey(key) && String(item?.automationId || '') === projectId)
+    .map(([key, item]) => ({ key, metadata: item || {} }));
+  const deletable = candidates.filter((item) => !activeKeys.has(item.key) && !sharedKeys.has(item.key));
+  let deleteBytes = 0;
+  for (const item of deletable) {
+    const stat = await fs.stat(await resolveAssetKey(item.key)).catch(() => null);
+    item.bytes = stat?.isFile() ? stat.size : 0;
+    deleteBytes += item.bytes;
+  }
+  const byType = {};
+  for (const item of deletable) {
+    const type = item.key.split('/')[0];
+    byType[type] = (byType[type] || 0) + 1;
+  }
+  return {
+    project,
+    candidates,
+    deletable,
+    activeCount: candidates.filter((item) => activeKeys.has(item.key)).length,
+    sharedCount: candidates.filter((item) => !activeKeys.has(item.key) && sharedKeys.has(item.key)).length,
+    deleteBytes,
+    byType
+  };
+}
+
 function sanitizeOverlayPreset(body = {}, previous = {}) {
   const overlay = normalizeAutomationOverlay(body.overlay || previous.overlay || {});
   delete overlay.previewBg;
   const titleOverlay = normalizeAutomationTitleOverlay(body.titleOverlay || previous.titleOverlay || {}, [], '');
+  const dynamicText = normalizeAutomationDynamicText(body.dynamicText || previous.dynamicText || {});
   delete titleOverlay.enabled;
   delete titleOverlay.mode;
   delete titleOverlay.blockId;
@@ -1794,6 +2179,7 @@ function sanitizeOverlayPreset(body = {}, previous = {}) {
     name: String(body.name ?? previous.name ?? '').trim().slice(0, 100) || 'Estilo sin nombre',
     overlay,
     titleOverlay,
+    dynamicText,
     ts: previous.ts || Date.now(),
     updatedAt: Date.now()
   };
@@ -1803,6 +2189,16 @@ function normalizeStyleImageKey(value) {
   const key = String(value || '').trim();
   if (!key || key.includes('..')) return '';
   return /^(generated|uploads|characters|elements|poser)\/[\w./ -]+$/i.test(key) ? key : '';
+}
+
+function normalizeAutomationAssetKeys(value) {
+  const seen = new Set();
+  return (Array.isArray(value) ? value : []).map((item) => String(item || '').trim()).filter((key) => {
+    if (!/^(generated|uploads|video)\//i.test(key) || key.length > 500 || key.includes('..')
+      || key.includes('\\') || /[\x00-\x1f]/.test(key) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 60);
 }
 
 function validateAutomationSource(src) {
@@ -2533,6 +2929,32 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { key, name });
     }
 
+    // Carga multimedia clasificada para Assets. Las imágenes se guardan en
+    // Subidas y los videos en Videos, conservando una categoría y etiquetas
+    // comunes que pueden editarse y filtrarse después.
+    if (p === '/api/assets/visual' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const { mime, buffer } = parseDataUrl(body.dataUrl);
+      if (buffer.length > 100 * 1024 * 1024) throw new Error('El archivo supera el límite de 100 MB.');
+      const visual = validateUploadedVisual(mime, buffer, body.name);
+      const category = sanitizeVisualCategory(body.category);
+      const tags = normalizeVisualTags(body.tags);
+      const base = sanitizeName(body.name || visual.kind).replace(/\.[^.]+$/, '') || visual.kind;
+      const cfg = await getConfig();
+      const targetDir = resolveDir(visual.zone === 'video' ? cfg.paths.video : cfg.paths.uploads);
+      await fs.mkdir(targetDir, { recursive: true });
+      const existing = new Set(await fs.readdir(targetDir).catch(() => []));
+      let name = `${ts()}-${base}${visual.extension}`;
+      for (let index = 2; existing.has(name); index++) name = `${ts()}-${base}-${index}${visual.extension}`;
+      const key = await saveBuffer(visual.zone, name, buffer);
+      const metadata = {
+        type: visual.kind, modelId: 'upload', modelName: 'Archivo subido', ts: Date.now(),
+        prompt: '', cost: 0, category, tags, mime: visual.mime
+      };
+      await updateJson('asset-metadata.json', {}, (all) => ({ ...all, [key]: metadata }));
+      return send(res, 200, { key, name, ...metadata });
+    }
+
     // Carga de audios a su biblioteca propia. A diferencia del cargador de
     // imágenes, conserva la clasificación y las etiquetas necesarias para que
     // el Automatizador pueda encontrar música compatible con una obra.
@@ -2569,6 +2991,9 @@ const server = http.createServer(async (req, res) => {
         if (item.key.startsWith('audio/')) {
           item.audioKind = sanitizeAudioKind(item.audioKind, item.modelId === MUSIC_MODEL.id ? 'music' : 'voice');
           item.musicTags = normalizeMusicTags(item.musicTags);
+        } else {
+          item.category = sanitizeVisualCategory(item.category);
+          item.tags = normalizeVisualTags(item.tags);
         }
       }
       return send(res, 200, { generated, uploads, audio, video });
@@ -2866,6 +3291,10 @@ const server = http.createServer(async (req, res) => {
               ...prev.config?.videoEffect,
               ...(body.config.videoEffect || {})
             }),
+            dynamicText: normalizeAutomationDynamicText({
+              ...prev.config?.dynamicText,
+              ...(body.config.dynamicText || {})
+            }),
             audioModelId: getAudioModel(body.config.audioModelId ?? prev.config?.audioModelId).id,
             heygenAuthMode: (body.config.heygenAuthMode ?? prev.config?.heygenAuthMode) === 'oauth' ? 'oauth' : 'key',
             transitionSound: normalizeAutomationTransitionSound({
@@ -2882,11 +3311,17 @@ const server = http.createServer(async (req, res) => {
           };
           if (body.config?.overlay !== undefined
             && automationOverlayRenderSignature(prev.config?.overlay) !== automationOverlayRenderSignature(next.config?.overlay)) {
-            next.outputs = Object.fromEntries(Object.entries(next.outputs || {}).map(([blockId, output]) => [
-              blockId,
-              invalidateAutomationOutput(output, { text: true })
+            if (next.finalOutput?.videoKey) next.textRefreshRequiredAt = Date.now();
+            else next.outputs = Object.fromEntries(Object.entries(next.outputs || {}).map(([blockId, output]) => [
+              blockId, invalidateAutomationOutput(output, { text: true })
             ]));
-            next.finalOutput = null;
+          }
+          if (body.config?.dynamicText !== undefined
+            && automationDynamicTextRenderSignature(prev.config?.dynamicText) !== automationDynamicTextRenderSignature(next.config?.dynamicText)) {
+            if (next.finalOutput?.videoKey) next.textRefreshRequiredAt = Date.now();
+            else next.outputs = Object.fromEntries(Object.entries(next.outputs || {}).map(([blockId, output]) => [
+              blockId, invalidateAutomationOutput(output, { text: true })
+            ]));
           }
           if (body.config?.titleOverlay !== undefined) {
             const previousTitle = normalizeAutomationTitleOverlay(prev.config?.titleOverlay, prev.blocks, prev.integration?.scriptTitle || prev.name);
@@ -2894,13 +3329,15 @@ const server = http.createServer(async (req, res) => {
             const titleRenderingChanged = automationTitleRenderSignature(previousTitle, prev.blocks, prev.integration?.scriptTitle || prev.name)
               !== automationTitleRenderSignature(nextTitle, next.blocks, next.integration?.scriptTitle || next.name);
             if (titleRenderingChanged) {
-              const affectsEveryBlock = previousTitle.mode === 'block' || nextTitle.mode === 'block';
-              const affectedBlockIds = new Set([previousTitle.blockId, nextTitle.blockId].filter(Boolean));
-              next.outputs = Object.fromEntries(Object.entries(next.outputs || {}).map(([blockId, output]) => [
-                blockId,
-                affectsEveryBlock || affectedBlockIds.has(blockId) ? invalidateAutomationOutput(output, { text: true }) : output
-              ]));
-              next.finalOutput = null;
+              if (next.finalOutput?.videoKey) next.textRefreshRequiredAt = Date.now();
+              else {
+                const affectsEveryBlock = previousTitle.mode === 'block' || nextTitle.mode === 'block';
+                const affectedBlockIds = new Set([previousTitle.blockId, nextTitle.blockId].filter(Boolean));
+                next.outputs = Object.fromEntries(Object.entries(next.outputs || {}).map(([blockId, output]) => [
+                  blockId,
+                  affectsEveryBlock || affectedBlockIds.has(blockId) ? invalidateAutomationOutput(output, { text: true }) : output
+                ]));
+              }
             }
           }
           if (body.config?.music !== undefined
@@ -2920,8 +3357,8 @@ const server = http.createServer(async (req, res) => {
           }
           if (body.blocks !== undefined) {
             const sanitized = sanitizeAutomation({ ...prev, requirements: prev.requirements, blocks: body.blocks }, prev).blocks;
-            if (sanitized.some((block) => !block.imagePrompt.trim() || !block.items.length)) {
-              throw new Error('Cada bloque debe conservar un prompt visual y al menos un texto de narración o diálogo.');
+            if (sanitized.some((block) => (block.generator !== 'assets' && !block.imagePrompt.trim()) || !block.items.length)) {
+              throw new Error('Cada bloque debe conservar al menos un texto y, salvo que use Assets, un prompt visual.');
             }
             const previousById = new Map((prev.blocks || []).map((block) => [block.id, block]));
             const nextOutputs = {};
@@ -2937,16 +3374,24 @@ const server = http.createServer(async (req, res) => {
                 const generatorChanged = previousBlock.generator !== block.generator
                   || previousBlock.heygenCharacterId !== block.heygenCharacterId
                   || previousBlock.heygenFraming !== block.heygenFraming;
+                const assetVisualChanged = JSON.stringify(previousBlock.assetKeys || []) !== JSON.stringify(block.assetKeys || [])
+                  || previousBlock.assetMuteOriginal !== block.assetMuteOriginal;
                 const textChanged = JSON.stringify(previousBlock.items || []) !== JSON.stringify(block.items || []);
                 const blockTitleChanged = previousBlock.title !== block.title
                   && next.config?.titleOverlay?.enabled === true
                   && next.config?.titleOverlay?.mode === 'block';
-                if (promptChanged || generatorChanged || textChanged || blockTitleChanged) generationChanged = true;
-                output = invalidateAutomationOutput(output, {
-                  image: promptChanged || generatorChanged,
-                  text: textChanged || blockTitleChanged || generatorChanged,
-                  audio: textChanged || generatorChanged
-                });
+                const titleOnlyRefresh = blockTitleChanged && next.finalOutput?.videoKey
+                  && !promptChanged && !generatorChanged && !assetVisualChanged && !textChanged;
+                if (titleOnlyRefresh) {
+                  next.textRefreshRequiredAt = Date.now();
+                } else {
+                  if (promptChanged || generatorChanged || assetVisualChanged || textChanged || blockTitleChanged) generationChanged = true;
+                  output = invalidateAutomationOutput(output, {
+                    image: promptChanged || generatorChanged,
+                    text: textChanged || blockTitleChanged || generatorChanged || assetVisualChanged,
+                    audio: textChanged || generatorChanged
+                  });
+                }
               }
               nextOutputs[block.id] = output;
             }
@@ -2968,6 +3413,7 @@ const server = http.createServer(async (req, res) => {
             ...next.config,
             includeLogos: next.config?.includeLogos === true,
             videoEffect: normalizeAutomationVideoEffect(next.config?.videoEffect),
+            dynamicText: normalizeAutomationDynamicText(next.config?.dynamicText),
             audioModelId: getAudioModel(next.config?.audioModelId).id,
             heygenAuthMode: next.config?.heygenAuthMode === 'oauth' ? 'oauth' : 'key',
             transitionSound: normalizeAutomationTransitionSound(next.config?.transitionSound),
@@ -2986,6 +3432,100 @@ const server = http.createServer(async (req, res) => {
         await updateJson('automations.json', [], (all) => all.filter((x) => x.id !== projectId));
         return send(res, 200, { ok: true });
       }
+    }
+
+    const automationFinalizeMatch = /^\/api\/automations\/([a-z0-9]+)\/finalize$/.exec(p);
+    if (automationFinalizeMatch && ['GET', 'POST'].includes(req.method)) {
+      const projectId = automationFinalizeMatch[1];
+      if (automationAssemblyJobs.has(projectId)) {
+        return send(res, 409, { error: 'El proyecto todavía se está ensamblando. Esperá a que termine antes de finalizarlo.' });
+      }
+      const plan = await automationCleanupPlan(projectId);
+      if (!plan) return send(res, 404, { error: 'Proyecto no encontrado.' });
+      const summary = {
+        generatedCount: plan.candidates.length,
+        deleteCount: plan.deletable.length,
+        deleteBytes: plan.deleteBytes,
+        activeCount: plan.activeCount,
+        sharedCount: plan.sharedCount,
+        byType: plan.byType,
+        sample: plan.deletable.slice(0, 12).map((item) => ({
+          key: item.key,
+          name: path.basename(item.key),
+          bytes: item.bytes,
+          kind: item.metadata.autoKind || item.metadata.type || item.key.split('/')[0]
+        }))
+      };
+      if (req.method === 'GET') return send(res, 200, summary);
+
+      const removed = new Set();
+      const failed = [];
+      for (const item of plan.deletable) {
+        try {
+          await fs.unlink(await resolveAssetKey(item.key));
+          removed.add(item.key);
+        } catch (error) {
+          if (error?.code === 'ENOENT') removed.add(item.key);
+          else failed.push({ key: item.key, error: error?.message || String(error) });
+        }
+      }
+
+      await updateJson('asset-metadata.json', {}, (all) => {
+        for (const key of removed) delete all[key];
+        return all;
+      });
+      await updateJson('asset-links.json', [], (links) => links.filter((link) => !removed.has(link.key)));
+      await updateJson('element-links.json', [], (links) => links.filter((link) => !removed.has(link.key)));
+      await updateJson('series.json', [], (all) => all.map((series) => ({
+        ...series,
+        assetKeys: (series.assetKeys || []).filter((key) => !removed.has(key))
+      })));
+      await updateJson('scripts.json', [], (all) => all.map((script) => ({
+        ...script,
+        scenes: (script.scenes || []).map((scene) => ({
+          ...scene,
+          shots: (scene.shots || []).map((shot) => ({
+            ...shot,
+            assetKeys: (shot.assetKeys || []).filter((key) => !removed.has(key)),
+            audioKeys: (shot.audioKeys || []).filter((key) => !removed.has(key))
+          }))
+        }))
+      })));
+      const cleanedHistory = await updateJson('history.json', [], (all) => all.map((entry) => ({
+        ...entry,
+        outputs: (entry.outputs || []).filter((key) => !removed.has(key)),
+        refs: (entry.refs || []).filter((key) => !removed.has(key))
+      })).filter((entry) => entry.outputs.length));
+      await updateJson('audio-captions.json', {}, (captions) => {
+        for (const key of removed) delete captions[key];
+        return captions;
+      });
+
+      const finalizedAt = Date.now();
+      let updatedProject = null;
+      await updateJson('automations.json', [], (all) => all.map((project) => {
+        if (project.id !== projectId) return project;
+        updatedProject = {
+          ...project,
+          finalization: {
+            finalizedAt,
+            deletedCount: removed.size,
+            deletedBytes: plan.deletable.filter((item) => removed.has(item.key)).reduce((sum, item) => sum + item.bytes, 0),
+            retainedActiveCount: plan.activeCount,
+            retainedSharedCount: plan.sharedCount,
+            failedCount: failed.length
+          },
+          updatedAt: finalizedAt
+        };
+        return updatedProject;
+      }));
+      return send(res, 200, {
+        ...summary,
+        deleted: removed.size,
+        failed,
+        project: automationForClient(updatedProject),
+        history: cleanedHistory.slice(0, 200)
+      });
     }
 
     const automationMusicMatch = /^\/api\/automations\/([a-z0-9]+)\/music\/(auto-select|generate)$/.exec(p);
@@ -3116,6 +3656,7 @@ const server = http.createServer(async (req, res) => {
         const avatarIds = framing === 'split' ? [wideAvatarId, closeAvatarId] : [framing === 'close' ? closeAvatarId : wideAvatarId];
         const aspectRatio = ['16:9', '9:16', '4:5', '5:4', '1:1', 'auto'].includes(project.config?.aspectRatio) ? project.config.aspectRatio : '9:16';
         const resolution = project.config?.resolution === '1K' ? '720p' : '1080p';
+        const { width, height } = automationVideoDimensions(aspectRatio);
         const generateClip = async (audioPath, index) => {
           const buffer = await fs.readFile(audioPath);
           const extension = path.extname(audioPath).toLowerCase();
@@ -3200,7 +3741,6 @@ const server = http.createServer(async (req, res) => {
         if (segmentVideoKeys.length === 2) {
           const videoPaths = [];
           for (const key of segmentVideoKeys) videoPaths.push(await resolveAssetKey(key));
-          const { width, height } = automationVideoDimensions(aspectRatio);
           const name = `${ts()}-auto-heygen-unido-${newId()}.mp4`;
           const outPath = path.join(outDir, name);
           const args = ['-y', '-i', videoPaths[0], '-i', videoPaths[1], '-filter_complex',
@@ -3214,11 +3754,34 @@ const server = http.createServer(async (req, res) => {
           videoKey = `video/${name}`;
         }
 
+        const captionAudioKeys = audioGroups.flat();
+        const captionAudioPaths = [];
+        for (const key of captionAudioKeys) captionAudioPaths.push(await resolveAssetKey(key));
+        const motionOverlay = await renderAutomationMotionOverlay({
+          project,
+          block,
+          audioKeys: captionAudioKeys,
+          audioPaths: captionAudioPaths,
+          ffmpegExecutable,
+          width,
+          height,
+          outDir
+        });
         const textLayerKey = String(body.textLayerKey || '');
-        if (/^(generated|uploads)\//.test(textLayerKey)) {
+        if (motionOverlay) {
+          const baseVideoPath = await resolveAssetKey(videoKey);
+          const name = `${ts()}-auto-heygen-remotion-${newId()}.mp4`;
+          const outPath = path.join(outDir, name);
+          const args = ['-y', '-i', baseVideoPath, '-c:v', 'libvpx', '-i', motionOverlay.path, '-filter_complex',
+            `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=25[base];` +
+            `[1:v]scale=${width}:${height},format=rgba,setpts=PTS-STARTPTS[layer];` +
+            '[base][layer]overlay=0:0:shortest=1:format=auto,format=yuv420p[v]',
+            '-map', '[v]', '-map', '0:a?', '-c:v', 'libx264', '-c:a', 'aac', '-b:a', '192k', '-shortest', outPath];
+          await runFfmpeg(ffmpegExecutable, args);
+          videoKey = `video/${name}`;
+        } else if (/^(generated|uploads)\//.test(textLayerKey)) {
           const baseVideoPath = await resolveAssetKey(videoKey);
           const textLayerPath = await resolveAssetKey(textLayerKey);
-          const { width, height } = automationVideoDimensions(aspectRatio);
           const name = `${ts()}-auto-heygen-texto-${newId()}.mp4`;
           const outPath = path.join(outDir, name);
           const args = ['-y', '-i', baseVideoPath, '-i', textLayerPath, '-filter_complex',
@@ -3241,22 +3804,167 @@ const server = http.createServer(async (req, res) => {
           }
           if (!segmentVideoKeys.includes(videoKey)) metadata[videoKey] = {
             type: 'video', modelId: 'ffmpeg', modelName: 'HeyGen · composición local', ts: Date.now(), category,
-            automationId: projectId, blockId: block.id, heygenFraming: framing, characterId: character.id, cost: 0
+            automationId: projectId, blockId: block.id, heygenFraming: framing, characterId: character.id,
+            motionOverlayKey: motionOverlay?.key || null, cost: 0
           };
           return metadata;
         });
-        return send(res, 200, { videoKey, segmentVideoKeys, framing, characterId: character.id });
+        return send(res, 200, { videoKey, segmentVideoKeys, framing, characterId: character.id, motionOverlayKey: motionOverlay?.key || '' });
       } finally {
         for (const tempPath of temporaryAudioPaths) await fs.unlink(tempPath).catch(() => {});
       }
     }
 
-    // Muxea el video de un bloque: imagen fija (ya con el texto quemado) + audio(s)
-    // en secuencia → mp4 que dura lo que el audio. El overlay lo quema el cliente
-    // por canvas (WYSIWYG con el visualizador); acá solo se arma el video.
+    // Monta un bloque a partir de una secuencia ordenada de Assets. Cada imagen
+    // o video recibe la misma fracción de la duración de la voz; los videos se
+    // repiten si son más cortos. El audio original puede mezclarse o silenciarse.
+    const automationAssetBlockMatch = /^\/api\/automations\/([a-z0-9]+)\/asset-block$/.exec(p);
+    if (automationAssetBlockMatch && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const projectId = automationAssetBlockMatch[1];
+      const projects = await readJson('automations.json', []);
+      const project = projects.find((item) => item.id === projectId);
+      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
+      const block = project.blocks?.find((item) => item.id === String(body.blockId || ''));
+      if (!block) return send(res, 404, { error: 'Bloque no encontrado.' });
+      if (block.generator !== 'assets') return send(res, 400, { error: 'Este bloque no está configurado para usar Assets.' });
+      const assetKeys = normalizeAutomationAssetKeys(block.assetKeys);
+      if (!assetKeys.length) return send(res, 400, { error: 'Elegí al menos una imagen o video para este bloque.' });
+      const audioKeys = (Array.isArray(body.audioKeys) ? body.audioKeys : []).map(String).filter((key) => /^audio\//.test(key));
+      if (!audioKeys.length) return send(res, 400, { error: 'Falta el audio narrado del bloque.' });
+
+      const cfg = await getConfig();
+      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
+      const assetPaths = await Promise.all(assetKeys.map((key) => resolveAssetKey(key)));
+      const audioPaths = await Promise.all(audioKeys.map((key) => resolveAssetKey(key)));
+      const allStats = await Promise.all([...assetPaths, ...audioPaths].map((filePath) => fs.stat(filePath).catch(() => null)));
+      if (allStats.some((stat) => !stat?.isFile())) return send(res, 400, { error: 'No encuentro uno o más Assets seleccionados.' });
+      const audioDurations = await Promise.all(audioPaths.map((audioPath) => probeMediaDuration(ffmpegExecutable, audioPath)));
+      if (audioDurations.some((duration) => !duration)) return send(res, 400, { error: 'No pude calcular la duración de todos los audios.' });
+      const exactDuration = audioDurations.reduce((sum, duration) => sum + duration, 0);
+      const segmentDuration = exactDuration / assetPaths.length;
+      const { width, height } = automationVideoDimensions(project.config?.aspectRatio);
+      const outDir = resolveDir(cfg.paths.video);
+      await fs.mkdir(outDir, { recursive: true });
+      const name = `${ts()}-auto-assets-${sanitizeName(block.title || block.id)}-${newId()}.mp4`;
+      const outPath = path.join(outDir, name);
+      const isVideo = assetKeys.map((key) => key.startsWith('video/'));
+      const muteOriginal = block.assetMuteOriginal !== false;
+      const hasOriginalAudio = muteOriginal
+        ? isVideo.map(() => false)
+        : await Promise.all(assetPaths.map((assetPath, index) => isVideo[index] ? probeHasAudioStream(ffmpegExecutable, assetPath) : false));
+
+      const args = ['-y'];
+      for (let index = 0; index < assetPaths.length; index++) {
+        if (isVideo[index]) args.push('-stream_loop', '-1');
+        else args.push('-loop', '1', '-framerate', '25');
+        args.push('-i', assetPaths[index]);
+      }
+      const firstAudioInput = assetPaths.length;
+      for (const audioPath of audioPaths) args.push('-i', audioPath);
+
+      const motionOverlay = await renderAutomationMotionOverlay({
+        project, block, audioKeys, audioPaths, ffmpegExecutable, width, height, outDir,
+        textHints: (block.items || []).map((item) => item.text)
+      });
+      let layerInputIndex = -1;
+      if (motionOverlay) {
+        args.push('-c:v', 'libvpx', '-i', motionOverlay.path);
+        layerInputIndex = assetPaths.length + audioPaths.length;
+      } else {
+        const textLayerKey = String(body.textLayerKey || '');
+        if (!/^(generated|uploads)\//.test(textLayerKey)) return send(res, 400, { error: 'Falta la capa estática de títulos y subtítulos.' });
+        const textLayerPath = await resolveAssetKey(textLayerKey);
+        args.push('-loop', '1', '-framerate', '25', '-i', textLayerPath);
+        layerInputIndex = assetPaths.length + audioPaths.length;
+      }
+
+      const filters = [];
+      const visualLabels = [];
+      const segment = segmentDuration.toFixed(6);
+      for (let index = 0; index < assetPaths.length; index++) {
+        filters.push(
+          `[${index}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+          `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
+          `trim=start=0:duration=${segment},setpts=PTS-STARTPTS,format=yuv420p[assetv${index}]`
+        );
+        visualLabels.push(`[assetv${index}]`);
+      }
+      filters.push(`${visualLabels.join('')}concat=n=${visualLabels.length}:v=1:a=0[visual]`);
+
+      if (audioPaths.length > 1) {
+        const voiceLabels = [];
+        for (let index = 0; index < audioPaths.length; index++) {
+          const label = `voicepart${index}`;
+          filters.push(`[${firstAudioInput + index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[${label}]`);
+          voiceLabels.push(`[${label}]`);
+        }
+        filters.push(`${voiceLabels.join('')}concat=n=${audioPaths.length}:v=0:a=1[voice]`);
+      } else {
+        filters.push(`[${firstAudioInput}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[voice]`);
+      }
+
+      let audioLabel = 'voice';
+      if (!muteOriginal) {
+        const originalLabels = [];
+        for (let index = 0; index < assetPaths.length; index++) {
+          const label = `original${index}`;
+          originalLabels.push(`[${label}]`);
+          if (hasOriginalAudio[index]) {
+            filters.push(
+              `[${index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
+              `atrim=start=0:duration=${segment},asetpts=PTS-STARTPTS[${label}]`
+            );
+          } else {
+            filters.push(`anullsrc=r=48000:cl=stereo,atrim=duration=${segment},asetpts=PTS-STARTPTS[${label}]`);
+          }
+        }
+        filters.push(`${originalLabels.join('')}concat=n=${originalLabels.length}:v=0:a=1[originalaudio]`);
+        filters.push('[voice][originalaudio]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[mixedaudio]');
+        audioLabel = 'mixedaudio';
+      }
+
+      filters.push(
+        `[${layerInputIndex}:v:0]scale=${width}:${height},format=rgba,trim=start=0:duration=${exactDuration.toFixed(6)},` +
+        'setpts=PTS-STARTPTS[layer]'
+      );
+      filters.push('[visual][layer]overlay=0:0:shortest=1:format=auto,format=yuv420p[vout]');
+      args.push(
+        '-filter_complex', filters.join(';'),
+        '-map', '[vout]', '-map', `[${audioLabel}]`,
+        '-t', exactDuration.toFixed(6), '-r', '25',
+        '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-shortest', outPath
+      );
+      await runFfmpeg(ffmpegExecutable, args);
+      const videoKey = `video/${name}`;
+      await updateJson('asset-metadata.json', {}, (metadata) => {
+        metadata[videoKey] = {
+          type: 'video', modelId: 'ffmpeg', modelName: 'Automatizador · Assets', ts: Date.now(),
+          category: `Auto: ${project.name}`.slice(0, 80), automationId: projectId, blockId: block.id,
+          sourceAssetKeys: assetKeys, assetMuteOriginal: muteOriginal, segmentDuration,
+          motionOverlayKey: motionOverlay?.key || null, width, height, duration: exactDuration, cost: 0
+        };
+        return metadata;
+      });
+      return send(res, 200, {
+        videoKey, motionOverlayKey: motionOverlay?.key || '', assetKeys,
+        assetMuteOriginal: muteOriginal, segmentDuration, duration: exactDuration
+      });
+    }
+
+    // Muxea el video de un bloque: imagen fija + audio(s) en secuencia. Con texto
+    // dinámico activo, Remotion entrega una capa transparente sincronizada que
+    // FFmpeg compone sobre la imagen limpia.
     const automationVideoMatch = /^\/api\/automations\/([a-z0-9]+)\/video$/.exec(p);
     if (automationVideoMatch && req.method === 'POST') {
       const body = await readJsonBody(req);
+      const projectId = automationVideoMatch[1];
+      const projects = await readJson('automations.json', []);
+      const project = projects.find((item) => item.id === projectId);
+      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
+      const block = project.blocks?.find((item) => item.id === String(body.blockId || ''));
+      if (!block) return send(res, 404, { error: 'Bloque no encontrado.' });
       const cfg = await getConfig();
       const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
       const imageKey = String(body.imageKey || '');
@@ -3274,9 +3982,40 @@ const server = http.createServer(async (req, res) => {
       const outDir = resolveDir(cfg.paths.video);
       await fs.mkdir(outDir, { recursive: true });
       const outPath = path.join(outDir, name);
+      const detectedDimensions = await probeVideoDimensions(ffmpegExecutable, imgPath);
+      const fallbackDimensions = automationVideoDimensions(project.config?.aspectRatio);
+      const width = detectedDimensions?.width || fallbackDimensions.width;
+      const height = detectedDimensions?.height || fallbackDimensions.height;
+      const motionOverlay = await renderAutomationMotionOverlay({
+        project,
+        block,
+        audioKeys,
+        audioPaths,
+        ffmpegExecutable,
+        width,
+        height,
+        outDir,
+        textHints: (block.items || []).map((item) => item.text)
+      });
       const args = ['-y', '-loop', '1', '-i', imgPath];
       for (const a of audioPaths) args.push('-i', a);
-      if (audioPaths.length > 1) {
+      if (motionOverlay) args.push('-c:v', 'libvpx', '-i', motionOverlay.path);
+      if (motionOverlay) {
+        const filters = [];
+        let audioMap = '1:a';
+        if (audioPaths.length > 1) {
+          const inputs = audioPaths.map((_, i) => `[${i + 1}:a]`).join('');
+          filters.push(`${inputs}concat=n=${audioPaths.length}:v=0:a=1[a]`);
+          audioMap = '[a]';
+        }
+        const overlayInputIndex = audioPaths.length + 1;
+        filters.push(
+          `[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1,fps=25[base]`,
+          `[${overlayInputIndex}:v]scale=${width}:${height},format=rgba,setpts=PTS-STARTPTS[motion]`,
+          '[base][motion]overlay=0:0:shortest=1:format=auto,format=yuv420p[v]'
+        );
+        args.push('-filter_complex', filters.join(';'), '-map', '[v]', '-map', audioMap);
+      } else if (audioPaths.length > 1) {
         const inputs = audioPaths.map((_, i) => `[${i + 1}:a]`).join('');
         args.push('-filter_complex', `${inputs}concat=n=${audioPaths.length}:v=0:a=1[a]`, '-map', '0:v', '-map', '[a]');
       } else {
@@ -3284,7 +4023,7 @@ const server = http.createServer(async (req, res) => {
       }
       // dimensiones pares (requisito de yuv420p) y cierre al terminar el audio
       args.push('-c:v', 'libx264', '-tune', 'stillimage', '-pix_fmt', 'yuv420p',
-        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-r', '25',
+        ...(motionOverlay ? [] : ['-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2']), '-r', '25',
         '-c:a', 'aac', '-b:a', '192k');
       // -shortest por sí solo puede conservar varios segundos de fotogramas en
       // cola cuando la imagen fija tarda más en codificarse que el audio en
@@ -3296,10 +4035,10 @@ const server = http.createServer(async (req, res) => {
       const key = `video/${name}`;
       const category = String(body.category || '').slice(0, 80);
       await updateJson('asset-metadata.json', {}, (m) => {
-        m[key] = { type: 'video', modelId: 'ffmpeg', modelName: 'Automatizador', ts: Date.now(), category, automationId: automationVideoMatch[1], blockId: String(body.blockId || '') };
+        m[key] = { type: 'video', modelId: 'ffmpeg', modelName: 'Automatizador', ts: Date.now(), category, automationId: projectId, blockId: block.id, motionOverlayKey: motionOverlay?.key || null };
         return m;
       });
-      return send(res, 200, { videoKey: key });
+      return send(res, 200, { videoKey: key, motionOverlayKey: motionOverlay?.key || '' });
     }
 
     // Ensambla los MP4 terminados de todos los bloques, respetando exactamente
@@ -3587,6 +4326,69 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { project: updatedProject, finalOutput: updatedProject.finalOutput });
     }
 
+    // Regenera exclusivamente la capa animada de títulos/subtítulos de un
+    // bloque. Reutiliza los audios existentes y no llama a ningún proveedor.
+    const automationTextLayerMatch = /^\/api\/automations\/([a-z0-9]+)\/text-layer$/.exec(p);
+    if (automationTextLayerMatch && req.method === 'POST') {
+      const projectId = automationTextLayerMatch[1];
+      const body = await readJsonBody(req);
+      const projects = await readJson('automations.json', []);
+      const project = projects.find((item) => item.id === projectId);
+      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
+      if (!normalizeAutomationDynamicText(project.config?.dynamicText).enabled) {
+        return send(res, 400, { error: 'Este proyecto no tiene texto dinámico activo.' });
+      }
+      const block = (project.blocks || []).find((item) => item.id === String(body.blockId || ''));
+      if (!block) return send(res, 404, { error: 'Bloque no encontrado.' });
+      const output = project.outputs?.[block.id] || {};
+      const audioKeys = (Array.isArray(output.audioKeys) ? output.audioKeys : [])
+        .map(String).filter((key) => /^audio\//.test(key));
+      if (!audioKeys.length) return send(res, 400, { error: `Faltan los audios existentes de “${block.title || block.id}”.` });
+      const cfg = await getConfig();
+      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
+      const audioPaths = await Promise.all(audioKeys.map((key) => resolveAssetKey(key)));
+      const fallbackDimensions = automationVideoDimensions(project.config?.aspectRatio);
+      let detectedDimensions = null;
+      if (/^video\//.test(String(output.videoKey || ''))) {
+        const blockVideoPath = await resolveAssetKey(output.videoKey).catch(() => null);
+        if (blockVideoPath) detectedDimensions = await probeVideoDimensions(ffmpegExecutable, blockVideoPath);
+      }
+      const width = Number(project.finalOutput?.width) || detectedDimensions?.width || fallbackDimensions.width;
+      const height = Number(project.finalOutput?.height) || detectedDimensions?.height || fallbackDimensions.height;
+      const outDir = resolveDir(cfg.paths.video);
+      await fs.mkdir(outDir, { recursive: true });
+      const rendered = await renderAutomationMotionOverlay({
+        project,
+        block,
+        audioKeys,
+        audioPaths,
+        ffmpegExecutable,
+        width,
+        height,
+        outDir,
+        textHints: (block.items || []).map((item) => item.text)
+      });
+      if (!rendered?.key) return send(res, 500, { error: 'Remotion no devolvió la nueva capa de texto.' });
+      let updatedProject = null;
+      await updateJson('automations.json', [], (all) => all.map((item) => {
+        if (item.id !== projectId) return item;
+        updatedProject = {
+          ...item,
+          outputs: {
+            ...(item.outputs || {}),
+            [block.id]: {
+              ...(item.outputs?.[block.id] || {}),
+              motionOverlayKey: rendered.key,
+              textRefreshedAt: Date.now()
+            }
+          },
+          updatedAt: Date.now()
+        };
+        return updatedProject;
+      }));
+      return send(res, 200, { project: automationForClient(updatedProject), motionOverlayKey: rendered.key });
+    }
+
     // Posproducción opcional: reconstruye cada toma desde su imagen limpia o los
     // segmentos originales de HeyGen, aplica efecto y máscara, y recién después
     // agrega la capa PNG de texto. Reutiliza el audio del MP4 final, no llama
@@ -3602,10 +4404,29 @@ const server = http.createServer(async (req, res) => {
       }
 
       const body = await readJsonBody(req);
+      const textRefreshTarget = ['final', 'effect'].includes(body.textRefreshTarget)
+        ? body.textRefreshTarget
+        : '';
+      const isTextRefresh = Boolean(textRefreshTarget);
+      const textLayersRefreshed = isTextRefresh || body.textLayersRefreshed === true;
+      if (textRefreshTarget === 'effect' && !project.effectOutput?.videoKey) {
+        return send(res, 400, { error: 'El proyecto todavía no tiene una versión con efectos para actualizar.' });
+      }
+      if (textRefreshTarget === 'final' && project.effectOutput?.videoKey) {
+        return send(res, 400, { error: 'Ya existe una versión con efectos; la actualización de textos debe aplicarse solamente sobre esa versión.' });
+      }
+      const applyEffects = !isTextRefresh || textRefreshTarget === 'effect';
+      const preservedEffect = textRefreshTarget === 'effect' ? {
+        preset: project.effectOutput.preset,
+        intensity: project.effectOutput.intensity,
+        maskEnabled: project.effectOutput.maskEnabled,
+        maskColor: project.effectOutput.maskColor,
+        maskOpacity: project.effectOutput.maskOpacity
+      } : null;
       const effect = normalizeAutomationVideoEffect({
         ...project.config?.videoEffect,
-        ...(body.videoEffect || body || {}),
-        enabled: true
+        ...(preservedEffect || body.videoEffect || body || {}),
+        enabled: applyEffects
       });
       const sourceVideoKey = String(project.finalOutput.videoKey);
       if (!/^video\//.test(sourceVideoKey)) return send(res, 400, { error: 'El ensamble final no es un video válido.' });
@@ -3623,31 +4444,41 @@ const server = http.createServer(async (req, res) => {
       if (!duration) return send(res, 400, { error: 'No pude leer la duración del ensamble. Verificá que ffprobe esté junto a ffmpeg.' });
 
       const blockSources = [];
+      const dynamicTextEnabled = normalizeAutomationDynamicText(project.config?.dynamicText).enabled;
       for (const block of project.blocks || []) {
         const output = project.outputs?.[block.id] || {};
         const imageKey = String(output.imageKey || '');
         const textLayerKey = String(output.textLayerKey || '');
+        const motionOverlayKey = String(output.motionOverlayKey || '');
         const blockVideoKey = String(output.videoKey || '');
         const isHeyGen = block.generator === 'heygen' || output.generator === 'heygen';
+        const isAssetBlock = block.generator === 'assets' || output.generator === 'assets';
+        const selectedAssetKeys = normalizeAutomationAssetKeys(block.assetKeys);
         const heygenSegmentKeys = (Array.isArray(output.heygenSegmentVideoKeys) ? output.heygenSegmentVideoKeys : [])
           .map(String)
           .filter((key) => /^video\//.test(key));
-        if (!isHeyGen && !/^(generated|uploads)\//.test(imageKey)) {
+        if (!isHeyGen && !isAssetBlock && !/^(generated|uploads)\//.test(imageKey)) {
           return send(res, 400, { error: `Falta la imagen limpia de “${block.title || block.id}”.` });
         }
         if (isHeyGen && !heygenSegmentKeys.length) {
           return send(res, 400, { error: `Faltan los planos originales de HeyGen de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.` });
         }
-        if (!/^(generated|uploads)\//.test(textLayerKey)) {
-          return send(res, 400, { error: `Falta la capa de subtítulos de “${block.title || block.id}”. Volvé a aplicar el efecto para prepararla.` });
+        if (isAssetBlock && !selectedAssetKeys.length) {
+          return send(res, 400, { error: `Faltan los Assets seleccionados de “${block.title || block.id}”.` });
+        }
+        const layerKey = dynamicTextEnabled ? motionOverlayKey : textLayerKey;
+        const layerIsVideo = dynamicTextEnabled;
+        if (layerIsVideo ? !/^video\//.test(layerKey) : !/^(generated|uploads)\//.test(layerKey)) {
+          return send(res, 400, { error: `Falta la capa ${layerIsVideo ? 'animada' : 'de subtítulos'} de “${block.title || block.id}”. Volvé a generar esa toma para prepararla.` });
         }
         if (!/^video\//.test(blockVideoKey)) {
           return send(res, 400, { error: `Falta el video terminado de “${block.title || block.id}”.` });
         }
-        const visualKeys = isHeyGen ? heygenSegmentKeys : [imageKey];
+        const visualKeys = isHeyGen ? heygenSegmentKeys : isAssetBlock ? selectedAssetKeys : [imageKey];
+        const visualKinds = visualKeys.map((key) => key.startsWith('video/') ? 'video' : 'image');
         const [visualPaths, textLayerPath, blockVideoPath] = await Promise.all([
           Promise.all(visualKeys.map((key) => resolveAssetKey(key))),
-          resolveAssetKey(textLayerKey),
+          resolveAssetKey(layerKey),
           resolveAssetKey(blockVideoKey)
         ]);
         const stats = await Promise.all([
@@ -3658,7 +4489,11 @@ const server = http.createServer(async (req, res) => {
         if (stats.some((stat) => !stat?.isFile())) {
           return send(res, 400, { error: `No encuentro todos los materiales locales de “${block.title || block.id}”.` });
         }
-        blockSources.push({ block, kind: isHeyGen ? 'video' : 'image', visualPaths, textLayerPath, blockVideoPath });
+        blockSources.push({
+          block,
+          kind: isHeyGen ? 'heygen' : isAssetBlock ? 'assets' : 'image',
+          visualPaths, visualKinds, textLayerPath, layerIsVideo, blockVideoPath
+        });
       }
       if (!blockSources.length) return send(res, 400, { error: 'El proyecto no tiene tomas para procesar.' });
 
@@ -3669,9 +4504,11 @@ const server = http.createServer(async (req, res) => {
         return send(res, 400, { error: 'No pude calcular la duración de todas las tomas. Verificá que ffprobe esté junto a ffmpeg.' });
       }
       const contentDuration = blockDurations.reduce((sum, blockDuration) => sum + blockDuration, 0);
-      const effectFilters = automationVideoEffectFilters(effect, width, height);
-      const maskFilter = automationVideoMaskFilter(effect);
-      const name = `${ts()}-efecto-${effect.preset}-${sanitizeName(project.name)}-${newId()}.mp4`;
+      const effectFilters = applyEffects ? automationVideoEffectFilters(effect, width, height) : 'format=yuv420p';
+      const maskFilter = applyEffects ? automationVideoMaskFilter(effect) : '';
+      const name = isTextRefresh
+        ? `${ts()}-textos-${textRefreshTarget}-${sanitizeName(project.name)}-${newId()}.mp4`
+        : `${ts()}-efecto-${effect.preset}-${sanitizeName(project.name)}-${newId()}.mp4`;
       const outDir = resolveDir(cfg.paths.video);
       await fs.mkdir(outDir, { recursive: true });
       const outPath = path.join(outDir, name);
@@ -3679,12 +4516,15 @@ const server = http.createServer(async (req, res) => {
       let nextInputIndex = 1;
       for (const source of blockSources) {
         source.visualInputIndexes = [];
-        for (const visualPath of source.visualPaths) {
-          if (source.kind === 'image') args.push('-loop', '1', '-framerate', '25');
+        for (const [visualIndex, visualPath] of source.visualPaths.entries()) {
+          if (source.visualKinds[visualIndex] === 'image') args.push('-loop', '1', '-framerate', '25');
+          else if (source.kind === 'assets') args.push('-stream_loop', '-1');
           args.push('-i', visualPath);
           source.visualInputIndexes.push(nextInputIndex++);
         }
-        args.push('-loop', '1', '-framerate', '25', '-i', source.textLayerPath);
+        if (!source.layerIsVideo) args.push('-loop', '1', '-framerate', '25');
+        else args.push('-c:v', 'libvpx');
+        args.push('-i', source.textLayerPath);
         source.layerInputIndex = nextInputIndex++;
       }
       const filters = [
@@ -3702,6 +4542,20 @@ const server = http.createServer(async (req, res) => {
             `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
             `${effectFilters}${maskFilter},trim=start=0:end=${blockDuration},setpts=PTS-STARTPTS[effectbg${index}]`
           );
+        } else if (source.kind === 'assets') {
+          const assetSegmentDuration = Number(blockDuration) / source.visualInputIndexes.length;
+          const assetLabels = [];
+          for (const [assetIndex, inputIndex] of source.visualInputIndexes.entries()) {
+            const label = `assetfx${index}_${assetIndex}`;
+            filters.push(
+              `[${inputIndex}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+              `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
+              `${effectFilters}${maskFilter},trim=start=0:duration=${assetSegmentDuration.toFixed(6)},` +
+              `setpts=PTS-STARTPTS[${label}]`
+            );
+            assetLabels.push(`[${label}]`);
+          }
+          filters.push(`${assetLabels.join('')}concat=n=${assetLabels.length}:v=1:a=0[effectbg${index}]`);
         } else {
           const segmentLabels = [];
           for (const [segmentIndex, inputIndex] of source.visualInputIndexes.entries()) {
@@ -3727,7 +4581,7 @@ const server = http.createServer(async (req, res) => {
         filters.push(
           `[${layerInputIndex}:v:0]format=rgba,scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
           `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1,` +
-          `trim=start=0:end=${blockDuration},setpts=PTS-STARTPTS,format=rgba[textlayer${index}]`
+          `${source.layerIsVideo ? 'fps=25,' : ''}trim=start=0:end=${blockDuration},setpts=PTS-STARTPTS,format=rgba[textlayer${index}]`
         );
         filters.push(
           `[effectbg${index}][textlayer${index}]overlay=x=0:y=0:shortest=1:format=auto,` +
@@ -3756,7 +4610,15 @@ const server = http.createServer(async (req, res) => {
         '-c:a', 'copy', '-movflags', '+faststart',
         outPath
       );
-      await runFfmpeg(ffmpegExecutable, args);
+      if (automationAssemblyJobs.has(projectId)) {
+        return send(res, 409, { error: 'Este proyecto ya tiene una posproducción en curso. Esperá a que termine.' });
+      }
+      automationAssemblyJobs.add(projectId);
+      try {
+        await runFfmpeg(ffmpegExecutable, args);
+      } finally {
+        automationAssemblyJobs.delete(projectId);
+      }
 
       const videoKey = `video/${name}`;
       const processedAt = Date.now();
@@ -3765,22 +4627,24 @@ const server = http.createServer(async (req, res) => {
         metadata[videoKey] = {
           type: 'video',
           modelId: 'ffmpeg',
-          modelName: 'Posproducción FFmpeg',
+          modelName: isTextRefresh ? 'Textos actualizados · FFmpeg' : 'Posproducción FFmpeg',
           ts: processedAt,
           category: `Auto: ${project.name}`,
           automationId: project.id,
-          autoKind: 'post-effect',
+          autoKind: isTextRefresh ? `text-refresh-${textRefreshTarget}` : 'post-effect',
           sourceVideoKey,
-          effectPreset: effect.preset,
-          effectName: presetName,
-          effectIntensity: effect.intensity,
-          maskEnabled: effect.maskEnabled,
-          maskColor: effect.maskColor,
-          maskOpacity: effect.maskOpacity,
+          effectPreset: applyEffects ? effect.preset : null,
+          effectName: applyEffects ? presetName : null,
+          effectIntensity: applyEffects ? effect.intensity : null,
+          maskEnabled: applyEffects ? effect.maskEnabled : false,
+          maskColor: applyEffects ? effect.maskColor : null,
+          maskOpacity: applyEffects ? effect.maskOpacity : 0,
           width,
           height,
           subtitleLayerCount: blockSources.length,
           subtitlesPreserved: true,
+          textsRefreshed: textLayersRefreshed,
+          textRefreshTarget: textRefreshTarget || null,
           logoPreserved: project.finalOutput.includeLogos === true,
           cost: 0
         };
@@ -3790,38 +4654,66 @@ const server = http.createServer(async (req, res) => {
       let updatedProject = null;
       await updateJson('automations.json', [], (all) => all.map((item) => {
         if (item.id !== projectId) return item;
-        updatedProject = {
+        const baseProject = {
           ...item,
           config: {
             ...item.config,
-            videoEffect: effect,
+            videoEffect: isTextRefresh ? item.config?.videoEffect : effect,
+            dynamicText: normalizeAutomationDynamicText(item.config?.dynamicText),
             transitionSound: normalizeAutomationTransitionSound(item.config?.transitionSound),
             music: normalizeAutomationMusic(item.config?.music, item.requirements?.music),
             overlay: normalizeAutomationOverlay(item.config?.overlay),
             titleOverlay: normalizeAutomationTitleOverlay(item.config?.titleOverlay, item.blocks, item.integration?.scriptTitle || item.name)
           },
-          effectOutput: {
-            videoKey,
-            sourceVideoKey,
-            processedAt,
-            preset: effect.preset,
-            presetName,
-            intensity: effect.intensity,
-            maskEnabled: effect.maskEnabled,
-            maskColor: effect.maskColor,
-            maskOpacity: effect.maskOpacity,
-            width,
-            height,
-            subtitleLayerCount: blockSources.length,
-            subtitlesPreserved: true,
-            logoPreserved: project.finalOutput.includeLogos === true
-          },
+          textRefreshRequiredAt: textLayersRefreshed ? null : item.textRefreshRequiredAt,
           updatedAt: processedAt
         };
+        const nextEffectOutput = {
+          ...(isTextRefresh ? item.effectOutput : {}),
+          videoKey,
+          sourceVideoKey,
+          processedAt,
+          preset: effect.preset,
+          presetName,
+          intensity: effect.intensity,
+          maskEnabled: effect.maskEnabled,
+          maskColor: effect.maskColor,
+          maskOpacity: effect.maskOpacity,
+          width,
+          height,
+          subtitleLayerCount: blockSources.length,
+          subtitlesPreserved: true,
+          textsRefreshed: textLayersRefreshed,
+          textRefreshedAt: textLayersRefreshed ? processedAt : null,
+          logoPreserved: project.finalOutput.includeLogos === true
+        };
+        if (textRefreshTarget === 'final') {
+          updatedProject = {
+            ...baseProject,
+            finalOutput: {
+              ...item.finalOutput,
+              videoKey,
+              assembledAt: processedAt,
+              textsRefreshed: true,
+              textRefreshedAt: processedAt
+            },
+            effectOutput: null
+          };
+        } else {
+          updatedProject = {
+            ...baseProject,
+            effectOutput: nextEffectOutput
+          };
+        }
         return updatedProject;
       }));
       if (!updatedProject) return send(res, 404, { error: 'El proyecto fue eliminado durante la posproducción.' });
-      return send(res, 200, { project: updatedProject, effectOutput: updatedProject.effectOutput });
+      return send(res, 200, {
+        project: updatedProject,
+        finalOutput: updatedProject.finalOutput,
+        effectOutput: updatedProject.effectOutput,
+        textRefreshTarget: textRefreshTarget || null
+      });
     }
 
     // Etiqueta assets con la categoría del proyecto (y bloque) para agruparlos en Assets.
@@ -3833,6 +4725,8 @@ const server = http.createServer(async (req, res) => {
           ...(m[k] || {}),
           category: body.category !== undefined ? String(body.category).slice(0, 80) : m[k]?.category,
           automationId: body.automationId !== undefined ? String(body.automationId) : m[k]?.automationId,
+          automationName: body.automationName !== undefined ? String(body.automationName).slice(0, 120) : m[k]?.automationName,
+          generatedByAutomation: body.automationId !== undefined ? true : m[k]?.generatedByAutomation,
           blockId: body.blockId !== undefined ? String(body.blockId) : m[k]?.blockId,
           autoKind: body.autoKind !== undefined ? String(body.autoKind) : m[k]?.autoKind
         };
@@ -3859,6 +4753,32 @@ const server = http.createServer(async (req, res) => {
         return all;
       });
       return send(res, 200, { key, ...updated });
+    }
+
+    if (p === '/api/assets/visual-metadata' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const keys = [...new Set((Array.isArray(body.keys) ? body.keys : [body.key]).map(String)
+        .filter((key) => /^(generated|uploads|video)\//.test(key)))].slice(0, 5000);
+      if (!keys.length) throw new Error('Elegí al menos una imagen o video para clasificar.');
+      for (const key of keys) await fs.access(await resolveAssetKey(key));
+      const category = sanitizeVisualCategory(body.category);
+      const tags = normalizeVisualTags(body.tags);
+      const updated = {};
+      await updateJson('asset-metadata.json', {}, (all) => {
+        for (const key of keys) {
+          const previous = all[key] || {};
+          updated[key] = {
+            ...previous,
+            type: key.startsWith('video/') ? 'video' : (previous.type || 'image'),
+            category,
+            tags,
+            metadataUpdatedAt: Date.now()
+          };
+          all[key] = updated[key];
+        }
+        return all;
+      });
+      return send(res, 200, { keys, metadata: updated });
     }
 
     if (p === '/api/generate/image' && req.method === 'POST') {
@@ -4093,6 +5013,10 @@ const server = http.createServer(async (req, res) => {
       const swap = (k) => (k === oldKey ? newKey : k);
       await updateJson('asset-metadata.json', {}, (m) => {
         if (m[oldKey]) { m[newKey] = m[oldKey]; delete m[oldKey]; }
+        for (const metadata of Object.values(m)) {
+          if (Array.isArray(metadata?.sourceAssetKeys)) metadata.sourceAssetKeys = metadata.sourceAssetKeys.map(swap);
+          if (metadata?.motionOverlayKey) metadata.motionOverlayKey = swap(metadata.motionOverlayKey);
+        }
         return m;
       });
       await updateJson('asset-links.json', [], (links) => links.map((l) => l.key === oldKey ? { ...l, key: newKey } : l));
@@ -4112,8 +5036,18 @@ const server = http.createServer(async (req, res) => {
       await updateJson('history.json', [], (all) => all.map((e) => ({
         ...e, outputs: (e.outputs || []).map(swap), refs: (e.refs || []).map(swap)
       })));
+      await updateJson('audio-captions.json', {}, (captions) => {
+        if (!captions[oldKey]) return captions;
+        captions[newKey] = { ...captions[oldKey], audioKey: newKey };
+        delete captions[oldKey];
+        return captions;
+      });
       await updateJson('automations.json', [], (all) => all.map((project) => ({
         ...project,
+        blocks: (project.blocks || []).map((block) => ({
+          ...block,
+          assetKeys: (block.assetKeys || []).map(swap)
+        })),
         generatedCharacters: Object.fromEntries(Object.entries(project.generatedCharacters || {}).map(([role, character]) => [role, {
           ...character,
           assetKey: swap(character.assetKey),
@@ -4125,7 +5059,9 @@ const server = http.createServer(async (req, res) => {
           imageKey: swap(output.imageKey),
           textImageKey: swap(output.textImageKey),
           textLayerKey: swap(output.textLayerKey),
+          motionOverlayKey: swap(output.motionOverlayKey),
           videoKey: swap(output.videoKey),
+          assetKeys: (output.assetKeys || []).map(swap),
           audioKeys: (output.audioKeys || []).map(swap)
         }])),
         config: {
@@ -4215,6 +5151,10 @@ const server = http.createServer(async (req, res) => {
         outputs: (entry.outputs || []).filter((key) => !removed.has(key)),
         refs: (entry.refs || []).filter((key) => !removed.has(key))
       })).filter((entry) => entry.outputs.length));
+      await updateJson('audio-captions.json', {}, (captions) => {
+        for (const key of removed) delete captions[key];
+        return captions;
+      });
       await updateJson('automations.json', [], (all) => all.map((project) => {
         const music = normalizeAutomationMusic(project.config?.music, project.requirements?.music);
         if (removed.has(music.assetKey)) music.assetKey = '';
@@ -4232,7 +5172,9 @@ const server = http.createServer(async (req, res) => {
           imageKey: removed.has(output.imageKey) ? null : output.imageKey,
           textImageKey: removed.has(output.textImageKey) ? null : output.textImageKey,
           textLayerKey: removed.has(output.textLayerKey) ? null : output.textLayerKey,
+          motionOverlayKey: removed.has(output.motionOverlayKey) ? null : output.motionOverlayKey,
           videoKey: removed.has(output.videoKey) ? null : output.videoKey,
+          assetKeys: (output.assetKeys || []).filter((key) => !removed.has(key)),
           audioKeys: (output.audioKeys || []).filter((key) => !removed.has(key))
         }]));
         const generatedCharacters = Object.fromEntries(Object.entries(project.generatedCharacters || {})
@@ -4244,7 +5186,11 @@ const server = http.createServer(async (req, res) => {
         };
         const overlay = normalizeAutomationOverlay(project.config?.overlay);
         if (removed.has(overlay.previewBg)) overlay.previewBg = '';
-        return { ...project, generatedCharacters, assignments, outputs, config: { ...project.config, music, overlay }, finalOutput, effectOutput };
+        const blocks = (project.blocks || []).map((block) => ({
+          ...block,
+          assetKeys: (block.assetKeys || []).filter((key) => !removed.has(key))
+        }));
+        return { ...project, blocks, generatedCharacters, assignments, outputs, config: { ...project.config, music, overlay }, finalOutput, effectOutput };
       }));
       return send(res, 200, { ok: true, deleted: allowed.length, history: cleaned.slice(0, 200) });
     }
