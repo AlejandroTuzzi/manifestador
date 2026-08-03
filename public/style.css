@@ -707,7 +707,7 @@ h3 { font-size: 15px; }
   border-radius: 0; overflow: hidden;
   border: 1px solid var(--border);
 }
-.ref-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ref-thumb img, .ref-thumb video { width: 100%; height: 100%; object-fit: cover; display: block; background: #050208; }
 .ref-thumb .rm {
   position: absolute; top: 2px; right: 2px;
   width: 18px; height: 18px; border: none; border-radius: 0;
@@ -1333,7 +1333,13 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
   border: 2px solid transparent; aspect-ratio: 1; position: relative;
 }
 .picker-grid .pick:hover { border-color: var(--pink); }
-.picker-grid .pick img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.picker-grid .pick img, .picker-grid .pick video { width: 100%; height: 100%; object-fit: cover; display: block; background: #050208; }
+.picker-grid .picker-audio {
+  width: 100%; height: 100%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px;
+  color: var(--pink); background: radial-gradient(circle at center, rgba(236,72,153,.16), #050208 72%);
+}
+.picker-grid .picker-audio small { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
 .picker-grid .pick .p-label {
   position: absolute; left: 0; right: 0; bottom: 0;
   font-size: 9.5px; padding: 10px 6px 4px; color: #e6dcf7;

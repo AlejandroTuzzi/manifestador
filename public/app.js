@@ -403,7 +403,6 @@ function renderVideoControls() {
   $('#videoAudioRow').hidden = isHeyGen || !m.audio;
   $('#heygenVideoControls').hidden = !isHeyGen;
   $('#h3VideoControls').hidden = !isH3;
-  $('#h3MediaRow').hidden = !isH3 || state.video.mode !== 'reference';
   $('#h3ContextIr').checked = isH3 && state.video.h3ContextIr;
   $('#videoRefsStrip').closest('.control-row').hidden = isHeyGen && m.requiresRegisteredCharacter;
   $('#btnShotList').hidden = isHeyGen;
@@ -501,22 +500,43 @@ function renderRefs() {
     const add = document.createElement('button');
     add.className = 'ref-add';
     add.textContent = '+';
-    add.title = 'Agregar imagen de referencia';
+    add.title = isVideo && currentVideoModel()?.provider === 'minimax' && state.video.mode === 'reference'
+      ? 'Agregar imagen, video o audio de referencia'
+      : 'Agregar imagen de referencia';
     add.addEventListener('click', () => openPicker());
     strip.appendChild(add);
   }
 }
 
-function addRef(key, fromChar = false) {
+function addRef(key, fromChar = false, kind = 'image') {
   const m = activeRefModel();
   const maxRefs = activeRefLimit();
-  if (state.refs.some((r) => r.key === key)) return;
+  const normalizedKind = ['image', 'video', 'audio'].includes(kind) ? kind : 'image';
+  const isH3Reference = state.mode === 'video'
+    && currentVideoModel()?.provider === 'minimax'
+    && state.video.mode === 'reference';
+  if (state.refs.some((r) => r.key === key)) return false;
+  if (normalizedKind !== 'image' && !isH3Reference) {
+    toast('Este modo sólo admite imágenes como referencia.', 'err');
+    return false;
+  }
   if (state.refs.length >= maxRefs) {
-    return toast(`${m.name} admite hasta ${maxRefs} referencia(s) en este modo`, 'err');
+    toast(`${m.name} admite hasta ${maxRefs} referencia(s) en este modo`, 'err');
+    return false;
+  }
+  if (isH3Reference) {
+    const mediaLimit = m.mediaLimits?.[normalizedKind];
+    const kindCount = state.refs.filter((ref) => referenceKind(ref) === normalizedKind).length;
+    if (mediaLimit != null && kindCount >= mediaLimit) {
+      const label = normalizedKind === 'image' ? 'imágenes' : normalizedKind === 'video' ? 'videos' : 'audios';
+      toast(`MiniMax H3 admite hasta ${mediaLimit} ${label} de referencia.`, 'err');
+      return false;
+    }
   }
   // las fotos de personajes llevan siempre el nombre como etiqueta (editable con T)
-  state.refs.push({ key, fromChar, kind: 'image', label: refLabelSuggestion(key) });
+  state.refs.push({ key, fromChar, kind: normalizedKind, label: normalizedKind === 'image' ? refLabelSuggestion(key) : '' });
   renderRefs();
+  return true;
 }
 
 // nombre sugerido para etiquetar una ref que viene de un personaje o elemento
@@ -1472,15 +1492,30 @@ function renderPromptsPanel() {
 
 // replaceIndex null = agregar una referencia nueva; un índice = reemplazar esa
 // referencia in-place (conserva posición, cita y etiqueta)
+function isH3MultimediaPicker() {
+  return state.mode === 'video'
+    && currentVideoModel()?.provider === 'minimax'
+    && state.video.mode === 'reference'
+    && state.replaceRefIndex == null
+    && !state.promptStyleImagePick
+    && !state.overlayBgPick;
+}
+
 function openPicker(replaceIndex = null) {
   state.replaceRefIndex = replaceIndex;
-  $('#pickerTitle').textContent = replaceIndex != null ? 'Reemplazar imagen de referencia' : 'Elegir imagen de referencia';
+  const multimedia = isH3MultimediaPicker();
+  $('#pickerTitle').textContent = replaceIndex != null
+    ? 'Reemplazar imagen de referencia'
+    : multimedia ? 'Elegir referencia para MiniMax H3' : 'Elegir imagen de referencia';
+  $('#pickerVideoTab').hidden = !multimedia;
+  $('#pickerAudioTab').hidden = !multimedia;
+  if (!multimedia && ['video', 'audio'].includes(state.pickerTab)) state.pickerTab = 'upload';
   $('#pickerModal').hidden = false;
   setPickerTab(state.pickerTab || 'upload');
 }
 
 // una selección del picker: reemplaza si estamos en ese modo, o agrega
-function pickRef(key) {
+function pickRef(key, kind = 'image') {
   if (state.promptStyleImagePick) {
     state.promptStyleImagePick = false;
     state.replaceRefIndex = null;
@@ -1499,7 +1534,7 @@ function pickRef(key) {
     return;
   }
   if (state.replaceRefIndex != null) return replaceRef(state.replaceRefIndex, key);
-  addRef(key);
+  return addRef(key, false, kind);
 }
 
 function replaceRef(i, key) {
@@ -1520,23 +1555,34 @@ $$('#pickerTabs .tab').forEach((t) => {
 });
 
 async function setPickerTab(src) {
+  const multimedia = isH3MultimediaPicker();
+  if (['video', 'audio'].includes(src) && !multimedia) src = 'upload';
   state.pickerTab = src;
   $$('#pickerTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.src === src));
   const body = $('#pickerBody');
 
   if (src === 'upload') {
-    body.innerHTML = '<div class="drop-zone" id="dropZone">Arrastrá imágenes acá<br>o hacé clic para elegir archivos</div>';
+    const input = $('#fileInput');
+    input.accept = multimedia
+      ? '.jpg,.jpeg,.png,.webp,.mp4,.mov,.mp3,.wav,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,audio/mpeg,audio/wav'
+      : 'image/*';
+    body.innerHTML = `<div class="drop-zone" id="dropZone">${multimedia
+      ? 'Arrastrá imágenes, videos o audios acá<br><small>H3: JPG, PNG, WebP, MP4, MOV, MP3 o WAV</small>'
+      : 'Arrastrá imágenes acá'}<br>o hacé clic para elegir archivos</div>`;
     const dz = $('#dropZone');
     dz.addEventListener('click', () => {
-      $('#fileInput').onchange = async (e) => { await uploadFiles([...e.target.files], true); e.target.value = ''; };
-      $('#fileInput').click();
+      input.onchange = async (e) => { await uploadFiles([...e.target.files], true); e.target.value = ''; };
+      input.click();
     });
     dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('over'); });
     dz.addEventListener('dragleave', () => dz.classList.remove('over'));
     dz.addEventListener('drop', async (e) => {
       e.preventDefault();
       dz.classList.remove('over');
-      await uploadFiles([...e.dataTransfer.files].filter((f) => f.type.startsWith('image/')), true);
+      const files = [...e.dataTransfer.files].filter((file) => multimedia
+        ? ['image', 'video', 'audio'].includes(referenceFileKind(file))
+        : referenceFileKind(file) === 'image');
+      await uploadFiles(files, true);
     });
     return;
   }
@@ -1561,16 +1607,20 @@ async function setPickerTab(src) {
   } else {
     await refreshAssets();
     const items = state.assets[src] || [];
+    const kind = src === 'video' ? 'video' : src === 'audio' ? 'audio' : 'image';
     body.innerHTML = items.length
       ? `<div class="picker-grid">${items.map((a) =>
-          `<div class="pick" data-key="${esc(a.key)}"><img src="${fileUrl(a.key)}" loading="lazy" alt=""><div class="p-label">${esc(a.name)}</div></div>`
+          `<div class="pick pick-${kind}" data-key="${esc(a.key)}" data-kind="${kind}">${kind === 'video'
+            ? `<video src="${fileUrl(a.key)}" muted preload="metadata"></video>`
+            : kind === 'audio' ? `<span class="picker-audio">${IC('mic', 'ic ic-lg')}<small>Audio</small></span>`
+              : `<img src="${fileUrl(a.key)}" loading="lazy" alt="">`}<div class="p-label">${esc(a.name)}</div></div>`
         ).join('')}</div>`
       : '<div class="empty-note">Nada por acá todavía.</div>';
   }
 
   $$('#pickerBody .pick').forEach((p) => {
     p.addEventListener('click', () => {
-      pickRef(p.dataset.key);
+      pickRef(p.dataset.key, p.dataset.kind || 'image');
       $('#pickerModal').hidden = true;
     });
   });
@@ -1672,28 +1722,78 @@ function renderPickerSeries() {
   });
 }
 
+function referenceFileKind(file) {
+  const type = String(file?.type || '').toLowerCase();
+  const name = String(file?.name || '').toLowerCase();
+  if (type.startsWith('video/') || /\.(mp4|mov)$/.test(name)) return 'video';
+  if (type.startsWith('audio/') || /\.(mp3|wav)$/.test(name)) return 'audio';
+  if (type.startsWith('image/') || /\.(png|jpe?g|webp)$/.test(name)) return 'image';
+  return '';
+}
+
 async function uploadFiles(files, asRefs) {
   if (!files.length) return;
   // en modo reemplazo solo tiene sentido una imagen: se usa la primera
   const replacing = asRefs && state.replaceRefIndex != null;
   const list = replacing ? files.slice(0, 1) : files;
+  const multimedia = asRefs && isH3MultimediaPicker();
+  const initialRefTotal = state.refs.length;
+  const initialRefCounts = state.refs.reduce((counts, ref) => {
+    counts[referenceKind(ref)]++;
+    return counts;
+  }, { image: 0, video: 0, audio: 0 });
+  const addedCounts = { image: 0, video: 0, audio: 0 };
+  let uploaded = 0;
   for (const f of list) {
     try {
+      const kind = referenceFileKind(f);
+      if (!kind || (!multimedia && kind !== 'image')) {
+        toast(`${f.name}: formato no admitido como referencia`, 'err');
+        continue;
+      }
+      if (multimedia) {
+        const totalLimit = activeRefLimit();
+        if (initialRefTotal + addedCounts.image + addedCounts.video + addedCounts.audio >= totalLimit) {
+          toast(`${f.name}: H3 admite hasta ${totalLimit} referencias en total`, 'err');
+          continue;
+        }
+        const mediaLimit = currentVideoModel()?.mediaLimits?.[kind];
+        if (mediaLimit != null && initialRefCounts[kind] + addedCounts[kind] >= mediaLimit) {
+          const label = kind === 'image' ? 'imágenes' : kind === 'video' ? 'videos' : 'audios';
+          toast(`${f.name}: H3 admite hasta ${mediaLimit} ${label} de referencia`, 'err');
+          continue;
+        }
+      }
       // el cuerpo de la petición admite 150 MB y el base64 infla ~33%
       if (f.size > 100 * 1024 * 1024) {
         toast(`${f.name}: pesa más de 100 MB, achicalo antes de subirlo`, 'err');
         continue;
       }
+      if (multimedia) {
+        const sizeLimitMb = { image: 30, video: 50, audio: 15 }[kind];
+        if (f.size > sizeLimitMb * 1024 * 1024) {
+          toast(`${f.name}: supera el máximo de ${sizeLimitMb} MB para referencias ${kind === 'image' ? 'de imagen' : kind === 'video' ? 'de video' : 'de audio'} de H3`, 'err');
+          continue;
+        }
+      }
       const dataUrl = await readFileAsDataUrl(f);
-      const { key } = await api('/api/upload', { method: 'POST', body: { name: f.name, dataUrl } });
-      if (asRefs) pickRef(key);
+      const upload = multimedia
+        ? kind === 'audio'
+          ? await api('/api/assets/audio', { method: 'POST', body: { name: f.name, dataUrl, audioKind: 'sound' } })
+          : await api('/api/assets/visual', { method: 'POST', body: { name: f.name, dataUrl, category: '', tags: [] } })
+        : await api('/api/upload', { method: 'POST', body: { name: f.name, dataUrl } });
+      const added = asRefs ? pickRef(upload.key, kind) : true;
+      if (added !== false) {
+        uploaded++;
+        addedCounts[kind]++;
+      }
     } catch (e) {
       toast(`${f.name}: ${e.message}`, 'err');
     }
   }
   if (asRefs) {
     $('#pickerModal').hidden = true;
-    if (!replacing) toast(`${list.length} imagen(es) subida(s) y agregada(s) como referencia`);
+    if (!replacing && uploaded) toast(`${uploaded} archivo${uploaded === 1 ? '' : 's'} subido${uploaded === 1 ? '' : 's'} y agregado${uploaded === 1 ? '' : 's'} como referencia`);
   } else {
     toast(`${files.length} imagen(es) subida(s)`);
   }
@@ -5518,8 +5618,8 @@ function renderAutomationAssetsPicker() {
   if (!picker) return;
   const search = String(picker.search || '').trim().toLocaleLowerCase('es');
   const selected = new Set(picker.keys);
-  const h3Picker = picker.purpose === 'h3' || picker.purpose === 'h3-block';
-  const sourceItems = h3Picker ? automationReferenceAssets() : automationVisualAssets();
+  const h3BlockPicker = picker.purpose === 'h3-block';
+  const sourceItems = h3BlockPicker ? automationReferenceAssets() : automationVisualAssets();
   const items = sourceItems.filter((item) =>
     (picker.zone === 'all' || item.zone === picker.zone)
     && (!search || String(item.name || item.key).toLocaleLowerCase('es').includes(search))
@@ -5543,7 +5643,7 @@ function renderAutomationAssetsPicker() {
         video: next.filter((candidate) => candidate.zone === 'video').length,
         audio: next.filter((candidate) => candidate.zone === 'audio').length
       };
-      if (h3Picker && (next.length > 12 || counts.image > 9 || counts.video > 3 || counts.audio > 3)) {
+      if (h3BlockPicker && (next.length > 12 || counts.image > 9 || counts.video > 3 || counts.audio > 3)) {
         return toast('MiniMax H3 admite hasta 12 referencias: 9 imágenes, 3 videos y 3 audios.', 'err');
       }
       picker.keys.push(item.key);
@@ -5556,7 +5656,7 @@ function renderAutomationAssetsPicker() {
     const item = automationVisualAsset(key);
     const preview = automationAssetPreview(item, key);
     return `<div class="automation-assets-order-item" data-order-key="${esc(key)}"><b>${index + 1}</b>${preview}<span title="${esc(item.name || key)}">${esc(item.name || key)}</span><button type="button" class="icon-btn" data-order-up${index ? '' : ' disabled'} title="Subir">↑</button><button type="button" class="icon-btn" data-order-down${index < picker.keys.length - 1 ? '' : ' disabled'} title="Bajar">↓</button><button type="button" class="icon-btn" data-order-remove title="Quitar">×</button></div>`;
-  }).join('') : `<span class="hint">${h3Picker ? 'Sin referencias: H3 generará desde texto si el modo lo permite.' : 'Elegí al menos una imagen o video.'}</span>`;
+  }).join('') : `<span class="hint">${h3BlockPicker ? 'Sin referencias: H3 generará desde texto si el modo lo permite.' : 'Elegí al menos una imagen o video.'}</span>`;
   $('#automationAssetsOrder').querySelectorAll('[data-order-key]').forEach((row) => {
     const key = row.dataset.orderKey;
     row.querySelector('[data-order-up]')?.addEventListener('click', () => {
@@ -5596,38 +5696,24 @@ async function openAutomationAssetsPicker(blockElement, block) {
   $('#automationAssetsModal').hidden = false;
 }
 
-async function openH3AssetsPicker({ blockElement = null, block = null } = {}) {
+async function openH3BlockAssetsPicker(blockElement, block) {
   try { await refreshAssets(); } catch { /* el modal mostrará el último estado disponible */ }
-  const isBlock = Boolean(blockElement && block);
-  let keys;
-  if (isBlock) {
-    const settings = blockElement.querySelector('[data-block-h3-settings]');
-    try { keys = JSON.parse(settings?.dataset.h3ReferenceKeys || '[]'); } catch { keys = []; }
-  } else {
-    keys = state.refs.map((ref) => ref.key);
-  }
+  const settings = blockElement.querySelector('[data-block-h3-settings]');
+  let keys = [];
+  try { keys = JSON.parse(settings?.dataset.h3ReferenceKeys || '[]'); } catch { keys = []; }
   state.automationAssetPicker = {
-    purpose: isBlock ? 'h3-block' : 'h3', blockElement, blockId: block?.id || '',
+    purpose: 'h3-block', blockElement, blockId: block?.id || '',
     keys: Array.isArray(keys) ? [...keys] : [], zone: 'all', search: ''
   };
   $('#automationAssetsAudioTab').hidden = false;
-  $('#automationAssetsTitle').textContent = isBlock
-    ? `Referencias H3 · ${block.title || 'Bloque'}`
-    : 'Referencias multimedia · MiniMax H3';
+  $('#automationAssetsTitle').textContent = `Referencias H3 · ${block.title || 'Bloque'}`;
   renderAutomationAssetsPicker();
   $('#automationAssetsModal').hidden = false;
 }
 
 function closeAutomationAssetsPicker(commit = false) {
   const picker = state.automationAssetPicker;
-  if (commit && picker?.purpose === 'h3') {
-    const previous = new Map(state.refs.map((ref) => [ref.key, ref]));
-    state.refs = picker.keys.map((key) => ({
-      ...(previous.get(key) || { key, label: '', fromChar: false }),
-      kind: automationVisualAsset(key).zone === 'video' ? 'video' : automationVisualAsset(key).zone === 'audio' ? 'audio' : 'image'
-    }));
-    renderRefs();
-  } else if (commit && picker?.purpose === 'h3-block' && picker.blockElement) {
+  if (commit && picker?.purpose === 'h3-block' && picker.blockElement) {
     const settings = picker.blockElement.querySelector('[data-block-h3-settings]');
     settings.dataset.h3ReferenceKeys = JSON.stringify(picker.keys);
     settings.querySelector('[data-block-h3-list]').innerHTML = automationBlockAssetSelectionMarkup(picker.keys);
@@ -5654,10 +5740,9 @@ $('#automationAssetsSearch').addEventListener('input', () => {
 $('#automationAssetsClose').addEventListener('click', () => closeAutomationAssetsPicker(false));
 $('#automationAssetsCancel').addEventListener('click', () => closeAutomationAssetsPicker(false));
 $('#automationAssetsDone').addEventListener('click', () => {
-  if (!state.automationAssetPicker?.keys.length && state.automationAssetPicker?.purpose !== 'h3') return toast('Elegí al menos un archivo.', 'err');
+  if (!state.automationAssetPicker?.keys.length) return toast('Elegí al menos un archivo.', 'err');
   closeAutomationAssetsPicker(true);
 });
-$('#h3PickMedia')?.addEventListener('click', () => openH3AssetsPicker());
 $('#automationAssetsModal').addEventListener('click', (event) => {
   if (event.target.id === 'automationAssetsModal') closeAutomationAssetsPicker(false);
 });
@@ -6768,7 +6853,7 @@ function renderAutomationProject() {
   $('#automationRoot').querySelectorAll('[data-pick-block-h3]').forEach((button) => button.addEventListener('click', () => {
     const blockElement = button.closest('.auto-block');
     const block = pr.blocks.find((item) => item.id === blockElement?.dataset.block);
-    if (blockElement && block) openH3AssetsPicker({ blockElement, block });
+    if (blockElement && block) openH3BlockAssetsPicker(blockElement, block);
   }));
 
   $('#automationRoot').querySelectorAll('[data-save-block]').forEach((button) => button.addEventListener('click', async () => {

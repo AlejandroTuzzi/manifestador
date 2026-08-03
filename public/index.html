@@ -226,11 +226,6 @@
             <label>Context-IR</label>
             <label class="poser-toggle"><input type="checkbox" id="h3ContextIr"> analizar todas las referencias y enriquecer el prompt antes de generar</label>
           </div>
-          <div class="control-row" id="h3MediaRow">
-            <label>Multimedia</label>
-            <button type="button" class="tool-btn" id="h3PickMedia"><svg class="ic"><use href="#i-folder"/></svg> Elegir imágenes, videos y audios</button>
-            <span class="hint">En Referencias: 9 imágenes, 3 videos y 3 audios; máximo 12 archivos. El audio necesita una imagen o video.</span>
-          </div>
         </div>
         <div id="heygenVideoControls" class="heygen-video-controls" hidden>
           <div class="control-row"><label>Conexión</label><select id="heygenAuthMode" class="select"><option value="oauth">OAuth · plan web</option><option value="key">API key · saldo API</option></select><span id="heygenVideoAuthStatus" class="hint"></span></div>
@@ -968,6 +963,8 @@
       <button class="tab" data-src="elements">Locaciones/Objetos</button>
       <button class="tab" data-src="series">Series</button>
       <button class="tab" data-src="poses">Poses</button>
+      <button class="tab" data-src="video" id="pickerVideoTab" hidden>Videos</button>
+      <button class="tab" data-src="audio" id="pickerAudioTab" hidden>Audio</button>
     </div>
     <div id="pickerBody" class="picker-body"></div>
   </div>
