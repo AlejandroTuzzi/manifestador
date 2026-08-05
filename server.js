@@ -1765,6 +1765,256 @@ const DEFAULT_AUTOMATION_CONFIG = {
   dynamicText: { ...DEFAULT_DYNAMIC_TEXT }
 };
 
+const DEFAULT_SUBTITLER_PROJECT = {
+  id: '',
+  name: 'Proyecto de subtítulos',
+  sourceVideoKey: '',
+  sourceName: '',
+  languageCode: '',
+  noVerbatim: true,
+  transcript: null,
+  lines: [],
+  config: {
+    overlay: { ...DEFAULT_OVERLAY },
+    titleOverlay: { ...DEFAULT_TITLE_OVERLAY, mode: 'project' },
+    dynamicText: { ...DEFAULT_DYNAMIC_TEXT, enabled: true }
+  },
+  outputs: [],
+  createdAt: 0,
+  updatedAt: 0
+};
+
+const DEFAULT_SUBTITLER_STORE = {
+  activeProjectId: '',
+  projects: []
+};
+
+function normalizeSubtitleLine(line = {}, index = 0) {
+  const start = Math.max(0, Number(line.start) || 0);
+  const end = Math.max(start + 0.04, Number(line.end) || start + 0.04);
+  const sourceWords = (Array.isArray(line.sourceWords) ? line.sourceWords : []).slice(0, 80).map((word) => {
+    const wordStart = Math.max(0, Number(word.start) || 0);
+    return {
+      text: String(word.text || '').trim().slice(0, 120),
+      start: wordStart,
+      end: Math.max(wordStart + 0.01, Number(word.end) || wordStart + 0.01),
+      speakerId: String(word.speakerId || '').slice(0, 80)
+    };
+  }).filter((word) => word.text);
+  const sourceText = String(line.sourceText || '').trim().slice(0, 2000);
+  return {
+    id: String(line.id || `line-${index + 1}`).replace(/[^a-z0-9_-]/gi, '').slice(0, 80) || `line-${index + 1}`,
+    start: Number(start.toFixed(3)),
+    end: Number(end.toFixed(3)),
+    text: String(line.text || sourceText).trim().slice(0, 2000),
+    sourceText,
+    speakerId: String(line.speakerId || '').slice(0, 80),
+    sourceWords
+  };
+}
+
+function normalizeSubtitlerProject(saved = {}, index = 0) {
+  const sourceVideoKey = /^video\/[\w./ -]+$/i.test(String(saved.sourceVideoKey || ''))
+    && !String(saved.sourceVideoKey).includes('..') ? String(saved.sourceVideoKey) : '';
+  const fallbackId = index === 0 ? 'subtitulos-inicial' : `subtitulos-${index + 1}`;
+  return {
+    ...DEFAULT_SUBTITLER_PROJECT,
+    ...(saved || {}),
+    id: String(saved.id || fallbackId).replace(/[^a-z0-9_-]/gi, '').slice(0, 80) || fallbackId,
+    name: String(saved.name || 'Proyecto de subtítulos').trim().slice(0, 160) || 'Proyecto de subtítulos',
+    sourceVideoKey,
+    sourceName: String(saved.sourceName || '').slice(0, 260),
+    languageCode: /^[a-z]{2,3}$/i.test(String(saved.languageCode || '')) ? String(saved.languageCode).toLowerCase() : '',
+    noVerbatim: saved.noVerbatim !== false,
+    transcript: saved.transcript && typeof saved.transcript === 'object' ? {
+      text: String(saved.transcript.text || '').slice(0, 500000),
+      languageCode: String(saved.transcript.languageCode || '').slice(0, 20),
+      languageProbability: Number(saved.transcript.languageProbability) || 0,
+      modelId: 'scribe_v2',
+      transcribedAt: Number(saved.transcript.transcribedAt) || 0,
+      duration: Math.max(0, Number(saved.transcript.duration) || 0)
+    } : null,
+    lines: (Array.isArray(saved.lines) ? saved.lines : []).slice(0, 10000).map(normalizeSubtitleLine).filter((line) => line.text),
+    config: {
+      overlay: normalizeAutomationOverlay(saved.config?.overlay),
+      titleOverlay: normalizeAutomationTitleOverlay(saved.config?.titleOverlay, [], saved.config?.titleOverlay?.text || ''),
+      dynamicText: normalizeAutomationDynamicText({ enabled: true, ...(saved.config?.dynamicText || {}) })
+    },
+    outputs: (Array.isArray(saved.outputs) ? saved.outputs : []).filter((item) => /^video\//.test(String(item?.videoKey || ''))).slice(0, 20),
+    createdAt: Number(saved.createdAt) || Number(saved.updatedAt) || 0,
+    updatedAt: Number(saved.updatedAt) || 0
+  };
+}
+
+function normalizeSubtitlerStore(saved = {}) {
+  // Migra automáticamente el formato inicial de un único trabajo a proyectos.
+  const legacyProject = !Array.isArray(saved?.projects) && saved && typeof saved === 'object'
+    && (saved.sourceVideoKey || saved.transcript || saved.lines?.length || saved.outputs?.length)
+    ? [{ ...saved, id: saved.id || 'subtitulos-inicial', name: saved.name || saved.sourceName || 'Proyecto de subtítulos' }]
+    : [];
+  let projects = (Array.isArray(saved?.projects) ? saved.projects : legacyProject)
+    .slice(0, 500)
+    .map(normalizeSubtitlerProject);
+  if (!projects.length) {
+    projects = [normalizeSubtitlerProject({
+      id: 'subtitulos-inicial', name: 'Proyecto de subtítulos', createdAt: Date.now(), updatedAt: Date.now()
+    })];
+  }
+  const ids = new Set();
+  projects = projects.map((project, index) => {
+    let id = project.id;
+    while (ids.has(id)) id = `${project.id}-${index + 1}`;
+    ids.add(id);
+    return { ...project, id };
+  });
+  const requestedActive = String(saved?.activeProjectId || '');
+  return {
+    ...DEFAULT_SUBTITLER_STORE,
+    activeProjectId: projects.some((project) => project.id === requestedActive) ? requestedActive : projects[0].id,
+    projects
+  };
+}
+
+function subtitlerForClient(storeValue = {}) {
+  const store = normalizeSubtitlerStore(storeValue);
+  const active = store.projects.find((project) => project.id === store.activeProjectId) || store.projects[0];
+  return {
+    ...active,
+    activeProjectId: active.id,
+    projects: [...store.projects]
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .map((project) => ({
+        id: project.id,
+        name: project.name,
+        sourceName: project.sourceName,
+        lineCount: project.lines.length,
+        outputCount: project.outputs.length,
+        dynamicTextEnabled: project.config.dynamicText.enabled,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt
+      }))
+  };
+}
+
+function replaceSubtitlerProject(storeValue, projectValue) {
+  const store = normalizeSubtitlerStore(storeValue);
+  const project = normalizeSubtitlerProject(projectValue);
+  return {
+    activeProjectId: project.id,
+    projects: store.projects.map((item) => item.id === project.id ? project : item)
+  };
+}
+
+function activeSubtitlerProject(storeValue = {}, requestedId = '') {
+  const store = normalizeSubtitlerStore(storeValue);
+  const id = String(requestedId || store.activeProjectId);
+  return store.projects.find((project) => project.id === id)
+    || store.projects.find((project) => project.id === store.activeProjectId)
+    || store.projects[0];
+}
+
+function joinTranscriptTokens(tokens) {
+  return tokens.join(' ').replace(/\s+([,.;:!?…])/g, '$1').replace(/([¿¡])\s+/g, '$1').trim();
+}
+
+function subtitleLinesFromScribe(words = []) {
+  const timed = [];
+  for (const item of words) {
+    const text = String(item?.text || '').trim();
+    const start = Number(item?.start);
+    const end = Number(item?.end);
+    if (!text || !Number.isFinite(start) || !Number.isFinite(end) || end < start) continue;
+    if (item.type && item.type !== 'word') continue;
+    timed.push({ text, start, end, speakerId: String(item.speaker_id || '') });
+  }
+  const lines = [];
+  let current = [];
+  const flush = () => {
+    if (!current.length) return;
+    const sourceText = joinTranscriptTokens(current.map((word) => word.text));
+    lines.push(normalizeSubtitleLine({
+      id: `line-${lines.length + 1}`,
+      start: current[0].start,
+      end: current[current.length - 1].end,
+      text: sourceText,
+      sourceText,
+      speakerId: current.find((word) => word.speakerId)?.speakerId || '',
+      sourceWords: current
+    }, lines.length));
+    current = [];
+  };
+  for (const word of timed) {
+    const nextText = joinTranscriptTokens([...current.map((item) => item.text), word.text]);
+    const speakerChanged = current.length && word.speakerId && current[0].speakerId && word.speakerId !== current[0].speakerId;
+    const longGap = current.length && word.start - current[current.length - 1].end > 0.7;
+    if (current.length && (speakerChanged || longGap || current.length >= 7 || nextText.length > 48)) flush();
+    current.push(word);
+    if (/[.!?…][”"']?$/.test(word.text) && current.length >= 3) flush();
+  }
+  flush();
+  return lines;
+}
+
+function subtitleWordsFromLines(lines = []) {
+  const words = [];
+  for (const [lineIndex, rawLine] of lines.entries()) {
+    const line = normalizeSubtitleLine(rawLine, lineIndex);
+    const tokens = String(line.text || '').split(/\s+/).filter(Boolean);
+    if (!tokens.length) continue;
+    const original = line.sourceWords || [];
+    const exactText = line.sourceText && line.text.trim() === line.sourceText.trim();
+    const originalStart = original[0]?.start ?? line.start;
+    const originalEnd = original.at(-1)?.end ?? line.end;
+    const originalSpan = Math.max(0.01, originalEnd - originalStart);
+    const targetSpan = Math.max(0.04, line.end - line.start);
+    const remapTime = (value) => line.start + targetSpan * Math.max(0, Math.min(1, (value - originalStart) / originalSpan));
+    if (original.length === tokens.length) {
+      for (const [index, token] of tokens.entries()) words.push({
+        text: token,
+        start: Number(remapTime(original[index].start).toFixed(3)),
+        end: Number(remapTime(original[index].end).toFixed(3))
+      });
+      continue;
+    }
+    if (exactText && original.length) {
+      for (const word of original) words.push({
+        text: word.text,
+        start: Number(remapTime(word.start).toFixed(3)),
+        end: Number(remapTime(word.end).toFixed(3))
+      });
+      continue;
+    }
+    const span = Math.max(0.04, line.end - line.start);
+    for (const [index, token] of tokens.entries()) {
+      words.push({
+        text: token,
+        start: Number((line.start + span * index / tokens.length).toFixed(3)),
+        end: Number((line.start + span * (index + 1) / tokens.length).toFixed(3))
+      });
+    }
+  }
+  return words.sort((left, right) => left.start - right.start || left.end - right.end);
+}
+
+async function transcribeSubtitleAudio({ apiKey, audioPath, languageCode = '', noVerbatim = true }) {
+  if (!apiKey) throw new Error('Falta la API key de ElevenLabs en Configuración.');
+  const audio = await fs.readFile(audioPath);
+  const form = new FormData();
+  form.append('file', new Blob([audio], { type: 'audio/mpeg' }), path.basename(audioPath));
+  form.append('model_id', 'scribe_v2');
+  form.append('timestamps_granularity', 'word');
+  form.append('tag_audio_events', 'false');
+  form.append('diarize', 'true');
+  form.append('no_verbatim', noVerbatim ? 'true' : 'false');
+  if (languageCode) form.append('language_code', languageCode);
+  const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+    method: 'POST', headers: { 'xi-api-key': apiKey }, body: form, signal: AbortSignal.timeout(30 * 60 * 1000)
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result?.detail?.message || result?.detail || result?.error || `ElevenLabs Scribe: HTTP ${response.status}`);
+  return result;
+}
+
 function normalizeAutomationMusic(saved = {}, requirement = {}) {
   const requiredTags = normalizeMusicTags(requirement);
   const music = {
@@ -1893,15 +2143,15 @@ function automationTitleText(project, block) {
   return { text: title.text || project.integration?.scriptTitle || project.name, config: title };
 }
 
-async function renderAutomationMotionOverlay({ project, block, audioKeys, audioPaths, ffmpegExecutable, width, height, outDir, textHints = [] }) {
-  const dynamic = normalizeAutomationDynamicText(project.config?.dynamicText);
-  if (!dynamic.enabled) return null;
-  const timeline = await automationCaptionTimeline({ audioKeys, audioPaths, ffmpegExecutable, textHints });
-  const duration = timeline.duration || await Promise.all(audioPaths.map((audioPath) => probeMediaDuration(ffmpegExecutable, audioPath)))
-    .then((items) => items.reduce((sum, item) => sum + (item || 0), 0));
-  if (!duration) throw new Error('No pude calcular la duración para los subtítulos dinámicos.');
-  const overlay = normalizeAutomationOverlay(project.config?.overlay);
-  const { text: titleText, config: title } = automationTitleText(project, block);
+async function renderSubtitleMotionOverlay({
+  dynamicText, overlay: savedOverlay, titleOverlay: savedTitle, titleText = '', timeline,
+  duration, width, height, outDir, fileLabel = 'subtitulos', metadata: assetMetadata = {}
+}) {
+  const dynamic = normalizeAutomationDynamicText(dynamicText);
+  const overlay = normalizeAutomationOverlay(savedOverlay);
+  const title = normalizeAutomationTitleOverlay(savedTitle, [], titleText);
+  const renderDuration = Number(duration) || Number(timeline?.duration) || 0;
+  if (!renderDuration) throw new Error('No pude calcular la duración para los subtítulos.');
   const scale = height / 1080;
   const fontFaces = await remotionFontFaces([
     overlay.font,
@@ -1924,14 +2174,14 @@ async function renderAutomationMotionOverlay({ project, block, audioKeys, audioP
     width,
     height,
     fps: 25,
-    durationSeconds: duration,
+    durationSeconds: renderDuration,
     fontFaces,
     title: {
       enabled: Boolean(titleText),
       text: titleText,
-      animation: dynamic.titleAnimation,
+      animation: dynamic.enabled ? dynamic.titleAnimation : 'none',
       start: 0,
-      duration: Math.min(duration, 3.4),
+      duration: Math.min(renderDuration, 3.4),
       x: title.x,
       y: title.y,
       align: title.align,
@@ -1952,9 +2202,9 @@ async function renderAutomationMotionOverlay({ project, block, audioKeys, audioP
       }
     },
     captions: {
-      enabled: timeline.words.length > 0,
-      words: timeline.words,
-      animation: dynamic.captionAnimation,
+      enabled: (timeline?.words || []).length > 0,
+      words: timeline?.words || [],
+      animation: dynamic.enabled ? dynamic.captionAnimation : 'none',
       wordsPerPage: dynamic.wordsPerPage,
       x: overlay.x,
       y: overlay.y,
@@ -1967,19 +2217,44 @@ async function renderAutomationMotionOverlay({ project, block, audioKeys, audioP
     }
   };
   await fs.mkdir(outDir, { recursive: true });
-  const name = `${ts()}-auto-remotion-${sanitizeName(block.title || block.id)}-${newId()}.webm`;
+  const name = `${ts()}-remotion-${sanitizeName(fileLabel)}-${newId()}.webm`;
   const outputPath = path.join(outDir, name);
   await renderDynamicTextOverlay({ outputPath, inputProps });
   const key = `video/${name}`;
-  await updateJson('asset-metadata.json', {}, (metadata) => ({
-    ...metadata,
+  await updateJson('asset-metadata.json', {}, (allMetadata) => ({
+    ...allMetadata,
     [key]: {
       type: 'video', modelId: 'remotion-dynamic-text', modelName: 'Remotion · texto dinámico', ts: Date.now(),
-      category: `Auto: ${project.name}`.slice(0, 80), automationId: project.id, blockId: block.id,
-      autoKind: 'dynamic-text-overlay', transparent: true, wordCount: timeline.words.length, duration, cost: 0
+      transparent: true, wordCount: (timeline?.words || []).length, duration: renderDuration, cost: 0,
+      ...assetMetadata
     }
   }));
-  return { key, path: outputPath, duration, wordCount: timeline.words.length };
+  return { key, path: outputPath, duration: renderDuration, wordCount: (timeline?.words || []).length };
+}
+
+async function renderAutomationMotionOverlay({ project, block, audioKeys, audioPaths, ffmpegExecutable, width, height, outDir, textHints = [] }) {
+  const dynamic = normalizeAutomationDynamicText(project.config?.dynamicText);
+  if (!dynamic.enabled) return null;
+  const timeline = await automationCaptionTimeline({ audioKeys, audioPaths, ffmpegExecutable, textHints });
+  const duration = timeline.duration || await Promise.all(audioPaths.map((audioPath) => probeMediaDuration(ffmpegExecutable, audioPath)))
+    .then((items) => items.reduce((sum, item) => sum + (item || 0), 0));
+  const { text: titleText, config: title } = automationTitleText(project, block);
+  return renderSubtitleMotionOverlay({
+    dynamicText: dynamic,
+    overlay: project.config?.overlay,
+    titleOverlay: title,
+    titleText,
+    timeline,
+    duration,
+    width,
+    height,
+    outDir,
+    fileLabel: `auto-${block.title || block.id}`,
+    metadata: {
+      category: `Auto: ${project.name}`.slice(0, 80), automationId: project.id, blockId: block.id,
+      autoKind: 'dynamic-text-overlay'
+    }
+  });
 }
 
 function automationProjectCostEstimate(project, pricing, assetMetadata) {
@@ -2241,7 +2516,8 @@ function automationForClient(project) {
 
 const AUTOMATION_CLEANUP_REFERENCE_FILES = [
   'asset-links.json', 'element-links.json', 'series.json', 'scripts.json',
-  'characters.json', 'elements.json', 'prompts.json', 'overlay-presets.json'
+  'characters.json', 'elements.json', 'prompts.json', 'overlay-presets.json',
+  'subtitler.json'
 ];
 
 function isCleanupAssetKey(value) {
@@ -2936,7 +3212,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations, fonts, overlayPresets, transitionSounds] = await Promise.all([
+      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations, fonts, overlayPresets, transitionSounds, subtitler] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
@@ -2951,7 +3227,8 @@ const server = http.createServer(async (req, res) => {
         readJson('automations.json', []),
         readJson('fonts.json', []),
         readJson('overlay-presets.json', []),
-        listTransitionSounds()
+        listTransitionSounds(),
+        readJson('subtitler.json', DEFAULT_SUBTITLER_STORE)
       ]);
       return send(res, 200, {
         config: publicConfig(cfg),
@@ -2973,6 +3250,7 @@ const server = http.createServer(async (req, res) => {
         automations: automations.map(automationForClient),
         fonts,
         overlayPresets,
+        subtitler: subtitlerForClient(subtitler),
         transitionSounds: transitionSounds.map((sound) => ({
           id: sound.id,
           category: sound.category,
@@ -3045,6 +3323,191 @@ const server = http.createServer(async (req, res) => {
         return all.filter((item) => item.id !== id);
       });
       return found ? send(res, 200, { ok: true }) : send(res, 404, { error: 'Estilo no encontrado.' });
+    }
+
+    // --- Subtitulador independiente: video → audio temporal → Scribe v2 →
+    // líneas editables → motor compartido Remotion → MP4 subtitulado. ---
+    if (p === '/api/subtitler' && req.method === 'GET') {
+      return send(res, 200, subtitlerForClient(await readJson('subtitler.json', DEFAULT_SUBTITLER_STORE)));
+    }
+    if (p === '/api/subtitler/projects' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const store = normalizeSubtitlerStore(await readJson('subtitler.json', DEFAULT_SUBTITLER_STORE));
+      const now = Date.now();
+      const project = normalizeSubtitlerProject({
+        id: newId(),
+        name: String(body.name || '').trim() || `Subtítulos ${store.projects.length + 1}`,
+        createdAt: now,
+        updatedAt: now,
+        config: {
+          overlay: { ...DEFAULT_OVERLAY },
+          titleOverlay: { ...DEFAULT_TITLE_OVERLAY, mode: 'project' },
+          dynamicText: { ...DEFAULT_DYNAMIC_TEXT, enabled: true }
+        }
+      }, store.projects.length);
+      const nextStore = { activeProjectId: project.id, projects: [project, ...store.projects] };
+      await writeJson('subtitler.json', nextStore);
+      return send(res, 200, subtitlerForClient(nextStore));
+    }
+    const subtitlerOpenMatch = p.match(/^\/api\/subtitler\/projects\/([a-z0-9_-]+)\/open$/i);
+    if (subtitlerOpenMatch && req.method === 'POST') {
+      const store = normalizeSubtitlerStore(await readJson('subtitler.json', DEFAULT_SUBTITLER_STORE));
+      const id = subtitlerOpenMatch[1];
+      if (!store.projects.some((project) => project.id === id)) return send(res, 404, { error: 'Proyecto de subtítulos no encontrado.' });
+      const nextStore = { ...store, activeProjectId: id };
+      await writeJson('subtitler.json', nextStore);
+      return send(res, 200, subtitlerForClient(nextStore));
+    }
+    const subtitlerDeleteMatch = p.match(/^\/api\/subtitler\/projects\/([a-z0-9_-]+)$/i);
+    if (subtitlerDeleteMatch && req.method === 'DELETE') {
+      const store = normalizeSubtitlerStore(await readJson('subtitler.json', DEFAULT_SUBTITLER_STORE));
+      const id = subtitlerDeleteMatch[1];
+      if (!store.projects.some((project) => project.id === id)) return send(res, 404, { error: 'Proyecto de subtítulos no encontrado.' });
+      let projects = store.projects.filter((project) => project.id !== id);
+      if (!projects.length) {
+        const now = Date.now();
+        projects = [normalizeSubtitlerProject({ id: newId(), name: 'Proyecto de subtítulos', createdAt: now, updatedAt: now })];
+      }
+      const nextStore = {
+        activeProjectId: store.activeProjectId === id ? projects[0].id : store.activeProjectId,
+        projects
+      };
+      await writeJson('subtitler.json', nextStore);
+      return send(res, 200, subtitlerForClient(nextStore));
+    }
+    if (p === '/api/subtitler' && req.method === 'PUT') {
+      const body = await readJsonBody(req);
+      const store = normalizeSubtitlerStore(await readJson('subtitler.json', DEFAULT_SUBTITLER_STORE));
+      const previous = activeSubtitlerProject(store, body.projectId);
+      const { projectId, projects, activeProjectId, id, ...changes } = body;
+      const next = normalizeSubtitlerProject({
+        ...previous,
+        ...changes,
+        id: previous.id,
+        config: { ...previous.config, ...(changes.config || {}) },
+        outputs: previous.outputs,
+        updatedAt: Date.now()
+      });
+      if (next.sourceVideoKey) await fs.access(await resolveAssetKey(next.sourceVideoKey));
+      const nextStore = replaceSubtitlerProject(store, next);
+      await writeJson('subtitler.json', nextStore);
+      return send(res, 200, subtitlerForClient(nextStore));
+    }
+    if (p === '/api/subtitler/transcribe' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const store = normalizeSubtitlerStore(await readJson('subtitler.json', DEFAULT_SUBTITLER_STORE));
+      const previous = activeSubtitlerProject(store, body.projectId);
+      const sourceVideoKey = String(body.sourceVideoKey || previous.sourceVideoKey || '');
+      if (!/^video\//.test(sourceVideoKey) || sourceVideoKey.includes('..')) {
+        return send(res, 400, { error: 'Elegí o subí un video antes de transcribir.' });
+      }
+      const cfg = await getConfig();
+      if (!cfg.keys.elevenlabs) return send(res, 400, { error: 'Falta la API key de ElevenLabs en Configuración.' });
+      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
+      const sourcePath = await resolveAssetKey(sourceVideoKey);
+      if (!(await probeHasAudioStream(ffmpegExecutable, sourcePath))) {
+        return send(res, 400, { error: 'El video no contiene una pista de audio para transcribir.' });
+      }
+      const duration = await probeMediaDuration(ffmpegExecutable, sourcePath);
+      const outDir = resolveDir(cfg.paths.video);
+      await fs.mkdir(outDir, { recursive: true });
+      const tempAudioPath = path.join(outDir, `.${ts()}-scribe-${newId()}.mp3`);
+      let transcription;
+      try {
+        await runFfmpeg(ffmpegExecutable, [
+          '-y', '-i', sourcePath, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '64k', tempAudioPath
+        ]);
+        transcription = await transcribeSubtitleAudio({
+          apiKey: cfg.keys.elevenlabs,
+          audioPath: tempAudioPath,
+          languageCode: /^[a-z]{2,3}$/i.test(String(body.languageCode || '')) ? String(body.languageCode).toLowerCase() : '',
+          noVerbatim: body.noVerbatim !== false
+        });
+      } finally {
+        await fs.unlink(tempAudioPath).catch(() => {});
+      }
+      const lines = subtitleLinesFromScribe(transcription?.words || []);
+      if (!lines.length) return send(res, 422, { error: 'ElevenLabs no detectó palabras con marcas temporales en este video.' });
+      const sourceName = path.basename(sourceVideoKey);
+      const next = normalizeSubtitlerProject({
+        ...previous,
+        sourceVideoKey,
+        sourceName,
+        languageCode: body.languageCode || '',
+        noVerbatim: body.noVerbatim !== false,
+        transcript: {
+          text: transcription.text || lines.map((line) => line.text).join(' '),
+          languageCode: transcription.language_code || '',
+          languageProbability: transcription.language_probability || 0,
+          modelId: 'scribe_v2',
+          transcribedAt: Date.now(),
+          duration: duration || lines[lines.length - 1].end
+        },
+        lines,
+        updatedAt: Date.now()
+      });
+      const nextStore = replaceSubtitlerProject(store, next);
+      await writeJson('subtitler.json', nextStore);
+      return send(res, 200, subtitlerForClient(nextStore));
+    }
+    if (p === '/api/subtitler/render' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const store = normalizeSubtitlerStore(await readJson('subtitler.json', DEFAULT_SUBTITLER_STORE));
+      const previous = activeSubtitlerProject(store, body.projectId);
+      const draft = normalizeSubtitlerProject({
+        ...previous,
+        ...body,
+        config: { ...previous.config, ...(body.config || {}) },
+        outputs: previous.outputs
+      });
+      if (!draft.sourceVideoKey) return send(res, 400, { error: 'Elegí o subí un video.' });
+      if (!draft.lines.length) return send(res, 400, { error: 'Primero transcribí el video y revisá sus líneas.' });
+      const words = subtitleWordsFromLines(draft.lines);
+      if (!words.length) return send(res, 400, { error: 'No quedaron palabras para subtitular.' });
+      const cfg = await getConfig();
+      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
+      const sourcePath = await resolveAssetKey(draft.sourceVideoKey);
+      const dimensions = await probeVideoDimensions(ffmpegExecutable, sourcePath);
+      const duration = await probeMediaDuration(ffmpegExecutable, sourcePath);
+      if (!dimensions || !duration) return send(res, 400, { error: 'No pude leer las dimensiones o duración del video.' });
+      const width = Math.max(2, Math.floor(dimensions.width / 2) * 2);
+      const height = Math.max(2, Math.floor(dimensions.height / 2) * 2);
+      const outDir = resolveDir(cfg.paths.video);
+      await fs.mkdir(outDir, { recursive: true });
+      const layer = await renderSubtitleMotionOverlay({
+        dynamicText: draft.config.dynamicText,
+        overlay: draft.config.overlay,
+        titleOverlay: draft.config.titleOverlay,
+        titleText: draft.config.titleOverlay.enabled ? draft.config.titleOverlay.text : '',
+        timeline: { words, duration }, duration, width, height, outDir,
+        fileLabel: `subtitulos-${draft.sourceName || 'video'}`,
+        metadata: { category: 'Subtitulador', subtitlerKind: 'text-overlay', subtitlerProjectId: draft.id, sourceVideoKey: draft.sourceVideoKey }
+      });
+      const outputName = `${ts()}-subtitulado-${sanitizeName(path.basename(draft.sourceVideoKey, path.extname(draft.sourceVideoKey)))}-${newId()}.mp4`;
+      const outputPath = path.join(outDir, outputName);
+      await runFfmpeg(ffmpegExecutable, [
+        '-y', '-i', sourcePath, '-c:v', 'libvpx', '-i', layer.path, '-filter_complex',
+        `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=25[base];` +
+        `[1:v]scale=${width}:${height},format=rgba,setpts=PTS-STARTPTS[layer];` +
+        '[base][layer]overlay=0:0:eof_action=pass:shortest=0:format=auto,format=yuv420p[v]',
+        '-map', '[v]', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
+        '-c:a', 'aac', '-b:a', '192k', '-t', String(duration), outputPath
+      ]);
+      const videoKey = `video/${outputName}`;
+      const renderedAt = Date.now();
+      await updateJson('asset-metadata.json', {}, (metadata) => ({
+        ...metadata,
+        [videoKey]: {
+          type: 'video', modelId: 'remotion-subtitler', modelName: 'Subtitulador · Remotion', ts: renderedAt,
+          category: 'Subtitulador', subtitlerKind: 'rendered-video', subtitlerProjectId: draft.id, sourceVideoKey: draft.sourceVideoKey,
+          motionOverlayKey: layer.key, wordCount: words.length, duration, cost: 0
+        }
+      }));
+      const output = { videoKey, motionOverlayKey: layer.key, sourceVideoKey: draft.sourceVideoKey, wordCount: words.length, duration, width, height, renderedAt };
+      const next = normalizeSubtitlerProject({ ...draft, outputs: [output, ...previous.outputs].slice(0, 20), updatedAt: renderedAt });
+      const nextStore = replaceSubtitlerProject(store, next);
+      await writeJson('subtitler.json', nextStore);
+      return send(res, 200, subtitlerForClient(nextStore));
     }
 
     if (p === '/api/config' && req.method === 'PUT') {

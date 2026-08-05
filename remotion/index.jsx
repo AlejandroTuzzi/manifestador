@@ -53,12 +53,13 @@ const AnimatedTitle = ({title}) => {
   const enter = spring({frame: localFrame, fps, config: {damping: 13, stiffness: 155, mass: .72}});
   const fadeOut = interpolate(localFrame, [durationFrames - Math.min(10, durationFrames / 3), durationFrames], [1, 0], clamp);
   const animation = title.animation || 'rise';
+  const staticTitle = animation === 'none';
   const rawText = transformText(String(title.text), title.style?.textTransform);
   const typedLength = Math.round(interpolate(localFrame, [0, Math.min(durationFrames * .7, fps * 1.4)], [0, rawText.length], {...clamp, easing: Easing.out(Easing.cubic)}));
   const displayText = animation === 'typewriter' ? rawText.slice(0, typedLength) : rawText;
   const translateY = animation === 'rise' ? interpolate(enter, [0, 1], [70, 0]) : 0;
   const rotation = animation === 'slam' ? interpolate(enter, [0, 1], [-4, 0]) : 0;
-  const scale = animation === 'slam'
+  const scale = staticTitle ? 1 : animation === 'slam'
     ? interpolate(enter, [0, 1], [1.55, 1])
     : interpolate(enter, [0, 1], [.88, 1]);
   const alignShift = title.align === 'left' ? '0%' : title.align === 'right' ? '-100%' : '-50%';
@@ -68,7 +69,7 @@ const AnimatedTitle = ({title}) => {
       width: `${title.maxWidthPct || 88}%`, textAlign: title.align || 'center',
       transform: `translate(${alignShift}, -50%) translateY(${translateY}px) rotate(${rotation}deg) scale(${scale})`,
       transformOrigin: title.align === 'left' ? 'left center' : title.align === 'right' ? 'right center' : 'center',
-      opacity: enter * fadeOut,
+      opacity: (staticTitle ? 1 : enter) * fadeOut,
       padding: title.style?.background ? '10px 18px' : 0,
       background: title.style?.background ? title.style.backgroundColor || 'rgba(0,0,0,.45)' : 'transparent',
       borderRadius: title.style?.background ? 10 : 0,
@@ -104,6 +105,7 @@ const AnimatedCaptions = ({captions}) => {
   if (time < first.start - .12 || time > last.end + .24) return null;
   const pageFrame = frame - Math.max(0, Math.floor((first.start - .08) * fps));
   const pageEnter = spring({frame: pageFrame, fps, config: {damping: 16, stiffness: 190, mass: .58}});
+  const staticCaptions = captions.animation === 'none';
   const alignShift = captions.align === 'left' ? '0%' : captions.align === 'right' ? '-100%' : '-50%';
   // El gap en `em` del contenedor tomaba los 16 px predeterminados del navegador,
   // no el tamaño real de los subtítulos. Además, el pop usa transform y no ocupa
@@ -123,8 +125,8 @@ const AnimatedCaptions = ({captions}) => {
       justifyContent: captions.align === 'left' ? 'flex-start' : captions.align === 'right' ? 'flex-end' : 'center',
       alignItems: 'baseline', columnGap: `${wordGapPx}px`, rowGap: `${lineGapPx}px`,
       textAlign: captions.align || 'center', lineHeight: 1.12,
-      transform: `translate(${alignShift}, -50%) translateY(${interpolate(pageEnter, [0, 1], [26, 0])}px)`,
-      opacity: pageEnter,
+      transform: `translate(${alignShift}, -50%) translateY(${staticCaptions ? 0 : interpolate(pageEnter, [0, 1], [26, 0])}px)`,
+      opacity: staticCaptions ? 1 : pageEnter,
       padding: captions.background ? '10px 16px' : 0,
       background: captions.background ? captions.backgroundColor || 'rgba(0,0,0,.45)' : 'transparent',
       borderRadius: captions.background ? 10 : 0
@@ -135,7 +137,7 @@ const AnimatedCaptions = ({captions}) => {
         const localWordFrame = frame - Math.floor(word.start * fps);
         const wordEnter = spring({frame: localWordFrame, fps, config: {damping: 11, stiffness: 240, mass: .42}});
         const animation = captions.animation || 'word-pop';
-        const activeScale = active && animation === 'word-pop' ? interpolate(wordEnter, [0, 1], [1.42, 1.1]) : active ? 1.06 : 1;
+        const activeScale = staticCaptions ? 1 : active && animation === 'word-pop' ? interpolate(wordEnter, [0, 1], [1.42, 1.1]) : active ? 1.06 : 1;
         const bounce = active && animation === 'bounce' ? interpolate(wordEnter, [0, .55, 1], [18, -9, 0]) : 0;
         const style = active ? captions.activeStyle : captions.style;
         return (

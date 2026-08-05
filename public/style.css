@@ -1145,6 +1145,8 @@ audio::-webkit-media-controls-volume-slider {
 
 .key-row { display: flex; gap: 6px; }
 .key-row input { flex: 1; min-width: 0; }
+.key-visibility-btn { width: 34px; height: 34px; flex: 0 0 34px; align-self: center; }
+.key-visibility-btn.active { color: var(--pink); border-color: var(--pink); background: rgba(236,72,153,.08); }
 .test-btn { flex-shrink: 0; padding: 8px 11px; }
 .test-result { font-size: 11.5px; font-weight: 600; min-height: 14px; }
 .test-result.ok { color: #86efac; }
@@ -1243,6 +1245,8 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .login-box { max-width: 390px; display: flex; flex-direction: column; gap: 14px; text-align: center; padding: 32px; }
 .login-box p { color: var(--muted); }
 .login-box input { width: 100%; background: rgba(10,5,18,.7); border: 1px solid var(--border); color: var(--text); padding: 12px; font: inherit; }
+.login-password-row { width: 100%; }
+.login-password-row .key-visibility-btn { height: 42px; }
 .login-box .generate-btn { align-self: stretch; }
 .login-mark img { width: 72px; height: 72px; object-fit: contain; }
 .modal-box {
@@ -1800,6 +1804,155 @@ body.asset-player-open main { padding-bottom: 132px; }
   font-size: 12px;
 }
 .heygen-card-badge { margin: 0 0 8px; }
+
+/* ---------- subtitulador ---------- */
+.subtitler-project-panel {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.1fr) minmax(240px, .9fr) minmax(220px, .8fr) auto;
+  align-items: end;
+  gap: 12px;
+  border-color: rgba(236,72,153,.4);
+  background: linear-gradient(135deg, rgba(236,72,153,.075), rgba(139,92,246,.055), rgba(10,5,18,.45));
+}
+.subtitler-project-copy { align-self: center; }
+.subtitler-project-copy h3 { margin-bottom: 5px; }
+.subtitler-project-panel > label { display: grid; gap: 6px; min-width: 0; }
+.subtitler-project-panel > label > span {
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .45px;
+  text-transform: uppercase;
+}
+.subtitler-project-panel input,
+.subtitler-project-panel .select { width: 100%; min-width: 0; }
+.subtitler-project-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.subtitler-motion-badge {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  padding: 5px 9px;
+  border: 1px solid var(--border-soft);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .45px;
+  text-transform: uppercase;
+}
+.subtitler-motion-badge.active { border-color: rgba(52,211,153,.45); color: #86efac; background: rgba(52,211,153,.07); }
+.subtitler-source-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(300px, 1fr);
+  gap: 16px;
+}
+.subtitler-source-grid .automation-panel { min-width: 0; }
+.subtitler-source-panel > label,
+.subtitler-transcribe-controls > label,
+.subtitler-line > label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.subtitler-source-panel label > span,
+.subtitler-transcribe-controls label > span,
+.subtitler-line label > span {
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .45px;
+  text-transform: uppercase;
+}
+.subtitler-source-panel .select,
+.subtitler-transcribe-controls .select { width: 100%; }
+.subtitler-source-panel video {
+  display: block;
+  width: 100%;
+  max-height: 350px;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  background: #000;
+}
+.subtitler-transcribe-controls {
+  display: grid;
+  grid-template-columns: minmax(150px, .7fr) minmax(220px, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+.subtitler-transcribe-controls .generate-btn { grid-column: 1 / -1; justify-self: start; }
+.subtitler-lines { display: grid; gap: 8px; }
+.subtitler-line-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+.subtitler-line {
+  display: grid;
+  grid-template-columns: 34px 95px 95px minmax(240px, 1fr) 34px;
+  align-items: end;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-left: 2px solid rgba(236,72,153,.58);
+  background: rgba(10,5,18,.42);
+}
+.subtitler-line-index {
+  align-self: center;
+  color: var(--pink);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+.subtitler-line input,
+.subtitler-line textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: rgba(10,5,18,.72);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.4;
+  padding: 8px 9px;
+}
+.subtitler-line textarea { min-height: 58px; resize: vertical; }
+.subtitler-line input:focus,
+.subtitler-line textarea:focus { outline: none; border-color: var(--violet); }
+.subtitler-line-text { min-width: 0; }
+.subtitler-style-panel .overlay-typography-grid.single { grid-template-columns: minmax(280px, 1fr); max-width: 680px; }
+.subtitler-preview { max-width: 520px; min-height: 340px; margin-top: 16px; background: #050208; }
+.subtitler-preview .ov-preview-bg { z-index: 0; }
+.subtitler-preview .ov-text { z-index: 2; }
+.subtitler-render-panel {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto minmax(260px, 420px);
+  align-items: center;
+  gap: 18px;
+  border-color: rgba(52,211,153,.35);
+  background: linear-gradient(135deg, rgba(52,211,153,.07), rgba(10,5,18,.45));
+}
+.subtitler-render-panel h3 { margin-bottom: 6px; }
+.subtitler-render-panel p { margin: 0 0 8px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.subtitler-render-panel > .generate-btn { white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .subtitler-project-panel { grid-template-columns: 1fr 1fr; }
+  .subtitler-project-copy,
+  .subtitler-project-actions,
+  .subtitler-motion-badge { grid-column: 1 / -1; }
+  .subtitler-source-grid,
+  .subtitler-render-panel { grid-template-columns: 1fr; }
+  .subtitler-line { grid-template-columns: 30px 1fr 1fr 34px; }
+  .subtitler-line-text { grid-column: 2 / 4; }
+  .subtitler-render-panel > .generate-btn { justify-self: start; }
+}
+@media (max-width: 620px) {
+  .subtitler-project-panel { grid-template-columns: 1fr; }
+  .subtitler-project-panel > * { grid-column: 1; }
+  .subtitler-transcribe-controls { grid-template-columns: 1fr; }
+  .subtitler-transcribe-controls .generate-btn { grid-column: 1; width: 100%; }
+  .subtitler-line { grid-template-columns: 28px 1fr 34px; }
+  .subtitler-line > label:nth-of-type(1),
+  .subtitler-line > label:nth-of-type(2) { grid-column: 2; }
+  .subtitler-line-text { grid-column: 2; }
+  .subtitler-line > button { grid-column: 3; grid-row: 1; }
+}
 
 @media (max-width: 900px) {
   .heygen-video-controls .control-row,

@@ -75,6 +75,7 @@ const state = {
   elements: [],              // locaciones y objetos
   elementLinks: [],
   automations: [],           // proyectos del automatizador
+  subtitler: null,           // video, transcripción editable y estilos del Subtitulador
   openAutomationId: null,    // proyecto abierto en la vista de detalle
   automationAssetPicker: null, // { blockElement, keys, originalKeys, zone, search }
   costProjectId: '',         // proyecto elegido en la estimación de Consumo
@@ -216,6 +217,8 @@ function inferredApiTask(path, method, body) {
   if (path === '/api/translate') return { title: 'Traduciendo texto', detail: 'Esperando la traducción…' };
   if (/\/automations\/[a-z0-9]+\/assemble$/.test(path)) return { title: 'Ensamblando video final', detail: 'Uniendo tomas, audio y música con FFmpeg…' };
   if (/\/automations\/[a-z0-9]+\/text-layer$/.test(path)) return { title: 'Renderizando textos', detail: 'Creando una nueva capa animada con Remotion…' };
+  if (path === '/api/subtitler/transcribe') return { title: 'Transcribiendo video', detail: 'Extrayendo el audio y esperando a ElevenLabs Scribe v2…' };
+  if (path === '/api/subtitler/render') return { title: 'Renderizando subtítulos', detail: 'Animando el texto con Remotion y componiendo el video…' };
   if (/\/automations\/[a-z0-9]+\/effect$/.test(path) && body?.textRefreshTarget) return { title: 'Actualizando textos del master', detail: 'Recomponiendo el video sin regenerar imágenes ni audio…' };
   if (/\/automations\/[a-z0-9]+\/effect$/.test(path)) return { title: 'Aplicando efecto final', detail: 'Procesando imagen y conservando subtítulos nítidos…' };
   if (/\/automations\/[a-z0-9]+\/video$/.test(path)) return { title: 'Armando toma', detail: 'Sincronizando imagen y audio con FFmpeg…' };

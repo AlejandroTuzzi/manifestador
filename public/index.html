@@ -62,6 +62,7 @@
       <button class="nav-btn" data-view="elements"><svg class="ic"><use href="#i-globe"/></svg> Locaciones y objetos</button>
       <button class="nav-btn" data-view="series"><svg class="ic"><use href="#i-layers"/></svg> Series</button>
       <button class="nav-btn" data-view="automatizador"><svg class="ic"><use href="#i-spark"/></svg> Automatizador</button>
+      <button class="nav-btn" data-view="subtitler"><svg class="ic"><use href="#i-clapper"/></svg> Subtitulador</button>
       <button class="nav-btn" data-view="poser"><svg class="ic"><use href="#i-cube"/></svg> Poser</button>
       <button class="nav-btn" data-view="prompts"><svg class="ic"><use href="#i-book"/></svg> Prompts</button>
       <button class="nav-btn" data-view="costs"><svg class="ic"><use href="#i-dollar"/></svg> Consumo</button>
@@ -530,6 +531,16 @@
 
     <input type="file" id="automationImportInput" accept=".json,application/json" hidden>
 
+    <!-- ==================== SUBTITULADOR ==================== -->
+    <section id="view-subtitler" class="view">
+      <div class="chars-head">
+        <div><h2>Subtitulador</h2><span class="hint">ElevenLabs Scribe v2 + Remotion · transcripción editable y subtítulos dinámicos</span></div>
+        <button type="button" id="subtitlerUpload" class="generate-btn small"><svg class="ic"><use href="#i-upload"/></svg> Subir video</button>
+      </div>
+      <div id="subtitlerRoot"></div>
+      <input type="file" id="subtitlerVideoInput" accept=".mp4,.mov,.m4v,.webm,video/mp4,video/quicktime,video/webm" hidden>
+    </section>
+
     <!-- ==================== GUION (se abre desde Series) ==================== -->
     <section id="view-script" class="view">
       <div class="chars-head script-head">
@@ -612,35 +623,35 @@
         <h3>API Keys</h3>
         <div class="cfg-grid">
           <label>Gemini (Google AI Studio)
-            <span class="key-row"><input type="password" name="key_gemini" placeholder="AIza…"><button type="button" class="tool-btn test-btn" data-service="gemini">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_gemini" placeholder="AIza…"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="gemini">Probar</button></span>
             <span class="test-result" data-result="gemini"></span>
           </label>
           <label>Google Cloud Translation
-            <span class="key-row"><input type="password" name="key_googleTranslate" placeholder="API key de Google Cloud"><button type="button" class="tool-btn test-btn" data-service="googleTranslate">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_googleTranslate" placeholder="API key de Google Cloud"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="googleTranslate">Probar</button></span>
             <span class="test-result" data-result="googleTranslate"></span>
           </label>
           <label>BytePlus ModelArk (Seedream)
-            <span class="key-row"><input type="password" name="key_ark" placeholder="key de Ark"><button type="button" class="tool-btn test-btn" data-service="ark">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_ark" placeholder="key de Ark"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="ark">Probar</button></span>
             <span class="test-result" data-result="ark"></span>
           </label>
           <label>MiniMax H3
-            <span class="key-row"><input type="password" name="key_minimax" placeholder="API key de MiniMax"><button type="button" class="tool-btn test-btn" data-service="minimax">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_minimax" placeholder="API key de MiniMax"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="minimax">Probar</button></span>
             <span class="test-result" data-result="minimax"></span>
           </label>
           <label>ElevenLabs
-            <span class="key-row"><input type="password" name="key_elevenlabs" placeholder="xi-…"><button type="button" class="tool-btn test-btn" data-service="elevenlabs">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_elevenlabs" placeholder="xi-…"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="elevenlabs">Probar</button></span>
             <span class="test-result" data-result="elevenlabs"></span>
           </label>
           <label>OpenAI (actualiza precios)
-            <span class="key-row"><input type="password" name="key_openai" placeholder="sk-…"><button type="button" class="tool-btn test-btn" data-service="openai">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_openai" placeholder="sk-…"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="openai">Probar</button></span>
             <span class="test-result" data-result="openai"></span>
           </label>
           <label>Suno (música)
-            <span class="key-row"><input type="password" name="key_suno" placeholder="key del proveedor de Suno"><button type="button" class="tool-btn test-btn" data-service="suno">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_suno" placeholder="key del proveedor de Suno"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="suno">Probar</button></span>
             <span class="test-result" data-result="suno"></span>
           </label>
           <label>HeyGen API
-            <span class="key-row"><input type="password" name="key_heygen" placeholder="API key de HeyGen"><button type="button" class="tool-btn test-btn" data-service="heygen">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_heygen" placeholder="API key de HeyGen"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="heygen">Probar</button></span>
             <span class="test-result" data-result="heygen"></span>
           </label>
         </div>
@@ -686,10 +697,10 @@
         <h3>Acceso</h3>
         <div class="cfg-grid">
           <label>Nueva clave de acceso
-            <input type="password" name="accessPassword" minlength="6" autocomplete="new-password" placeholder="Dejar vacío para conservar la actual">
+            <span class="key-row"><input type="password" name="accessPassword" minlength="6" autocomplete="new-password" placeholder="Dejar vacío para conservar la actual"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button></span>
           </label>
           <label>Repetir nueva clave
-            <input type="password" name="accessPasswordConfirm" minlength="6" autocomplete="new-password">
+            <span class="key-row"><input type="password" name="accessPasswordConfirm" minlength="6" autocomplete="new-password"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button></span>
           </label>
         </div>
         <p id="accessStatus" class="hint"></p>
@@ -942,7 +953,7 @@
     <div class="login-mark"><img src="brand/manifestador-isologo.png" alt=""></div>
     <h2>Manifestador</h2>
     <p>Introduce tu clave de acceso</p>
-    <input id="loginPassword" type="password" autocomplete="current-password" autofocus required>
+    <span class="key-row login-password-row"><input id="loginPassword" type="password" autocomplete="current-password" autofocus required><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button></span>
     <button class="generate-btn" type="submit">Entrar</button>
     <div id="loginError" class="test-result err"></div>
   </form>

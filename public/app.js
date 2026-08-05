@@ -14,6 +14,10 @@ $$('.nav-btn').forEach((btn) => {
     if (view === 'characters') renderCharacters();
     if (view === 'series') renderSeries();
     if (view === 'automatizador') renderAutomations();
+    if (view === 'subtitler') {
+      const ready = (state.assets.video || []).length ? Promise.resolve() : refreshAssets().catch(() => undefined);
+      ready.then(renderSubtitler);
+    }
     if (view === 'elements') renderElements();
     if (view === 'poser') window.poserEnter?.();
     if (view === 'prompts') renderPromptLibrary();
@@ -1917,6 +1921,20 @@ $('#visualUploadForm').addEventListener('submit', async (event) => {
       : `subida${uploaded === 1 ? '' : 's'} y clasificada${uploaded === 1 ? '' : 's'}`;
     toast(`${uploaded} ${noun} ${adjective}.`);
   }
+});
+
+$$('[data-password-toggle]').forEach((button) => {
+  button.setAttribute('aria-pressed', 'false');
+  button.addEventListener('click', () => {
+    const input = button.closest('.key-row')?.querySelector('input');
+    if (!input) return;
+    const visible = input.type === 'password';
+    input.type = visible ? 'text' : 'password';
+    button.classList.toggle('active', visible);
+    button.setAttribute('aria-pressed', String(visible));
+    button.setAttribute('aria-label', visible ? 'Ocultar clave' : 'Mostrar clave');
+    button.title = visible ? 'Ocultar clave' : 'Mostrar clave';
+  });
 });
 
 function openVisualClassify(keys, { category = '', tags = [] } = {}) {
@@ -5244,6 +5262,52 @@ function automationArtPromptOptions() {
   ).join('');
 }
 
+// Vista previa compartida por Automatizador y Subtitulador. Ambos consumen la
+// misma estructura de estilo que luego interpreta el motor Remotion del servidor.
+function applySubtitlePreviewStyles({ preview, text, titleText, overlay, titleOverlay, visibleTitle = '' }) {
+  if (!preview || !text || !titleText) return;
+  const h = preview.clientHeight || 320;
+  const scale = h / 1080;
+  const normalSize = Math.max(4, (overlay.fontSizePx || 64) * scale);
+  const highlightSize = Math.max(4, (overlay.highlightFontSizePx || overlay.fontSizePx || 64) * scale);
+  Object.assign(text.style, {
+    lineHeight: `${Math.max(normalSize, highlightSize) * 1.2}px`,
+    left: (overlay.x ?? 50) + '%', top: (overlay.y ?? 88) + '%',
+    maxWidth: (overlay.maxWidthPct || 88) + '%', textAlign: overlay.align || 'center',
+    transform: `translate(${overlay.align === 'left' ? '0' : overlay.align === 'right' ? '-100%' : '-50%'}, -50%)`
+  });
+  text.querySelectorAll('.ov-normal').forEach((normal) => Object.assign(normal.style, {
+    fontFamily: overlay.font, fontSize: normalSize + 'px', fontWeight: overlay.fontWeight || 700,
+    fontStyle: overlay.fontItalic ? 'italic' : 'normal', textTransform: overlay.textTransform || 'none',
+    textDecorationLine: [overlay.fontUnderline && 'underline', overlay.fontStrikeThrough && 'line-through'].filter(Boolean).join(' ') || 'none',
+    color: overlay.color, webkitTextStroke: `${Math.max(0, (overlay.strokeWidthPx || 0) * scale)}px ${overlay.strokeColor}`
+  }));
+  const highlight = text.querySelector('.ov-hl');
+  if (highlight) Object.assign(highlight.style, {
+    fontFamily: overlay.highlightFont || overlay.font, fontSize: highlightSize + 'px', fontWeight: overlay.highlightFontWeight || 800,
+    fontStyle: overlay.highlightFontItalic ? 'italic' : 'normal', textTransform: overlay.highlightTextTransform || 'none',
+    textDecorationLine: [overlay.highlightFontUnderline && 'underline', overlay.highlightFontStrikeThrough && 'line-through'].filter(Boolean).join(' ') || 'none',
+    color: overlay.highlightColor || '#fbbf24',
+    webkitTextStroke: `${Math.max(0, (overlay.highlightStrokeWidthPx || 0) * scale)}px ${overlay.highlightStrokeColor || '#000000'}`
+  });
+  text.classList.toggle('has-bg', !!overlay.bg);
+
+  const titleSize = Math.max(4, (titleOverlay.fontSizePx || 96) * scale);
+  titleText.hidden = !titleOverlay.enabled || !visibleTitle;
+  titleText.textContent = visibleTitle;
+  Object.assign(titleText.style, {
+    fontFamily: titleOverlay.font || 'sans-serif', fontSize: titleSize + 'px', fontWeight: titleOverlay.fontWeight || 900,
+    fontStyle: titleOverlay.fontItalic ? 'italic' : 'normal', textTransform: titleOverlay.textTransform || 'none',
+    textDecorationLine: [titleOverlay.fontUnderline && 'underline', titleOverlay.fontStrikeThrough && 'line-through'].filter(Boolean).join(' ') || 'none',
+    color: titleOverlay.color || '#ffffff',
+    webkitTextStroke: `${Math.max(0, (titleOverlay.strokeWidthPx || 0) * scale)}px ${titleOverlay.strokeColor || '#000000'}`,
+    left: (titleOverlay.x ?? 50) + '%', top: (titleOverlay.y ?? 14) + '%', maxWidth: (titleOverlay.maxWidthPct || 88) + '%',
+    textAlign: titleOverlay.align || 'center', lineHeight: `${titleSize * 1.15}px`,
+    transform: `translate(${titleOverlay.align === 'left' ? '0' : titleOverlay.align === 'right' ? '-100%' : '-50%'}, -50%)`
+  });
+  titleText.classList.toggle('has-bg', !!titleOverlay.bg);
+}
+
 function automationHeyGenCharacters() {
   return state.characters.filter(heygenCharacterReady);
 }
@@ -6638,64 +6702,11 @@ function renderAutomationProject() {
   // --- visualizador del texto sobreimpreso ---
   const preview = $('#ovPreview'), text = $('#ovText'), titleText = $('#ovTitle');
   const styleText = () => {
-    const h = preview.clientHeight || 320;
-    const scale = h / 1080;
-    const normalSize = Math.max(4, (ov.fontSizePx || 64) * scale);
-    const highlightSize = Math.max(4, (ov.highlightFontSizePx || ov.fontSizePx || 64) * scale);
-    Object.assign(text.style, {
-      lineHeight: `${Math.max(normalSize, highlightSize) * 1.2}px`,
-      left: (ov.x ?? 50) + '%',
-      top: (ov.y ?? 88) + '%',
-      maxWidth: (ov.maxWidthPct || 88) + '%',
-      textAlign: ov.align || 'center',
-      transform: `translate(${ov.align === 'left' ? '0' : ov.align === 'right' ? '-100%' : '-50%'}, -50%)`
-    });
-    text.querySelectorAll('.ov-normal').forEach((normal) => Object.assign(normal.style, {
-      fontFamily: ov.font,
-      fontSize: normalSize + 'px',
-      fontWeight: ov.fontWeight || 700,
-      fontStyle: ov.fontItalic ? 'italic' : 'normal',
-      textTransform: ov.textTransform || 'none',
-      textDecorationLine: [ov.fontUnderline && 'underline', ov.fontStrikeThrough && 'line-through'].filter(Boolean).join(' ') || 'none',
-      color: ov.color,
-      webkitTextStroke: `${Math.max(0, (ov.strokeWidthPx || 0) * scale)}px ${ov.strokeColor}`
-    }));
-    Object.assign(text.querySelector('.ov-hl').style, {
-      fontFamily: ov.highlightFont || ov.font,
-      fontSize: highlightSize + 'px',
-      fontWeight: ov.highlightFontWeight || 800,
-      fontStyle: ov.highlightFontItalic ? 'italic' : 'normal',
-      textTransform: ov.highlightTextTransform || 'none',
-      textDecorationLine: [ov.highlightFontUnderline && 'underline', ov.highlightFontStrikeThrough && 'line-through'].filter(Boolean).join(' ') || 'none',
-      color: ov.highlightColor || '#fbbf24',
-      webkitTextStroke: `${Math.max(0, (ov.highlightStrokeWidthPx || 0) * scale)}px ${ov.highlightStrokeColor || '#000000'}`
-    });
-    text.classList.toggle('has-bg', !!ov.bg);
-
-    const titleSize = Math.max(4, (titleOv.fontSizePx || 96) * scale);
     const previewBlock = pr.blocks.find((block) => block.id === titleOv.blockId) || pr.blocks[0];
     const visibleTitle = titleOv.mode === 'block'
       ? (previewBlock?.title || '')
       : (titleOv.text || pr.integration?.scriptTitle || pr.name);
-    titleText.hidden = !titleOv.enabled || !visibleTitle;
-    titleText.textContent = visibleTitle;
-    Object.assign(titleText.style, {
-      fontFamily: titleOv.font || 'sans-serif',
-      fontSize: titleSize + 'px',
-      fontWeight: titleOv.fontWeight || 900,
-      fontStyle: titleOv.fontItalic ? 'italic' : 'normal',
-      textTransform: titleOv.textTransform || 'none',
-      textDecorationLine: [titleOv.fontUnderline && 'underline', titleOv.fontStrikeThrough && 'line-through'].filter(Boolean).join(' ') || 'none',
-      color: titleOv.color || '#ffffff',
-      webkitTextStroke: `${Math.max(0, (titleOv.strokeWidthPx || 0) * scale)}px ${titleOv.strokeColor || '#000000'}`,
-      left: (titleOv.x ?? 50) + '%',
-      top: (titleOv.y ?? 14) + '%',
-      maxWidth: (titleOv.maxWidthPct || 88) + '%',
-      textAlign: titleOv.align || 'center',
-      lineHeight: `${titleSize * 1.15}px`,
-      transform: `translate(${titleOv.align === 'left' ? '0' : titleOv.align === 'right' ? '-100%' : '-50%'}, -50%)`
-    });
-    titleText.classList.toggle('has-bg', !!titleOv.bg);
+    applySubtitlePreviewStyles({ preview, text, titleText, overlay: ov, titleOverlay: titleOv, visibleTitle });
     $('#autoTitlePanel')?.classList.toggle('enabled', !!titleOv.enabled);
     $('#autoTitleText').disabled = titleOv.mode === 'block';
     $('#autoTitleTextField')?.classList.toggle('is-unused', titleOv.mode === 'block');
@@ -8054,6 +8065,294 @@ async function applyAutomationVideoEffect(projectId, requestedEffect) {
 }
 
 // ---------------------------------------------------------------------------
+// Subtitulador · Scribe v2 + editor de líneas + motor Remotion compartido
+// ---------------------------------------------------------------------------
+
+function subtitlerTypeCard(kind, cfg) {
+  const isHighlight = kind === 'highlight';
+  const isTitle = kind === 'title';
+  const id = isTitle ? 'subTitle' : isHighlight ? 'subOvHl' : 'subOv';
+  const font = isHighlight ? (cfg.highlightFont || '') : cfg.font;
+  const size = isHighlight ? cfg.highlightFontSizePx : cfg.fontSizePx;
+  const weight = isHighlight ? cfg.highlightFontWeight : cfg.fontWeight;
+  const transform = isHighlight ? cfg.highlightTextTransform : cfg.textTransform;
+  const italic = isHighlight ? cfg.highlightFontItalic : cfg.fontItalic;
+  const underline = isHighlight ? cfg.highlightFontUnderline : cfg.fontUnderline;
+  const strike = isHighlight ? cfg.highlightFontStrikeThrough : cfg.fontStrikeThrough;
+  const color = isHighlight ? cfg.highlightColor : cfg.color;
+  const stroke = isHighlight ? cfg.highlightStrokeColor : cfg.strokeColor;
+  const strokeWidth = isHighlight ? cfg.highlightStrokeWidthPx : cfg.strokeWidthPx;
+  return `<div class="overlay-type-card${isHighlight ? ' highlight' : isTitle ? ' title' : ''}">
+    <h5>${isHighlight ? 'Texto resaltado' : isTitle ? 'Título' : 'Texto normal'}</h5>
+    <label><span>Fuente</span><span class="overlay-font-line"><select class="select" id="${id}Font">${overlayFontOptions(font, { inherit: isHighlight })}</select><button type="button" class="mini-btn" data-sub-import-font="${kind}">Importar</button></span></label>
+    <label><span>Tamaño · px @ 1080</span><input type="number" id="${id}Size" min="8" max="300" step="1" value="${size}"></label>
+    <label><span>Peso</span><select class="select" id="${id}Weight">${[400, 500, 600, 700, 800, 900].map((value) => `<option value="${value}"${value === weight ? ' selected' : ''}>${value}</option>`).join('')}</select></label>
+    <label><span>Mayúsculas y minúsculas</span><select class="select" id="${id}Transform">${[['none', 'Como fue escrito'], ['uppercase', 'MAYÚSCULAS'], ['lowercase', 'minúsculas'], ['capitalize', 'Iniciales En Mayúscula']].map(([value, label]) => `<option value="${value}"${value === (transform || 'none') ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
+    <div class="overlay-format-options"><label><input type="checkbox" id="${id}Italic"${italic ? ' checked' : ''}> <em>Cursiva</em></label><label><input type="checkbox" id="${id}Underline"${underline ? ' checked' : ''}> <u>Subrayado</u></label><label><input type="checkbox" id="${id}Strike"${strike ? ' checked' : ''}> <s>Tachado</s></label></div>
+    <label><span>Color</span><input type="color" id="${id}Color" value="${esc(color || '#ffffff')}"></label>
+    <label><span>Color del borde</span><input type="color" id="${id}Stroke" value="${esc(stroke || '#000000')}"></label>
+    <label><span>Borde · px @ 1080</span><input type="number" id="${id}StrokeW" min="0" max="30" step="0.5" value="${strokeWidth || 0}"></label>
+  </div>`;
+}
+
+function subtitlerLineMarkup(line, index) {
+  return `<div class="subtitler-line" data-sub-line="${esc(line.id)}">
+    <b class="subtitler-line-index">${index + 1}</b>
+    <label><span>Inicio</span><input type="number" data-sub-start min="0" step="0.01" value="${Number(line.start).toFixed(2)}"></label>
+    <label><span>Fin</span><input type="number" data-sub-end min="0" step="0.01" value="${Number(line.end).toFixed(2)}"></label>
+    <label class="subtitler-line-text"><span>${line.speakerId ? `${esc(line.speakerId)} · ` : ''}Texto interpretado</span><textarea data-sub-text rows="2" maxlength="2000">${esc(line.text)}</textarea></label>
+    <button type="button" class="icon-btn" data-sub-remove-line title="Quitar línea">${IC('trash')}</button>
+  </div>`;
+}
+
+function readSubtitlerLines(root, originalLines) {
+  return [...root.querySelectorAll('[data-sub-line]')].map((row, index) => {
+    const previous = originalLines.find((line) => line.id === row.dataset.subLine) || {};
+    const start = Math.max(0, Number(row.querySelector('[data-sub-start]').value) || 0);
+    const end = Math.max(start + .04, Number(row.querySelector('[data-sub-end]').value) || start + .04);
+    return { ...previous, id: previous.id || `line-${index + 1}`, start, end, text: row.querySelector('[data-sub-text]').value.trim() };
+  }).filter((line) => line.text);
+}
+
+function subtitleSrtTime(seconds) {
+  const totalMs = Math.max(0, Math.round((Number(seconds) || 0) * 1000));
+  const hours = Math.floor(totalMs / 3600000);
+  const minutes = Math.floor((totalMs % 3600000) / 60000);
+  const secs = Math.floor((totalMs % 60000) / 1000);
+  const millis = totalMs % 1000;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(millis).padStart(3, '0')}`;
+}
+
+function downloadSubtitleFile({ name, extension, content, mime }) {
+  const safeName = String(name || 'subtitulos')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/\s+/g, ' ').trim()
+    .slice(0, 120) || 'subtitulos';
+  const blob = new Blob([`\uFEFF${content}`], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `${safeName}.${extension}`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+async function saveSubtitler(patch = {}, { rerender = false } = {}) {
+  const previous = state.subtitler || {};
+  state.subtitler = await api('/api/subtitler', {
+    method: 'PUT', task: false,
+    body: {
+      projectId: previous.activeProjectId || previous.id,
+      ...patch,
+      config: patch.config ? { ...(previous.config || {}), ...patch.config } : undefined
+    }
+  });
+  if (rerender) renderSubtitler();
+  return state.subtitler;
+}
+
+function renderSubtitler() {
+  const root = $('#subtitlerRoot');
+  const studio = state.subtitler;
+  if (!root || !studio) return;
+  const ov = { ...(studio.config?.overlay || {}) };
+  const titleOv = { ...DEFAULT_AUTOMATION_TITLE_OVERLAY, mode: 'project', ...(studio.config?.titleOverlay || {}) };
+  const dynamicText = { enabled: true, titleAnimation: 'rise', captionAnimation: 'word-pop', wordsPerPage: 5, ...(studio.config?.dynamicText || {}) };
+  const videos = state.assets.video || [];
+  const source = videos.find((video) => video.key === studio.sourceVideoKey);
+  const latest = studio.outputs?.[0];
+  const projects = studio.projects || [];
+  const transcriptStatus = studio.transcript
+    ? `${studio.lines.length} líneas · ${studio.transcript.languageCode || 'idioma detectado'}${studio.transcript.languageProbability ? ` · ${Math.round(studio.transcript.languageProbability * 100)}%` : ''} · Scribe v2 · ${fmtDate(studio.transcript.transcribedAt)}`
+    : 'Todavía no se transcribió este video.';
+  root.innerHTML = `<section class="automation-panel subtitler-project-panel">
+    <div class="subtitler-project-copy"><h3>Proyecto de subtitulado</h3><span class="hint">Cada proyecto conserva su video, transcripción corregida, animaciones, estilos y renders.</span></div>
+    <label><span>Proyecto guardado</span><select class="select" id="subProjectSelect">${projects.map((project) => `<option value="${esc(project.id)}"${project.id === studio.activeProjectId ? ' selected' : ''}>${esc(project.name)}${project.lineCount ? ` · ${project.lineCount} líneas` : ''}</option>`).join('')}</select></label>
+    <label><span>Nombre</span><input type="text" id="subProjectName" maxlength="160" value="${esc(studio.name || '')}" placeholder="Nombre del proyecto"></label>
+    <div class="subtitler-project-actions"><button type="button" class="mini-btn" id="subProjectNew">${IC('plus')} Nuevo</button><button type="button" class="mini-btn accent" id="subProjectSave">${IC('save')} Guardar proyecto</button><button type="button" class="mini-btn danger" id="subProjectDelete"${projects.length <= 1 ? ' disabled' : ''}>${IC('trash')} Borrar</button></div>
+    <span class="subtitler-motion-badge${dynamicText.enabled ? ' active' : ''}">${IC('spark')} ${dynamicText.enabled ? 'Animaciones dinámicas activas' : 'Animaciones desactivadas'}</span>
+  </section>
+  <div class="subtitler-source-grid">
+    <section class="automation-panel subtitler-source-panel">
+      <div class="automation-panel-heading"><div><h3>1 · Video de origen</h3><span class="hint">Subí un video o elegí uno existente en Assets. El audio extraído será temporal.</span></div></div>
+      <label><span>Video</span><select class="select" id="subSourceVideo"><option value="">— elegí un video —</option>${videos.map((video) => `<option value="${esc(video.key)}"${video.key === studio.sourceVideoKey ? ' selected' : ''}>${esc(video.name)}</option>`).join('')}</select></label>
+      ${source ? `<video src="${fileUrl(source.key)}" controls preload="metadata"></video><span class="hint">${esc(source.name)}</span>` : '<div class="empty-note">Subí o elegí el video que querés subtitular.</div>'}
+    </section>
+    <section class="automation-panel subtitler-transcribe-panel">
+      <div class="automation-panel-heading"><div><h3>2 · Interpretar audio</h3><span class="hint">ElevenLabs Scribe v2 detecta texto, idioma, hablantes y tiempos por palabra.</span></div></div>
+      <div class="subtitler-transcribe-controls">
+        <label><span>Idioma</span><select class="select" id="subLanguage"><option value=""${studio.languageCode ? '' : ' selected'}>Detectar automáticamente</option><option value="spa"${studio.languageCode === 'spa' ? ' selected' : ''}>Español</option><option value="eng"${studio.languageCode === 'eng' ? ' selected' : ''}>Inglés</option><option value="por"${studio.languageCode === 'por' ? ' selected' : ''}>Portugués</option></select></label>
+        <label class="poser-toggle"><input type="checkbox" id="subNoVerbatim"${studio.noVerbatim !== false ? ' checked' : ''}> limpiar muletillas y falsos comienzos</label>
+        <button type="button" class="generate-btn small" id="subTranscribe"${source ? '' : ' disabled'}>${IC('mic')} ${studio.transcript ? 'Volver a transcribir' : 'Extraer audio y transcribir'}</button>
+      </div>
+      <span class="automation-stage-status" id="subTranscriptStatus">${esc(transcriptStatus)}</span>
+    </section>
+  </div>
+  <section class="automation-panel subtitler-lines-panel">
+    <div class="automation-panel-heading"><div><h3>3 · Revisar líneas</h3><span class="hint">Corregí palabras, nombres y signos. También podés ajustar los tiempos de cada línea.</span></div><div class="subtitler-line-actions"><button type="button" class="mini-btn" id="subExportTxt"${studio.lines.length ? '' : ' disabled'}>${IC('download')} TXT</button><button type="button" class="mini-btn" id="subExportSrt"${studio.lines.length ? '' : ' disabled'}>${IC('download')} SRT</button><button type="button" class="mini-btn" id="subAddLine">${IC('plus')} Línea</button><button type="button" class="mini-btn accent" id="subSaveLines"${studio.lines.length ? '' : ' disabled'}>${IC('save')} Guardar correcciones</button></div></div>
+    <div class="subtitler-lines">${studio.lines.length ? studio.lines.map(subtitlerLineMarkup).join('') : '<div class="empty-note">La transcripción construirá aquí todas las líneas editables.</div>'}</div>
+  </section>
+  <section class="automation-panel subtitler-style-panel">
+    <div class="overlay-preset-bar"><div><h4>4 · Estilo de títulos y textos</h4><span class="hint">Los mismos presets y propiedades que usa el Automatizador.</span></div><select class="select" id="subPreset">${overlayPresetOptions()}</select><button type="button" class="mini-btn" id="subPresetApply" disabled>${IC('check')} Aplicar</button><button type="button" class="mini-btn accent" id="subPresetSave">${IC('save')} Guardar estilo actual</button><button type="button" class="mini-btn danger" id="subPresetDelete" disabled>${IC('trash')}</button></div>
+    <div class="automation-dynamic-text-panel${dynamicText.enabled ? ' enabled' : ''}" id="subDynamicPanel"><div class="automation-dynamic-text-head"><div><h4>Texto dinámico · Remotion</h4><span class="hint">El mismo motor del Automatizador: título animado, avance palabra por palabra y resaltado sincronizado con el audio.</span></div><label class="poser-toggle"><input type="checkbox" id="subDynamicEnabled"${dynamicText.enabled ? ' checked' : ''}> activar animaciones</label></div><div class="automation-dynamic-text-grid">
+      <label><span>Animación del título</span><select class="select" id="subTitleAnimation"><option value="rise"${dynamicText.titleAnimation === 'rise' ? ' selected' : ''}>Ascenso suave</option><option value="slam"${dynamicText.titleAnimation === 'slam' ? ' selected' : ''}>Impacto</option><option value="typewriter"${dynamicText.titleAnimation === 'typewriter' ? ' selected' : ''}>Máquina de escribir</option></select></label>
+      <label><span>Animación de subtítulos</span><select class="select" id="subCaptionAnimation"><option value="word-pop"${dynamicText.captionAnimation === 'word-pop' ? ' selected' : ''}>Palabra con impacto</option><option value="karaoke"${dynamicText.captionAnimation === 'karaoke' ? ' selected' : ''}>Resaltado karaoke</option><option value="bounce"${dynamicText.captionAnimation === 'bounce' ? ' selected' : ''}>Rebote</option></select></label>
+      <label><span>Palabras visibles por grupo</span><input type="number" id="subWordsPerPage" min="1" max="12" value="${dynamicText.wordsPerPage}"></label>
+    </div></div>
+    <h4>Texto sobreimpreso</h4><div class="overlay-typography-grid">${subtitlerTypeCard('normal', ov)}${subtitlerTypeCard('highlight', ov)}</div>
+    <div class="overlay-layout-controls"><label><span>Posición vertical</span><select class="select" id="subOvPos">${[['top', 'Arriba'], ['center', 'Centro'], ['bottom', 'Abajo']].map(([value, label]) => `<option value="${value}"${value === ov.position ? ' selected' : ''}>${label}</option>`).join('')}</select></label><label><span>Alineación</span><select class="select" id="subOvAlign">${[['left', 'Izquierda'], ['center', 'Centro'], ['right', 'Derecha']].map(([value, label]) => `<option value="${value}"${value === ov.align ? ' selected' : ''}>${label}</option>`).join('')}</select></label><label><span>Ancho máximo · %</span><input type="number" id="subOvMaxWidth" min="20" max="100" value="${ov.maxWidthPct || 88}"></label><button type="button" class="mini-btn" id="subOvCenter">Centrar horizontalmente</button><label class="poser-toggle"><input type="checkbox" id="subOvBg"${ov.bg ? ' checked' : ''}> caja de fondo</label></div>
+    <div class="title-overlay-panel${titleOv.enabled ? ' enabled' : ''}" id="subTitlePanel"><div class="title-overlay-heading"><div><h4>Título</h4><span class="hint">Opcional; no altera la transcripción.</span></div><label class="poser-toggle"><input type="checkbox" id="subTitleEnabled"${titleOv.enabled ? ' checked' : ''}> incluir título</label></div><label><span>Texto del título</span><input type="text" id="subTitleText" maxlength="300" value="${esc(titleOv.text || '')}" placeholder="Título del video"></label><div class="overlay-typography-grid single">${subtitlerTypeCard('title', titleOv)}</div><div class="overlay-layout-controls"><label><span>Posición vertical</span><select class="select" id="subTitlePos">${[['top', 'Arriba'], ['center', 'Centro'], ['bottom', 'Abajo']].map(([value, label]) => `<option value="${value}"${value === titleOv.position ? ' selected' : ''}>${label}</option>`).join('')}</select></label><label><span>Alineación</span><select class="select" id="subTitleAlign">${[['left', 'Izquierda'], ['center', 'Centro'], ['right', 'Derecha']].map(([value, label]) => `<option value="${value}"${value === titleOv.align ? ' selected' : ''}>${label}</option>`).join('')}</select></label><label><span>Ancho máximo · %</span><input type="number" id="subTitleMaxWidth" min="20" max="100" value="${titleOv.maxWidthPct || 88}"></label><button type="button" class="mini-btn" id="subTitleCenter">Centrar horizontalmente</button><label class="poser-toggle"><input type="checkbox" id="subTitleBg"${titleOv.bg ? ' checked' : ''}> caja de fondo</label></div></div>
+    <input type="file" id="subFontFile" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" hidden>
+    <div class="ov-preview subtitler-preview" id="subPreview" style="aspect-ratio:${source ? '9/16' : '9/16'}">${source ? `<video class="ov-preview-bg" src="${fileUrl(source.key)}" muted loop autoplay playsinline></video>` : ''}<div class="ov-title" id="subPreviewTitle">${esc(titleOv.text || '')}</div><div class="ov-text" id="subPreviewText"><span class="ov-normal">Un texto de </span><span class="ov-hl">ejemplo</span><span class="ov-normal"> dinámico acá</span></div></div>
+  </section>
+  <section class="automation-panel subtitler-render-panel"><div><h3>5 · Generar video subtitulado</h3><p>Conserva el video y su audio; sólo añade la capa de título y subtítulos. Las correcciones actuales se usan en el render.</p><span class="hint" id="subRenderStatus">${latest ? `Último render · ${latest.wordCount} palabras · ${fmtDate(latest.renderedAt)}` : 'Todavía no hay una versión renderizada.'}</span></div><button type="button" class="generate-btn" id="subRender"${source && studio.lines.length ? '' : ' disabled'}>${IC('film')} Renderizar subtítulos</button>${latest ? `<div class="final-assembly-preview"><video src="${fileUrl(latest.videoKey)}" controls preload="metadata"></video><button type="button" class="mini-btn" data-open-asset="${esc(latest.videoKey)}">Abrir resultado</button></div>` : ''}</section>`;
+
+  const preview = $('#subPreview'), previewText = $('#subPreviewText'), previewTitle = $('#subPreviewTitle');
+  const updatePreview = () => {
+    applySubtitlePreviewStyles({ preview, text: previewText, titleText: previewTitle, overlay: ov, titleOverlay: titleOv, visibleTitle: titleOv.text || 'Título del video' });
+    $('#subDynamicPanel').classList.toggle('enabled', dynamicText.enabled);
+    $('#subTitlePanel').classList.toggle('enabled', titleOv.enabled);
+    const motionBadge = root.querySelector('.subtitler-motion-badge');
+    motionBadge?.classList.toggle('active', dynamicText.enabled);
+    if (motionBadge) motionBadge.innerHTML = `${IC('spark')} ${dynamicText.enabled ? 'Animaciones dinámicas activas' : 'Animaciones desactivadas'}`;
+  };
+  const config = () => ({ overlay: ov, titleOverlay: titleOv, dynamicText });
+  const persistConfig = () => saveSubtitler({ config: config() });
+  const projectSnapshot = () => ({
+    name: $('#subProjectName').value.trim() || studio.name || 'Proyecto de subtítulos',
+    lines: readSubtitlerLines(root, studio.lines),
+    config: config()
+  });
+  $('#subProjectSelect').addEventListener('change', async (event) => {
+    const nextId = event.target.value;
+    try {
+      await saveSubtitler(projectSnapshot());
+      state.subtitler = await api(`/api/subtitler/projects/${nextId}/open`, { method: 'POST', task: false });
+      renderSubtitler();
+    } catch (error) { toast(error.message, 'err'); }
+  });
+  $('#subProjectName').addEventListener('change', async () => {
+    try { await saveSubtitler({ name: $('#subProjectName').value.trim() || studio.name }, { rerender: true }); }
+    catch (error) { toast(error.message, 'err'); }
+  });
+  $('#subProjectSave').addEventListener('click', async () => {
+    try { await saveSubtitler(projectSnapshot()); toast('Proyecto de subtitulado guardado.', 'ok'); }
+    catch (error) { toast(error.message, 'err'); }
+  });
+  $('#subProjectNew').addEventListener('click', async () => {
+    const name = window.prompt('Nombre del nuevo proyecto de subtitulado:', 'Nuevo proyecto');
+    if (!name?.trim()) return;
+    try {
+      await saveSubtitler(projectSnapshot());
+      state.subtitler = await api('/api/subtitler/projects', { method: 'POST', body: { name: name.trim() }, task: false });
+      renderSubtitler();
+      toast('Nuevo proyecto de subtitulado creado.', 'ok');
+    } catch (error) { toast(error.message, 'err'); }
+  });
+  $('#subProjectDelete').addEventListener('click', async () => {
+    if (!confirm(`¿Borrar el proyecto “${studio.name}”? Los videos de Assets no se eliminarán.`)) return;
+    try {
+      state.subtitler = await api(`/api/subtitler/projects/${studio.activeProjectId}`, { method: 'DELETE', task: false });
+      renderSubtitler();
+      toast('Proyecto de subtitulado eliminado.');
+    } catch (error) { toast(error.message, 'err'); }
+  });
+  const bind = (id, target, prop, transform = (value) => value) => {
+    const element = $('#' + id);
+    element.addEventListener('input', () => { target[prop] = transform(element.type === 'checkbox' ? element.checked : element.value); updatePreview(); });
+    element.addEventListener('change', persistConfig);
+  };
+  bind('subDynamicEnabled', dynamicText, 'enabled'); bind('subTitleAnimation', dynamicText, 'titleAnimation'); bind('subCaptionAnimation', dynamicText, 'captionAnimation'); bind('subWordsPerPage', dynamicText, 'wordsPerPage', (value) => Math.max(1, Math.min(12, Number(value) || 5)));
+  [['subOvFont', 'font'], ['subOvSize', 'fontSizePx', Number], ['subOvWeight', 'fontWeight', Number], ['subOvTransform', 'textTransform'], ['subOvItalic', 'fontItalic'], ['subOvUnderline', 'fontUnderline'], ['subOvStrike', 'fontStrikeThrough'], ['subOvColor', 'color'], ['subOvStroke', 'strokeColor'], ['subOvStrokeW', 'strokeWidthPx', Number], ['subOvHlFont', 'highlightFont'], ['subOvHlSize', 'highlightFontSizePx', Number], ['subOvHlWeight', 'highlightFontWeight', Number], ['subOvHlTransform', 'highlightTextTransform'], ['subOvHlItalic', 'highlightFontItalic'], ['subOvHlUnderline', 'highlightFontUnderline'], ['subOvHlStrike', 'highlightFontStrikeThrough'], ['subOvHlColor', 'highlightColor'], ['subOvHlStroke', 'highlightStrokeColor'], ['subOvHlStrokeW', 'highlightStrokeWidthPx', Number], ['subOvAlign', 'align'], ['subOvMaxWidth', 'maxWidthPct', Number], ['subOvBg', 'bg']].forEach(([id, prop, transform]) => bind(id, ov, prop, transform));
+  [['subTitleEnabled', 'enabled'], ['subTitleText', 'text'], ['subTitleFont', 'font'], ['subTitleSize', 'fontSizePx', Number], ['subTitleWeight', 'fontWeight', Number], ['subTitleTransform', 'textTransform'], ['subTitleItalic', 'fontItalic'], ['subTitleUnderline', 'fontUnderline'], ['subTitleStrike', 'fontStrikeThrough'], ['subTitleColor', 'color'], ['subTitleStroke', 'strokeColor'], ['subTitleStrokeW', 'strokeWidthPx', Number], ['subTitleAlign', 'align'], ['subTitleMaxWidth', 'maxWidthPct', Number], ['subTitleBg', 'bg']].forEach(([id, prop, transform]) => bind(id, titleOv, prop, transform));
+  const setPosition = (selectId, target, top, bottom) => { target.position = $('#' + selectId).value; target.y = target.position === 'top' ? top : target.position === 'center' ? 50 : bottom; target.x = 50; updatePreview(); persistConfig(); };
+  $('#subOvPos').addEventListener('change', () => setPosition('subOvPos', ov, 12, 88));
+  $('#subTitlePos').addEventListener('change', () => setPosition('subTitlePos', titleOv, 14, 86));
+  $('#subOvCenter').addEventListener('click', () => { ov.x = 50; updatePreview(); persistConfig(); });
+  $('#subTitleCenter').addEventListener('click', () => { titleOv.x = 50; updatePreview(); persistConfig(); });
+
+  $('#subSourceVideo').addEventListener('change', async (event) => {
+    const picked = videos.find((video) => video.key === event.target.value);
+    await saveSubtitler({ sourceVideoKey: picked?.key || '', sourceName: picked?.name || '', transcript: null, lines: [] }, { rerender: true });
+  });
+  $('#subTranscribe').addEventListener('click', async (event) => {
+    const button = event.currentTarget; button.disabled = true;
+    try {
+      state.subtitler = await api('/api/subtitler/transcribe', { method: 'POST', body: { projectId: studio.activeProjectId, sourceVideoKey: studio.sourceVideoKey, languageCode: $('#subLanguage').value, noVerbatim: $('#subNoVerbatim').checked } });
+      renderSubtitler(); toast('Transcripción terminada. Revisá las líneas antes de renderizar.', 'ok');
+    } catch (error) { button.disabled = false; toast(error.message, 'err'); }
+  });
+  const saveLines = async () => { studio.lines = readSubtitlerLines(root, studio.lines); await saveSubtitler({ lines: studio.lines }); toast('Correcciones guardadas.'); };
+  $('#subSaveLines').addEventListener('click', saveLines);
+  $('#subExportTxt').addEventListener('click', () => {
+    const lines = readSubtitlerLines(root, studio.lines);
+    if (!lines.length) return toast('No hay líneas para exportar.', 'err');
+    downloadSubtitleFile({
+      name: $('#subProjectName').value.trim() || studio.name,
+      extension: 'txt',
+      mime: 'text/plain',
+      content: lines.map((line) => line.text).join('\r\n')
+    });
+    toast('Subtítulos exportados en TXT.', 'ok');
+  });
+  $('#subExportSrt').addEventListener('click', () => {
+    const lines = readSubtitlerLines(root, studio.lines);
+    if (!lines.length) return toast('No hay líneas para exportar.', 'err');
+    downloadSubtitleFile({
+      name: $('#subProjectName').value.trim() || studio.name,
+      extension: 'srt',
+      mime: 'application/x-subrip',
+      content: lines.map((line, index) => `${index + 1}\r\n${subtitleSrtTime(line.start)} --> ${subtitleSrtTime(line.end)}\r\n${line.text}`).join('\r\n\r\n') + '\r\n'
+    });
+    toast('Subtítulos exportados en SRT.', 'ok');
+  });
+  root.querySelectorAll('[data-sub-remove-line]').forEach((button) => button.addEventListener('click', async () => { button.closest('[data-sub-line]').remove(); await saveLines(); renderSubtitler(); }));
+  $('#subAddLine').addEventListener('click', async () => { const last = studio.lines.at(-1); studio.lines.push({ id: `line-${Date.now()}`, start: last?.end || 0, end: (last?.end || 0) + 2, text: 'Nueva línea', sourceText: '', sourceWords: [] }); await saveSubtitler({ lines: studio.lines }, { rerender: true }); });
+  $('#subRender').addEventListener('click', async (event) => {
+    const button = event.currentTarget; button.disabled = true;
+    try {
+      const lines = readSubtitlerLines(root, studio.lines);
+      state.subtitler = await api('/api/subtitler/render', { method: 'POST', body: { projectId: studio.activeProjectId, sourceVideoKey: studio.sourceVideoKey, lines, config: config() } });
+      await refreshAssets(); renderSubtitler(); toast('Video subtitulado terminado.', 'ok');
+    } catch (error) { button.disabled = false; toast(error.message, 'err'); }
+  });
+  $('#subPreset').addEventListener('change', (event) => { const enabled = Boolean(event.target.value); $('#subPresetApply').disabled = !enabled; $('#subPresetDelete').disabled = !enabled; });
+  $('#subPresetApply').addEventListener('click', async () => { const preset = state.overlayPresets.find((item) => item.id === $('#subPreset').value); if (!preset) return; Object.assign(ov, preset.overlay || {}); Object.assign(titleOv, preset.titleOverlay || {}); Object.assign(dynamicText, preset.dynamicText || {}); await saveSubtitler({ config: config() }, { rerender: true }); });
+  $('#subPresetSave').addEventListener('click', async () => { const name = window.prompt('Nombre para este estilo de títulos y textos:'); if (!name?.trim()) return; const item = await api('/api/overlay-presets', { method: 'POST', body: { name: name.trim(), overlay: ov, titleOverlay: titleOv, dynamicText } }); state.overlayPresets.unshift(item); renderSubtitler(); toast(`Estilo “${item.name}” guardado.`); });
+  $('#subPresetDelete').addEventListener('click', async () => { const preset = state.overlayPresets.find((item) => item.id === $('#subPreset').value); if (!preset || !confirm(`¿Borrar el estilo “${preset.name}”?`)) return; await api(`/api/overlay-presets/${preset.id}`, { method: 'DELETE' }); state.overlayPresets = state.overlayPresets.filter((item) => item.id !== preset.id); renderSubtitler(); });
+  let fontTarget = 'normal';
+  root.querySelectorAll('[data-sub-import-font]').forEach((button) => button.addEventListener('click', () => { fontTarget = button.dataset.subImportFont; $('#subFontFile').value = ''; $('#subFontFile').click(); }));
+  $('#subFontFile').addEventListener('change', async (event) => { const file = event.target.files?.[0]; if (!file) return; const font = await api('/api/fonts', { method: 'POST', body: { fileName: file.name, name: file.name.replace(/\.[^.]+$/, ''), dataUrl: await readFileAsDataUrl(file) } }); state.fonts.unshift(font); await registerCustomFont(font); if (fontTarget === 'title') titleOv.font = font.family; else if (fontTarget === 'highlight') ov.highlightFont = font.family; else ov.font = font.family; await saveSubtitler({ config: config() }, { rerender: true }); });
+  const makeDraggable = (element, target) => { let dragging = false; element.addEventListener('pointerdown', (event) => { dragging = true; element.setPointerCapture(event.pointerId); event.preventDefault(); }); element.addEventListener('pointermove', (event) => { if (!dragging) return; const rect = preview.getBoundingClientRect(); target.x = Math.max(0, Math.min(100, (event.clientX - rect.left) / rect.width * 100)); target.y = Math.max(0, Math.min(100, (event.clientY - rect.top) / rect.height * 100)); updatePreview(); }); const end = () => { if (!dragging) return; dragging = false; persistConfig(); }; element.addEventListener('pointerup', end); element.addEventListener('pointercancel', end); };
+  makeDraggable(previewText, ov); makeDraggable(previewTitle, titleOv);
+  const previewVideo = preview.querySelector('video');
+  previewVideo?.addEventListener('loadedmetadata', () => {
+    if (previewVideo.videoWidth && previewVideo.videoHeight) {
+      preview.style.aspectRatio = `${previewVideo.videoWidth}/${previewVideo.videoHeight}`;
+      updatePreview();
+    }
+  });
+  bindAutomationAssetOpeners(root);
+  requestAnimationFrame(updatePreview);
+  if (window.ResizeObserver) new ResizeObserver(updatePreview).observe(preview);
+}
+
+$('#subtitlerUpload').addEventListener('click', () => { $('#subtitlerVideoInput').value = ''; $('#subtitlerVideoInput').click(); });
+$('#subtitlerVideoInput').addEventListener('change', async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (file.size > 100 * 1024 * 1024) return toast('El video supera el límite de 100 MB.', 'err');
+  try {
+    const uploaded = await api('/api/assets/visual', { method: 'POST', body: { name: file.name, dataUrl: await readFileAsDataUrl(file), category: 'Subtitulador', tags: ['subtitulado'] } });
+    await refreshAssets();
+    await saveSubtitler({ sourceVideoKey: uploaded.key, sourceName: uploaded.name, transcript: null, lines: [] }, { rerender: true });
+    toast('Video cargado. Ya podés extraer el audio y transcribirlo.', 'ok');
+  } catch (error) { toast(error.message, 'err'); }
+});
+
+// ---------------------------------------------------------------------------
 // consumo y precios
 // ---------------------------------------------------------------------------
 
@@ -8509,6 +8808,7 @@ async function init() {
     state.elements = s.elements || [];
     state.elementLinks = s.elementLinks || [];
     state.automations = s.automations || [];
+    state.subtitler = s.subtitler || null;
     state.history = s.history;
     state.pricing = s.pricing;
     state.modelId = s.models[0]?.id;
@@ -8534,10 +8834,10 @@ async function init() {
   if (state.pinnedId && !pinnedChar()) setPinned('');
   startAutomationSync();
 
-  // deep-links: #audio, #assets, #characters, #series, #prompts, #costs, #config
+  // deep-links: #audio, #assets, #characters, #series, #subtitler, #prompts, #costs, #config
   const h = location.hash.slice(1);
   if (h === 'audio') setMode('audio');
-  else if (['assets', 'characters', 'series', 'prompts', 'costs', 'config'].includes(h)) {
+  else if (['assets', 'characters', 'series', 'subtitler', 'prompts', 'costs', 'config'].includes(h)) {
     $(`.nav-btn[data-view="${h}"]`)?.click();
   }
 }
