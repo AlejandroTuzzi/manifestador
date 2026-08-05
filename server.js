@@ -840,7 +840,9 @@ async function runImageGeneration(req) {
   const hasPoserRef = refs.some((key) => String(key).startsWith('poser/'));
   // la nota de las etiquetas va adelante (los modelos de imagen pesan más lo
   // que leen primero); el prompt del Poser sigue yendo detrás del pedido
-  const preface = mode !== 'frames' && refs.some((key) => validStamp(labeledRefs[key])) ? LABELED_REFS_PROMPT : '';
+  // Este flujo es exclusivamente de imagen: `mode` pertenece a video y no
+  // existe aquí. Las referencias etiquetadas siempre necesitan su prefacio.
+  const preface = refs.some((key) => validStamp(labeledRefs[key])) ? LABELED_REFS_PROMPT : '';
   const suffix = hasPoserRef && cfg.poserPrompt?.trim() ? cfg.poserPrompt.trim() : '';
   const sentPrompt = [prompt, suffix].filter(Boolean).join('\n\n');
 

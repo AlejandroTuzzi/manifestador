@@ -52,7 +52,7 @@ function setMode(mode) {
   // el armador de tomas es propio del video
   $('#btnShotList').hidden = mode !== 'video';
   if (mode !== 'video') $('#shotListPanel').hidden = true;
-  $('.editor-wrap').classList.toggle('tags-on', (mode === 'audio' && audioModel?.supportsAudioTags !== false) || mode === 'video');
+  $('.editor-wrap').classList.toggle('tags-on', mode === 'image' || (mode === 'audio' && audioModel?.supportsAudioTags !== false) || mode === 'video');
   $('#promptBox').placeholder = mode === 'audio'
     ? (audioModel?.supportsAudioTags === false
       ? 'Escribí el texto a locutar… Multilingual v2 prioriza una narración estable'
@@ -113,10 +113,28 @@ $('#musicTitle').addEventListener('input', (e) => { state.music.title = e.target
 const promptBox = $('#promptBox');
 const highlighter = $('#highlighter');
 
+function highlightReferenceMentions(text, mentions) {
+  const values = [...new Set(mentions.map((value) => String(value || '').trim()).filter(Boolean))]
+    .sort((left, right) => right.length - left.length);
+  if (!values.length) return esc(text);
+  const pattern = values.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const matcher = new RegExp(`(${pattern})`, 'giu');
+  const wanted = new Set(values.map((value) => value.toLocaleLowerCase('es')));
+  return text.split(matcher).map((part) => wanted.has(part.toLocaleLowerCase('es'))
+    ? `<span class="tag">${esc(part)}</span>`
+    : esc(part)).join('');
+}
+
 function renderHighlight() {
   const text = promptBox.value;
   if (state.mode === 'audio') {
     highlighter.innerHTML = esc(text).replace(/\[([^\]\n]{1,60})\]/g, '<span class="tag">[$1]</span>') + '\n';
+  } else if (state.mode === 'image') {
+    const mentions = state.refs.map((ref, index) => {
+      const label = normalizeReferenceLabel(ref.label);
+      return label ? `@${label}` : `@image${index + 1}`;
+    });
+    highlighter.innerHTML = highlightReferenceMentions(text, mentions) + '\n';
   } else if (state.mode === 'video' && state.video.mode === 'reference') {
     highlighter.innerHTML = esc(text).replace(/@image\d+/gi, '<span class="tag">$&</span>') + '\n';
   } else if (state.mode === 'video') {
@@ -450,6 +468,10 @@ $('#heygenVoiceId').addEventListener('input', (e) => { state.video.heygenVoiceId
 $('#heygenMotionPrompt').addEventListener('input', (e) => { state.video.heygenMotionPrompt = e.target.value; });
 $('#heygenExpressiveness').addEventListener('change', (e) => { state.video.heygenExpressiveness = e.target.value; });
 
+function normalizeReferenceLabel(value) {
+  return String(value || '').trim().replace(/^@+/, '').replace(/\s+/g, ' ').slice(0, 100);
+}
+
 function renderRefs() {
   const isVideo = state.mode === 'video';
   const m = activeRefModel();
@@ -460,6 +482,7 @@ function renderRefs() {
   $(isVideo ? '#videoRefsCount' : '#refsCount').textContent = `${state.refs.length}/${maxRefs}`;
   const refMode = isVideo ? state.video.mode : null;
   state.refs.forEach((r, i) => {
+    r.label = normalizeReferenceLabel(r.label);
     const isAsset = r.key.startsWith('asset://');
     const kind = referenceKind(r);
     const isH3 = isVideo && currentVideoModel()?.provider === 'minimax';
@@ -473,7 +496,7 @@ function renderRefs() {
     const badge = isH3 && refMode === 'reference' ? `<button class="ref-at" title="Insertar ${h3Mention} en el prompt">${kind === 'image' ? 'IMG' : kind === 'video' ? 'VID' : 'AUD'} ${typeNumber}</button>`
       : refMode === 'reference' ? `<button class="ref-at" title="Insertar @image${i + 1} en el prompt">@${i + 1}</button>`
       : refMode === 'frames' ? `<span class="ref-badge">${i === 0 ? 'inicio' : 'fin'}</span>`
-      : !isVideo && !isAsset ? `<button class="ref-at" title="Insertar ${esc(mention)} en el prompt">@${i + 1}</button>`
+      : !isVideo && !isAsset ? `<button class="ref-at" title="Insertar ${esc(mention)} en el prompt">${esc(mention)}</button>`
       : '';
     d.innerHTML = isAsset
       ? `<div class="asset-face" title="${esc(r.key)}">${IC('user', 'ic ic-lg')}<span>verificado</span></div>${badge}<button class="rm" title="Quitar">×</button>`
@@ -492,8 +515,9 @@ function renderRefs() {
         r.label || refLabelSuggestion(r.key)
       );
       if (value === null) return;
-      r.label = value.trim();
+      r.label = normalizeReferenceLabel(value);
       renderRefs();
+      renderHighlight();
     });
     d.querySelector('.ref-at')?.addEventListener('click', () => insertAtCursor(`${mention} `));
     d.querySelector('img')?.addEventListener('click', () => openLightbox(r.key, state.refs.filter((ref) => !ref.key.startsWith('asset://')).map((ref) => ref.key)));
@@ -538,7 +562,7 @@ function addRef(key, fromChar = false, kind = 'image') {
     }
   }
   // las fotos de personajes llevan siempre el nombre como etiqueta (editable con T)
-  state.refs.push({ key, fromChar, kind: normalizedKind, label: normalizedKind === 'image' ? refLabelSuggestion(key) : '' });
+  state.refs.push({ key, fromChar, kind: normalizedKind, label: normalizedKind === 'image' ? normalizeReferenceLabel(refLabelSuggestion(key)) : '' });
   renderRefs();
   return true;
 }
@@ -601,9 +625,10 @@ function stampLabel(key, text) {
 async function buildLabeledRefs(refItems) {
   const out = {};
   for (const r of refItems) {
-    if (referenceKind(r) !== 'image' || !r.label || r.key.startsWith('asset://')) continue;
+    const label = normalizeReferenceLabel(r.label);
+    if (referenceKind(r) !== 'image' || !label || r.key.startsWith('asset://')) continue;
     try {
-      out[r.key] = await stampLabel(r.key, r.label);
+      out[r.key] = await stampLabel(r.key, label);
     } catch {
       toast(`No pude etiquetar una referencia; va sin etiqueta`, 'err');
     }
@@ -5178,6 +5203,46 @@ function automationAssignedEntity(pr, kind, role) {
   return state.elements.find((item) => item.id === id) || null;
 }
 
+function automationPromptMentionMap(pr) {
+  const entries = [];
+  for (const kind of ['characters', 'locations', 'objects']) {
+    for (const requirement of pr.requirements?.[kind] || []) {
+      const role = String(requirement.role || '').toUpperCase();
+      const entity = automationAssignedEntity(pr, kind, requirement.role);
+      const label = normalizeReferenceLabel(entity?.name || requirement.role);
+      if (role && label) entries.push({ role, label });
+    }
+  }
+  return entries;
+}
+
+function regexLiteral(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// En pantalla y al generar se ve el nombre exacto estampado en la ficha.
+// Internamente se guardan @ROLES estables para que cambiar una asignación no
+// rompa el contrato del proyecto.
+function automationPromptForEditor(pr, value) {
+  let prompt = String(value || '');
+  for (const { role, label } of automationPromptMentionMap(pr).sort((a, b) => b.role.length - a.role.length)) {
+    prompt = prompt.replace(new RegExp(`@?\\b${regexLiteral(role)}\\b`, 'g'), () => `@${label}`);
+  }
+  return prompt;
+}
+
+function automationPromptFromEditor(pr, value) {
+  let prompt = String(value || '');
+  const entries = automationPromptMentionMap(pr).sort((a, b) => b.label.length - a.label.length);
+  for (const { role, label } of entries) {
+    prompt = prompt.replace(new RegExp(`@${regexLiteral(label)}(?![\\p{L}\\p{N}_])`, 'giu'), () => `@${role}`);
+  }
+  for (const { role } of entries) {
+    prompt = prompt.replace(new RegExp(`@?\\b${regexLiteral(role)}\\b`, 'g'), `@${role}`);
+  }
+  return prompt;
+}
+
 const DEFAULT_AUTOMATION_ART_STYLE = 'Photorealistic cinematic realism, natural human anatomy, realistic skin and materials, restrained color grading, consistent lighting and lens language';
 const DEFAULT_AUTOMATION_TITLE_OVERLAY = {
   enabled: false, mode: 'block', blockId: '', text: '', font: 'sans-serif', fontSizePx: 96, fontWeight: 900,
@@ -6200,7 +6265,7 @@ function renderAutomationProject() {
               </div>
             </div>
             <label><span>Título interno del bloque</span><input type="text" data-block-title maxlength="160" value="${esc(b.title || '')}"></label>
-            <label data-block-prompt-field><span>Prompt visual · inglés</span><textarea data-block-prompt maxlength="4000" rows="5">${esc(b.imagePrompt)}</textarea></label>
+            <label data-block-prompt-field><span>Prompt visual · inglés</span><textarea data-block-prompt maxlength="4000" rows="5">${esc(automationPromptForEditor(pr, b.imagePrompt))}</textarea></label>
             <label data-block-prompt-field><span>Prompt negativo · inglés</span><textarea data-block-negative maxlength="2000" rows="2">${esc(b.negativePrompt || '')}</textarea></label>
             <div class="auto-block-script-items">
               ${(b.items || []).map((it, itemIndex) => `<label><span>${it.kind === 'dialogue' ? `Diálogo · ${esc(it.character || 'sin personaje')}` : 'Narración'}</span><textarea data-block-item="${itemIndex}" maxlength="2000" rows="3">${esc(it.text)}</textarea></label>`).join('')}
@@ -6339,7 +6404,7 @@ function renderAutomationProject() {
   newBlockKind.addEventListener('change', syncNewBlockKind);
   newBlockForm.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const imagePrompt = $('#autoNewBlockPrompt').value.trim();
+    const imagePrompt = automationPromptFromEditor(pr, $('#autoNewBlockPrompt').value.trim());
     const text = $('#autoNewBlockText').value.trim();
     const kind = newBlockKind.value === 'dialogue' ? 'dialogue' : 'narration';
     const character = kind === 'dialogue' ? $('#autoNewBlockCharacter').value : '';
@@ -6872,7 +6937,7 @@ function renderAutomationProject() {
     const blockId = button.dataset.saveBlock;
     const currentBlock = pr.blocks.find((block) => block.id === blockId);
     if (!blockElement || !currentBlock) return;
-    const imagePrompt = blockElement.querySelector('[data-block-prompt]').value.trim();
+    const imagePrompt = automationPromptFromEditor(pr, blockElement.querySelector('[data-block-prompt]').value.trim());
     const negativePrompt = blockElement.querySelector('[data-block-negative]').value.trim();
     const title = blockElement.querySelector('[data-block-title]').value.trim() || currentBlock.title || 'Bloque';
     const selectedGenerator = blockElement.querySelector('[data-block-generator]').value;
@@ -7042,23 +7107,22 @@ function fichaKeyForEntity(entity) {
   return entity.sheet || (entity.photos && entity.photos[0]) || null;
 }
 
-// resuelve refs (fichas etiquetadas) y expande @ROL → nombre en el prompt.
+// Resuelve refs y mantiene una correspondencia literal entre la etiqueta
+// estampada y su mención: @ROL se convierte en @Nombre, nunca en una palabra
+// suelta sin @.
 async function automationRefsAndPrompt(pr, block) {
   // La referencia de estilo va primero para que se conserve aun si el modelo
   // limita la cantidad total de imagenes adjuntas.
   const refItems = automationStyleRefItems(pr);
-  const names = {};
   const addChar = (role) => {
     const c = automationAssignedEntity(pr, 'characters', role);
     const key = fichaKeyForEntity(c);
-    if (c) names[role] = c.name;
     if (key) refItems.push({ key, label: c?.name || role });
   };
   const addEl = (kind, role) => {
     if (!role) return;
     const e = automationAssignedEntity(pr, kind, role);
     const key = fichaKeyForEntity(e);
-    if (e) names[role] = e.name;
     if (key) refItems.push({ key, label: e?.name || role });
   };
   block.characters.forEach(addChar);
@@ -7068,7 +7132,7 @@ async function automationRefsAndPrompt(pr, block) {
   const seen = new Set();
   const refs = refItems.filter((r) => !seen.has(r.key) && seen.add(r.key));
   const labeledRefs = await buildLabeledRefs(refs);
-  let prompt = block.imagePrompt.replace(/@([A-Z0-9_]+)/g, (m, r) => names[r] || m.replace('@', ''));
+  let prompt = automationPromptForEditor(pr, block.imagePrompt);
   if (block.negativePrompt) prompt += `\n\nAvoid in the generated image: ${block.negativePrompt}`;
   return { refs: refs.map((r) => r.key), labeledRefs, prompt: automationStyledPrompt(pr, prompt) };
 }
