@@ -1,0 +1,1 @@
+[2026-08-08T01:47:08.937Z] sd-cli (SDXL (local)): comando: C:\Csd.cpp\sd-cli.exe -m B:\ComfyUI\ComfyUI\models\checkpoints\SDXL\XL_betterThanWords_v30.safetensors -p "A beautiful woman" -W 768 -H 1344 -o C:\Users\TUZZI\AppData\Local\Temp\manifestador-sd-1786153628937-9bdab420.png --steps 30 --cfg-scale 7 --sampling-method euler_a

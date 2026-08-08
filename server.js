@@ -4,11 +4,12 @@
 import http from 'node:http';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFile } from 'node:child_process';
 
-import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel, getAudioModel } from './lib/models.js';
+import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODELS, AUDIO_MODEL, MUSIC_MODEL, SDCPP_SAMPLERS, getImageModel, getVideoModel, getAudioModel } from './lib/models.js';
 import {
   generateGemini, analyzeArtStyle, generateSeedream, generateOpenAIImage, generateSeedanceVideo,
   generateMiniMaxH3Video, regenerateMiniMaxH3Video, generateScreenplay,
@@ -25,6 +26,7 @@ import {
   getHeyGenVideoWithKey, getHeyGenVideoWithMcp,
   waitForHeyGenVideo, downloadHeyGenVideo
 } from './lib/heygen.js';
+import { generateSdCpp } from './lib/localEngine.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(ROOT, 'data');
@@ -78,6 +80,27 @@ const DEFAULT_CONFIG = {
   seedanceMiniModelId: '',
   sunoModelId: 'V5_5',
   customAudioTags: [],
+  localEngine: {
+    sdCliPath: '',
+    checkpointsFolder: '',
+    sdxlCheckpoint: '',
+    ponyCheckpoint: '',
+    onnxModelsFolder: '',
+    zImageTurbo: {
+      diffusionModelsFolder: '', diffusionModel: '',
+      vaeFolder: '', vae: '',
+      textEncodersFolder: '', textEncoder: ''
+    },
+    qwenImageEdit: {
+      diffusionModelsFolder: '', diffusionModel: '',
+      vaeFolder: '', vae: '',
+      textEncodersFolder: '', textEncoder: '',
+      visionProjector: ''
+    },
+    rmbgModel: '',
+    kokoroModel: '',
+    kokoroVoices: ''
+  },
   accessPasswordHash: ''
 };
 
@@ -134,16 +157,55 @@ async function updateJson(file, fallback, updater) {
   return task;
 }
 
+// ---------------------------------------------------------------------------
+// Log de depuración (texto plano). Pensado para ver qué pasó con procesos
+// externos (motor local, ffmpeg) y errores de la API sin abrir otra consola.
+// Se acumula con appendFile (barato) y solo se relee/recorta cuando supera
+// el tope de tamaño, para no pagar el costo de leer todo el archivo en cada
+// línea.
+// ---------------------------------------------------------------------------
+
+const LOG_FILE = () => path.join(DATA_DIR, 'log.txt');
+const LOG_MAX_BYTES = 2 * 1024 * 1024;
+let logChain = Promise.resolve();
+function appendLog(line) {
+  const stamped = `[${new Date().toISOString()}] ${line}\n`;
+  logChain = logChain.then(async () => {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.appendFile(LOG_FILE(), stamped, 'utf8');
+    const stat = await fs.stat(LOG_FILE()).catch(() => null);
+    if (stat && stat.size > LOG_MAX_BYTES) {
+      const current = await fs.readFile(LOG_FILE(), 'utf8').catch(() => '');
+      const trimmed = current.slice(current.length - LOG_MAX_BYTES);
+      const nl = trimmed.indexOf('\n');
+      await fs.writeFile(LOG_FILE(), nl === -1 ? trimmed : trimmed.slice(nl + 1), 'utf8');
+    }
+  }).catch(() => {});
+  return logChain;
+}
+
+// Progreso en vivo de generaciones locales (sd-cli), en memoria: el cliente
+// manda un genId propio y lo sondea mientras espera la respuesta del POST
+// principal. No se persiste — es efímero por diseño, solo dura la generación.
+const sdcppProgress = new Map();
+
 async function getConfig() {
   const cfg = await readJson('config.json', {});
   const savedKeys = cfg.keys || {};
   const savedEndpoints = cfg.endpoints || {};
+  const savedLocalEngine = cfg.localEngine || {};
   const merged = {
     ...DEFAULT_CONFIG,
     ...cfg,
     keys: Object.fromEntries(Object.keys(DEFAULT_CONFIG.keys).map((key) => [key, savedKeys[key] || ''])),
     paths: { ...DEFAULT_CONFIG.paths, ...(cfg.paths || {}) },
-    endpoints: Object.fromEntries(Object.keys(DEFAULT_CONFIG.endpoints).map((key) => [key, savedEndpoints[key] || DEFAULT_CONFIG.endpoints[key]]))
+    endpoints: Object.fromEntries(Object.keys(DEFAULT_CONFIG.endpoints).map((key) => [key, savedEndpoints[key] || DEFAULT_CONFIG.endpoints[key]])),
+    localEngine: {
+      ...DEFAULT_CONFIG.localEngine,
+      ...savedLocalEngine,
+      zImageTurbo: { ...DEFAULT_CONFIG.localEngine.zImageTurbo, ...(savedLocalEngine.zImageTurbo || {}) },
+      qwenImageEdit: { ...DEFAULT_CONFIG.localEngine.qwenImageEdit, ...(savedLocalEngine.qwenImageEdit || {}) }
+    }
   };
   return merged;
 }
@@ -807,6 +869,59 @@ async function detectPhotoshop() {
 // Generación
 // ---------------------------------------------------------------------------
 
+// Cada campo de archivo (checkpoint, diffusion model, VAE, text encoder)
+// tiene su propia carpeta configurada en Configuración → Motores locales, sin
+// compartirla entre modelos: Z-Image Turbo y Qwen Image Edit no mezclan sus
+// carpetas aunque ambos necesiten un diffusion model/VAE/text encoder.
+function resolveModelFile(folder, filename) {
+  if (!filename || !folder) return '';
+  return path.join(resolveDir(folder), filename);
+}
+
+// Steps/CFG/sampler/seed son ajustables por generación desde Crear; si el
+// pedido no manda alguno, se usa el default del modelo (lib/models.js).
+function buildSdcppTuningArgs(model, opts = {}) {
+  const defaults = model.sdcppDefaults || {};
+  const args = [];
+  const steps = Number(opts.steps ?? defaults.steps);
+  if (Number.isFinite(steps) && steps > 0) args.push('--steps', String(Math.round(steps)));
+  const cfgScale = Number(opts.cfgScale ?? defaults.cfgScale);
+  if (Number.isFinite(cfgScale) && cfgScale > 0) args.push('--cfg-scale', String(cfgScale));
+  const sampler = String(opts.sampler || defaults.sampler || '').trim();
+  if (sampler) args.push('--sampling-method', sampler);
+  const seed = opts.seed !== undefined && opts.seed !== null && opts.seed !== '' ? Number(opts.seed) : null;
+  if (seed !== null && Number.isFinite(seed)) args.push('--seed', String(Math.round(seed)));
+  return args;
+}
+
+// Arma el set de rutas de archivo que necesita cada modelo local según lo
+// configurado en Configuración → Motores locales.
+function sdcppModelFiles(cfg, sdcppModel) {
+  const le = cfg.localEngine;
+  switch (sdcppModel) {
+    case 'sdxl': return { checkpoint: resolveModelFile(le.checkpointsFolder, le.sdxlCheckpoint) };
+    case 'pony': return { checkpoint: resolveModelFile(le.checkpointsFolder, le.ponyCheckpoint) };
+    case 'z-image-turbo': {
+      const m = le.zImageTurbo;
+      return {
+        diffusionModel: resolveModelFile(m.diffusionModelsFolder, m.diffusionModel),
+        vae: resolveModelFile(m.vaeFolder, m.vae),
+        textEncoder: resolveModelFile(m.textEncodersFolder, m.textEncoder)
+      };
+    }
+    case 'qwen-image-edit': {
+      const m = le.qwenImageEdit;
+      return {
+        diffusionModel: resolveModelFile(m.diffusionModelsFolder, m.diffusionModel),
+        vae: resolveModelFile(m.vaeFolder, m.vae),
+        textEncoder: resolveModelFile(m.textEncodersFolder, m.textEncoder),
+        visionProjector: resolveModelFile(m.textEncodersFolder, m.visionProjector)
+      };
+    }
+    default: return {};
+  }
+}
+
 async function runImageGeneration(req) {
   const cfg = await getConfig();
   const model = getImageModel(req.modelId);
@@ -864,6 +979,41 @@ async function runImageGeneration(req) {
           apiKey: cfg.keys.openai, apiModel, prompt: sentPrompt, preface, refPaths,
           aspectRatio: req.aspectRatio, resolution: req.resolution
         });
+      case 'sdcpp': {
+        const modelFiles = sdcppModelFiles(cfg, model.sdcppModel);
+        const missing = Object.entries(modelFiles).filter(([key, value]) => key !== 'visionProjector' && !value).map(([key]) => key);
+        if (missing.length) {
+          throw new Error(`Falta configurar ${missing.join(', ')} para ${model.name} en Configuración → Motores locales.`);
+        }
+        // Las refs "etiquetadas" llegan como data URL (estampado en el momento);
+        // sd-cli necesita un archivo real en disco, así que se vuelca a un temporal.
+        let refPath = null;
+        let tempRefPath = null;
+        if (refPaths.length) {
+          const ref = refPaths[0];
+          if (typeof ref === 'string' && ref.startsWith('data:image/')) {
+            const { buffer } = parseDataUrl(ref);
+            tempRefPath = path.join(os.tmpdir(), `manifestador-sd-ref-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.png`);
+            await fs.writeFile(tempRefPath, buffer);
+            refPath = tempRefPath;
+          } else {
+            refPath = ref;
+          }
+        }
+        const genId = String(req.genId || '').trim();
+        try {
+          const extraArgs = [...buildSdcppTuningArgs(model, req.sdcpp), ...(model.sdcppFixedArgs || [])];
+          return await generateSdCpp({
+            sdCliPath: cfg.localEngine.sdCliPath, modelFiles, prompt: sentPrompt, refPath,
+            aspectRatio: req.aspectRatio, extraArgs,
+            onLog: (msg) => appendLog(`sd-cli (${model.name}): ${msg}`),
+            onProgress: genId ? (current, total) => sdcppProgress.set(genId, { current, total }) : undefined
+          });
+        } finally {
+          if (tempRefPath) await fs.unlink(tempRefPath).catch(() => {});
+          if (genId) sdcppProgress.delete(genId);
+        }
+      }
       default:
         throw new Error(`Proveedor no implementado: ${model.provider}`);
     }
@@ -3239,6 +3389,7 @@ const server = http.createServer(async (req, res) => {
         audioModels: AUDIO_MODELS,
         audioModel: AUDIO_MODEL,
         musicModel: MUSIC_MODEL,
+        sdcppSamplers: SDCPP_SAMPLERS,
         characters,
         prompts,
         promptCategories,
@@ -3532,6 +3683,12 @@ const server = http.createServer(async (req, res) => {
         poserPrompt: body.poserPrompt !== undefined ? String(body.poserPrompt) : cfg.poserPrompt,
         photoshopPath: body.photoshopPath !== undefined ? String(body.photoshopPath).trim() : cfg.photoshopPath,
         ffmpegPath: body.ffmpegPath !== undefined ? String(body.ffmpegPath).trim() : cfg.ffmpegPath,
+        localEngine: {
+          ...cfg.localEngine,
+          ...(body.localEngine || {}),
+          zImageTurbo: { ...cfg.localEngine.zImageTurbo, ...((body.localEngine || {}).zImageTurbo || {}) },
+          qwenImageEdit: { ...cfg.localEngine.qwenImageEdit, ...((body.localEngine || {}).qwenImageEdit || {}) }
+        },
         customAudioTags: Array.isArray(body.customAudioTags)
           ? [...new Set(body.customAudioTags.map((tag) => String(tag).trim().replace(/^\[|\]$/g, '')).filter(Boolean))].slice(0, 100)
           : (cfg.customAudioTags || []),
@@ -3541,6 +3698,59 @@ const server = http.createServer(async (req, res) => {
       };
       await writeJson('config.json', next);
       return send(res, 200, publicConfig(next));
+    }
+
+    // Lista los archivos de pesos de una carpeta, incluidas subcarpetas (para
+    // elegir el activo de cada campo de Motores locales sin depender de
+    // guardar el formulario antes de poder verlos). Sirve para checkpoints,
+    // diffusion models, VAE, text encoders u ONNX según qué extensiones pida
+    // el llamador. Mismo criterio de recorrido que el listado de modelos del
+    // Poser: ruta relativa con "/", tope de 500 archivos.
+    if (p === '/api/local-engine/models' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const folder = String(body.folder || '').trim();
+      if (!folder) throw new Error('Indicá primero la carpeta.');
+      const allowed = new Set(['safetensors', 'ckpt', 'gguf', 'onnx', 'bin', 'npz', 'pt', 'pth']);
+      const extensions = (Array.isArray(body.extensions) ? body.extensions : ['safetensors', 'ckpt', 'gguf'])
+        .map((e) => String(e).toLowerCase()).filter((e) => allowed.has(e));
+      const pattern = new RegExp(`\\.(${extensions.join('|')})$`, 'i');
+      const dir = resolveDir(folder);
+      const files = [];
+      const walk = async (rel) => {
+        let entries;
+        try {
+          entries = await fs.readdir(path.join(dir, rel), { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const e of entries) {
+          if (files.length >= 500) return;
+          const relPath = rel ? `${rel}/${e.name}` : e.name;
+          if (e.isDirectory()) await walk(relPath);
+          else if (pattern.test(e.name)) files.push(relPath);
+        }
+      };
+      await walk('');
+      if (!files.length) {
+        const dirStat = await fs.stat(dir).catch(() => null);
+        if (!dirStat?.isDirectory()) throw new Error(`No pude leer la carpeta "${folder}".`);
+      }
+      files.sort((a, b) => a.localeCompare(b));
+      return send(res, 200, { files });
+    }
+
+    if (p === '/api/generate/progress' && req.method === 'GET') {
+      const genId = url.searchParams.get('id') || '';
+      return send(res, 200, sdcppProgress.get(genId) || { current: 0, total: 0 });
+    }
+
+    if (p === '/api/log' && req.method === 'GET') {
+      const text = await fs.readFile(LOG_FILE(), 'utf8').catch(() => '');
+      return send(res, 200, { text });
+    }
+    if (p === '/api/log' && req.method === 'DELETE') {
+      await fs.writeFile(LOG_FILE(), '', 'utf8').catch(() => {});
+      return send(res, 200, { ok: true });
     }
 
     if (p === '/api/upload' && req.method === 'POST') {
@@ -6464,6 +6674,7 @@ const server = http.createServer(async (req, res) => {
 
     return send(res, 404, { error: 'Ruta no encontrada' });
   } catch (err) {
+    appendLog(`ERROR ${req.method} ${p}: ${err.message || err}`);
     return send(res, 500, { error: err.message || String(err) });
   }
 });

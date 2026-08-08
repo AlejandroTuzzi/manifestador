@@ -184,8 +184,8 @@ function renderTagPalette() {
   });
 }
 
-async function copyPrompt(text) {
-  if (!text) return toast('Este asset no tiene un prompt guardado', 'err');
+async function copyText(text, { emptyMsg = 'Nada para copiar', okMsg = 'Copiado' } = {}) {
+  if (!text) return toast(emptyMsg, 'err');
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -193,7 +193,11 @@ async function copyPrompt(text) {
     area.value = text; area.style.position = 'fixed'; area.style.opacity = '0';
     document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove();
   }
-  toast('Prompt copiado');
+  toast(okMsg);
+}
+
+function copyPrompt(text) {
+  return copyText(text, { emptyMsg: 'Este asset no tiene un prompt guardado', okMsg: 'Prompt copiado' });
 }
 
 function assetInfo(key) {
@@ -327,6 +331,7 @@ function chipRow(container, values, active, onPick, labelFn = (v) => v) {
   }
 }
 
+let lastSdcppModelId = null;
 function renderImageControls() {
   const m = currentModel();
   if (!m) return;
@@ -346,10 +351,29 @@ function renderImageControls() {
     (v) => { state.batch = v; renderImageControls(); },
     (v) => `×${v}`);
 
+  $('#sdcppControls').hidden = m.provider !== 'sdcpp';
+  if (m.provider === 'sdcpp') {
+    if ($('#sdcppSampler').options.length !== state.sdcppSamplers.length) {
+      $('#sdcppSampler').innerHTML = state.sdcppSamplers.map((s) => `<option value="${esc(s.id)}">${esc(s.label)}</option>`).join('');
+    }
+    if (lastSdcppModelId !== m.id) {
+      const d = m.sdcppDefaults || {};
+      state.sdcpp = { steps: d.steps ?? '', cfgScale: d.cfgScale ?? '', sampler: d.sampler ?? '', seed: state.sdcpp.seed };
+    }
+    $('#sdcppSteps').value = state.sdcpp.steps;
+    $('#sdcppCfgScale').value = state.sdcpp.cfgScale;
+    $('#sdcppSampler').value = state.sdcpp.sampler;
+    $('#sdcppSeed').value = state.sdcpp.seed;
+  }
+  lastSdcppModelId = m.provider === 'sdcpp' ? m.id : null;
+
   $('#modelNote').textContent = m.notes || '';
   renderRefs();
   renderCharacterVariantControl();
   updateEstimate();
+}
+for (const [id, field] of [['sdcppSteps', 'steps'], ['sdcppCfgScale', 'cfgScale'], ['sdcppSampler', 'sampler'], ['sdcppSeed', 'seed']]) {
+  $(`#${id}`).addEventListener('change', (e) => { state.sdcpp[field] = e.target.value; });
 }
 
 function heygenWideAvatarId(character) {
@@ -815,6 +839,47 @@ function renderPinnedHint() {
 $('#unpinBtn').addEventListener('click', () => setPinned(''));
 
 // ---------------------------------------------------------------------------
+// consola: log de depuración del servidor (motor local, errores de API),
+// colapsable y persistente en data/log.txt. Mientras está abierta se sondea
+// cada pocos segundos para simular actividad en vivo sin necesitar sockets.
+// ---------------------------------------------------------------------------
+
+let consolePollTimer = null;
+
+async function refreshConsoleLog() {
+  const pre = $('#consoleLog');
+  try {
+    const { text } = await api('/api/log', { task: false });
+    const wasAtBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
+    pre.textContent = text || '';
+    if (wasAtBottom) pre.scrollTop = pre.scrollHeight;
+  } catch (e) {
+    // silencioso: no queremos que fallar al leer el log tape la consola de errores en toasts
+  }
+}
+
+function setConsoleOpen(open) {
+  $('#consolePanel').classList.toggle('collapsed', !open);
+  localStorage.setItem('consoleOpen', open ? '1' : '');
+  clearInterval(consolePollTimer);
+  if (open) {
+    refreshConsoleLog();
+    consolePollTimer = setInterval(refreshConsoleLog, 3000);
+  }
+}
+
+$('#consoleToggle').addEventListener('click', () => setConsoleOpen($('#consolePanel').classList.contains('collapsed')));
+$('#consoleRefresh').addEventListener('click', refreshConsoleLog);
+$('#consoleCopy').addEventListener('click', () =>
+  copyText($('#consoleLog').textContent, { emptyMsg: 'El log está vacío', okMsg: 'Log copiado' }));
+$('#consoleClear').addEventListener('click', async () => {
+  await api('/api/log', { method: 'DELETE', task: false });
+  $('#consoleLog').textContent = '';
+  toast('Log limpiado');
+});
+if (localStorage.getItem('consoleOpen')) setConsoleOpen(true);
+
+// ---------------------------------------------------------------------------
 // lista de tomas para video: arma el esqueleto "Shot N:" con sus tiempos
 //
 // La forma documentada para Seedance 2.0 es la toma numerada ("Shot 1: …"),
@@ -1134,7 +1199,8 @@ async function generate() {
       modelId: state.modelId, prompt, aspectRatio: state.aspectRatio,
       resolution: state.resolution, batch: state.batch,
       refs: state.refs.map((r) => r.key), labeledRefs, characterId: state.pinnedId || null,
-      characterVariantId: state.characterVariantId || null
+      characterVariantId: state.characterVariantId || null,
+      ...(model.provider === 'sdcpp' ? { genId: `sdcpp-${Date.now()}-${Math.random().toString(16).slice(2)}`, sdcpp: state.sdcpp } : {})
     } : isVideo ? {
       modelId: state.video.modelId, prompt, mode: state.video.mode,
       aspectRatio: state.video.aspectRatio, resolution: state.video.resolution,
@@ -1180,6 +1246,17 @@ async function runGenerationJob(job) {
   job.startedAt = Date.now();
   state.activeGenerations += 1;
   renderGenerationQueue();
+  // El motor local (sd-cli) reporta pasos de muestreo mientras corre; se sondea
+  // aparte del POST principal, que se queda esperando hasta que termine todo.
+  let progressTimer = null;
+  if (job.body?.genId) {
+    progressTimer = setInterval(async () => {
+      try {
+        const p = await api(`/api/generate/progress?id=${encodeURIComponent(job.body.genId)}`, { task: false });
+        if (p.total > 0) { job.progress = p; renderGenerationQueue(); }
+      } catch {}
+    }, 700);
+  }
   try {
     const entry = await api(job.path, { method: 'POST', body: job.body });
     job.status = 'done'; job.entry = entry; job.finishedAt = Date.now();
@@ -1197,6 +1274,8 @@ async function runGenerationJob(job) {
     job.status = 'error'; job.error = e.message; job.finishedAt = Date.now();
     toast(e.message, 'err');
   } finally {
+    clearInterval(progressTimer);
+    job.progress = null;
     state.activeGenerations -= 1;
     renderGenerationQueue();
     pumpGenerationQueue();
@@ -1212,7 +1291,7 @@ function renderGenerationQueue() {
   box.innerHTML = `<div class="generation-queue-head"><span>Cola de generación</span><span>${active} activas · ${queued} esperando</span></div>`
     + state.generationJobs.slice(0, 12).map((job) => `<div class="generation-job ${job.status}" data-job="${job.id}">
       <div class="job-status">${job.status === 'queued' ? 'Ⅱ' : job.status === 'running' ? '●' : job.status === 'done' ? '✓' : '!'}</div>
-      <div class="job-main"><div class="job-title">${esc(job.label)}</div><div class="job-prompt ${job.status === 'error' ? 'job-error' : ''}">${esc(job.error || job.prompt)}</div></div>
+      <div class="job-main"><div class="job-title">${esc(job.label)}${job.progress?.total ? ` <span class="job-step">· paso ${job.progress.current}/${job.progress.total}</span>` : ''}</div><div class="job-prompt ${job.status === 'error' ? 'job-error' : ''}">${esc(job.error || job.prompt)}</div></div>
       <div class="job-actions">${job.entry ? '<button class="mini-btn" data-job-act="view">Ver</button>' : ''}${['done','error'].includes(job.status) ? '<button class="icon-btn" data-job-act="dismiss">×</button>' : ''}</div>
     </div>`).join('');
   box.querySelectorAll('[data-job]').forEach((row) => row.querySelectorAll('[data-job-act]').forEach((button) => button.addEventListener('click', () => {
@@ -8669,6 +8748,53 @@ $('#btnSavePricing').addEventListener('click', async () => {
 // configuración
 // ---------------------------------------------------------------------------
 
+// Cada carpeta de Motores locales (checkpoints, diffusion models, VAE, text
+// encoders, ONNX) alimenta uno o más selects. Cada select conserva su propia
+// elección aunque el archivo elegido ya no aparezca en un releído, para no
+// perder lo guardado por un error transitorio de lectura. Devuelve la
+// cantidad de archivos encontrados (0 si la carpeta está vacía o sin configurar).
+// selectConfigs: [{ id, desired? }] — desired omitido = conservar el valor actual del select.
+async function refreshFolderSelects(folderInputId, selectConfigs, extensions) {
+  const folder = $(`#${folderInputId}`).value.trim();
+  let files = [];
+  if (folder) {
+    try {
+      ({ files } = await api('/api/local-engine/models', { method: 'POST', body: { folder, extensions } }));
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  }
+  for (const { id, desired } of selectConfigs) {
+    const sel = $(`#${id}`);
+    const want = desired !== undefined ? desired : sel.value;
+    const set = new Set(files);
+    if (want) set.add(want);
+    sel.innerHTML = '<option value="">— elegir —</option>' + [...set].sort((a, b) => a.localeCompare(b))
+      .map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join('');
+    sel.value = want;
+  }
+  return files.length;
+}
+
+const LOCAL_ENGINE_FOLDER_GROUPS = [
+  ['checkpointsFolderInput', [{ id: 'sdxlCheckpointSelect' }, { id: 'ponyCheckpointSelect' }]],
+  ['zImageDiffusionFolderInput', [{ id: 'zImageDiffusionSelect' }]],
+  ['zImageVaeFolderInput', [{ id: 'zImageVaeSelect' }]],
+  ['zImageTextEncoderFolderInput', [{ id: 'zImageTextEncoderSelect' }]],
+  ['qwenDiffusionFolderInput', [{ id: 'qwenDiffusionSelect' }]],
+  ['qwenVaeFolderInput', [{ id: 'qwenVaeSelect' }]],
+  ['qwenTextEncoderFolderInput', [{ id: 'qwenTextEncoderSelect' }, { id: 'qwenVisionProjectorSelect' }]],
+  ['onnxModelsFolderInput', [{ id: 'rmbgModelSelect' }, { id: 'kokoroModelSelect' }, { id: 'kokoroVoicesSelect' }], ['onnx', 'bin', 'npz']]
+];
+
+$('#btnListAllFolders').addEventListener('click', async () => {
+  let total = 0;
+  for (const [folderInputId, selectConfigs, extensions] of LOCAL_ENGINE_FOLDER_GROUPS) {
+    total += await refreshFolderSelects(folderInputId, selectConfigs, extensions);
+  }
+  toast(`${total} archivo(s) encontrados en total`);
+});
+
 function fillConfigForm() {
   const f = $('#configForm');
   const c = state.config;
@@ -8695,6 +8821,36 @@ function fillConfigForm() {
   f.poserPrompt.value = c.poserPrompt || '';
   f.photoshopPath.value = c.photoshopPath || '';
   f.ffmpegPath.value = c.ffmpegPath || '';
+  const le = c.localEngine || {};
+  f.localEngine_sdCliPath.value = le.sdCliPath || '';
+  f.localEngine_checkpointsFolder.value = le.checkpointsFolder || '';
+  f.localEngine_onnxModelsFolder.value = le.onnxModelsFolder || '';
+  const zit = le.zImageTurbo || {};
+  const qie = le.qwenImageEdit || {};
+  f.localEngine_zImageTurbo_diffusionModelsFolder.value = zit.diffusionModelsFolder || '';
+  f.localEngine_zImageTurbo_vaeFolder.value = zit.vaeFolder || '';
+  f.localEngine_zImageTurbo_textEncodersFolder.value = zit.textEncodersFolder || '';
+  f.localEngine_qwenImageEdit_diffusionModelsFolder.value = qie.diffusionModelsFolder || '';
+  f.localEngine_qwenImageEdit_vaeFolder.value = qie.vaeFolder || '';
+  f.localEngine_qwenImageEdit_textEncodersFolder.value = qie.textEncodersFolder || '';
+  refreshFolderSelects('checkpointsFolderInput', [
+    { id: 'sdxlCheckpointSelect', desired: le.sdxlCheckpoint || '' },
+    { id: 'ponyCheckpointSelect', desired: le.ponyCheckpoint || '' }
+  ]);
+  refreshFolderSelects('zImageDiffusionFolderInput', [{ id: 'zImageDiffusionSelect', desired: zit.diffusionModel || '' }]);
+  refreshFolderSelects('zImageVaeFolderInput', [{ id: 'zImageVaeSelect', desired: zit.vae || '' }]);
+  refreshFolderSelects('zImageTextEncoderFolderInput', [{ id: 'zImageTextEncoderSelect', desired: zit.textEncoder || '' }]);
+  refreshFolderSelects('qwenDiffusionFolderInput', [{ id: 'qwenDiffusionSelect', desired: qie.diffusionModel || '' }]);
+  refreshFolderSelects('qwenVaeFolderInput', [{ id: 'qwenVaeSelect', desired: qie.vae || '' }]);
+  refreshFolderSelects('qwenTextEncoderFolderInput', [
+    { id: 'qwenTextEncoderSelect', desired: qie.textEncoder || '' },
+    { id: 'qwenVisionProjectorSelect', desired: qie.visionProjector || '' }
+  ]);
+  refreshFolderSelects('onnxModelsFolderInput', [
+    { id: 'rmbgModelSelect', desired: le.rmbgModel || '' },
+    { id: 'kokoroModelSelect', desired: le.kokoroModel || '' },
+    { id: 'kokoroVoicesSelect', desired: le.kokoroVoices || '' }
+  ], ['onnx', 'bin', 'npz']);
   renderConfigAudioTags();
   $('#accessStatus').textContent = c.accessProtected
     ? 'La aplicación está protegida. Escribí una nueva clave solo si querés cambiarla.'
@@ -8829,6 +8985,33 @@ $('#configForm').addEventListener('submit', async (e) => {
         poserPrompt: f.poserPrompt.value.trim(),
         photoshopPath: f.photoshopPath.value.trim(),
         ffmpegPath: f.ffmpegPath.value.trim(),
+        localEngine: {
+          sdCliPath: f.localEngine_sdCliPath.value.trim(),
+          checkpointsFolder: f.localEngine_checkpointsFolder.value.trim(),
+          sdxlCheckpoint: f.localEngine_sdxlCheckpoint.value.trim(),
+          ponyCheckpoint: f.localEngine_ponyCheckpoint.value.trim(),
+          onnxModelsFolder: f.localEngine_onnxModelsFolder.value.trim(),
+          zImageTurbo: {
+            diffusionModelsFolder: f.localEngine_zImageTurbo_diffusionModelsFolder.value.trim(),
+            diffusionModel: f.localEngine_zImageTurbo_diffusionModel.value.trim(),
+            vaeFolder: f.localEngine_zImageTurbo_vaeFolder.value.trim(),
+            vae: f.localEngine_zImageTurbo_vae.value.trim(),
+            textEncodersFolder: f.localEngine_zImageTurbo_textEncodersFolder.value.trim(),
+            textEncoder: f.localEngine_zImageTurbo_textEncoder.value.trim()
+          },
+          qwenImageEdit: {
+            diffusionModelsFolder: f.localEngine_qwenImageEdit_diffusionModelsFolder.value.trim(),
+            diffusionModel: f.localEngine_qwenImageEdit_diffusionModel.value.trim(),
+            vaeFolder: f.localEngine_qwenImageEdit_vaeFolder.value.trim(),
+            vae: f.localEngine_qwenImageEdit_vae.value.trim(),
+            textEncodersFolder: f.localEngine_qwenImageEdit_textEncodersFolder.value.trim(),
+            textEncoder: f.localEngine_qwenImageEdit_textEncoder.value.trim(),
+            visionProjector: f.localEngine_qwenImageEdit_visionProjector.value.trim()
+          },
+          rmbgModel: f.localEngine_rmbgModel.value.trim(),
+          kokoroModel: f.localEngine_kokoroModel.value.trim(),
+          kokoroVoices: f.localEngine_kokoroVoices.value.trim()
+        },
         accessPassword: f.accessPassword.value
       }
     });
@@ -8858,6 +9041,7 @@ async function init() {
       ? s.config.audioModelId
       : (state.audioModels[0]?.id || 'eleven-v3');
     state.musicModel = s.musicModel || null;
+    state.sdcppSamplers = s.sdcppSamplers || [];
     state.transitionSounds = s.transitionSounds || [];
     if (s.musicModel?.defaultVersion) state.music.version = s.config?.sunoModelId || s.musicModel.defaultVersion;
     state.characters = s.characters;
