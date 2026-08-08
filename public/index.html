@@ -85,18 +85,6 @@
       <div id="taskMonitorList" class="task-monitor-list"><span class="task-monitor-empty">La actividad aparecerá aquí.</span></div>
     </section>
 
-    <section id="consolePanel" class="console-panel collapsed">
-      <div class="console-head">
-        <button type="button" class="console-toggle" id="consoleToggle"><svg class="ic"><use href="#i-right"/></svg><strong>Consola</strong></button>
-        <div class="console-actions">
-          <button type="button" id="consoleRefresh" class="icon-btn" title="Actualizar"><svg class="ic"><use href="#i-refresh"/></svg></button>
-          <button type="button" id="consoleCopy" class="icon-btn" title="Copiar log"><svg class="ic"><use href="#i-copy"/></svg></button>
-          <button type="button" id="consoleClear" class="icon-btn" title="Limpiar log"><svg class="ic"><use href="#i-trash"/></svg></button>
-        </div>
-      </div>
-      <pre id="consoleLog" class="console-log"></pre>
-    </section>
-
     <div class="sidebar-footer">local · sin nubes de más</div>
   </aside>
 
@@ -198,15 +186,6 @@
           <label>Personaje</label>
           <select id="characterVariantSelect" class="select"></select>
           <span class="hint">Elegí el original o un outfit variante</span>
-        </div>
-        <div id="sdcppControls" class="control-row" hidden>
-          <label>Motor local</label>
-          <div class="sdcpp-tuning">
-            <label>Steps <input type="number" id="sdcppSteps" min="1" max="150" step="1"></label>
-            <label>CFG <input type="number" id="sdcppCfgScale" min="0" max="30" step="0.1"></label>
-            <label>Sampler <select id="sdcppSampler" class="select"></select></label>
-            <label>Seed <input type="number" id="sdcppSeed" step="1" placeholder="-1 = azar"></label>
-          </div>
         </div>
         <div id="modelNote" class="model-note"></div>
       </div>
@@ -701,62 +680,6 @@
           <label>Ruta de FFmpeg <input type="text" name="ffmpegPath" placeholder="C:\ffmpeg\bin o C:\ffmpeg\bin\ffmpeg.exe"></label>
         </div>
         <p class="hint">El Automatizador lo usa para armar el video mp4 de cada bloque (imagen + audio). Podés pegar la carpeta bin o la ruta completa a ffmpeg.exe.</p>
-
-        <h3>Motores locales</h3>
-        <div class="cfg-grid">
-          <label>Ruta de sd-cli (stable-diffusion.cpp) <input type="text" name="localEngine_sdCliPath" placeholder="C:\sd.cpp\bin o C:\sd.cpp\bin\sd-cli.exe"></label>
-        </div>
-        <p class="hint">Motor local sin costo por generación. Corre los checkpoints/pesos que ya usás en ComfyUI, sin abrirlo. Podés pegar la carpeta bin o la ruta completa al ejecutable.</p>
-
-        <p class="hint"><button type="button" id="btnListAllFolders" class="mini-btn"><svg class="ic"><use href="#i-refresh"/></svg> Releer todas las carpetas</button> Busca los archivos de pesos (incluidas subcarpetas) en cada carpeta configurada abajo, para poder elegirlos en los selectores.</p>
-        <div class="cfg-grid">
-          <label>Carpeta de checkpoints (SDXL/Pony) <input type="text" name="localEngine_checkpointsFolder" id="checkpointsFolderInput" placeholder="C:\modelos\checkpoints"></label>
-        </div>
-        <div class="cfg-grid">
-          <label>SDXL — checkpoint activo <select name="localEngine_sdxlCheckpoint" id="sdxlCheckpointSelect" class="select"><option value="">— elegir —</option></select></label>
-          <label>Pony — checkpoint activo <select name="localEngine_ponyCheckpoint" id="ponyCheckpointSelect" class="select"><option value="">— elegir —</option></select></label>
-        </div>
-
-        <p class="hint">Z-Image Turbo y Qwen Image Edit tienen carpetas propias, sin compartir entre sí — cada carpeta puede tener subcarpetas.</p>
-
-        <h4>Z-Image Turbo</h4>
-        <div class="cfg-grid">
-          <label>Diffusion model — carpeta <input type="text" name="localEngine_zImageTurbo_diffusionModelsFolder" id="zImageDiffusionFolderInput" placeholder="C:\ComfyUI\models\diffusion_models\ZImage_Turbo"></label>
-          <label>Diffusion model — archivo <select name="localEngine_zImageTurbo_diffusionModel" id="zImageDiffusionSelect" class="select"><option value="">— elegir —</option></select></label>
-        </div>
-        <div class="cfg-grid">
-          <label>VAE — carpeta <input type="text" name="localEngine_zImageTurbo_vaeFolder" id="zImageVaeFolderInput"></label>
-          <label>VAE — archivo <select name="localEngine_zImageTurbo_vae" id="zImageVaeSelect" class="select"><option value="">— elegir —</option></select></label>
-        </div>
-        <div class="cfg-grid">
-          <label>Text encoder (Qwen3-4B) — carpeta <input type="text" name="localEngine_zImageTurbo_textEncodersFolder" id="zImageTextEncoderFolderInput"></label>
-          <label>Text encoder — archivo <select name="localEngine_zImageTurbo_textEncoder" id="zImageTextEncoderSelect" class="select"><option value="">— elegir —</option></select></label>
-        </div>
-
-        <h4>Qwen Image Edit</h4>
-        <div class="cfg-grid">
-          <label>Diffusion model — carpeta <input type="text" name="localEngine_qwenImageEdit_diffusionModelsFolder" id="qwenDiffusionFolderInput" placeholder="C:\ComfyUI\models\diffusion_models"></label>
-          <label>Diffusion model — archivo <select name="localEngine_qwenImageEdit_diffusionModel" id="qwenDiffusionSelect" class="select"><option value="">— elegir —</option></select></label>
-        </div>
-        <div class="cfg-grid">
-          <label>VAE — carpeta <input type="text" name="localEngine_qwenImageEdit_vaeFolder" id="qwenVaeFolderInput"></label>
-          <label>VAE — archivo <select name="localEngine_qwenImageEdit_vae" id="qwenVaeSelect" class="select"><option value="">— elegir —</option></select></label>
-        </div>
-        <div class="cfg-grid">
-          <label>Text encoder (Qwen2.5-VL-7B) — carpeta <input type="text" name="localEngine_qwenImageEdit_textEncodersFolder" id="qwenTextEncoderFolderInput"></label>
-          <label>Text encoder — archivo <select name="localEngine_qwenImageEdit_textEncoder" id="qwenTextEncoderSelect" class="select"><option value="">— elegir —</option></select></label>
-          <label>Vision projector (opcional, 2509+) <select name="localEngine_qwenImageEdit_visionProjector" id="qwenVisionProjectorSelect" class="select"><option value="">— elegir —</option></select></label>
-        </div>
-
-        <div class="cfg-grid">
-          <label>Carpeta de modelos ONNX (RMBG/Kokoro) <input type="text" name="localEngine_onnxModelsFolder" id="onnxModelsFolderInput" placeholder="C:\modelos\onnx"></label>
-        </div>
-        <p class="hint">RMBG 2.0 y Kokoro: guardá acá su selección para tenerla lista — la generación con estos dos todavía no está conectada, llega en una vuelta siguiente.</p>
-        <div class="cfg-grid">
-          <label>RMBG 2.0 — modelo <select name="localEngine_rmbgModel" id="rmbgModelSelect" class="select"><option value="">— elegir —</option></select></label>
-          <label>Kokoro — modelo <select name="localEngine_kokoroModel" id="kokoroModelSelect" class="select"><option value="">— elegir —</option></select></label>
-          <label>Kokoro — voces <select name="localEngine_kokoroVoices" id="kokoroVoicesSelect" class="select"><option value="">— elegir —</option></select></label>
-        </div>
 
         <h3>Prompt de pose (Poser)</h3>
         <textarea name="poserPrompt" class="cfg-textarea" rows="4" spellcheck="false"></textarea>

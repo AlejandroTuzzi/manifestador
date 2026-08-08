@@ -27,8 +27,6 @@ const state = {
   aspectRatio: '1:1',
   resolution: '1K',
   batch: 1,
-  sdcppSamplers: [],
-  sdcpp: { steps: '', cfgScale: '', sampler: '', seed: '' },
   videoModels: [],
   video: {
     modelId: null, mode: 'reference', aspectRatio: '16:9', resolution: '720p', duration: 5, audio: false,

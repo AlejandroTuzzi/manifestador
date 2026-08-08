@@ -155,22 +155,6 @@ nav { display: flex; flex-direction: column; gap: 4px; }
 .task-monitor-item.error .task-item-copy small { color: #fda4af; white-space: normal; }
 .task-counter { color: #c4b5fd; font-size: 9px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-.console-panel { margin-top: 8px; border: 1px solid var(--border-soft); background: rgba(15,8,24,.5); }
-.console-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; }
-.console-toggle { display: flex; align-items: center; gap: 6px; background: none; border: 0; color: var(--muted); font: inherit; cursor: pointer; padding: 0; }
-.console-toggle strong { color: #ede9fe; font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
-.console-toggle .ic { width: 11px; height: 11px; transition: transform .15s; transform: rotate(90deg); }
-.console-panel.collapsed .console-toggle .ic { transform: rotate(0deg); }
-.console-panel.collapsed .console-actions, .console-panel.collapsed .console-log { display: none; }
-.console-actions { display: flex; gap: 4px; }
-.console-log {
-  max-height: 240px; overflow-y: auto; margin: 0; padding: 8px 11px 10px;
-  border-top: 1px solid var(--border-soft);
-  font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 10px; line-height: 1.5;
-  color: var(--muted); white-space: pre-wrap; word-break: break-word;
-}
-.console-log:empty::before { content: 'Sin actividad registrada todavía.'; color: #6f6280; }
-
 .sidebar-footer { font-size: 10px; color: #574a6e; text-align: center; padding-bottom: 4px; }
 
 /* ---------- main ---------- */
@@ -714,15 +698,6 @@ h3 { font-size: 15px; }
 
 .model-note { font-size: 12px; color: #8d7cab; padding-left: 104px; }
 
-.sdcpp-tuning { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
-.sdcpp-tuning label { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--muted); }
-.sdcpp-tuning input, .sdcpp-tuning select {
-  width: 78px; background: var(--panel-solid); border: 1px solid var(--border); color: var(--text);
-  padding: 6px 8px; font: inherit; font-size: 12px;
-}
-.sdcpp-tuning select { width: auto; }
-.sdcpp-tuning input:focus, .sdcpp-tuning select:focus { outline: none; border-color: var(--violet); }
-
 /* ---------- referencias ---------- */
 .refs-row { align-items: flex-start; }
 .refs-count { color: var(--pink); }
@@ -890,7 +865,6 @@ h3 { font-size: 15px; }
 @keyframes pulse { to { opacity: .35; } }
 .job-main { min-width: 0; }
 .job-title { font-size: 12px; font-weight: 700; }
-.job-step { color: var(--pink); font-weight: 800; font-variant-numeric: tabular-nums; }
 .job-prompt { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .job-error { color: #fda4af; }
 .job-actions { display: flex; gap: 5px; }
@@ -1144,7 +1118,6 @@ audio::-webkit-media-controls-volume-slider {
 /* ---------- config ---------- */
 .config-form { max-width: 720px; display: flex; flex-direction: column; gap: 14px; }
 .config-form h3 { margin-top: 10px; color: #d3c3f0; }
-.config-form h4 { font-size: 13px; color: var(--pink); text-transform: uppercase; letter-spacing: .04em; }
 .cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .cfg-grid label { font-size: 12px; font-weight: 700; color: var(--muted); display: flex; flex-direction: column; gap: 5px; }
 .cfg-grid input, .audio-tag-add input {
