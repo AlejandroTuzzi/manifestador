@@ -746,6 +746,27 @@ $('#poserCapture').addEventListener('click', async () => {
   }
 });
 
+async function captureToComfySlot(slot) {
+  if (!P.root) return B.toast('Cargá un modelo primero', 'err');
+  const wasBones = $('#poserShowBones').checked;
+  $('#poserShowBones').checked = false;
+  const wasGrid = P.grid.visible;
+  P.grid.visible = false;
+  updateBoneOverlay();
+  const dataUrl = captureDataUrl();
+  P.grid.visible = wasGrid;
+  $('#poserShowBones').checked = wasBones;
+  try {
+    const { key } = await B.api('/api/poser/captures', { method: 'POST', body: { name: P.model.name, dataUrl } });
+    B.setComfyPoseRef(slot, key);
+    B.toast('Captura agregada como pose de ComfyUI');
+  } catch (e) {
+    B.toast(e.message, 'err');
+  }
+}
+$('#poserCaptureComfyPose').addEventListener('click', () => captureToComfySlot('poseControlNet'));
+$('#poserCaptureComfyIp').addEventListener('click', () => captureToComfySlot('poseIpAdapter'));
+
 $('#poserSaveScene').addEventListener('click', async () => {
   if (!P.root) return B.toast('Cargá un modelo primero', 'err');
   const name = $('#poserSceneName').value.trim() || `Pose ${new Date().toLocaleString()}`;

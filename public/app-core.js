@@ -36,6 +36,12 @@ const state = {
   heygenOAuth: { connected: false, localhostSupported: true },
   musicModel: null,
   music: { version: 'V5_5', customMode: true, instrumental: false, style: '', title: '' },
+  comfyui: {
+    aspectRatio: '1:1', resolution: '1K',
+    refs: { reference: null, poseControlNet: null, poseIpAdapter: null },
+    slots: null            // último resultado de /api/comfyui/scan
+  },
+  comfyPickerSlot: null,    // slot de state.comfyui.refs que el picker va a llenar (null = flujo genérico)
   transitionSounds: [],   // catálogo local, agrupado por las carpetas de public/sounds
   refs: [],              // [{ key, fromChar, label }]
   voiceId: '',

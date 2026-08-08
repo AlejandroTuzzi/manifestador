@@ -25,6 +25,10 @@ import {
   getHeyGenVideoWithKey, getHeyGenVideoWithMcp,
   waitForHeyGenVideo, downloadHeyGenVideo
 } from './lib/heygen.js';
+import {
+  TUZZI_TYPES, loadWorkflow, scanWorkflowSlots, comfyResolutionPixels, fillSlots,
+  submitPrompt, watchProgress, waitForHistory, extractOutputs, downloadView, checkComfyHealth
+} from './lib/comfyBridge.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(ROOT, 'data');
@@ -40,6 +44,7 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 7777;
 const sessions = new Map();
 const automationAssemblyJobs = new Set();
 const heygenOAuthStates = new Map();
+const comfyProgress = new Map(); // genId -> { current, total }
 
 // Se agrega automáticamente (sin mostrarse en la caja) cuando alguna
 // referencia viene del Poser, para que el modelo la tome solo como pose.
@@ -78,7 +83,8 @@ const DEFAULT_CONFIG = {
   seedanceMiniModelId: '',
   sunoModelId: 'V5_5',
   customAudioTags: [],
-  accessPasswordHash: ''
+  accessPasswordHash: '',
+  comfyui: { host: '127.0.0.1', port: 8188, workflowPath: '' }
 };
 
 // ---------------------------------------------------------------------------
@@ -143,7 +149,8 @@ async function getConfig() {
     ...cfg,
     keys: Object.fromEntries(Object.keys(DEFAULT_CONFIG.keys).map((key) => [key, savedKeys[key] || ''])),
     paths: { ...DEFAULT_CONFIG.paths, ...(cfg.paths || {}) },
-    endpoints: Object.fromEntries(Object.keys(DEFAULT_CONFIG.endpoints).map((key) => [key, savedEndpoints[key] || DEFAULT_CONFIG.endpoints[key]]))
+    endpoints: Object.fromEntries(Object.keys(DEFAULT_CONFIG.endpoints).map((key) => [key, savedEndpoints[key] || DEFAULT_CONFIG.endpoints[key]])),
+    comfyui: { ...DEFAULT_CONFIG.comfyui, ...(cfg.comfyui || {}) }
   };
   return merged;
 }
@@ -919,6 +926,91 @@ async function runImageGeneration(req) {
     });
   }
   return entry;
+}
+
+// El key de un asset ya guardado se sirve tal cual en /files/. Una ref que
+// todavía es un data: URL (etiquetada, o recién subida sin guardar) se
+// escribe como archivo temporal bajo la zona "uploads" y se borra al final,
+// haya salido bien la corrida o no.
+async function resolveComfyRefUrl(key, tempFiles) {
+  if (!key) return null;
+  let assetKey = key;
+  if (String(key).startsWith('data:')) {
+    const { mime, buffer } = parseDataUrl(key);
+    const name = `${ts()}-comfy-tmp-${newId()}${extForMime(mime)}`;
+    assetKey = await saveBuffer('uploads', name, buffer);
+    tempFiles.push(assetKey);
+  }
+  const filesPath = '/files/' + assetKey.split('/').map(encodeURIComponent).join('/');
+  return `http://127.0.0.1:${PORT}${filesPath}`;
+}
+
+// No es un modelo del catálogo: ComfyUI es un único destino de paso. El
+// usuario arma y mantiene su propio workflow en ComfyUI; acá solo se buscan
+// los nodos Tuzzi reconocidos y se llenan los que estén presentes.
+async function runComfyUIGeneration(req) {
+  const cfg = await getConfig();
+  const prompt = String(req.prompt || '').trim();
+  if (!prompt) throw new Error('El prompt está vacío.');
+
+  const graph = await loadWorkflow(cfg.comfyui.workflowPath);
+  const slots = scanWorkflowSlots(graph);
+  const hasOutput = slots[TUZZI_TYPES.outputImage] || slots[TUZZI_TYPES.outputVideo] || slots[TUZZI_TYPES.outputAudio];
+  if (!hasOutput) {
+    throw new Error('Este workflow no tiene ningún nodo Tuzzi de salida (Imagen/Video/Audio) — Manifestador no podría recibir el resultado.');
+  }
+
+  const refsIn = req.refs && typeof req.refs === 'object' ? req.refs : {};
+  const tempFiles = [];
+  const genId = String(req.genId || '').trim();
+  let stopProgress = null;
+  try {
+    const [reference, poseControlNet, poseIpAdapter] = await Promise.all([
+      resolveComfyRefUrl(refsIn.reference, tempFiles),
+      resolveComfyRefUrl(refsIn.poseControlNet, tempFiles),
+      resolveComfyRefUrl(refsIn.poseIpAdapter, tempFiles)
+    ]);
+    const [width, height] = comfyResolutionPixels(req.aspectRatio, req.resolution);
+    const filled = fillSlots(graph, slots, { prompt, reference, poseControlNet, poseIpAdapter, width, height });
+
+    const clientId = crypto.randomUUID();
+    const promptId = await submitPrompt(cfg, filled, clientId);
+    if (genId) {
+      comfyProgress.set(genId, { current: 0, total: 0 });
+      stopProgress = watchProgress(cfg, clientId, promptId, (p) => comfyProgress.set(genId, p));
+    }
+
+    const historyEntry = await waitForHistory(cfg, promptId);
+    const outputGroups = extractOutputs(historyEntry, slots);
+    if (!outputGroups.length) {
+      throw new Error('ComfyUI terminó, pero ninguno de tus nodos Tuzzi de salida produjo un archivo (revisá el workflow en la interfaz de ComfyUI).');
+    }
+
+    const zoneFor = { image: 'generated', video: 'video', audio: 'audio' };
+    const entries = [];
+    for (const group of outputGroups) {
+      const outputs = [];
+      for (const file of group.files) {
+        const buffer = await downloadView(cfg, file);
+        const name = `${ts()}-comfyui-${newId()}${path.extname(file.filename) || ''}`;
+        outputs.push(await saveBuffer(zoneFor[group.kind], name, buffer));
+      }
+      const entry = {
+        id: newId(), ts: Date.now(), type: group.kind, modelId: 'comfyui', modelName: 'ComfyUI',
+        prompt, aspectRatio: req.aspectRatio || 'auto', resolution: req.resolution || 'auto',
+        refs: Object.values(refsIn).filter(Boolean), outputs, errors: [], cost: 0,
+        comfyPromptId: promptId, comfyWorkflowPath: cfg.comfyui.workflowPath
+      };
+      await updateJson('history.json', [], (history) => [entry, ...history].slice(0, 1000));
+      await recordAssetMetadata(entry);
+      entries.push(entry);
+    }
+    return entries[0];
+  } finally {
+    stopProgress?.();
+    if (genId) comfyProgress.delete(genId);
+    for (const key of tempFiles) await fs.unlink(await resolveAssetKey(key)).catch(() => {});
+  }
 }
 
 async function runHeyGenVideoGeneration(req, cfg, model) {
@@ -3127,7 +3219,10 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    if (p.startsWith('/api/') || p.startsWith('/files/') || p.startsWith('/fonts/')) {
+    // Los nodos Tuzzi de ComfyUI (mismo equipo) necesitan descargar referencias
+    // de /files/ sin sesión de navegador — mismo criterio de confianza que ya
+    // usa la integración con Controversy Tracker (isLoopbackRequest).
+    if ((p.startsWith('/api/') || p.startsWith('/files/') || p.startsWith('/fonts/')) && !(p.startsWith('/files/') && isLoopbackRequest(req))) {
       const cfg = await getConfig();
       const token = sessionToken(req);
       if (cfg.accessPasswordHash && (sessions.get(token) || 0) <= Date.now()) {
@@ -3532,6 +3627,11 @@ const server = http.createServer(async (req, res) => {
         poserPrompt: body.poserPrompt !== undefined ? String(body.poserPrompt) : cfg.poserPrompt,
         photoshopPath: body.photoshopPath !== undefined ? String(body.photoshopPath).trim() : cfg.photoshopPath,
         ffmpegPath: body.ffmpegPath !== undefined ? String(body.ffmpegPath).trim() : cfg.ffmpegPath,
+        comfyui: {
+          host: body.comfyui?.host !== undefined ? String(body.comfyui.host).trim() || DEFAULT_CONFIG.comfyui.host : cfg.comfyui.host,
+          port: body.comfyui?.port !== undefined ? Number(body.comfyui.port) || DEFAULT_CONFIG.comfyui.port : cfg.comfyui.port,
+          workflowPath: body.comfyui?.workflowPath !== undefined ? String(body.comfyui.workflowPath).trim() : cfg.comfyui.workflowPath
+        },
         customAudioTags: Array.isArray(body.customAudioTags)
           ? [...new Set(body.customAudioTags.map((tag) => String(tag).trim().replace(/^\[|\]$/g, '')).filter(Boolean))].slice(0, 100)
           : (cfg.customAudioTags || []),
@@ -5727,6 +5827,25 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, entry);
     }
 
+    if (p === '/api/generate/comfyui' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const entry = await runComfyUIGeneration(body);
+      return send(res, 200, entry);
+    }
+
+    if (p === '/api/generate/progress' && req.method === 'GET') {
+      const genId = url.searchParams.get('id') || '';
+      return send(res, 200, comfyProgress.get(genId) || { current: 0, total: 0 });
+    }
+
+    if (p === '/api/comfyui/scan' && req.method === 'GET') {
+      const cfg = await getConfig();
+      const graph = await loadWorkflow(cfg.comfyui.workflowPath);
+      const slots = scanWorkflowSlots(graph);
+      const found = Object.fromEntries(Object.entries(TUZZI_TYPES).map(([key, type]) => [key, (slots[type] || []).length]));
+      return send(res, 200, { slots: found });
+    }
+
     if (p === '/api/translate' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const cfg = await getConfig();
@@ -5818,6 +5937,20 @@ const server = http.createServer(async (req, res) => {
         const account = safeHeyGenAccount(await getHeyGenApiUser(body.key || cfg.keys.heygen || ''));
         const label = account.email || account.name || account.id || 'cuenta válida';
         return send(res, 200, { ok: true, detail: `Conectado a ${label}${account.billingType ? ` · ${account.billingType}` : ''}`, account });
+      }
+      if (service === 'comfyui') {
+        const testCfg = { comfyui: { ...cfg.comfyui, ...(body.comfyui || {}) } };
+        await checkComfyHealth(testCfg);
+        let slotsDetail = '';
+        try {
+          const graph = await loadWorkflow(testCfg.comfyui.workflowPath);
+          const slots = scanWorkflowSlots(graph);
+          const found = Object.keys(TUZZI_TYPES).filter((key) => (slots[TUZZI_TYPES[key]] || []).length);
+          slotsDetail = ` Nodos Tuzzi detectados: ${found.length ? found.join(', ') : 'ninguno'}.`;
+        } catch (error) {
+          slotsDetail = ` (ComfyUI responde, pero no pude leer el workflow: ${error.message})`;
+        }
+        return send(res, 200, { ok: true, detail: `ComfyUI responde.${slotsDetail}` });
       }
       const endpoint = body.endpoint || (service === 'ark' ? cfg.endpoints.ark
         : service === 'minimax' ? cfg.endpoints.minimax

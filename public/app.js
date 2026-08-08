@@ -43,10 +43,12 @@ function setMode(mode) {
   $('#modeVideo').classList.toggle('active', mode === 'video');
   $('#modeAudio').classList.toggle('active', mode === 'audio');
   $('#modeMusic').classList.toggle('active', mode === 'music');
+  $('#modeComfyUI').classList.toggle('active', mode === 'comfyui');
   $('#imageControls').hidden = mode !== 'image';
   $('#videoControls').hidden = mode !== 'video';
   $('#audioControls').hidden = mode !== 'audio';
   $('#musicControls').hidden = mode !== 'music';
+  $('#comfyuiControls').hidden = mode !== 'comfyui';
   const audioModel = (state.audioModels || []).find((model) => model.id === state.audioModelId);
   $('#tagPalette').hidden = mode !== 'audio' || audioModel?.supportsAudioTags === false;
   // el armador de tomas es propio del video
@@ -61,13 +63,16 @@ function setMode(mode) {
     ? 'Describí la escena en movimiento: acción, cámara, ambiente…'
     : mode === 'music'
     ? (state.music.customMode ? 'Escribí la LETRA de la canción (versos, estribillo)…' : 'Describí la canción: género, ánimo, instrumentos, tema…')
+    : mode === 'comfyui'
+    ? 'Escribí el prompt que va a recibir tu workflow de ComfyUI…'
     : 'Escribí lo que querés manifestar…';
-  $('#btnGenerate').innerHTML = mode === 'audio' ? `${IC('mic')} Dar voz` : mode === 'video' ? `${IC('film')} Manifestar video` : mode === 'music' ? `${IC('music')} Componer` : `${IC('spark')} Manifestar`;
+  $('#btnGenerate').innerHTML = mode === 'audio' ? `${IC('mic')} Dar voz` : mode === 'video' ? `${IC('film')} Manifestar video` : mode === 'music' ? `${IC('music')} Componer` : mode === 'comfyui' ? `${IC('layers')} Manifestar (ComfyUI)` : `${IC('spark')} Manifestar`;
   if (mode === 'audio' && state.voices === null) loadVoices(false);
   if (mode === 'audio') renderAudioModelSelect();
   if (mode === 'video') renderVideoControls();
   if (mode === 'music') renderMusicControls();
   if (mode === 'image') renderRefs();
+  if (mode === 'comfyui') { renderComfyControls(); refreshComfySlots(); }
   renderHighlight();
   renderPinnedHint();
   updateEstimate();
@@ -77,6 +82,7 @@ $('#modeImage').addEventListener('click', () => setMode('image'));
 $('#modeVideo').addEventListener('click', () => setMode('video'));
 $('#modeAudio').addEventListener('click', () => setMode('audio'));
 $('#modeMusic').addEventListener('click', () => setMode('music'));
+$('#modeComfyUI').addEventListener('click', () => setMode('comfyui'));
 
 // ---------------------------------------------------------------------------
 // controles de música (Suno)
@@ -105,6 +111,76 @@ $('#musicCustom').addEventListener('change', (e) => { state.music.customMode = e
 $('#musicInstrumental').addEventListener('change', (e) => { state.music.instrumental = e.target.checked; renderMusicControls(); });
 $('#musicStyle').addEventListener('input', (e) => { state.music.style = e.target.value; });
 $('#musicTitle').addEventListener('input', (e) => { state.music.title = e.target.value; });
+
+// ---------------------------------------------------------------------------
+// controles de ComfyUI (puente a un workflow externo)
+// ---------------------------------------------------------------------------
+
+const COMFY_ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+const COMFY_RESOLUTIONS = ['1K', '2K', '4K'];
+const COMFY_REF_SLOTS = {
+  reference: { strip: '#comfyRefReference', title: 'Elegir imagen de referencia' },
+  poseControlNet: { strip: '#comfyRefPoseControlNet', title: 'Elegir pose (ControlNet)' },
+  poseIpAdapter: { strip: '#comfyRefPoseIpAdapter', title: 'Elegir pose (IP-Adapter)' }
+};
+const COMFY_SLOT_LABELS = {
+  prompt: 'Prompt', reference: 'Referencia', poseControlNet: 'Pose ControlNet', poseIpAdapter: 'Pose IP-Adapter',
+  resolution: 'Resolución', outputImage: 'Salida imagen', outputVideo: 'Salida video', outputAudio: 'Salida audio'
+};
+
+function renderComfyControls() {
+  chipRow($('#comfyArChips'), COMFY_ASPECT_RATIOS, state.comfyui.aspectRatio,
+    (v) => { state.comfyui.aspectRatio = v; renderComfyControls(); });
+  chipRow($('#comfyResChips'), COMFY_RESOLUTIONS, state.comfyui.resolution,
+    (v) => { state.comfyui.resolution = v; renderComfyControls(); });
+  for (const slot of Object.keys(COMFY_REF_SLOTS)) renderComfyRefSlot(slot);
+  renderComfySlotsHint();
+}
+
+function renderComfyRefSlot(slot) {
+  const el = $(COMFY_REF_SLOTS[slot].strip);
+  const key = state.comfyui.refs[slot];
+  el.innerHTML = '';
+  if (key) {
+    const d = document.createElement('div');
+    d.className = 'ref-thumb ref-image';
+    d.innerHTML = `<img src="${fileUrl(key)}" alt=""><button class="rm" title="Quitar">×</button>`;
+    d.querySelector('img').addEventListener('click', () => openLightbox(key));
+    d.querySelector('.rm').addEventListener('click', () => { state.comfyui.refs[slot] = null; renderComfyRefSlot(slot); });
+    el.appendChild(d);
+  } else {
+    const add = document.createElement('button');
+    add.className = 'ref-add';
+    add.textContent = '+';
+    add.title = 'Agregar imagen';
+    add.addEventListener('click', () => openComfyPicker(slot));
+    el.appendChild(add);
+  }
+}
+
+function openComfyPicker(slot) {
+  state.comfyPickerSlot = slot;
+  openPicker(null);
+  $('#pickerTitle').textContent = COMFY_REF_SLOTS[slot].title;
+}
+
+function renderComfySlotsHint() {
+  const hint = $('#comfySlotsHint');
+  const slots = state.comfyui.slots;
+  if (!slots) { hint.textContent = 'Configurá el workflow en Configuración → ComfyUI para ver qué nodos detecta.'; return; }
+  const found = Object.entries(slots).filter(([, n]) => n > 0).map(([k]) => COMFY_SLOT_LABELS[k] || k);
+  hint.textContent = found.length ? `Nodos detectados: ${found.join(', ')}.` : 'Este workflow no tiene ningún nodo Tuzzi.';
+}
+
+async function refreshComfySlots() {
+  try {
+    const r = await api('/api/comfyui/scan');
+    state.comfyui.slots = r.slots;
+  } catch {
+    state.comfyui.slots = null;
+  }
+  renderComfySlotsHint();
+}
 
 // ---------------------------------------------------------------------------
 // resaltado de corchetes (modo audio)
@@ -1076,6 +1152,7 @@ async function generate() {
   const isImage = state.mode === 'image';
   const isVideo = state.mode === 'video';
   const isMusic = state.mode === 'music';
+  const isComfy = state.mode === 'comfyui';
   // validación del prompt según el modo (en música instrumental no hay letra)
   if (isMusic) {
     const mm = state.music;
@@ -1128,8 +1205,9 @@ async function generate() {
     label: isImage ? `${model.name} · ${state.resolution} · ×${state.batch}`
       : isVideo ? `${model.name} · ${state.video.resolution}${isHeyGen ? '' : ` · ${state.video.duration}s`}`
       : isMusic ? `Suno ${state.music.version}${state.music.instrumental ? ' · instrumental' : ''}`
+      : isComfy ? `ComfyUI · ${state.comfyui.aspectRatio} · ${state.comfyui.resolution}`
       : `${audioModel?.name || 'ElevenLabs'} · ${voice?.name || pc?.voiceName || 'voz'}`,
-    path: isImage ? '/api/generate/image' : isVideo ? '/api/generate/video' : isMusic ? '/api/generate/music' : '/api/generate/audio',
+    path: isImage ? '/api/generate/image' : isVideo ? '/api/generate/video' : isMusic ? '/api/generate/music' : isComfy ? '/api/generate/comfyui' : '/api/generate/audio',
     body: isImage ? {
       modelId: state.modelId, prompt, aspectRatio: state.aspectRatio,
       resolution: state.resolution, batch: state.batch,
@@ -1152,6 +1230,10 @@ async function generate() {
       model: state.music.version, prompt,
       style: state.music.style, title: state.music.title,
       instrumental: state.music.instrumental, customMode: state.music.customMode
+    } : isComfy ? {
+      prompt, aspectRatio: state.comfyui.aspectRatio, resolution: state.comfyui.resolution,
+      refs: { ...state.comfyui.refs },
+      genId: `comfyui-${Date.now()}-${Math.random().toString(16).slice(2)}`
     } : {
       text: prompt,
       audioModelId: audioModel?.id || state.audioModelId,
@@ -1180,6 +1262,15 @@ async function runGenerationJob(job) {
   job.startedAt = Date.now();
   state.activeGenerations += 1;
   renderGenerationQueue();
+  let progressTimer = null;
+  if (job.body?.genId) {
+    progressTimer = setInterval(async () => {
+      try {
+        const p = await api(`/api/generate/progress?id=${encodeURIComponent(job.body.genId)}`, { task: false });
+        if (p.total > 0) { job.progress = p; renderGenerationQueue(); }
+      } catch {}
+    }, 700);
+  }
   try {
     const entry = await api(job.path, { method: 'POST', body: job.body });
     job.status = 'done'; job.entry = entry; job.finishedAt = Date.now();
@@ -1197,6 +1288,8 @@ async function runGenerationJob(job) {
     job.status = 'error'; job.error = e.message; job.finishedAt = Date.now();
     toast(e.message, 'err');
   } finally {
+    if (progressTimer) clearInterval(progressTimer);
+    job.progress = null;
     state.activeGenerations -= 1;
     renderGenerationQueue();
     pumpGenerationQueue();
@@ -1212,7 +1305,11 @@ function renderGenerationQueue() {
   box.innerHTML = `<div class="generation-queue-head"><span>Cola de generación</span><span>${active} activas · ${queued} esperando</span></div>`
     + state.generationJobs.slice(0, 12).map((job) => `<div class="generation-job ${job.status}" data-job="${job.id}">
       <div class="job-status">${job.status === 'queued' ? 'Ⅱ' : job.status === 'running' ? '●' : job.status === 'done' ? '✓' : '!'}</div>
-      <div class="job-main"><div class="job-title">${esc(job.label)}</div><div class="job-prompt ${job.status === 'error' ? 'job-error' : ''}">${esc(job.error || job.prompt)}</div></div>
+      <div class="job-main">
+        <div class="job-title">${esc(job.label)}${job.progress?.total ? ` · paso ${job.progress.current}/${job.progress.total}` : ''}</div>
+        ${job.progress?.total ? `<div class="job-progress-bar"><div style="width:${Math.min(100, Math.round(job.progress.current / job.progress.total * 100))}%"></div></div>` : ''}
+        <div class="job-prompt ${job.status === 'error' ? 'job-error' : ''}">${esc(job.error || job.prompt)}</div>
+      </div>
       <div class="job-actions">${job.entry ? '<button class="mini-btn" data-job-act="view">Ver</button>' : ''}${['done','error'].includes(job.status) ? '<button class="icon-btn" data-job-act="dismiss">×</button>' : ''}</div>
     </div>`).join('');
   box.querySelectorAll('[data-job]').forEach((row) => row.querySelectorAll('[data-job-act]').forEach((button) => button.addEventListener('click', () => {
@@ -1545,6 +1642,14 @@ function openPicker(replaceIndex = null) {
 
 // una selección del picker: reemplaza si estamos en ese modo, o agrega
 function pickRef(key, kind = 'image') {
+  if (state.comfyPickerSlot) {
+    const slot = state.comfyPickerSlot;
+    state.comfyPickerSlot = null;
+    $('#pickerModal').hidden = true;
+    state.comfyui.refs[slot] = key;
+    renderComfyRefSlot(slot);
+    return;
+  }
   if (state.promptStyleImagePick) {
     state.promptStyleImagePick = false;
     state.replaceRefIndex = null;
@@ -1578,7 +1683,7 @@ function replaceRef(i, key) {
   toast('Referencia reemplazada — el orden y la cita se mantienen');
 }
 
-$('#pickerClose').addEventListener('click', () => { $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.overlayBgPick = false; state.promptStyleImagePick = false; });
+$('#pickerClose').addEventListener('click', () => { $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.overlayBgPick = false; state.promptStyleImagePick = false; state.comfyPickerSlot = null; });
 $$('#pickerTabs .tab').forEach((t) => {
   t.addEventListener('click', () => setPickerTab(t.dataset.src));
 });
@@ -8695,6 +8800,9 @@ function fillConfigForm() {
   f.poserPrompt.value = c.poserPrompt || '';
   f.photoshopPath.value = c.photoshopPath || '';
   f.ffmpegPath.value = c.ffmpegPath || '';
+  f.comfyui_host.value = c.comfyui?.host || '127.0.0.1';
+  f.comfyui_port.value = c.comfyui?.port || 8188;
+  f.comfyui_workflowPath.value = c.comfyui?.workflowPath || '';
   renderConfigAudioTags();
   $('#accessStatus').textContent = c.accessProtected
     ? 'La aplicación está protegida. Escribí una nueva clave solo si querés cambiarla.'
@@ -8750,7 +8858,9 @@ $$('.test-btn').forEach((btn) => {
     out.className = 'test-result busy';
     out.textContent = 'Probando…';
     try {
-      const body = { service, key: f[`key_${service}`].value.trim() };
+      const body = service === 'comfyui'
+        ? { service, comfyui: { host: f.comfyui_host.value.trim(), port: Number(f.comfyui_port.value) || undefined, workflowPath: f.comfyui_workflowPath.value.trim() } }
+        : { service, key: f[`key_${service}`].value.trim() };
       if (service === 'ark') {
         body.endpoint = f.endpoint_ark.value.trim();
         body.seedreamModelId = f.seedreamModelId.value.trim();
@@ -8829,6 +8939,11 @@ $('#configForm').addEventListener('submit', async (e) => {
         poserPrompt: f.poserPrompt.value.trim(),
         photoshopPath: f.photoshopPath.value.trim(),
         ffmpegPath: f.ffmpegPath.value.trim(),
+        comfyui: {
+          host: f.comfyui_host.value.trim(),
+          port: Number(f.comfyui_port.value) || 8188,
+          workflowPath: f.comfyui_workflowPath.value.trim()
+        },
         accessPassword: f.accessPassword.value
       }
     });
@@ -8914,5 +9029,9 @@ init();
 
 window.manifestadorBridge = {
   api, toast, esc, fileUrl, addRef, IC, readFileAsDataUrl, goToCreate,
-  getState: () => state
+  getState: () => state,
+  setComfyPoseRef: (slot, key) => {
+    state.comfyui.refs[slot] = key;
+    setMode('comfyui');
+  }
 };

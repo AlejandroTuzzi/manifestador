@@ -865,6 +865,8 @@ h3 { font-size: 15px; }
 @keyframes pulse { to { opacity: .35; } }
 .job-main { min-width: 0; }
 .job-title { font-size: 12px; font-weight: 700; }
+.job-progress-bar { height: 4px; background: rgba(255,255,255,.08); margin: 5px 0; overflow: hidden; }
+.job-progress-bar > div { height: 100%; background: var(--grad); transition: width .3s ease; }
 .job-prompt { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .job-error { color: #fda4af; }
 .job-actions { display: flex; gap: 5px; }
