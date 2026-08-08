@@ -37,10 +37,12 @@ const state = {
   musicModel: null,
   music: { version: 'V5_5', customMode: true, instrumental: false, style: '', title: '' },
   comfyui: {
-    aspectRatio: '1:1', resolution: '1K',
+    workflowId: '', aspectRatio: '1:1', resolution: '1K',
     refs: { reference: null, poseControlNet: null, poseIpAdapter: null },
-    slots: null            // último resultado de /api/comfyui/scan
+    slots: null,           // último resultado de /api/comfyui/scan
+    customValues: {}        // { [slotIndex]: { mode: 'fixed'|'increment'|'random', value: string } }
   },
+  comfyuiWorkflows: [],      // biblioteca de workflows guardados (nombre, descripción, ruta/url)
   comfyPickerSlot: null,    // slot de state.comfyui.refs que el picker va a llenar (null = flujo genérico)
   transitionSounds: [],   // catálogo local, agrupado por las carpetas de public/sounds
   refs: [],              // [{ key, fromChar, label }]
@@ -260,6 +262,15 @@ async function api(path, opts = {}) {
 
 function fmtDate(ts) {
   return new Date(ts).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtDuration(ms) {
+  if (!ms || ms < 0) return '';
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const rem = Math.round(s % 60);
+  return `${m}m ${String(rem).padStart(2, '0')}s`;
 }
 
 function currentModel() {

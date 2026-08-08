@@ -280,6 +280,12 @@
       <!-- Controles de ComfyUI -->
       <div id="comfyuiControls" class="controls-card" hidden>
         <div class="control-row">
+          <label>Workflow</label>
+          <div id="comfyWorkflowChips" class="chips"></div>
+        </div>
+        <div id="comfyWorkflowEmpty" class="model-note" hidden>Todavía no agregaste ningún workflow — hacelo desde Configuración → ComfyUI.</div>
+        <div id="comfyWorkflowDesc" class="hint"></div>
+        <div class="control-row">
           <label>Proporción</label>
           <div id="comfyArChips" class="chips"></div>
         </div>
@@ -288,17 +294,18 @@
           <div id="comfyResChips" class="chips"></div>
         </div>
         <div class="control-row refs-row">
-          <label>Referencia</label>
+          <label>Referencia <span id="comfyReqReference" class="comfy-req-tag" hidden>obligatorio</span></label>
           <div id="comfyRefReference" class="refs-strip refs-strip-single"></div>
         </div>
         <div class="control-row refs-row">
-          <label>Pose (ControlNet)</label>
+          <label>Pose (ControlNet) <span id="comfyReqPoseControlNet" class="comfy-req-tag" hidden>obligatorio</span></label>
           <div id="comfyRefPoseControlNet" class="refs-strip refs-strip-single"></div>
         </div>
         <div class="control-row refs-row">
-          <label>Pose (IP-Adapter)</label>
+          <label>Face (IP-Adapter) <span id="comfyReqPoseIpAdapter" class="comfy-req-tag" hidden>obligatorio</span></label>
           <div id="comfyRefPoseIpAdapter" class="refs-strip refs-strip-single"></div>
         </div>
+        <div id="comfyCustomValuesRow" class="comfy-cv-row" hidden></div>
         <div id="comfySlotsHint" class="model-note"></div>
       </div>
 
@@ -327,7 +334,7 @@
           <label class="poser-toggle" title="Guarda la captura en blanco y negro para que la IA la tome solo como referencia de pose, sin copiar colores ni ropa"><input type="checkbox" id="poserGray"> en grises</label>
           <button id="poserCapture" class="generate-btn"><svg class="ic"><use href="#i-camera"/></svg> Capturar → Referencia</button>
           <button id="poserCaptureComfyPose" class="mini-btn" title="Usa la captura como pose de ControlNet en la pestaña ComfyUI"><svg class="ic"><use href="#i-camera"/></svg> → Pose ControlNet (ComfyUI)</button>
-          <button id="poserCaptureComfyIp" class="mini-btn" title="Usa la captura como pose de IP-Adapter en la pestaña ComfyUI"><svg class="ic"><use href="#i-camera"/></svg> → Pose IP-Adapter (ComfyUI)</button>
+          <button id="poserCaptureComfyIp" class="mini-btn" title="Usa la captura como face de IP-Adapter en la pestaña ComfyUI"><svg class="ic"><use href="#i-camera"/></svg> → Face IP-Adapter (ComfyUI)</button>
         </div>
       </div>
 
@@ -713,12 +720,34 @@
         <div class="cfg-grid">
           <label>Host <input type="text" name="comfyui_host" placeholder="127.0.0.1"></label>
           <label>Puerto <input type="number" name="comfyui_port" placeholder="8188"></label>
-          <label>Ruta del workflow (formato API) <input type="text" name="comfyui_workflowPath" placeholder="C:\ComfyUI\workflows\mi-flujo-api.json"></label>
         </div>
         <p class="hint">
           <button type="button" class="tool-btn test-btn" data-service="comfyui">Probar</button>
-          <span class="test-result" data-result="comfyui"></span><br>
-          Exportá el workflow desde ComfyUI con "Save (API Format)" y armalo con los nodos Tuzzi (Prompt, Referencia, Pose ControlNet/IP-Adapter, Resolución, Salida). Necesitás al menos un nodo Tuzzi de salida; los demás son opcionales — si el grafo los necesita y faltan, la corrida falla del lado de ComfyUI.
+          <span class="test-result" data-result="comfyui"></span>
+        </p>
+
+        <h4>Workflows</h4>
+        <p class="hint">Exportá cada workflow desde ComfyUI con "Save (API Format)" y armalo con los nodos Tuzzi (Prompt, Referencia, Pose ControlNet/IP-Adapter, Resolución, Salida). Necesitás al menos un nodo Tuzzi de salida; los demás son opcionales — si el grafo los necesita y faltan, la corrida falla del lado de ComfyUI.</p>
+        <div id="comfyWorkflowsList" class="comfy-workflows-list"></div>
+        <button type="button" id="btnAddComfyWorkflow" class="mini-btn"><svg class="ic"><use href="#i-plus"/></svg> Agregar workflow</button>
+        <div id="comfyWorkflowFormRow" class="cfg-grid" hidden>
+          <label>Nombre <input type="text" id="comfyWorkflowFormName" maxlength="100" placeholder="ej: SDXL retratos"></label>
+          <label>Descripción <input type="text" id="comfyWorkflowFormDesc" maxlength="500" placeholder="para qué sirve este workflow"></label>
+          <label>Ruta / URL del archivo <input type="text" id="comfyWorkflowFormPath" placeholder="C:\ComfyUI\workflows\mi-flujo-api.json"></label>
+        </div>
+        <div id="comfyWorkflowCvFormRow" class="comfy-cv-form" hidden>
+          <p class="hint">Valores personalizados (nodo "Valores Personalizados" del workflow): activá los que uses y ponéles un título — van a aparecer como campo numérico en la pestaña ComfyUI.</p>
+          <div class="comfy-cv-form-rows" id="comfyWorkflowCvRows"></div>
+        </div>
+        <div id="comfyWorkflowReqRefsRow" class="comfy-cv-form" hidden>
+          <p class="hint">Referencias obligatorias: si las activás, Manifestador no deja generar con este workflow hasta que elijas esa referencia.</p>
+          <label class="poser-toggle"><input type="checkbox" id="comfyWorkflowReqReference"> Referencia obligatoria</label>
+          <label class="poser-toggle"><input type="checkbox" id="comfyWorkflowReqPoseControlNet"> Pose (ControlNet) obligatoria</label>
+          <label class="poser-toggle"><input type="checkbox" id="comfyWorkflowReqPoseIpAdapter"> Face (IP-Adapter) obligatoria</label>
+        </div>
+        <p id="comfyWorkflowFormActions" class="hint" hidden>
+          <button type="button" id="comfyWorkflowFormSave" class="mini-btn accent">Guardar</button>
+          <button type="button" id="comfyWorkflowFormCancel" class="mini-btn">Cancelar</button>
         </p>
 
         <h3>Prompt de pose (Poser)</h3>

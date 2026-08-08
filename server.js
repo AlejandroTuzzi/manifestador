@@ -84,7 +84,7 @@ const DEFAULT_CONFIG = {
   sunoModelId: 'V5_5',
   customAudioTags: [],
   accessPasswordHash: '',
-  comfyui: { host: '127.0.0.1', port: 8188, workflowPath: '' }
+  comfyui: { host: '127.0.0.1', port: 8188 }
 };
 
 // ---------------------------------------------------------------------------
@@ -814,6 +814,16 @@ async function detectPhotoshop() {
 // Generación
 // ---------------------------------------------------------------------------
 
+// Mide cuánto tarda una generación de punta a punta y lo persiste en el
+// historial (entry.durationMs), sin tocar cada función de generación.
+async function timedGeneration(fn) {
+  const startedAt = Date.now();
+  const entry = await fn();
+  entry.durationMs = Date.now() - startedAt;
+  await updateJson('history.json', [], (history) => history.map((h) => (h.id === entry.id ? { ...h, durationMs: entry.durationMs } : h)));
+  return entry;
+}
+
 async function runImageGeneration(req) {
   const cfg = await getConfig();
   const model = getImageModel(req.modelId);
@@ -953,7 +963,13 @@ async function runComfyUIGeneration(req) {
   const prompt = String(req.prompt || '').trim();
   if (!prompt) throw new Error('El prompt está vacío.');
 
-  const graph = await loadWorkflow(cfg.comfyui.workflowPath);
+  const workflowId = String(req.workflowId || '').trim();
+  if (!workflowId) throw new Error('Elegí un workflow de ComfyUI.');
+  const workflows = await readJson('comfy-workflows.json', []);
+  const wf = workflows.find((w) => w.id === workflowId);
+  if (!wf) throw new Error('El workflow elegido ya no existe. Volvé a elegirlo.');
+
+  const graph = await loadWorkflow(wf.path);
   const slots = scanWorkflowSlots(graph);
   const hasOutput = slots[TUZZI_TYPES.outputImage] || slots[TUZZI_TYPES.outputVideo] || slots[TUZZI_TYPES.outputAudio];
   if (!hasOutput) {
@@ -961,6 +977,13 @@ async function runComfyUIGeneration(req) {
   }
 
   const refsIn = req.refs && typeof req.refs === 'object' ? req.refs : {};
+  const refLabels = { reference: 'Referencia', poseControlNet: 'Pose (ControlNet)', poseIpAdapter: 'Face (IP-Adapter)' };
+  const missingRefs = Object.entries(wf.requiredRefs || {})
+    .filter(([key, required]) => required && !refsIn[key])
+    .map(([key]) => refLabels[key] || key);
+  if (missingRefs.length) {
+    throw new Error(`Este workflow requiere: ${missingRefs.join(', ')}.`);
+  }
   const tempFiles = [];
   const genId = String(req.genId || '').trim();
   let stopProgress = null;
@@ -971,7 +994,14 @@ async function runComfyUIGeneration(req) {
       resolveComfyRefUrl(refsIn.poseIpAdapter, tempFiles)
     ]);
     const [width, height] = comfyResolutionPixels(req.aspectRatio, req.resolution);
-    const filled = fillSlots(graph, slots, { prompt, reference, poseControlNet, poseIpAdapter, width, height });
+    // El cliente ya resolvió fijo/autoincremental/random a un número final;
+    // acá solo se respeta qué slots están habilitados para este workflow.
+    const customValues = wf.customValues.map((cv, i) => {
+      if (!cv.enabled) return undefined;
+      const raw = req.customValues?.[i] ?? req.customValues?.[String(i)];
+      return raw !== undefined && raw !== null && raw !== '' && Number.isFinite(Number(raw)) ? Number(raw) : undefined;
+    });
+    const filled = fillSlots(graph, slots, { prompt, reference, poseControlNet, poseIpAdapter, width, height, customValues });
 
     const clientId = crypto.randomUUID();
     const promptId = await submitPrompt(cfg, filled, clientId);
@@ -996,10 +1026,10 @@ async function runComfyUIGeneration(req) {
         outputs.push(await saveBuffer(zoneFor[group.kind], name, buffer));
       }
       const entry = {
-        id: newId(), ts: Date.now(), type: group.kind, modelId: 'comfyui', modelName: 'ComfyUI',
+        id: newId(), ts: Date.now(), type: group.kind, modelId: 'comfyui', modelName: `ComfyUI · ${wf.name}`,
         prompt, aspectRatio: req.aspectRatio || 'auto', resolution: req.resolution || 'auto',
         refs: Object.values(refsIn).filter(Boolean), outputs, errors: [], cost: 0,
-        comfyPromptId: promptId, comfyWorkflowPath: cfg.comfyui.workflowPath
+        comfyPromptId: promptId, comfyWorkflowId: wf.id
       };
       await updateJson('history.json', [], (history) => [entry, ...history].slice(0, 1000));
       await recordAssetMetadata(entry);
@@ -2702,6 +2732,39 @@ function sanitizeOverlayPreset(body = {}, previous = {}) {
   };
 }
 
+// Los 5 slots de TuzziCustomValues (val1..val5): cada uno se puede activar y
+// titular por workflow; el valor real que se manda en cada generación lo
+// resuelve el cliente (fijo/autoincremental/random), acá solo se guarda si
+// el slot existe y cómo se llama.
+function sanitizeComfyCustomValues(value, previous = []) {
+  const source = Array.isArray(value) ? value : previous;
+  return Array.from({ length: 5 }, (_, i) => ({
+    enabled: Boolean(source[i]?.enabled),
+    label: String(source[i]?.label ?? '').trim().slice(0, 60)
+  }));
+}
+
+function sanitizeComfyRequiredRefs(value, previous = {}) {
+  const source = value && typeof value === 'object' ? value : (previous || {});
+  return {
+    reference: Boolean(source.reference),
+    poseControlNet: Boolean(source.poseControlNet),
+    poseIpAdapter: Boolean(source.poseIpAdapter)
+  };
+}
+
+function sanitizeComfyWorkflow(body = {}, previous = {}) {
+  return {
+    id: previous.id || newId(),
+    name: String(body.name ?? previous.name ?? '').trim().slice(0, 100) || 'Workflow sin nombre',
+    description: String(body.description ?? previous.description ?? '').trim().slice(0, 500),
+    path: String(body.path ?? previous.path ?? '').trim(),
+    customValues: sanitizeComfyCustomValues(body.customValues, previous.customValues),
+    requiredRefs: sanitizeComfyRequiredRefs(body.requiredRefs, previous.requiredRefs),
+    ts: previous.ts || Date.now()
+  };
+}
+
 function normalizeStyleImageKey(value) {
   const key = String(value || '').trim();
   if (!key || key.includes('..')) return '';
@@ -3309,7 +3372,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations, fonts, overlayPresets, transitionSounds, subtitler] = await Promise.all([
+      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations, fonts, overlayPresets, transitionSounds, subtitler, comfyWorkflows] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
@@ -3325,7 +3388,8 @@ const server = http.createServer(async (req, res) => {
         readJson('fonts.json', []),
         readJson('overlay-presets.json', []),
         listTransitionSounds(),
-        readJson('subtitler.json', DEFAULT_SUBTITLER_STORE)
+        readJson('subtitler.json', DEFAULT_SUBTITLER_STORE),
+        readJson('comfy-workflows.json', [])
       ]);
       return send(res, 200, {
         config: publicConfig(cfg),
@@ -3347,6 +3411,7 @@ const server = http.createServer(async (req, res) => {
         automations: automations.map(automationForClient),
         fonts,
         overlayPresets,
+        comfyWorkflows,
         subtitler: subtitlerForClient(subtitler),
         transitionSounds: transitionSounds.map((sound) => ({
           id: sound.id,
@@ -3629,8 +3694,7 @@ const server = http.createServer(async (req, res) => {
         ffmpegPath: body.ffmpegPath !== undefined ? String(body.ffmpegPath).trim() : cfg.ffmpegPath,
         comfyui: {
           host: body.comfyui?.host !== undefined ? String(body.comfyui.host).trim() || DEFAULT_CONFIG.comfyui.host : cfg.comfyui.host,
-          port: body.comfyui?.port !== undefined ? Number(body.comfyui.port) || DEFAULT_CONFIG.comfyui.port : cfg.comfyui.port,
-          workflowPath: body.comfyui?.workflowPath !== undefined ? String(body.comfyui.workflowPath).trim() : cfg.comfyui.workflowPath
+          port: body.comfyui?.port !== undefined ? Number(body.comfyui.port) || DEFAULT_CONFIG.comfyui.port : cfg.comfyui.port
         },
         customAudioTags: Array.isArray(body.customAudioTags)
           ? [...new Set(body.customAudioTags.map((tag) => String(tag).trim().replace(/^\[|\]$/g, '')).filter(Boolean))].slice(0, 100)
@@ -5764,17 +5828,18 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/generate/image' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const entry = await runImageGeneration(body);
+      const entry = await timedGeneration(() => runImageGeneration(body));
       return send(res, 200, entry);
     }
 
     if (p === '/api/generate/video' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const entry = await runVideoGeneration(body);
+      const entry = await timedGeneration(() => runVideoGeneration(body));
       return send(res, 200, entry);
     }
 
     if (p === '/api/generate/video/h3-regenerate-2k' && req.method === 'POST') {
+      const startedAt = Date.now();
       const body = await readJsonBody(req);
       const history = await readJson('history.json', []);
       const source = history.find((entry) => entry.id === String(body.historyId || ''));
@@ -5808,7 +5873,7 @@ const server = http.createServer(async (req, res) => {
       const entry = {
         ...source, id: newId(), ts: Date.now(), resolution: '2K', outputs: [key],
         cost: Number(cost.toFixed(6)), h3TaskId: regenerated.taskId,
-        h3RegeneratedFrom: source.id, errors: []
+        h3RegeneratedFrom: source.id, errors: [], durationMs: Date.now() - startedAt
       };
       await updateJson('history.json', [], (items) => [entry, ...items].slice(0, 1000));
       await recordAssetMetadata(entry);
@@ -5817,19 +5882,19 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/generate/audio' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const entry = await runAudioGeneration(body);
+      const entry = await timedGeneration(() => runAudioGeneration(body));
       return send(res, 200, entry);
     }
 
     if (p === '/api/generate/music' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const entry = await runMusicGeneration(body);
+      const entry = await timedGeneration(() => runMusicGeneration(body));
       return send(res, 200, entry);
     }
 
     if (p === '/api/generate/comfyui' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const entry = await runComfyUIGeneration(body);
+      const entry = await timedGeneration(() => runComfyUIGeneration(body));
       return send(res, 200, entry);
     }
 
@@ -5838,9 +5903,43 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, comfyProgress.get(genId) || { current: 0, total: 0 });
     }
 
+    if (p === '/api/comfyui/workflows' && req.method === 'GET') {
+      return send(res, 200, { workflows: await readJson('comfy-workflows.json', []) });
+    }
+    if (p === '/api/comfyui/workflows' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      if (!String(body.path || '').trim()) return send(res, 400, { error: 'Falta la ruta (URL) del workflow.' });
+      const item = sanitizeComfyWorkflow(body);
+      await updateJson('comfy-workflows.json', [], (all) => [item, ...all]);
+      return send(res, 200, item);
+    }
+    if (p.startsWith('/api/comfyui/workflows/') && req.method === 'PUT') {
+      const id = decodeURIComponent(p.split('/').pop());
+      const body = await readJsonBody(req);
+      let updated = null;
+      await updateJson('comfy-workflows.json', [], (all) => all.map((item) => {
+        if (item.id !== id) return item;
+        updated = sanitizeComfyWorkflow(body, item);
+        return updated;
+      }));
+      return updated ? send(res, 200, updated) : send(res, 404, { error: 'Workflow no encontrado.' });
+    }
+    if (p.startsWith('/api/comfyui/workflows/') && req.method === 'DELETE') {
+      const id = decodeURIComponent(p.split('/').pop());
+      let found = false;
+      await updateJson('comfy-workflows.json', [], (all) => {
+        found = all.some((item) => item.id === id);
+        return all.filter((item) => item.id !== id);
+      });
+      return found ? send(res, 200, { ok: true }) : send(res, 404, { error: 'Workflow no encontrado.' });
+    }
+
     if (p === '/api/comfyui/scan' && req.method === 'GET') {
-      const cfg = await getConfig();
-      const graph = await loadWorkflow(cfg.comfyui.workflowPath);
+      const id = url.searchParams.get('id') || '';
+      const workflows = await readJson('comfy-workflows.json', []);
+      const wf = workflows.find((w) => w.id === id);
+      if (!wf) return send(res, 400, { error: 'Elegí un workflow guardado.' });
+      const graph = await loadWorkflow(wf.path);
       const slots = scanWorkflowSlots(graph);
       const found = Object.fromEntries(Object.entries(TUZZI_TYPES).map(([key, type]) => [key, (slots[type] || []).length]));
       return send(res, 200, { slots: found });
@@ -5941,16 +6040,7 @@ const server = http.createServer(async (req, res) => {
       if (service === 'comfyui') {
         const testCfg = { comfyui: { ...cfg.comfyui, ...(body.comfyui || {}) } };
         await checkComfyHealth(testCfg);
-        let slotsDetail = '';
-        try {
-          const graph = await loadWorkflow(testCfg.comfyui.workflowPath);
-          const slots = scanWorkflowSlots(graph);
-          const found = Object.keys(TUZZI_TYPES).filter((key) => (slots[TUZZI_TYPES[key]] || []).length);
-          slotsDetail = ` Nodos Tuzzi detectados: ${found.length ? found.join(', ') : 'ninguno'}.`;
-        } catch (error) {
-          slotsDetail = ` (ComfyUI responde, pero no pude leer el workflow: ${error.message})`;
-        }
-        return send(res, 200, { ok: true, detail: `ComfyUI responde.${slotsDetail}` });
+        return send(res, 200, { ok: true, detail: 'ComfyUI responde. Agregá tus workflows abajo y usá "Detectar nodos" en cada uno.' });
       }
       const endpoint = body.endpoint || (service === 'ark' ? cfg.endpoints.ark
         : service === 'minimax' ? cfg.endpoints.minimax

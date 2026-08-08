@@ -121,20 +121,99 @@ const COMFY_RESOLUTIONS = ['1K', '2K', '4K'];
 const COMFY_REF_SLOTS = {
   reference: { strip: '#comfyRefReference', title: 'Elegir imagen de referencia' },
   poseControlNet: { strip: '#comfyRefPoseControlNet', title: 'Elegir pose (ControlNet)' },
-  poseIpAdapter: { strip: '#comfyRefPoseIpAdapter', title: 'Elegir pose (IP-Adapter)' }
+  poseIpAdapter: { strip: '#comfyRefPoseIpAdapter', title: 'Elegir face (IP-Adapter)' }
 };
 const COMFY_SLOT_LABELS = {
-  prompt: 'Prompt', reference: 'Referencia', poseControlNet: 'Pose ControlNet', poseIpAdapter: 'Pose IP-Adapter',
-  resolution: 'Resolución', outputImage: 'Salida imagen', outputVideo: 'Salida video', outputAudio: 'Salida audio'
+  prompt: 'Prompt', reference: 'Referencia', poseControlNet: 'Pose ControlNet', poseIpAdapter: 'Face IP-Adapter',
+  resolution: 'Resolución', outputImage: 'Salida imagen', outputVideo: 'Salida video', outputAudio: 'Salida audio',
+  customValues: 'Valores Personalizados'
 };
 
 function renderComfyControls() {
+  if (state.comfyuiWorkflows.length && !state.comfyuiWorkflows.some((w) => w.id === state.comfyui.workflowId)) {
+    state.comfyui.workflowId = state.comfyuiWorkflows[0].id;
+  }
+  chipRow($('#comfyWorkflowChips'), state.comfyuiWorkflows.map((w) => w.id), state.comfyui.workflowId,
+    (id) => { state.comfyui.workflowId = id; renderComfyControls(); refreshComfySlots(); },
+    (id) => state.comfyuiWorkflows.find((w) => w.id === id)?.name || id);
+  const current = state.comfyuiWorkflows.find((w) => w.id === state.comfyui.workflowId);
+  $('#comfyWorkflowDesc').textContent = current?.description || '';
+  $('#comfyWorkflowEmpty').hidden = Boolean(state.comfyuiWorkflows.length);
   chipRow($('#comfyArChips'), COMFY_ASPECT_RATIOS, state.comfyui.aspectRatio,
     (v) => { state.comfyui.aspectRatio = v; renderComfyControls(); });
   chipRow($('#comfyResChips'), COMFY_RESOLUTIONS, state.comfyui.resolution,
     (v) => { state.comfyui.resolution = v; renderComfyControls(); });
   for (const slot of Object.keys(COMFY_REF_SLOTS)) renderComfyRefSlot(slot);
+  $('#comfyReqReference').hidden = !current?.requiredRefs?.reference;
+  $('#comfyReqPoseControlNet').hidden = !current?.requiredRefs?.poseControlNet;
+  $('#comfyReqPoseIpAdapter').hidden = !current?.requiredRefs?.poseIpAdapter;
+  renderComfyCustomValues();
   renderComfySlotsHint();
+}
+
+function missingComfyRequiredRefs() {
+  const wf = state.comfyuiWorkflows.find((w) => w.id === state.comfyui.workflowId);
+  const labels = { reference: 'Referencia', poseControlNet: 'Pose (ControlNet)', poseIpAdapter: 'Face (IP-Adapter)' };
+  return Object.entries(wf?.requiredRefs || {})
+    .filter(([slot, required]) => required && !state.comfyui.refs[slot])
+    .map(([slot]) => labels[slot] || slot);
+}
+
+const COMFY_CV_MODES = [['fixed', 'Fijo'], ['increment', 'Auto +1'], ['random', 'Random']];
+
+function renderComfyCustomValues() {
+  const box = $('#comfyCustomValuesRow');
+  const wf = state.comfyuiWorkflows.find((w) => w.id === state.comfyui.workflowId);
+  const enabled = (wf?.customValues || []).map((cv, i) => ({ ...cv, i })).filter((cv) => cv.enabled);
+  if (!enabled.length) { box.hidden = true; box.innerHTML = ''; return; }
+  box.hidden = false;
+  box.innerHTML = enabled.map((cv) => {
+    const st = state.comfyui.customValues[cv.i] || (state.comfyui.customValues[cv.i] = { mode: 'fixed', value: '' });
+    return `<div class="comfy-cv-item">
+      <label>${esc(cv.label || `Valor ${cv.i + 1}`)}</label>
+      <input type="number" class="text-input" step="any" data-cv-value="${cv.i}" value="${esc(st.value)}" placeholder="0">
+      <div class="chips comfy-cv-mode" data-cv-mode-group="${cv.i}">
+        ${COMFY_CV_MODES.map(([mode, label]) => `<button type="button" class="chip${st.mode === mode ? ' active' : ''}" data-mode="${mode}">${label}</button>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+  box.querySelectorAll('[data-cv-value]').forEach((inp) => {
+    inp.addEventListener('input', () => { state.comfyui.customValues[inp.dataset.cvValue].value = inp.value; });
+  });
+  box.querySelectorAll('[data-cv-mode-group]').forEach((group) => {
+    const idx = group.dataset.cvModeGroup;
+    group.querySelectorAll('[data-mode]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.comfyui.customValues[idx].mode = btn.dataset.mode;
+        group.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('active', b === btn));
+      });
+    });
+  });
+}
+
+// Resuelve fijo/autoincremental/random a un número final por slot activo,
+// justo antes de encolar. Random: entero entre 1 y el valor escrito (tope
+// inclusive). Autoincremental: se manda el valor actual y se suma 1 después
+// de encolar, para la próxima generación.
+function resolveComfyCustomValues() {
+  const wf = state.comfyuiWorkflows.find((w) => w.id === state.comfyui.workflowId);
+  const values = {};
+  const postIncrement = [];
+  (wf?.customValues || []).forEach((cv, i) => {
+    if (!cv.enabled) return;
+    const st = state.comfyui.customValues[i];
+    if (!st || st.value === '' || st.value === undefined) return;
+    const typed = Number(st.value);
+    if (!Number.isFinite(typed)) return;
+    if (st.mode === 'random') {
+      const bound = Math.max(1, Math.floor(typed));
+      values[i] = Math.floor(Math.random() * bound) + 1;
+    } else {
+      values[i] = typed;
+      if (st.mode === 'increment') postIncrement.push(i);
+    }
+  });
+  return { values, postIncrement };
 }
 
 function renderComfyRefSlot(slot) {
@@ -166,21 +245,148 @@ function openComfyPicker(slot) {
 
 function renderComfySlotsHint() {
   const hint = $('#comfySlotsHint');
+  if (!state.comfyui.workflowId) { hint.textContent = 'Agregá y elegí un workflow arriba (o creá uno nuevo en Configuración → ComfyUI).'; return; }
   const slots = state.comfyui.slots;
-  if (!slots) { hint.textContent = 'Configurá el workflow en Configuración → ComfyUI para ver qué nodos detecta.'; return; }
+  if (!slots) { hint.textContent = 'No pude leer este workflow — revisá la ruta en Configuración → ComfyUI.'; return; }
   const found = Object.entries(slots).filter(([, n]) => n > 0).map(([k]) => COMFY_SLOT_LABELS[k] || k);
   hint.textContent = found.length ? `Nodos detectados: ${found.join(', ')}.` : 'Este workflow no tiene ningún nodo Tuzzi.';
 }
 
 async function refreshComfySlots() {
+  if (!state.comfyui.workflowId) { state.comfyui.slots = null; renderComfySlotsHint(); return; }
   try {
-    const r = await api('/api/comfyui/scan');
+    const r = await api(`/api/comfyui/scan?id=${encodeURIComponent(state.comfyui.workflowId)}`, { task: false });
     state.comfyui.slots = r.slots;
   } catch {
     state.comfyui.slots = null;
   }
   renderComfySlotsHint();
 }
+
+// --- biblioteca de workflows (Configuración → ComfyUI) ---
+
+function renderComfyWorkflowsList() {
+  const box = $('#comfyWorkflowsList');
+  if (!state.comfyuiWorkflows.length) {
+    box.innerHTML = '<div class="empty-note">Todavía no agregaste ningún workflow.</div>';
+    return;
+  }
+  box.innerHTML = state.comfyuiWorkflows.map((wf) => `<div class="comfy-wf-item" data-id="${esc(wf.id)}">
+    <div class="comfy-wf-main">
+      <strong>${esc(wf.name)}</strong>
+      ${wf.description ? `<span class="hint">${esc(wf.description)}</span>` : ''}
+      <span class="hint">${esc(wf.path)}</span>
+      <span class="hint comfy-wf-slots"></span>
+    </div>
+    <div class="comfy-wf-actions">
+      <button type="button" class="mini-btn" data-act="scan">Detectar nodos</button>
+      <button type="button" class="mini-btn" data-act="edit">Editar</button>
+      <button type="button" class="mini-btn danger" data-act="delete">Borrar</button>
+    </div>
+  </div>`).join('');
+  box.querySelectorAll('.comfy-wf-item').forEach((row) => {
+    const id = row.dataset.id;
+    const wf = state.comfyuiWorkflows.find((w) => w.id === id);
+    row.querySelector('[data-act="scan"]').addEventListener('click', async () => {
+      const slotsEl = row.querySelector('.comfy-wf-slots');
+      slotsEl.textContent = 'Escaneando…';
+      try {
+        const r = await api(`/api/comfyui/scan?id=${encodeURIComponent(id)}`, { task: false });
+        const found = Object.entries(r.slots).filter(([, n]) => n > 0).map(([k]) => COMFY_SLOT_LABELS[k] || k);
+        slotsEl.textContent = found.length ? `Nodos: ${found.join(', ')}` : 'Sin nodos Tuzzi detectados';
+      } catch (e) {
+        slotsEl.textContent = `Error: ${e.message}`;
+      }
+    });
+    row.querySelector('[data-act="edit"]').addEventListener('click', () => openComfyWorkflowForm(wf));
+    row.querySelector('[data-act="delete"]').addEventListener('click', async () => {
+      if (!confirm(`¿Borrar el workflow "${wf.name}"?`)) return;
+      await api(`/api/comfyui/workflows/${wf.id}`, { method: 'DELETE' });
+      state.comfyuiWorkflows = state.comfyuiWorkflows.filter((x) => x.id !== wf.id);
+      renderComfyWorkflowsList();
+      if (state.comfyui.workflowId === wf.id) { state.comfyui.workflowId = ''; renderComfyControls(); }
+    });
+  });
+}
+
+let comfyWorkflowEditingId = null;
+
+function renderComfyWorkflowCvForm(customValues = []) {
+  const box = $('#comfyWorkflowCvRows');
+  box.innerHTML = Array.from({ length: 5 }, (_, i) => {
+    const cv = customValues[i] || {};
+    return `<label class="comfy-cv-form-row">
+      <input type="checkbox" data-cv-enabled="${i}" ${cv.enabled ? 'checked' : ''}>
+      <input type="text" class="text-input" data-cv-label="${i}" maxlength="60" placeholder="Título (ej: Ip Adapter Weight)" value="${esc(cv.label || '')}" ${cv.enabled ? '' : 'disabled'}>
+    </label>`;
+  }).join('');
+  box.querySelectorAll('[data-cv-enabled]').forEach((chk) => {
+    chk.addEventListener('change', () => {
+      box.querySelector(`[data-cv-label="${chk.dataset.cvEnabled}"]`).disabled = !chk.checked;
+    });
+  });
+}
+
+function readComfyWorkflowCvForm() {
+  const box = $('#comfyWorkflowCvRows');
+  return Array.from({ length: 5 }, (_, i) => ({
+    enabled: box.querySelector(`[data-cv-enabled="${i}"]`).checked,
+    label: box.querySelector(`[data-cv-label="${i}"]`).value.trim()
+  }));
+}
+
+function openComfyWorkflowForm(wf = null) {
+  comfyWorkflowEditingId = wf?.id || null;
+  $('#comfyWorkflowFormName').value = wf?.name || '';
+  $('#comfyWorkflowFormDesc').value = wf?.description || '';
+  $('#comfyWorkflowFormPath').value = wf?.path || '';
+  renderComfyWorkflowCvForm(wf?.customValues || []);
+  $('#comfyWorkflowReqReference').checked = Boolean(wf?.requiredRefs?.reference);
+  $('#comfyWorkflowReqPoseControlNet').checked = Boolean(wf?.requiredRefs?.poseControlNet);
+  $('#comfyWorkflowReqPoseIpAdapter').checked = Boolean(wf?.requiredRefs?.poseIpAdapter);
+  $('#comfyWorkflowFormRow').hidden = false;
+  $('#comfyWorkflowCvFormRow').hidden = false;
+  $('#comfyWorkflowReqRefsRow').hidden = false;
+  $('#comfyWorkflowFormActions').hidden = false;
+  $('#comfyWorkflowFormName').focus();
+}
+function closeComfyWorkflowForm() {
+  comfyWorkflowEditingId = null;
+  $('#comfyWorkflowFormRow').hidden = true;
+  $('#comfyWorkflowCvFormRow').hidden = true;
+  $('#comfyWorkflowReqRefsRow').hidden = true;
+  $('#comfyWorkflowFormActions').hidden = true;
+}
+$('#btnAddComfyWorkflow').addEventListener('click', () => openComfyWorkflowForm());
+$('#comfyWorkflowFormCancel').addEventListener('click', closeComfyWorkflowForm);
+$('#comfyWorkflowFormSave').addEventListener('click', async () => {
+  const name = $('#comfyWorkflowFormName').value.trim();
+  const description = $('#comfyWorkflowFormDesc').value.trim();
+  const path = $('#comfyWorkflowFormPath').value.trim();
+  if (!path) return toast('Falta la ruta/URL del workflow', 'err');
+  try {
+    const body = {
+      name, description, path, customValues: readComfyWorkflowCvForm(),
+      requiredRefs: {
+        reference: $('#comfyWorkflowReqReference').checked,
+        poseControlNet: $('#comfyWorkflowReqPoseControlNet').checked,
+        poseIpAdapter: $('#comfyWorkflowReqPoseIpAdapter').checked
+      }
+    };
+    const saved = comfyWorkflowEditingId
+      ? await api(`/api/comfyui/workflows/${comfyWorkflowEditingId}`, { method: 'PUT', body })
+      : await api('/api/comfyui/workflows', { method: 'POST', body });
+    state.comfyuiWorkflows = comfyWorkflowEditingId
+      ? state.comfyuiWorkflows.map((w) => (w.id === saved.id ? saved : w))
+      : [saved, ...state.comfyuiWorkflows];
+    closeComfyWorkflowForm();
+    renderComfyWorkflowsList();
+    renderComfyControls();
+    toast('Workflow guardado');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+});
 
 // ---------------------------------------------------------------------------
 // resaltado de corchetes (modo audio)
@@ -1163,6 +1369,11 @@ async function generate() {
   } else if (!prompt) {
     return toast('Escribí un prompt primero', 'err');
   }
+  if (isComfy && !state.comfyui.workflowId) return toast('Elegí un workflow de ComfyUI primero', 'err');
+  if (isComfy) {
+    const missing = missingComfyRequiredRefs();
+    if (missing.length) return toast(`Este workflow requiere: ${missing.join(', ')}`, 'err');
+  }
   const pc = pinnedChar();
   const voiceId = state.voiceId || pc?.voiceId;
   const voice = (state.voices || []).find((v) => v.id === voiceId);
@@ -1199,13 +1410,14 @@ async function generate() {
   const refsUsed = isImage ? state.refs : isVideo ? state.refs.slice(0, activeRefLimit()) : [];
   const labeledRefs = !isH3 && !(isVideo && state.video.mode === 'frames') && refsUsed.some((r) => r.label)
     ? await buildLabeledRefs(refsUsed) : {};
+  const comfyResolved = isComfy ? resolveComfyCustomValues() : null;
   const job = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     status: 'queued', prompt, createdAt: Date.now(),
     label: isImage ? `${model.name} · ${state.resolution} · ×${state.batch}`
       : isVideo ? `${model.name} · ${state.video.resolution}${isHeyGen ? '' : ` · ${state.video.duration}s`}`
       : isMusic ? `Suno ${state.music.version}${state.music.instrumental ? ' · instrumental' : ''}`
-      : isComfy ? `ComfyUI · ${state.comfyui.aspectRatio} · ${state.comfyui.resolution}`
+      : isComfy ? `ComfyUI · ${state.comfyuiWorkflows.find((w) => w.id === state.comfyui.workflowId)?.name || 'workflow'} · ${state.comfyui.aspectRatio} · ${state.comfyui.resolution}`
       : `${audioModel?.name || 'ElevenLabs'} · ${voice?.name || pc?.voiceName || 'voz'}`,
     path: isImage ? '/api/generate/image' : isVideo ? '/api/generate/video' : isMusic ? '/api/generate/music' : isComfy ? '/api/generate/comfyui' : '/api/generate/audio',
     body: isImage ? {
@@ -1231,8 +1443,8 @@ async function generate() {
       style: state.music.style, title: state.music.title,
       instrumental: state.music.instrumental, customMode: state.music.customMode
     } : isComfy ? {
-      prompt, aspectRatio: state.comfyui.aspectRatio, resolution: state.comfyui.resolution,
-      refs: { ...state.comfyui.refs },
+      workflowId: state.comfyui.workflowId, prompt, aspectRatio: state.comfyui.aspectRatio, resolution: state.comfyui.resolution,
+      refs: { ...state.comfyui.refs }, customValues: comfyResolved.values,
       genId: `comfyui-${Date.now()}-${Math.random().toString(16).slice(2)}`
     } : {
       text: prompt,
@@ -1246,6 +1458,13 @@ async function generate() {
   state.generationJobs.unshift(job);
   renderGenerationQueue();
   pumpGenerationQueue();
+  if (isComfy && comfyResolved.postIncrement.length) {
+    for (const i of comfyResolved.postIncrement) {
+      const st = state.comfyui.customValues[i];
+      st.value = String((Number(st.value) || 0) + 1);
+    }
+    renderComfyCustomValues();
+  }
   toast('Generación añadida a la cola');
 }
 
@@ -1339,7 +1558,7 @@ function showEntry(entry, outputIdx = 0) {
       <div class="bv-media"><div style="padding:8px;color:var(--pink)">${IC('mic', 'ic ic-lg')}</div>
         <audio controls autoplay src="${fileUrl(entry.outputs[0])}"></audio>
       </div>
-      <div class="bv-meta">${esc(entry.voiceName || 'voz')} · ${esc(entry.modelName || 'ElevenLabs')} · ${fmtDate(entry.ts)}</div>
+      <div class="bv-meta">${esc(entry.voiceName || 'voz')} · ${esc(entry.modelName || 'ElevenLabs')} · ${fmtDate(entry.ts)}${entry.durationMs ? ` · tardó ${fmtDuration(entry.durationMs)}` : ''}</div>
       <div class="bv-actions">
         <button class="mini-btn" data-act="copy">${IC('copy')} Copiar prompt</button>
         <button class="mini-btn" data-act="regen">${IC('refresh')} Regenerar</button>
@@ -1350,7 +1569,7 @@ function showEntry(entry, outputIdx = 0) {
     const key = entry.outputs[0];
     bv.innerHTML = `
       <div class="bv-media"><video controls autoplay loop src="${fileUrl(key)}"></video></div>
-      <div class="bv-meta">${esc(entry.modelName)} · ${entry.aspectRatio} · ${entry.resolution} · ${entry.duration}s${entry.audio ? ' · con audio' : ''} · ${fmtDate(entry.ts)}</div>
+      <div class="bv-meta">${esc(entry.modelName)} · ${entry.aspectRatio} · ${entry.resolution} · ${entry.duration}s${entry.audio ? ' · con audio' : ''} · ${fmtDate(entry.ts)}${entry.durationMs ? ` · tardó ${fmtDuration(entry.durationMs)}` : ''}</div>
       <div class="bv-actions">
         <button class="mini-btn" data-act="copy">${IC('copy')} Copiar prompt</button>
         <button class="mini-btn" data-act="regen">${IC('refresh')} Regenerar</button>
@@ -1372,7 +1591,7 @@ function showEntry(entry, outputIdx = 0) {
       </div>
       ${entry.outputs.length > 1 ? `<div class="bv-counter">${outputIdx + 1} / ${entry.outputs.length}</div>` : ''}
       ${thumbs}
-      <div class="bv-meta">${esc(entry.modelName)} · ${entry.aspectRatio} · ${entry.resolution}${entry.batch > 1 ? ` · lote ×${entry.batch}` : ''} · ${fmtDate(entry.ts)}</div>
+      <div class="bv-meta">${esc(entry.modelName)} · ${entry.aspectRatio} · ${entry.resolution}${entry.batch > 1 ? ` · lote ×${entry.batch}` : ''} · ${fmtDate(entry.ts)}${entry.durationMs ? ` · tardó ${fmtDuration(entry.durationMs)}` : ''}</div>
       <div class="bv-actions">
         <button class="mini-btn" data-act="copy">${IC('copy')} Copiar prompt</button>
         <button class="mini-btn" data-act="ref">${IC('link')} Usar como referencia</button>
@@ -1502,7 +1721,7 @@ function renderHistory() {
       <div class="hist-thumbs">${thumbs}</div>
       <div class="hist-body">
         <div class="hist-prompt">${esc(entry.prompt)}</div>
-        <div class="hist-meta">${esc(entry.modelName)}${entry.type === 'audio' ? ` · ${esc(entry.voiceName || '')}` : entry.type === 'video' ? ` · ${entry.aspectRatio} · ${entry.resolution} · ${entry.duration}s` : ` · ${entry.aspectRatio} · ${entry.resolution}${entry.batch > 1 ? ' · ×' + entry.batch : ''}`} · ${fmtDate(entry.ts)}${entry.errors?.length ? ` · <span class="err">${entry.errors.length} error(es) en el lote</span>` : ''}</div>
+        <div class="hist-meta">${esc(entry.modelName)}${entry.type === 'audio' ? ` · ${esc(entry.voiceName || '')}` : entry.type === 'video' ? ` · ${entry.aspectRatio} · ${entry.resolution} · ${entry.duration}s` : ` · ${entry.aspectRatio} · ${entry.resolution}${entry.batch > 1 ? ' · ×' + entry.batch : ''}`} · ${fmtDate(entry.ts)}${entry.durationMs ? ` · tardó ${fmtDuration(entry.durationMs)}` : ''}${entry.errors?.length ? ` · <span class="err">${entry.errors.length} error(es) en el lote</span>` : ''}</div>
       </div>
       <div class="hist-actions">
         <button class="mini-btn" data-act="view">${IC('eye')} Ver</button>
@@ -8555,6 +8774,8 @@ function updateEstimate() {
   } else if (state.mode === 'music') {
     const perTrack = state.pricing.music?.perTrack ?? 0;
     el.textContent = perTrack ? `≈ $${(perTrack * 2).toFixed(3)} (2 variantes)` : '';
+  } else if (state.mode === 'comfyui') {
+    el.textContent = 'Gratis (tu ComfyUI local)';
   } else {
     const per1k = state.pricing.audio?.[state.audioModelId]?.per1kChars
       ?? state.pricing.audio?.['eleven-v3']?.per1kChars
@@ -8802,7 +9023,7 @@ function fillConfigForm() {
   f.ffmpegPath.value = c.ffmpegPath || '';
   f.comfyui_host.value = c.comfyui?.host || '127.0.0.1';
   f.comfyui_port.value = c.comfyui?.port || 8188;
-  f.comfyui_workflowPath.value = c.comfyui?.workflowPath || '';
+  renderComfyWorkflowsList();
   renderConfigAudioTags();
   $('#accessStatus').textContent = c.accessProtected
     ? 'La aplicación está protegida. Escribí una nueva clave solo si querés cambiarla.'
@@ -8859,7 +9080,7 @@ $$('.test-btn').forEach((btn) => {
     out.textContent = 'Probando…';
     try {
       const body = service === 'comfyui'
-        ? { service, comfyui: { host: f.comfyui_host.value.trim(), port: Number(f.comfyui_port.value) || undefined, workflowPath: f.comfyui_workflowPath.value.trim() } }
+        ? { service, comfyui: { host: f.comfyui_host.value.trim(), port: Number(f.comfyui_port.value) || undefined } }
         : { service, key: f[`key_${service}`].value.trim() };
       if (service === 'ark') {
         body.endpoint = f.endpoint_ark.value.trim();
@@ -8941,8 +9162,7 @@ $('#configForm').addEventListener('submit', async (e) => {
         ffmpegPath: f.ffmpegPath.value.trim(),
         comfyui: {
           host: f.comfyui_host.value.trim(),
-          port: Number(f.comfyui_port.value) || 8188,
-          workflowPath: f.comfyui_workflowPath.value.trim()
+          port: Number(f.comfyui_port.value) || 8188
         },
         accessPassword: f.accessPassword.value
       }
@@ -8979,6 +9199,7 @@ async function init() {
     state.prompts = s.prompts;
     state.fonts = s.fonts || [];
     state.overlayPresets = s.overlayPresets || [];
+    state.comfyuiWorkflows = s.comfyWorkflows || [];
     await registerCustomFonts(state.fonts);
     state.promptCategoriesExtra = s.promptCategories || {};
     state.assetLinks = s.assetLinks || [];

@@ -1120,6 +1120,21 @@ audio::-webkit-media-controls-volume-slider {
 /* ---------- config ---------- */
 .config-form { max-width: 720px; display: flex; flex-direction: column; gap: 14px; }
 .config-form h3 { margin-top: 10px; color: #d3c3f0; }
+.config-form h4 { margin: 6px 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.comfy-workflows-list { display: flex; flex-direction: column; gap: 8px; }
+.comfy-wf-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; border: 1px solid var(--border-soft); background: var(--panel); padding: 9px 11px; }
+.comfy-wf-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.comfy-wf-main strong { font-size: 13px; }
+.comfy-wf-main .hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.comfy-wf-actions { display: flex; gap: 5px; flex: 0 0 auto; }
+.comfy-cv-form-rows { display: flex; flex-direction: column; gap: 6px; }
+.comfy-cv-form-row { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 400; }
+.comfy-cv-form-row input[type="text"] { flex: 1; }
+.comfy-cv-row { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.comfy-cv-item { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.comfy-cv-item label { font-size: 12px; font-weight: 700; color: var(--muted); min-width: 120px; }
+.comfy-cv-item input[type="number"] { width: 90px; }
+.comfy-req-tag { color: #fb7185; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 .cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .cfg-grid label { font-size: 12px; font-weight: 700; color: var(--muted); display: flex; flex-direction: column; gap: 5px; }
 .cfg-grid input, .audio-tag-add input {
