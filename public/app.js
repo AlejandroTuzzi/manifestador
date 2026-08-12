@@ -418,7 +418,7 @@ function renderHighlight() {
     });
     highlighter.innerHTML = highlightReferenceMentions(text, mentions) + '\n';
   } else if (state.mode === 'video' && state.video.mode === 'reference') {
-    highlighter.innerHTML = esc(text).replace(/@image\d+/gi, '<span class="tag">$&</span>') + '\n';
+    highlighter.innerHTML = esc(text).replace(/@(image|video|audio)\d+/gi, '<span class="tag">$&</span>') + '\n';
   } else if (state.mode === 'video') {
     highlighter.innerHTML = esc(text) + '\n';
   } else {
@@ -654,11 +654,22 @@ function referenceKind(ref) {
   return key.startsWith('video/') ? 'video' : key.startsWith('audio/') ? 'audio' : 'image';
 }
 
+function supportsMultimediaVideoRefs(model = currentVideoModel()) {
+  return Boolean(model?.supportsMultimediaReferences || model?.provider === 'minimax');
+}
+
+function typedVideoReferenceMention(model, kind, number) {
+  const type = `${kind[0].toUpperCase()}${kind.slice(1)}`;
+  return model?.id === 'seedance-2-5' ? `@${type}${number}` : `${type} ${number}`;
+}
+
 function renderVideoControls() {
   const m = currentVideoModel();
   if (!m) return;
   const isHeyGen = m.provider === 'heygen';
   const isH3 = m.provider === 'minimax';
+  const isSeedance25 = m.id === 'seedance-2-5';
+  const multimediaRefs = supportsMultimediaVideoRefs(m);
   state.video.modelId = m.id;
   if (!m.aspectRatios.includes(state.video.aspectRatio)) state.video.aspectRatio = m.aspectRatios[0];
   if (!m.resolutions.includes(state.video.resolution)) state.video.resolution = m.resolutions[0];
@@ -669,7 +680,7 @@ function renderVideoControls() {
     (id) => {
       state.video.modelId = id;
       const next = state.videoModels.find((model) => model.id === id);
-      if (next?.provider !== 'minimax') state.refs = state.refs.filter((ref) => referenceKind(ref) === 'image');
+      if (!supportsMultimediaVideoRefs(next)) state.refs = state.refs.filter((ref) => referenceKind(ref) === 'image');
       applyPinnedCharacterPhotos(); renderVideoControls();
     },
     (id) => state.videoModels.find((x) => x.id === id).name);
@@ -680,10 +691,12 @@ function renderVideoControls() {
     ? 'Usá una imagen JPG o PNG: puede venir de cualquier asset o personaje.'
     : isH3 && state.video.mode === 'reference'
     ? 'Citá las referencias como Image 1, Video 1 o Audio 1. Podés combinar estética, personaje, movimiento, cámara, voz y ritmo.'
+    : isSeedance25 && state.video.mode === 'reference'
+    ? 'Citá las referencias como @Image1, @Video1 o @Audio1. Podés combinar hasta 50 archivos entre imagen, video y audio.'
     : state.video.mode === 'reference'
     ? 'mencionalas en el prompt con @image1, @image2… (botón @ en cada miniatura)'
     : '1ª imagen = fotograma inicial · 2ª = final';
-  $('#videoRefsLabel').textContent = isH3 ? 'Referencias' : 'Imágenes';
+  $('#videoRefsLabel').textContent = multimediaRefs ? 'Referencias' : 'Imágenes';
   chipRow($('#videoArChips'), m.aspectRatios, state.video.aspectRatio,
     (v) => { state.video.aspectRatio = v; renderVideoControls(); });
   chipRow($('#videoResChips'), m.resolutions, state.video.resolution,
@@ -767,15 +780,16 @@ function renderRefs() {
     r.label = normalizeReferenceLabel(r.label);
     const isAsset = r.key.startsWith('asset://');
     const kind = referenceKind(r);
-    const isH3 = isVideo && currentVideoModel()?.provider === 'minimax';
+    const videoModel = isVideo ? currentVideoModel() : null;
+    const typedMultimedia = isVideo && supportsMultimediaVideoRefs(videoModel);
     const typeNumber = state.refs.slice(0, i + 1).filter((ref) => referenceKind(ref) === kind).length;
     const d = document.createElement('div');
     d.className = `ref-thumb ref-${kind}` + (r.fromChar ? ' from-char' : '') + (isAsset ? ' verified-asset' : '');
     // cómo se cita esta ref en el prompt: en video Seedance exige @imageN;
     // en imagen se cita por su etiqueta (si tiene) para decirle quién es quién
-    const h3Mention = `${kind[0].toUpperCase()}${kind.slice(1)} ${typeNumber}`;
-    const mention = isH3 && refMode === 'reference' ? h3Mention : refMode === 'reference' || !r.label ? `@image${i + 1}` : `@${r.label}`;
-    const badge = isH3 && refMode === 'reference' ? `<button class="ref-at" title="Insertar ${h3Mention} en el prompt">${kind === 'image' ? 'IMG' : kind === 'video' ? 'VID' : 'AUD'} ${typeNumber}</button>`
+    const typedMention = typedVideoReferenceMention(videoModel, kind, typeNumber);
+    const mention = typedMultimedia && refMode === 'reference' ? typedMention : refMode === 'reference' || !r.label ? `@image${i + 1}` : `@${r.label}`;
+    const badge = typedMultimedia && refMode === 'reference' ? `<button class="ref-at" title="Insertar ${typedMention} en el prompt">${kind === 'image' ? 'IMG' : kind === 'video' ? 'VID' : 'AUD'} ${typeNumber}</button>`
       : refMode === 'reference' ? `<button class="ref-at" title="Insertar @image${i + 1} en el prompt">@${i + 1}</button>`
       : refMode === 'frames' ? `<span class="ref-badge">${i === 0 ? 'inicio' : 'fin'}</span>`
       : !isVideo && !isAsset ? `<button class="ref-at" title="Insertar ${esc(mention)} en el prompt">${esc(mention)}</button>`
@@ -810,8 +824,8 @@ function renderRefs() {
     const add = document.createElement('button');
     add.className = 'ref-add';
     add.textContent = '+';
-    add.title = isVideo && currentVideoModel()?.provider === 'minimax' && state.video.mode === 'reference'
-      ? 'Agregar imagen, video o audio de referencia'
+    add.title = isVideo && supportsMultimediaVideoRefs() && state.video.mode === 'reference'
+      ? `Agregar imagen, video o audio de referencia para ${currentVideoModel().name}`
       : 'Agregar imagen de referencia';
     add.addEventListener('click', () => openPicker());
     strip.appendChild(add);
@@ -822,11 +836,11 @@ function addRef(key, fromChar = false, kind = 'image') {
   const m = activeRefModel();
   const maxRefs = activeRefLimit();
   const normalizedKind = ['image', 'video', 'audio'].includes(kind) ? kind : 'image';
-  const isH3Reference = state.mode === 'video'
-    && currentVideoModel()?.provider === 'minimax'
+  const isMultimediaReference = state.mode === 'video'
+    && supportsMultimediaVideoRefs()
     && state.video.mode === 'reference';
   if (state.refs.some((r) => r.key === key)) return false;
-  if (normalizedKind !== 'image' && !isH3Reference) {
+  if (normalizedKind !== 'image' && !isMultimediaReference) {
     toast('Este modo sólo admite imágenes como referencia.', 'err');
     return false;
   }
@@ -834,12 +848,12 @@ function addRef(key, fromChar = false, kind = 'image') {
     toast(`${m.name} admite hasta ${maxRefs} referencia(s) en este modo`, 'err');
     return false;
   }
-  if (isH3Reference) {
+  if (isMultimediaReference) {
     const mediaLimit = m.mediaLimits?.[normalizedKind];
     const kindCount = state.refs.filter((ref) => referenceKind(ref) === normalizedKind).length;
     if (mediaLimit != null && kindCount >= mediaLimit) {
       const label = normalizedKind === 'image' ? 'imágenes' : normalizedKind === 'video' ? 'videos' : 'audios';
-      toast(`MiniMax H3 admite hasta ${mediaLimit} ${label} de referencia.`, 'err');
+      toast(`${m.name} admite hasta ${mediaLimit} ${label} de referencia.`, 'err');
       return false;
     }
   }
@@ -1019,7 +1033,13 @@ function applyPinnedCharacterPhotos() {
     if (key && state.refs.length < activeRefLimit()) state.refs.push({ key, fromChar: true, label: pc.name });
     return;
   }
-  if (videoModel?.provider === 'minimax') {
+  // Los personajes reales verificados se conservan como assets privados de
+  // ModelArk cuando el modelo de video pertenece a Seedance.
+  if (state.mode === 'video' && videoModel?.provider === 'seedance' && pc.arkAssetId) {
+    if (state.refs.length < activeRefLimit()) state.refs.push({ key: `asset://${pc.arkAssetId}`, fromChar: true });
+    return;
+  }
+  if (supportsMultimediaVideoRefs(videoModel)) {
     const variant = (pc.variants || []).find((v) => v.id === state.characterVariantId);
     const photos = variant?.photos?.length ? variant.photos : pc.photos;
     const currentImages = state.refs.filter((ref) => referenceKind(ref) === 'image').length;
@@ -1087,8 +1107,10 @@ function renderPinnedHint() {
   const variant = (pc.variants || []).find((v) => v.id === state.characterVariantId);
   hint.textContent = state.mode === 'image'
     ? `${pc.name}${variant ? ` · ${variant.name}` : ' · Original'}: sus fotos van como referencia`
-    : state.mode === 'video' && currentVideoModel()?.provider === 'minimax'
-    ? `${pc.name}: sus fotos locales van como referencias de MiniMax H3`
+    : state.mode === 'video' && currentVideoModel()?.provider === 'seedance' && pc.arkAssetId
+    ? `${pc.name}: va como rostro real verificado (asset de ModelArk)`
+    : state.mode === 'video' && supportsMultimediaVideoRefs()
+    ? `${pc.name}: sus fotos locales van como referencias de ${currentVideoModel().name}`
     : state.mode === 'video' && pc.arkAssetId
     ? `${pc.name}: va como rostro real verificado (asset de ModelArk)`
     : `${pc.name}: ${pc.voiceName ? 'habla con su voz (' + pc.voiceName + ')' : 'no tiene voz asignada'}`;
@@ -1381,6 +1403,7 @@ async function generate() {
   const model = isVideo ? currentVideoModel() : currentModel();
   const isHeyGen = isVideo && model?.provider === 'heygen';
   const isH3 = isVideo && model?.provider === 'minimax';
+  const isSeedance25 = isVideo && model?.id === 'seedance-2-5';
   if (isHeyGen && model.requiresRegisteredCharacter) {
     const character = state.characters.find((item) => item.id === state.video.heygenCharacterId);
     if (!heygenCharacterReady(character)) {
@@ -1394,6 +1417,7 @@ async function generate() {
   if (isHeyGen && state.video.heygenAuthMode === 'oauth' && !state.heygenOAuth.connected) return toast('Conectá HeyGen OAuth desde Configuración', 'err');
   if (isHeyGen && state.video.heygenAuthMode === 'key' && !state.config?.keys?.heygen) return toast('Guardá la API key de HeyGen en Configuración', 'err');
   if (isH3 && !state.config?.keys?.minimax) return toast('Guardá la API key de MiniMax en Configuración', 'err');
+  if (isSeedance25 && !state.config?.keys?.ark) return toast('Guardá la API key de BytePlus ModelArk en Configuración', 'err');
   if (isH3) {
     const counts = state.refs.reduce((out, ref) => {
       out[referenceKind(ref)] += 1;
@@ -1403,12 +1427,20 @@ async function generate() {
     if (counts.image > 9 || counts.video > 3 || counts.audio > 3 || state.refs.length > 12) return toast('H3 admite 9 imágenes, 3 videos y 3 audios; máximo 12 referencias.', 'err');
     if (state.video.mode === 'reference' && counts.audio && !counts.image && !counts.video) return toast('El audio H3 necesita al menos una imagen o video de referencia.', 'err');
   }
+  if (isSeedance25) {
+    const counts = state.refs.reduce((out, ref) => {
+      out[referenceKind(ref)] += 1;
+      return out;
+    }, { image: 0, video: 0, audio: 0 });
+    if (state.video.mode === 'frames' && (counts.video || counts.audio)) return toast('Inicio → Fin sólo admite imágenes.', 'err');
+    if (counts.image > 30 || counts.video > 10 || counts.audio > 10 || state.refs.length > 50) return toast('Seedance 2.5 admite 30 imágenes, 10 videos y 10 audios; máximo 50 referencias.', 'err');
+  }
   if (isVideo && !isHeyGen && state.video.mode === 'frames' && state.refs.length !== 2) {
     return toast('Inicio → Fin necesita exactamente dos imágenes: la primera es entrada y la segunda es salida.', 'err');
   }
   // las etiquetas se estampan acá, sobre copias: el asset guardado queda limpio
   const refsUsed = isImage ? state.refs : isVideo ? state.refs.slice(0, activeRefLimit()) : [];
-  const labeledRefs = !isH3 && !(isVideo && state.video.mode === 'frames') && refsUsed.some((r) => r.label)
+  const labeledRefs = !supportsMultimediaVideoRefs(model) && !(isVideo && state.video.mode === 'frames') && refsUsed.some((r) => r.label)
     ? await buildLabeledRefs(refsUsed) : {};
   const comfyResolved = isComfy ? resolveComfyCustomValues() : null;
   const job = {
@@ -1837,9 +1869,9 @@ function renderPromptsPanel() {
 
 // replaceIndex null = agregar una referencia nueva; un índice = reemplazar esa
 // referencia in-place (conserva posición, cita y etiqueta)
-function isH3MultimediaPicker() {
+function isVideoMultimediaPicker() {
   return state.mode === 'video'
-    && currentVideoModel()?.provider === 'minimax'
+    && supportsMultimediaVideoRefs()
     && state.video.mode === 'reference'
     && state.replaceRefIndex == null
     && !state.promptStyleImagePick
@@ -1848,10 +1880,10 @@ function isH3MultimediaPicker() {
 
 function openPicker(replaceIndex = null) {
   state.replaceRefIndex = replaceIndex;
-  const multimedia = isH3MultimediaPicker();
+  const multimedia = isVideoMultimediaPicker();
   $('#pickerTitle').textContent = replaceIndex != null
     ? 'Reemplazar imagen de referencia'
-    : multimedia ? 'Elegir referencia para MiniMax H3' : 'Elegir imagen de referencia';
+    : multimedia ? `Elegir referencia para ${currentVideoModel().name}` : 'Elegir imagen de referencia';
   $('#pickerVideoTab').hidden = !multimedia;
   $('#pickerAudioTab').hidden = !multimedia;
   if (!multimedia && ['video', 'audio'].includes(state.pickerTab)) state.pickerTab = 'upload';
@@ -1908,7 +1940,7 @@ $$('#pickerTabs .tab').forEach((t) => {
 });
 
 async function setPickerTab(src) {
-  const multimedia = isH3MultimediaPicker();
+  const multimedia = isVideoMultimediaPicker();
   if (['video', 'audio'].includes(src) && !multimedia) src = 'upload';
   state.pickerTab = src;
   $$('#pickerTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.src === src));
@@ -1920,7 +1952,7 @@ async function setPickerTab(src) {
       ? '.jpg,.jpeg,.png,.webp,.mp4,.mov,.mp3,.wav,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,audio/mpeg,audio/wav'
       : 'image/*';
     body.innerHTML = `<div class="drop-zone" id="dropZone">${multimedia
-      ? 'Arrastrá imágenes, videos o audios acá<br><small>H3: JPG, PNG, WebP, MP4, MOV, MP3 o WAV</small>'
+      ? `Arrastrá imágenes, videos o audios acá<br><small>${esc(currentVideoModel()?.name || 'Video multimodal')}: JPG, PNG, WebP, MP4, MOV, MP3 o WAV</small>`
       : 'Arrastrá imágenes acá'}<br>o hacé clic para elegir archivos</div>`;
     const dz = $('#dropZone');
     dz.addEventListener('click', () => {
@@ -2089,7 +2121,7 @@ async function uploadFiles(files, asRefs) {
   // en modo reemplazo solo tiene sentido una imagen: se usa la primera
   const replacing = asRefs && state.replaceRefIndex != null;
   const list = replacing ? files.slice(0, 1) : files;
-  const multimedia = asRefs && isH3MultimediaPicker();
+  const multimedia = asRefs && isVideoMultimediaPicker();
   const initialRefTotal = state.refs.length;
   const initialRefCounts = state.refs.reduce((counts, ref) => {
     counts[referenceKind(ref)]++;
@@ -2107,13 +2139,13 @@ async function uploadFiles(files, asRefs) {
       if (multimedia) {
         const totalLimit = activeRefLimit();
         if (initialRefTotal + addedCounts.image + addedCounts.video + addedCounts.audio >= totalLimit) {
-          toast(`${f.name}: H3 admite hasta ${totalLimit} referencias en total`, 'err');
+          toast(`${f.name}: ${currentVideoModel()?.name || 'el modelo'} admite hasta ${totalLimit} referencias en total`, 'err');
           continue;
         }
         const mediaLimit = currentVideoModel()?.mediaLimits?.[kind];
         if (mediaLimit != null && initialRefCounts[kind] + addedCounts[kind] >= mediaLimit) {
           const label = kind === 'image' ? 'imágenes' : kind === 'video' ? 'videos' : 'audios';
-          toast(`${f.name}: H3 admite hasta ${mediaLimit} ${label} de referencia`, 'err');
+          toast(`${f.name}: ${currentVideoModel()?.name || 'el modelo'} admite hasta ${mediaLimit} ${label} de referencia`, 'err');
           continue;
         }
       }
@@ -2123,9 +2155,13 @@ async function uploadFiles(files, asRefs) {
         continue;
       }
       if (multimedia) {
-        const sizeLimitMb = { image: 30, video: 50, audio: 15 }[kind];
+        // ModelArk limita a 64 MB el cuerpo completo; reservamos margen para
+        // el crecimiento de base64, el prompt y las demás referencias.
+        const sizeLimitMb = currentVideoModel()?.id === 'seedance-2-5'
+          ? { image: 30, video: 45, audio: 15 }[kind]
+          : { image: 30, video: 50, audio: 15 }[kind];
         if (f.size > sizeLimitMb * 1024 * 1024) {
-          toast(`${f.name}: supera el máximo de ${sizeLimitMb} MB para referencias ${kind === 'image' ? 'de imagen' : kind === 'video' ? 'de video' : 'de audio'} de H3`, 'err');
+          toast(`${f.name}: supera el máximo de ${sizeLimitMb} MB para referencias ${kind === 'image' ? 'de imagen' : kind === 'video' ? 'de video' : 'de audio'} en Manifestador`, 'err');
           continue;
         }
       }
@@ -3284,6 +3320,20 @@ function associationIsElement() {
   return $('#associateTargetType').value === 'element';
 }
 
+const NEW_ASSOCIATION_VARIANT = '__new__';
+
+function toggleAssociationNewVariant() {
+  const creating = $('#associateVariant').value === NEW_ASSOCIATION_VARIANT;
+  $('#associateNewVariantFields').hidden = !creating;
+  if (creating) setTimeout(() => $('#associateNewVariantName').focus(), 0);
+}
+
+function resetAssociationNewVariant() {
+  $('#associateNewVariantName').value = '';
+  $('#associateNewVariantDescription').value = '';
+  $('#associateNewVariantFields').hidden = true;
+}
+
 async function associateAsset(key) {
   if (!state.characters.length && !state.elements.length) return toast('Primero creá un personaje o una locación/objeto', 'err');
   state.pendingAssociationKey = key;
@@ -3293,6 +3343,7 @@ async function associateAsset(key) {
   const preferElement = (existingEl && !existingChar) || !state.characters.length;
   $('#associateTargetType').value = preferElement && state.elements.length ? 'element' : 'character';
   const existing = $('#associateTargetType').value === 'element' ? existingEl : existingChar;
+  resetAssociationNewVariant();
   renderAssociationOwners(existing ? (existing.characterId || existing.elementId) : '', existing?.variantId || '');
   $('#associateAsPhoto').checked = false;
   $('#associateAssetPreview').innerHTML = `<img src="${fileUrl(key)}" alt=""><div><strong>${existing ? 'Reasignar asset' : 'Nuevo vínculo'}</strong><div class="hint">El archivo no se moverá ni duplicará.</div></div>`;
@@ -3313,19 +3364,41 @@ function renderAssociationOwners(ownerId = '', variantId = '') {
 function renderAssociationVariants(selected = '') {
   const list = associationIsElement() ? state.elements : state.characters;
   const owner = list.find((c) => c.id === $('#associateCharacter').value);
-  $('#associateVariant').innerHTML = '<option value="">Original</option>' + (owner?.variants || []).map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('');
+  $('#associateVariant').innerHTML = '<option value="">Original</option>'
+    + (owner?.variants || []).map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('')
+    + `<option value="${NEW_ASSOCIATION_VARIANT}">＋ Crear nueva variante…</option>`;
   $('#associateVariant').value = selected;
+  toggleAssociationNewVariant();
 }
 
-$('#associateTargetType').addEventListener('change', () => renderAssociationOwners());
-$('#associateCharacter').addEventListener('change', () => renderAssociationVariants());
+$('#associateTargetType').addEventListener('change', () => { resetAssociationNewVariant(); renderAssociationOwners(); });
+$('#associateCharacter').addEventListener('change', () => { resetAssociationNewVariant(); renderAssociationVariants(); });
+$('#associateVariant').addEventListener('change', toggleAssociationNewVariant);
 $('#associateAssetForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const key = state.pendingAssociationKey;
   const isElement = associationIsElement();
   const ownerId = $('#associateCharacter').value;
-  const variantId = $('#associateVariant').value || null;
+  let variantId = $('#associateVariant').value || null;
   try {
+    if (variantId === NEW_ASSOCIATION_VARIANT) {
+      const name = $('#associateNewVariantName').value.trim();
+      const description = $('#associateNewVariantDescription').value.trim();
+      if (!name) {
+        $('#associateNewVariantName').focus();
+        return toast('Poné un nombre para la nueva variante', 'err');
+      }
+      const owners = isElement ? state.elements : state.characters;
+      const ownerBefore = owners.find((item) => item.id === ownerId);
+      const previousIds = new Set((ownerBefore?.variants || []).map((variant) => variant.id));
+      const base = isElement ? `/api/elements/${ownerId}/variants` : `/api/characters/${ownerId}/variants`;
+      const updated = await api(base, { method: 'POST', body: { name, description } });
+      const created = (updated.variants || []).find((variant) => !previousIds.has(variant.id));
+      if (!created) throw new Error('La variante se guardó, pero no pude identificarla para asociar el asset.');
+      owners[owners.findIndex((item) => item.id === ownerId)] = updated;
+      variantId = created.id;
+      renderAssociationVariants(variantId);
+    }
     if (isElement) {
       const result = await api('/api/element-links', { method: 'POST', body: { key, elementId: ownerId, variantId } });
       state.elementLinks = result.links;
@@ -3356,7 +3429,11 @@ $('#associateAssetForm').addEventListener('submit', async (e) => {
     toast(err.message, 'err');
   }
 });
-function closeAssociateAsset() { $('#associateAssetModal').hidden = true; state.pendingAssociationKey = null; }
+function closeAssociateAsset() {
+  $('#associateAssetModal').hidden = true;
+  state.pendingAssociationKey = null;
+  resetAssociationNewVariant();
+}
 $('#associateAssetClose').addEventListener('click', closeAssociateAsset);
 $('#associateAssetCancel').addEventListener('click', closeAssociateAsset);
 $('#associateAssetModal').addEventListener('click', (e) => { if (e.target.id === 'associateAssetModal') closeAssociateAsset(); });
@@ -5739,7 +5816,7 @@ function automationBlockAssetSelectionMarkup(keys = []) {
     const item = automationVisualAsset(key);
     const preview = automationAssetPreview(item, key);
     return `<span class="auto-block-asset-chip" title="${esc(item.name || key)}"><b>${index + 1}</b>${preview}</span>`;
-  }).join('') : '<span class="hint">Todavía no elegiste imágenes o videos.</span>';
+  }).join('') : '<span class="hint">Todavía no elegiste imágenes, videos o audios.</span>';
 }
 
 function overlayPresetOptions() {
@@ -6071,8 +6148,8 @@ function renderAutomationAssetsPicker() {
   if (!picker) return;
   const search = String(picker.search || '').trim().toLocaleLowerCase('es');
   const selected = new Set(picker.keys);
-  const h3BlockPicker = picker.purpose === 'h3-block';
-  const sourceItems = h3BlockPicker ? automationReferenceAssets() : automationVisualAssets();
+  const generativeVideoPicker = picker.purpose === 'generative-video-block';
+  const sourceItems = generativeVideoPicker ? automationReferenceAssets() : automationVisualAssets();
   const items = sourceItems.filter((item) =>
     (picker.zone === 'all' || item.zone === picker.zone)
     && (!search || String(item.name || item.key).toLocaleLowerCase('es').includes(search))
@@ -6096,8 +6173,9 @@ function renderAutomationAssetsPicker() {
         video: next.filter((candidate) => candidate.zone === 'video').length,
         audio: next.filter((candidate) => candidate.zone === 'audio').length
       };
-      if (h3BlockPicker && (next.length > 12 || counts.image > 9 || counts.video > 3 || counts.audio > 3)) {
-        return toast('MiniMax H3 admite hasta 12 referencias: 9 imágenes, 3 videos y 3 audios.', 'err');
+      const limits = picker.mediaLimits || {};
+      if (generativeVideoPicker && (next.length > limits.total || counts.image > limits.image || counts.video > limits.video || counts.audio > limits.audio)) {
+        return toast(`${picker.modelName} admite hasta ${limits.total} referencias: ${limits.image} imágenes, ${limits.video} videos y ${limits.audio} audios.`, 'err');
       }
       picker.keys.push(item.key);
     }
@@ -6109,7 +6187,7 @@ function renderAutomationAssetsPicker() {
     const item = automationVisualAsset(key);
     const preview = automationAssetPreview(item, key);
     return `<div class="automation-assets-order-item" data-order-key="${esc(key)}"><b>${index + 1}</b>${preview}<span title="${esc(item.name || key)}">${esc(item.name || key)}</span><button type="button" class="icon-btn" data-order-up${index ? '' : ' disabled'} title="Subir">↑</button><button type="button" class="icon-btn" data-order-down${index < picker.keys.length - 1 ? '' : ' disabled'} title="Bajar">↓</button><button type="button" class="icon-btn" data-order-remove title="Quitar">×</button></div>`;
-  }).join('') : `<span class="hint">${h3BlockPicker ? 'Sin referencias: H3 generará desde texto si el modo lo permite.' : 'Elegí al menos una imagen o video.'}</span>`;
+  }).join('') : `<span class="hint">${generativeVideoPicker ? `Sin referencias adicionales: ${esc(picker.modelName)} usará la imagen base del bloque.` : 'Elegí al menos una imagen o video.'}</span>`;
   $('#automationAssetsOrder').querySelectorAll('[data-order-key]').forEach((row) => {
     const key = row.dataset.orderKey;
     row.querySelector('[data-order-up]')?.addEventListener('click', () => {
@@ -6149,27 +6227,33 @@ async function openAutomationAssetsPicker(blockElement, block) {
   $('#automationAssetsModal').hidden = false;
 }
 
-async function openH3BlockAssetsPicker(blockElement, block) {
+async function openGenerativeVideoBlockAssetsPicker(blockElement, block, modelId) {
   try { await refreshAssets(); } catch { /* el modal mostrará el último estado disponible */ }
-  const settings = blockElement.querySelector('[data-block-h3-settings]');
+  const isSeedance25 = modelId === 'seedance-2-5';
+  const model = state.videoModels.find((item) => item.id === modelId);
+  const settingsSelector = isSeedance25 ? '[data-block-seedance25-settings]' : '[data-block-h3-settings]';
+  const settings = blockElement.querySelector(settingsSelector);
+  const datasetKey = isSeedance25 ? 'seedance25ReferenceKeys' : 'h3ReferenceKeys';
   let keys = [];
-  try { keys = JSON.parse(settings?.dataset.h3ReferenceKeys || '[]'); } catch { keys = []; }
+  try { keys = JSON.parse(settings?.dataset[datasetKey] || '[]'); } catch { keys = []; }
   state.automationAssetPicker = {
-    purpose: 'h3-block', blockElement, blockId: block?.id || '',
+    purpose: 'generative-video-block', blockElement, blockId: block?.id || '', modelId,
+    modelName: model?.name || modelId, mediaLimits: model?.mediaLimits || {}, settingsSelector,
+    datasetKey, listSelector: isSeedance25 ? '[data-block-seedance25-list]' : '[data-block-h3-list]',
     keys: Array.isArray(keys) ? [...keys] : [], zone: 'all', search: ''
   };
   $('#automationAssetsAudioTab').hidden = false;
-  $('#automationAssetsTitle').textContent = `Referencias H3 · ${block.title || 'Bloque'}`;
+  $('#automationAssetsTitle').textContent = `Referencias ${model?.name || ''} · ${block.title || 'Bloque'}`;
   renderAutomationAssetsPicker();
   $('#automationAssetsModal').hidden = false;
 }
 
 function closeAutomationAssetsPicker(commit = false) {
   const picker = state.automationAssetPicker;
-  if (commit && picker?.purpose === 'h3-block' && picker.blockElement) {
-    const settings = picker.blockElement.querySelector('[data-block-h3-settings]');
-    settings.dataset.h3ReferenceKeys = JSON.stringify(picker.keys);
-    settings.querySelector('[data-block-h3-list]').innerHTML = automationBlockAssetSelectionMarkup(picker.keys);
+  if (commit && picker?.purpose === 'generative-video-block' && picker.blockElement) {
+    const settings = picker.blockElement.querySelector(picker.settingsSelector);
+    settings.dataset[picker.datasetKey] = JSON.stringify(picker.keys);
+    settings.querySelector(picker.listSelector).innerHTML = automationBlockAssetSelectionMarkup(picker.keys);
   } else if (commit && picker?.blockElement) {
     const settings = picker.blockElement.querySelector('[data-block-assets-settings]');
     settings.dataset.assetKeys = JSON.stringify(picker.keys);
@@ -6544,7 +6628,7 @@ function renderAutomationProject() {
         const reusableAudioReady = Array.isArray(out?.audioKeys) && out.audioKeys.length >= (b.items || []).length;
         const heygenCharacters = automationHeyGenCharacters();
         const selectedHeyGenCharacter = automationBlockHeyGenCharacter(pr, b);
-        const blockGenerator = ['heygen', 'assets', 'h3'].includes(b.generator) ? b.generator : 'image';
+        const blockGenerator = ['heygen', 'assets', 'h3', 'seedance25'].includes(b.generator) ? b.generator : 'image';
         return `
         <div class="auto-block${done ? ' is-done' : ''}" data-block="${b.id}">
           <div class="auto-block-head">
@@ -6557,7 +6641,7 @@ function renderAutomationProject() {
           </div>
           <div class="auto-block-editor">
             <div class="auto-block-generator">
-              <label><span>Generador de la toma</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>Imagen + audio</option><option value="h3"${blockGenerator === 'h3' ? ' selected' : ''}>MiniMax H3 · video multimodal</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + audio de ElevenLabs</option><option value="assets"${blockGenerator === 'assets' ? ' selected' : ''}>Assets · imágenes y videos</option></select></label>
+              <label><span>Generador de la toma</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>Imagen + audio</option><option value="seedance25"${blockGenerator === 'seedance25' ? ' selected' : ''}>Seedance 2.5 · video multimodal</option><option value="h3"${blockGenerator === 'h3' ? ' selected' : ''}>MiniMax H3 · video multimodal</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + audio de ElevenLabs</option><option value="assets"${blockGenerator === 'assets' ? ' selected' : ''}>Assets · imágenes y videos</option></select></label>
               <div class="auto-block-heygen-settings" data-block-heygen-settings${blockGenerator === 'heygen' ? '' : ' hidden'}>
                 <label><span>Personaje · variante HeyGen</span><select class="select" data-block-heygen-character>${heygenCharacters.length ? heygenCharacters.map((character) => `<option value="${character.id}"${character.id === selectedHeyGenCharacter?.id ? ' selected' : ''}>${esc(character.name)} · HeyGen · ${character.heygen?.closeAvatarId ? '2 planos' : '1 plano'}</option>`).join('') : '<option value="">— no hay personajes HeyGen listos —</option>'}</select></label>
                 <label><span>Encuadre</span><select class="select" data-block-heygen-framing><option value="wide"${b.heygenFraming === 'wide' || !b.heygenFraming ? ' selected' : ''}>Plano general</option><option value="close"${b.heygenFraming === 'close' ? ' selected' : ''}>Primer plano</option><option value="split"${b.heygenFraming === 'split' ? ' selected' : ''}>Alternar general → primer plano</option></select></label>
@@ -6577,6 +6661,20 @@ function renderAutomationProject() {
                 <label class="poser-toggle"><input type="checkbox" data-block-h3-narration${b.h3UseNarrationReference !== false ? ' checked' : ''}> enviar la narración a H3 como referencia de audio</label>
                 <label class="poser-toggle"><input type="checkbox" data-block-h3-native-audio${b.h3KeepGeneratedAudio ? ' checked' : ''}> conservar el audio generado por H3 en lugar del archivo original de ElevenLabs</label>
                 <span class="hint" data-block-h3-hint>En Referencias, la imagen base del bloque y la voz se envían a H3. En Inicio → Fin debés elegir exactamente dos imágenes; la voz se añade durante el ensamblado.</span>
+              </div>
+              <div class="auto-block-assets-settings auto-block-h3-settings" data-block-seedance25-settings${blockGenerator === 'seedance25' ? '' : ' hidden'} data-seedance25-reference-keys="${esc(JSON.stringify(b.seedance25ReferenceKeys || []))}">
+                <div class="auto-block-assets-head">
+                  <div><strong>Seedance 2.5</strong><span class="hint">Video generativo de hasta 30 segundos por tramo, con referencias multimodales y audio nativo.</span></div>
+                  <button type="button" class="mini-btn" data-pick-block-seedance25>${IC('image')} Referencias adicionales</button>
+                </div>
+                <div class="auto-block-assets-list" data-block-seedance25-list>${automationBlockAssetSelectionMarkup(b.seedance25ReferenceKeys || [])}</div>
+                <div class="auto-block-create-grid">
+                  <label><span>Modo</span><select class="select" data-block-seedance25-mode><option value="reference"${b.seedance25Mode !== 'frames' ? ' selected' : ''}>Referencias multimodales</option><option value="frames"${b.seedance25Mode === 'frames' ? ' selected' : ''}>Fotograma de entrada → salida</option></select></label>
+                  <label><span>Resolución</span><select class="select" data-block-seedance25-resolution><option value="480p"${b.seedance25Resolution === '480p' ? ' selected' : ''}>480p</option><option value="720p"${b.seedance25Resolution !== '480p' ? ' selected' : ''}>720p</option></select></label>
+                </div>
+                <label class="poser-toggle"><input type="checkbox" data-block-seedance25-narration${b.seedance25UseNarrationReference !== false ? ' checked' : ''}> enviar la narración como @Audio de referencia</label>
+                <label class="poser-toggle"><input type="checkbox" data-block-seedance25-native-audio${b.seedance25KeepGeneratedAudio ? ' checked' : ''}> conservar el audio generado por Seedance en lugar del archivo original de ElevenLabs</label>
+                <span class="hint">En Referencias, la imagen base y la voz se envían a Seedance. Podés citar cada tipo por separado como @Image1, @Video1 o @Audio1. En Inicio → Fin elegí exactamente dos imágenes; la voz se añade durante el ensamblado.</span>
               </div>
               <div class="auto-block-assets-settings" data-block-assets-settings${blockGenerator === 'assets' ? '' : ' hidden'} data-asset-keys="${esc(JSON.stringify(b.assetKeys || []))}">
                 <div class="auto-block-assets-head">
@@ -7226,6 +7324,7 @@ function renderAutomationProject() {
     const settings = blockElement.querySelector('[data-block-heygen-settings]');
     const assetSettings = blockElement.querySelector('[data-block-assets-settings]');
     const h3Settings = blockElement.querySelector('[data-block-h3-settings]');
+    const seedance25Settings = blockElement.querySelector('[data-block-seedance25-settings]');
     const characterSelect = blockElement.querySelector('[data-block-heygen-character]');
     const framingSelect = blockElement.querySelector('[data-block-heygen-framing]');
     const hint = blockElement.querySelector('[data-block-heygen-hint]');
@@ -7233,6 +7332,7 @@ function renderAutomationProject() {
       settings.hidden = select.value !== 'heygen';
       assetSettings.hidden = select.value !== 'assets';
       h3Settings.hidden = select.value !== 'h3';
+      seedance25Settings.hidden = select.value !== 'seedance25';
       blockElement.querySelectorAll('[data-block-prompt-field]').forEach((field) => { field.hidden = select.value === 'assets'; });
       const character = state.characters.find((item) => item.id === characterSelect?.value);
       if (hint) hint.textContent = character?.heygen?.closeAvatarId
@@ -7253,7 +7353,12 @@ function renderAutomationProject() {
   $('#automationRoot').querySelectorAll('[data-pick-block-h3]').forEach((button) => button.addEventListener('click', () => {
     const blockElement = button.closest('.auto-block');
     const block = pr.blocks.find((item) => item.id === blockElement?.dataset.block);
-    if (blockElement && block) openH3BlockAssetsPicker(blockElement, block);
+    if (blockElement && block) openGenerativeVideoBlockAssetsPicker(blockElement, block, 'minimax-h3');
+  }));
+  $('#automationRoot').querySelectorAll('[data-pick-block-seedance25]').forEach((button) => button.addEventListener('click', () => {
+    const blockElement = button.closest('.auto-block');
+    const block = pr.blocks.find((item) => item.id === blockElement?.dataset.block);
+    if (blockElement && block) openGenerativeVideoBlockAssetsPicker(blockElement, block, 'seedance-2-5');
   }));
 
   $('#automationRoot').querySelectorAll('[data-save-block]').forEach((button) => button.addEventListener('click', async () => {
@@ -7265,7 +7370,7 @@ function renderAutomationProject() {
     const negativePrompt = blockElement.querySelector('[data-block-negative]').value.trim();
     const title = blockElement.querySelector('[data-block-title]').value.trim() || currentBlock.title || 'Bloque';
     const selectedGenerator = blockElement.querySelector('[data-block-generator]').value;
-    const generator = ['image', 'heygen', 'assets', 'h3'].includes(selectedGenerator) ? selectedGenerator : 'image';
+    const generator = ['image', 'heygen', 'assets', 'h3', 'seedance25'].includes(selectedGenerator) ? selectedGenerator : 'image';
     const heygenCharacterId = generator === 'heygen' ? (blockElement.querySelector('[data-block-heygen-character]').value || '') : '';
     const heygenFraming = generator === 'heygen' ? blockElement.querySelector('[data-block-heygen-framing]').value : 'wide';
     const heygenCharacter = state.characters.find((character) => character.id === heygenCharacterId);
@@ -7281,6 +7386,13 @@ function renderAutomationProject() {
     const h3ContextIr = h3Settings?.querySelector('[data-block-h3-context]')?.checked === true;
     const h3UseNarrationReference = h3Settings?.querySelector('[data-block-h3-narration]')?.checked !== false;
     const h3KeepGeneratedAudio = h3Settings?.querySelector('[data-block-h3-native-audio]')?.checked === true;
+    const seedance25Settings = blockElement.querySelector('[data-block-seedance25-settings]');
+    let seedance25ReferenceKeys = [];
+    try { seedance25ReferenceKeys = JSON.parse(seedance25Settings?.dataset.seedance25ReferenceKeys || '[]'); } catch { seedance25ReferenceKeys = []; }
+    const seedance25Mode = seedance25Settings?.querySelector('[data-block-seedance25-mode]')?.value === 'frames' ? 'frames' : 'reference';
+    const seedance25Resolution = seedance25Settings?.querySelector('[data-block-seedance25-resolution]')?.value === '480p' ? '480p' : '720p';
+    const seedance25UseNarrationReference = seedance25Settings?.querySelector('[data-block-seedance25-narration]')?.checked !== false;
+    const seedance25KeepGeneratedAudio = seedance25Settings?.querySelector('[data-block-seedance25-native-audio]')?.checked === true;
     const items = currentBlock.items.map((item, index) => ({
       ...item,
       text: blockElement.querySelector(`[data-block-item="${index}"]`)?.value.trim() || ''
@@ -7296,11 +7408,17 @@ function renderAutomationProject() {
         return toast('Inicio → Fin de H3 necesita exactamente dos imágenes, en orden: entrada y salida.', 'err');
       }
     }
+    if (generator === 'seedance25' && seedance25Mode === 'frames') {
+      if (seedance25ReferenceKeys.length !== 2 || seedance25ReferenceKeys.some((key) => /^(video|audio)\//.test(key))) {
+        return toast('Inicio → Fin de Seedance 2.5 necesita exactamente dos imágenes.', 'err');
+      }
+    }
     button.disabled = true;
     const updated = await saveAutomation({
       blocks: pr.blocks.map((block) => block.id === blockId
         ? { ...block, title, imagePrompt, negativePrompt, items, generator, heygenCharacterId, heygenFraming, assetKeys, assetMuteOriginal,
-          h3Mode, h3Resolution, h3ContextIr, h3UseNarrationReference, h3KeepGeneratedAudio, h3ReferenceKeys }
+          h3Mode, h3Resolution, h3ContextIr, h3UseNarrationReference, h3KeepGeneratedAudio, h3ReferenceKeys,
+          seedance25Mode, seedance25Resolution, seedance25UseNarrationReference, seedance25KeepGeneratedAudio, seedance25ReferenceKeys }
         : block)
     });
     if (updated) {
@@ -7317,6 +7435,7 @@ function renderAutomationProject() {
     const newMaterials = block?.generator === 'heygen'
       ? 'audios y videos HeyGen nuevos'
       : block?.generator === 'h3' ? 'audios y videos MiniMax H3 nuevos'
+      : block?.generator === 'seedance25' ? 'audios y videos Seedance 2.5 nuevos'
       : block?.generator === 'assets' ? 'audios nuevos y un montaje local de los Assets elegidos' : 'una imagen y audios nuevos';
     if (force && !confirm(`¿Regenerar “${block?.title || 'este bloque'}” desde cero? Se crearán ${newMaterials}.`)) return;
     if (block) await runAutomationBlock(pr.id, block, btn.closest('.auto-block'), { regenerate: force });
@@ -7329,17 +7448,19 @@ function renderAutomationProject() {
     const existingAudioKeys = Array.isArray(output.audioKeys) ? output.audioKeys.slice(0, block.items.length) : [];
     if (existingAudioKeys.length !== block.items.length) return toast('Este bloque no tiene todos sus audios guardados para reensamblar.', 'err');
     const visualDescription = block.generator === 'assets' ? `los ${(block.assetKeys || []).length} Assets seleccionados`
-      : block.generator === 'h3' ? `los ${(output.h3SegmentVideoKeys || []).length} tramos H3 y la imagen base` : 'la imagen limpia';
+      : ['h3', 'seedance25'].includes(block.generator)
+        ? `los ${(output.h3SegmentVideoKeys || []).length} tramos ${block.generator === 'seedance25' ? 'Seedance 2.5' : 'H3'} y la imagen base`
+        : 'la imagen limpia';
     if (!confirm(`¿Rehacer el texto y el video de “${block.title || 'este bloque'}”? Se conservarán exactamente ${visualDescription} y los ${existingAudioKeys.length} audio${existingAudioKeys.length === 1 ? '' : 's'} existentes; no se llamará a ElevenLabs.`)) return;
     const preservedOutput = {
       ...(block.generator === 'assets' ? {
         generator: 'assets', assetKeys: [...block.assetKeys], assetMuteOriginal: block.assetMuteOriginal !== false
-      } : block.generator === 'h3' ? {
-        generator: 'h3', imageKey: output.imageKey,
+      } : ['h3', 'seedance25'].includes(block.generator) ? {
+        generator: block.generator, imageKey: output.imageKey,
         imageModelId: output.imageModelId || '', imageModelName: output.imageModelName || '',
         h3SegmentVideoKeys: [...(output.h3SegmentVideoKeys || [])],
         h3SegmentDurations: [...(output.h3SegmentDurations || [])],
-        h3Resolution: output.h3Resolution || block.h3Resolution || '768P'
+        h3Resolution: output.h3Resolution || (block.generator === 'seedance25' ? block.seedance25Resolution : block.h3Resolution) || (block.generator === 'seedance25' ? '720p' : '768P')
       } : {
         imageKey: output.imageKey,
         imageModelId: output.imageModelId || '',
@@ -7361,7 +7482,13 @@ function renderAutomationProject() {
   }));
   $('#automationRoot').querySelectorAll('[data-regenblock]').forEach((btn) => btn.addEventListener('click', async () => {
     const block = pr.blocks.find((b) => b.id === btn.dataset.regenblock);
-    const materials = block?.generator === 'heygen' ? 'audios y videos HeyGen' : block?.generator === 'assets' ? 'audios y montaje local' : 'imagen y audios';
+    const materials = block?.generator === 'heygen'
+      ? 'audios y videos HeyGen'
+      : block?.generator === 'seedance25'
+        ? 'audios y videos Seedance 2.5'
+        : block?.generator === 'h3'
+          ? 'audios y videos MiniMax H3'
+          : block?.generator === 'assets' ? 'audios y montaje local' : 'imagen y audios';
     if (!block || !confirm(`¿Descartar los parciales de “${block.title || 'este bloque'}” y regenerar ${materials}?`)) return;
     await runAutomationBlock(pr.id, block, btn.closest('.auto-block'), { regenerate: true });
   }));
@@ -7699,11 +7826,14 @@ function automationBlockOutHtml(out, block = null) {
   const isHeyGen = out.generator === 'heygen';
   const isAssets = out.generator === 'assets';
   const isH3 = out.generator === 'h3';
+  const isSeedance25 = out.generator === 'seedance25';
   const canRegenerateHeyGenPlanes = isHeyGen && out.heygenFraming === 'split' && segmentVideoKeys.length === 2 && block?.id;
   const sourceStatus = isHeyGen
     ? `HeyGen · ${out.heygenFraming === 'split' ? '2 planos' : '1 plano'}`
     : isH3
       ? `MiniMax H3 · ${out.h3Resolution || '768P'} · ${h3SegmentVideoKeys.length} tramo${h3SegmentVideoKeys.length === 1 ? '' : 's'}`
+    : isSeedance25
+      ? `Seedance 2.5 · ${out.h3Resolution || '720p'} · ${h3SegmentVideoKeys.length} tramo${h3SegmentVideoKeys.length === 1 ? '' : 's'}`
     : isAssets
       ? `Assets · ${(out.assetKeys || []).length} visuales · ${out.assetMuteOriginal !== false ? 'audio original silenciado' : 'audio original mezclado'} · ${out.motionOverlayKey ? 'texto dinámico ✓' : `capa ${out.textLayerKey ? '✓' : '—'}`}`
       : `Imagen ${out.imageKey ? '✓' : '—'} · ${out.motionOverlayKey ? 'Texto dinámico ✓' : `Texto ${out.textImageKey ? '✓' : '—'} · Capa ${out.textLayerKey ? '✓' : '—'}`}`;
@@ -7721,7 +7851,7 @@ function automationBlockOutHtml(out, block = null) {
       const label = out.heygenFraming === 'split' ? (index === 0 ? 'Plano general' : 'Primer plano') : 'Toma HeyGen';
       return `<span class="heygen-segment-row"><button type="button" class="mini-btn" data-open-asset="${esc(key)}">${label}</button>${canRegenerateHeyGenPlanes ? `<button type="button" class="mini-btn accent" data-regenerate-heygen-segment data-block-id="${esc(block.id)}" data-segment-index="${index}">${IC('refresh')} Regenerar</button>` : ''}</span>`;
     }).join('')}</span>` : ''}
-    ${h3SegmentVideoKeys.length ? `<span class="heygen-segment-list"><small>Tramos MiniMax H3</small>${h3SegmentVideoKeys.map((key, index) => `<span class="heygen-segment-row"><button type="button" class="mini-btn" data-open-asset="${esc(key)}">Tramo ${index + 1}</button></span>`).join('')}</span>` : ''}
+    ${h3SegmentVideoKeys.length ? `<span class="heygen-segment-list"><small>Tramos ${isSeedance25 ? 'Seedance 2.5' : 'MiniMax H3'}</small>${h3SegmentVideoKeys.map((key, index) => `<span class="heygen-segment-row"><button type="button" class="mini-btn" data-open-asset="${esc(key)}">Tramo ${index + 1}</button></span>`).join('')}</span>` : ''}
     ${out.videoKey ? `<span class="auto-output-video"><video src="${fileUrl(out.videoKey)}" controls preload="metadata"></video><button type="button" class="mini-btn" data-open-asset="${esc(out.videoKey)}">Acciones del video</button></span>` : ''}`;
 }
 
@@ -8107,10 +8237,13 @@ async function runAutomationBlock(projectId, block, blockEl, {
     const { refs, labeledRefs, prompt } = await automationRefsAndPrompt(pr, block);
     let historyLoaded = false;
     let imageKey = output.imageKey;
-    if (!imageKey && block.generator === 'h3' && block.h3Mode === 'frames') {
-      imageKey = (block.h3ReferenceKeys || [])[0] || '';
+    const isGenerativeVideo = ['h3', 'seedance25'].includes(block.generator);
+    const generativeVideoMode = block.generator === 'seedance25' ? block.seedance25Mode : block.h3Mode;
+    const generativeReferenceKeys = block.generator === 'seedance25' ? block.seedance25ReferenceKeys : block.h3ReferenceKeys;
+    if (!imageKey && isGenerativeVideo && generativeVideoMode === 'frames') {
+      imageKey = (generativeReferenceKeys || [])[0] || '';
       if (imageKey) output = await persistAutomationBlockOutput(projectId, block.id, {
-        imageKey, imageModelId: 'minimax-h3-frame', imageModelName: 'Fotograma de entrada H3',
+        imageKey, imageModelId: `${block.generator}-frame`, imageModelName: `Fotograma de entrada ${block.generator === 'seedance25' ? 'Seedance 2.5' : 'H3'}`,
         fallbackUsed: false, recoveredImage: true, audioCountExpected: block.items.length
       });
     }
@@ -8213,11 +8346,11 @@ async function runAutomationBlock(projectId, block, blockEl, {
       await tagAutomationStage(pr, block, [audioKeys[audioKeys.length - 1]]);
     }
 
-    setStatus(block.generator === 'h3'
-      ? 'Generando y ensamblando los tramos MiniMax H3…'
+    setStatus(isGenerativeVideo
+      ? `Generando y ensamblando los tramos ${block.generator === 'seedance25' ? 'Seedance 2.5' : 'MiniMax H3'}…`
       : dynamicTextEnabled ? 'Animando títulos y subtítulos con Remotion…' : 'Armando el video…');
     const category = `Auto: ${pr.name}`;
-    const v = block.generator === 'h3'
+    const v = isGenerativeVideo
       ? await api(`/api/automations/${pr.id}/h3-block`, { method: 'POST', body: {
         blockId: block.id, imageKey, audioKeys, textLayerKey,
         reuseSegmentKeys: !regenerate ? (output.h3SegmentVideoKeys || []) : []
@@ -8228,20 +8361,21 @@ async function runAutomationBlock(projectId, block, blockEl, {
     output = await persistAutomationBlockOutput(projectId, block.id, {
       videoKey: v.videoKey,
       motionOverlayKey: v.motionOverlayKey || null,
-      ...(block.generator === 'h3' ? {
-        h3SegmentVideoKeys: v.segmentVideoKeys || [], generator: 'h3',
-        h3SegmentDurations: v.segmentDurations || [], h3Resolution: block.h3Resolution || '768P'
+      ...(isGenerativeVideo ? {
+        h3SegmentVideoKeys: v.segmentVideoKeys || [], generator: block.generator,
+        h3SegmentDurations: v.segmentDurations || [],
+        h3Resolution: block.generator === 'seedance25' ? (block.seedance25Resolution || '720p') : (block.h3Resolution || '768P')
       } : {}),
       completedAt: Date.now()
     });
     await tagAutomationStage(pr, block, [imageKey, textImageKey, textLayerKey, v.motionOverlayKey, ...(v.segmentVideoKeys || []), ...audioKeys, v.videoKey]);
-    if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: block.generator === 'h3' ? 'Toma MiniMax H3 terminada.' : 'Toma terminada.' });
+    if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: isGenerativeVideo ? `Toma ${block.generator === 'seedance25' ? 'Seedance 2.5' : 'MiniMax H3'} terminada.` : 'Toma terminada.' });
     renderAutomationProject();
     return true;
   } catch (err) {
     if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { error: err.message });
     toast(err.message, 'err');
-    if (block.generator === 'heygen' || block.generator === 'h3') {
+    if (block.generator === 'heygen' || ['h3', 'seedance25'].includes(block.generator)) {
       try {
         const snapshot = await api('/api/state');
         state.automations = snapshot.automations || state.automations;
@@ -8827,7 +8961,7 @@ function renderProjectCostEstimate(projects) {
       </div>
       <div class="project-cost-stat">
         <span>Material previsto</span>
-        <strong>${detail.resourceImages + detail.blockImages} imágenes · ${detail.audioItems} voces${detail.h3Blocks ? ` · ${detail.h3Blocks} toma${detail.h3Blocks === 1 ? '' : 's'} H3` : ''}${detail.musicEnabled ? ' · 1 música' : ''}</strong>
+        <strong>${detail.resourceImages + detail.blockImages} imágenes · ${detail.audioItems} voces${detail.h3Blocks ? ` · ${detail.h3Blocks} toma${detail.h3Blocks === 1 ? '' : 's'} H3` : ''}${detail.seedance25Blocks ? ` · ${detail.seedance25Blocks} toma${detail.seedance25Blocks === 1 ? '' : 's'} Seedance 2.5` : ''}${detail.musicEnabled ? ' · 1 música' : ''}</strong>
       </div>
     </div>
     <div class="project-cost-breakdown">
@@ -8846,6 +8980,10 @@ function renderProjectCostEstimate(projects) {
       ${detail.h3Blocks ? `<div class="cost-row">
         <span class="cr-label">Video generativo MiniMax H3<span class="cr-sub">${detail.h3Blocks} bloque${detail.h3Blocks === 1 ? '' : 's'} · ~${Math.round(detail.h3EstimatedSeconds || 0)} segundos facturables · resolución según cada bloque</span></span>
         <span class="cr-value">${fmtUsd(detail.h3VideoCost)}</span>
+      </div>` : ''}
+      ${detail.seedance25Blocks ? `<div class="cost-row">
+        <span class="cr-label">Video generativo Seedance 2.5<span class="cr-sub">${detail.seedance25Blocks} bloque${detail.seedance25Blocks === 1 ? '' : 's'} · ~${Math.round(detail.seedance25EstimatedSeconds || 0)} segundos facturables · resolución según cada bloque</span></span>
+        <span class="cr-value">${fmtUsd(detail.seedance25VideoCost)}</span>
       </div>` : ''}
       ${detail.musicEnabled ? `<div class="cost-row">
         <span class="cr-label">Música de fondo<span class="cr-sub">${detail.musicSource === 'suno' ? `${detail.generatedMusicTracks} variantes generadas con Suno` : detail.musicSource === 'auto' ? 'Selección automática desde Assets' : 'Pista existente de Assets'}</span></span>
@@ -9012,6 +9150,7 @@ function fillConfigForm() {
   f.path_audio.value = c.paths.audio || '';
   f.path_video.value = c.paths.video || '';
   f.seedreamModelId.value = c.seedreamModelId || '';
+  f.seedance25ModelId.value = c.seedance25ModelId || '';
   f.seedanceModelId.value = c.seedanceModelId || '';
   f.seedanceMiniModelId.value = c.seedanceMiniModelId || '';
   f.sunoModelId.value = c.sunoModelId || 'V5_5';
@@ -9154,6 +9293,7 @@ $('#configForm').addEventListener('submit', async (e) => {
           minimax: f.endpoint_minimax.value.trim()
         },
         seedreamModelId: f.seedreamModelId.value.trim(),
+        seedance25ModelId: f.seedance25ModelId.value.trim(),
         seedanceModelId: f.seedanceModelId.value.trim(),
         seedanceMiniModelId: f.seedanceMiniModelId.value.trim(),
         sunoModelId: f.sunoModelId.value.trim() || 'V5_5',

@@ -11,6 +11,7 @@ import { spawn, execFile } from 'node:child_process';
 import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel, getAudioModel } from './lib/models.js';
 import {
   generateGemini, analyzeArtStyle, generateSeedream, generateOpenAIImage, generateSeedanceVideo,
+  generateSeedance25Video,
   generateMiniMaxH3Video, regenerateMiniMaxH3Video, generateScreenplay,
   listVoices, generateSpeech, generateMusic, translateText, searchUpdatedPricing, testService
 } from './lib/providers.js';
@@ -79,6 +80,7 @@ const DEFAULT_CONFIG = {
     suno: 'https://api.sunoapi.org'
   },
   seedreamModelId: 'seedream-5-0-lite',
+  seedance25ModelId: '',
   seedanceModelId: '',
   seedanceMiniModelId: '',
   sunoModelId: 'V5_5',
@@ -493,7 +495,7 @@ async function probeVideoDimensions(ffmpegExecutable, videoPath) {
     execFile(ffprobe, [
       '-v', 'error',
       '-select_streams', 'v:0',
-      '-show_entries', 'stream=width,height',
+      '-show_entries', 'stream=width,height,avg_frame_rate,r_frame_rate',
       '-of', 'json',
       videoPath
     ], { windowsHide: true, maxBuffer: 1024 * 1024 }, (error, stdout) => {
@@ -502,7 +504,12 @@ async function probeVideoDimensions(ffmpegExecutable, videoPath) {
         const stream = JSON.parse(stdout)?.streams?.[0];
         const width = Math.floor(Number(stream?.width) / 2) * 2;
         const height = Math.floor(Number(stream?.height) / 2) * 2;
-        resolve(width > 0 && height > 0 ? { width, height } : null);
+        const rate = String(stream?.avg_frame_rate || stream?.r_frame_rate || '');
+        const [numerator, denominator = '1'] = rate.split('/').map(Number);
+        const fps = Number.isFinite(numerator) && Number.isFinite(denominator) && denominator > 0
+          ? numerator / denominator
+          : null;
+        resolve(width > 0 && height > 0 ? { width, height, fps: Number.isFinite(fps) && fps > 0 ? fps : null } : null);
       } catch {
         resolve(null);
       }
@@ -611,6 +618,49 @@ async function validateMiniMaxH3Media(mediaRefs, ffmpegExecutable) {
   }
   if (totals.video > 15.01) throw new Error('Los videos de referencia H3 no pueden superar 15 segundos en total.');
   if (totals.audio > 15.01) throw new Error('Los audios de referencia H3 no pueden superar 15 segundos en total.');
+}
+
+async function validateSeedance25Media(mediaRefs, ffmpegExecutable) {
+  const limitsMb = { image: 30, video: 200, audio: 15 };
+  const allowed = {
+    image: new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tif', '.tiff', '.gif', '.heic', '.heif']),
+    video: new Set(['.mp4', '.mov']),
+    audio: new Set(['.mp3', '.wav'])
+  };
+  const totals = { video: 0, audio: 0 };
+  for (const ref of mediaRefs) {
+    if (String(ref.path || '').startsWith('data:')) continue;
+    const kind = ['image', 'video', 'audio'].includes(ref.kind) ? ref.kind : 'image';
+    const extension = path.extname(ref.path).toLowerCase();
+    if (!allowed[kind].has(extension)) {
+      throw new Error(`Seedance 2.5 no admite ${extension || 'ese formato'} como ${kind === 'image' ? 'imagen' : kind === 'video' ? 'video' : 'audio'} de referencia.`);
+    }
+    const info = await fs.stat(ref.path);
+    if (info.size > limitsMb[kind] * 1024 * 1024) {
+      throw new Error(`Una referencia de ${kind === 'image' ? 'imagen' : kind === 'video' ? 'video' : 'audio'} supera ${limitsMb[kind]} MB, el máximo de Seedance 2.5.`);
+    }
+    if (kind === 'video' || kind === 'audio') {
+      const mediaDuration = await probeMediaDuration(ffmpegExecutable, ref.path);
+      if (!mediaDuration || mediaDuration < 2 || mediaDuration > 30.01) {
+        throw new Error(`Cada ${kind === 'video' ? 'video' : 'audio'} de referencia de Seedance 2.5 debe durar entre 2 y 30 segundos.`);
+      }
+      totals[kind] += mediaDuration;
+    }
+    if (kind === 'video') {
+      const dimensions = await probeVideoDimensions(ffmpegExecutable, ref.path);
+      if (dimensions && (dimensions.width < 300 || dimensions.width > 6000 || dimensions.height < 300 || dimensions.height > 6000
+        || dimensions.width * dimensions.height < 409600 || dimensions.width * dimensions.height > 8295044
+        || dimensions.width / dimensions.height < 0.4 || dimensions.width / dimensions.height > 2.5)) {
+        throw new Error('Los videos de referencia de Seedance 2.5 deben medir entre 300 y 6000 px por lado y tener una proporción entre 0,4 y 2,5.');
+      }
+      if (dimensions?.fps && (dimensions.fps < 24 || dimensions.fps > 60.01)) {
+        throw new Error('Los videos de referencia de Seedance 2.5 deben tener entre 24 y 60 FPS.');
+      }
+    }
+  }
+  if (totals.video > 30.01) throw new Error('Los videos de referencia de Seedance 2.5 no pueden superar 30 segundos en total.');
+  if (totals.audio > 30.01) throw new Error('Los audios de referencia de Seedance 2.5 no pueden superar 30 segundos en total.');
+  return totals;
 }
 
 async function probeHasAudioStream(ffmpegExecutable, mediaPath) {
@@ -1181,6 +1231,54 @@ async function runVideoGeneration(req) {
   const preface = refs.some((key) => validStamp(labeledRefs[key])) ? LABELED_REFS_PROMPT : '';
   const suffix = hasPoserRef && cfg.poserPrompt?.trim() ? cfg.poserPrompt.trim() : '';
   const sentPrompt = [preface, prompt, suffix].filter(Boolean).join('\n\n');
+
+  if (model.id === 'seedance-2-5') {
+    const counts = {
+      image: mediaRefs.filter((ref) => ref.kind === 'image').length,
+      video: mediaRefs.filter((ref) => ref.kind === 'video').length,
+      audio: mediaRefs.filter((ref) => ref.kind === 'audio').length
+    };
+    if (mode === 'frames' && (counts.image !== 2 || counts.video || counts.audio)) {
+      throw new Error('Inicio → Fin de Seedance 2.5 necesita exactamente dos imágenes.');
+    }
+    if (counts.image > 30 || counts.video > 10 || counts.audio > 10 || mediaRefs.length > 50) {
+      throw new Error('Seedance 2.5 admite 30 imágenes, 10 videos y 10 audios; máximo 50 referencias en total.');
+    }
+    const ffmpegExecutable = counts.video || counts.audio ? await resolveFfmpegExecutable(cfg.ffmpegPath) : null;
+    const inputDurations = await validateSeedance25Media(mediaRefs, ffmpegExecutable);
+    const video = await generateSeedance25Video({
+      apiKey: cfg.keys.ark,
+      apiModel: cfg.seedance25ModelId || model.apiModel,
+      endpoint: cfg.endpoints.ark,
+      prompt: sentPrompt,
+      mediaRefs,
+      mode,
+      aspectRatio,
+      resolution,
+      duration,
+      audio
+    });
+    const name = `${ts()}-${model.id}-${newId()}.mp4`;
+    const key = await saveBuffer('video', name, video.buffer);
+    const pricing = await getPricing();
+    const baseSeconds = duration + (counts.video ? inputDurations.video : 0);
+    const cost = videoPrice(pricing, model.id, resolution) * baseSeconds
+      * (counts.video ? (model.videoInputPriceMultiplier || 1) : 1);
+    await recordCost({
+      type: 'video', modelId: model.id, label: `${model.name} ${resolution}`,
+      units: duration, unitLabel: 'segundo(s)', cost
+    });
+    const entry = {
+      id: newId(), ts: Date.now(), type: 'video', modelId: model.id, modelName: model.name,
+      prompt, sentPrompt, mode, aspectRatio, resolution, duration, audio: Boolean(audio), refs,
+      refKinds: mediaRefs.map((ref) => ref.kind), characterId: req.characterId || null,
+      outputs: [key], errors: [], cost: Number(cost.toFixed(6)), seedanceTaskId: video.taskId,
+      seed: video.seed
+    };
+    await updateJson('history.json', [], (history) => [entry, ...history].slice(0, 1000));
+    await recordAssetMetadata(entry);
+    return entry;
+  }
 
   if (model.provider === 'minimax') {
     if (mediaRefs.some((ref) => String(ref.path || '').startsWith('asset://'))) {
@@ -2398,7 +2496,9 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
     (project.requirements?.characters?.length || 0) +
     (project.requirements?.locations?.length || 0) +
     (project.requirements?.objects?.length || 0);
-  const blockImages = (project.blocks || []).filter((block) => block.generator === 'image' || (block.generator === 'h3' && block.h3Mode !== 'frames')).length;
+  const blockImages = (project.blocks || []).filter((block) => block.generator === 'image'
+    || (block.generator === 'h3' && block.h3Mode !== 'frames')
+    || (block.generator === 'seedance25' && block.seedance25Mode !== 'frames')).length;
   const audioModel = getAudioModel(project.config?.audioModelId);
   const audioTexts = (project.blocks || []).flatMap((block) =>
     (block.items || []).map((item) => audioModel.supportsAudioTags ? automationAudioText(item.text) : stripTags(item.text)).filter(Boolean)
@@ -2433,7 +2533,20 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
     }
     return sum + billedSeconds * videoPrice(pricing, 'minimax-h3', block.h3Resolution === '2K' ? '2K' : '768P');
   }, 0);
-  const estimatedTotal = resourceImageCost + blockImageCost + audioCost + generatedMusicCost + h3ResolutionCosts;
+  const seedance25Blocks = (project.blocks || []).filter((block) => block.generator === 'seedance25');
+  let seedance25EstimatedSeconds = 0;
+  const seedance25VideoCost = seedance25Blocks.reduce((sum, block) => {
+    const approximate = Number(block.estimatedDuration) > 0
+      ? Number(block.estimatedDuration)
+      : Math.max(1, (block.items || []).reduce((total, item) => total + String(item.text || '').length, 0) / 14);
+    let billedSeconds = 0;
+    for (let remaining = approximate; remaining > 0.001; remaining -= Math.min(30, remaining)) {
+      billedSeconds += Math.max(4, Math.ceil(Math.min(30, remaining)));
+    }
+    seedance25EstimatedSeconds += billedSeconds;
+    return sum + billedSeconds * videoPrice(pricing, 'seedance-2-5', block.seedance25Resolution === '480p' ? '480p' : '720p');
+  }, 0);
+  const estimatedTotal = resourceImageCost + blockImageCost + audioCost + generatedMusicCost + h3ResolutionCosts + seedance25VideoCost;
 
   const linkedMetadata = Object.values(assetMetadata || {}).filter((metadata) =>
     metadata?.automationId === project.id
@@ -2460,6 +2573,9 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
       h3Blocks: h3Blocks.length,
       h3EstimatedSeconds,
       h3VideoCost: Number(h3ResolutionCosts.toFixed(6)),
+      seedance25Blocks: seedance25Blocks.length,
+      seedance25EstimatedSeconds,
+      seedance25VideoCost: Number(seedance25VideoCost.toFixed(6)),
       audioItems: audioTexts.length,
       audioCharacters,
       audioModelId: audioModel.id,
@@ -2554,7 +2670,7 @@ function sanitizeAutomation(src, prev = {}) {
       sourceQuote: String(b.sourceQuote || '').slice(0, 4000),
       quoteReference: String(b.quoteReference || '').slice(0, 80),
       estimatedDuration: Math.max(0, Math.min(3600, Number(b.estimatedDuration) || 0)),
-      generator: ['image', 'heygen', 'assets', 'h3'].includes(b.generator) ? b.generator : 'image',
+      generator: ['image', 'heygen', 'assets', 'h3', 'seedance25'].includes(b.generator) ? b.generator : 'image',
       heygenCharacterId: /^[a-z0-9]+$/.test(String(b.heygenCharacterId || '')) ? String(b.heygenCharacterId) : '',
       heygenFraming: ['wide', 'close', 'split'].includes(b.heygenFraming) ? b.heygenFraming : 'wide',
       assetKeys: normalizeAutomationAssetKeys(b.assetKeys),
@@ -2564,7 +2680,12 @@ function sanitizeAutomation(src, prev = {}) {
       h3ContextIr: b.h3ContextIr === true,
       h3UseNarrationReference: b.h3UseNarrationReference !== false,
       h3KeepGeneratedAudio: b.h3KeepGeneratedAudio === true,
-      h3ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.h3ReferenceKeys)
+      h3ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.h3ReferenceKeys),
+      seedance25Mode: b.seedance25Mode === 'frames' ? 'frames' : 'reference',
+      seedance25Resolution: b.seedance25Resolution === '480p' ? '480p' : '720p',
+      seedance25UseNarrationReference: b.seedance25UseNarrationReference !== false,
+      seedance25KeepGeneratedAudio: b.seedance25KeepGeneratedAudio === true,
+      seedance25ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.seedance25ReferenceKeys)
     };
   });
 
@@ -3684,6 +3805,7 @@ const server = http.createServer(async (req, res) => {
         paths: { ...cfg.paths, ...(body.paths || {}) },
         endpoints: { ...cfg.endpoints, ...(body.endpoints || {}) },
         seedreamModelId: body.seedreamModelId ?? cfg.seedreamModelId,
+        seedance25ModelId: body.seedance25ModelId ?? cfg.seedance25ModelId,
         seedanceModelId: body.seedanceModelId ?? cfg.seedanceModelId,
         seedanceMiniModelId: body.seedanceMiniModelId ?? cfg.seedanceMiniModelId,
         sunoModelId: body.sunoModelId ?? cfg.sunoModelId,
@@ -4165,12 +4287,22 @@ const server = http.createServer(async (req, res) => {
                   || previousBlock.h3UseNarrationReference !== block.h3UseNarrationReference
                   || JSON.stringify(previousBlock.h3ReferenceKeys || []) !== JSON.stringify(block.h3ReferenceKeys || [])
                 );
+                const seedance25IsRelevant = previousBlock.generator === 'seedance25' || block.generator === 'seedance25';
+                const seedance25GenerationChanged = seedance25IsRelevant && (
+                  previousBlock.seedance25Mode !== block.seedance25Mode
+                  || previousBlock.seedance25Resolution !== block.seedance25Resolution
+                  || previousBlock.seedance25UseNarrationReference !== block.seedance25UseNarrationReference
+                  || JSON.stringify(previousBlock.seedance25ReferenceKeys || []) !== JSON.stringify(block.seedance25ReferenceKeys || [])
+                );
                 const generatorChanged = previousBlock.generator !== block.generator
                   || previousBlock.heygenCharacterId !== block.heygenCharacterId
                   || previousBlock.heygenFraming !== block.heygenFraming
-                  || h3GenerationChanged;
+                  || h3GenerationChanged
+                  || seedance25GenerationChanged;
                 const h3AudioOutputChanged = h3IsRelevant
                   && previousBlock.h3KeepGeneratedAudio !== block.h3KeepGeneratedAudio;
+                const seedance25AudioOutputChanged = seedance25IsRelevant
+                  && previousBlock.seedance25KeepGeneratedAudio !== block.seedance25KeepGeneratedAudio;
                 const assetVisualChanged = JSON.stringify(previousBlock.assetKeys || []) !== JSON.stringify(block.assetKeys || [])
                   || previousBlock.assetMuteOriginal !== block.assetMuteOriginal;
                 const textChanged = JSON.stringify(previousBlock.items || []) !== JSON.stringify(block.items || []);
@@ -4178,16 +4310,18 @@ const server = http.createServer(async (req, res) => {
                   && next.config?.titleOverlay?.enabled === true
                   && next.config?.titleOverlay?.mode === 'block';
                 const titleOnlyRefresh = blockTitleChanged && next.finalOutput?.videoKey
-                  && !promptChanged && !generatorChanged && !assetVisualChanged && !textChanged && !h3AudioOutputChanged;
+                  && !promptChanged && !generatorChanged && !assetVisualChanged && !textChanged
+                  && !h3AudioOutputChanged && !seedance25AudioOutputChanged;
                 if (titleOnlyRefresh) {
                   next.textRefreshRequiredAt = Date.now();
                 } else {
-                  if (promptChanged || generatorChanged || assetVisualChanged || textChanged || blockTitleChanged || h3AudioOutputChanged) generationChanged = true;
+                  if (promptChanged || generatorChanged || assetVisualChanged || textChanged || blockTitleChanged
+                    || h3AudioOutputChanged || seedance25AudioOutputChanged) generationChanged = true;
                   output = invalidateAutomationOutput(output, {
                     image: promptChanged || generatorChanged,
                     text: textChanged || blockTitleChanged || generatorChanged || assetVisualChanged,
                     audio: textChanged || generatorChanged,
-                    video: h3AudioOutputChanged
+                    video: h3AudioOutputChanged || seedance25AudioOutputChanged
                   });
                 }
               }
@@ -4613,9 +4747,9 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // MiniMax H3 dentro del Automatizador. Divide cada voz en tramos de hasta
-    // 15 segundos, conserva los clips originales para reensamblar textos sin
-    // volver a pagar el modelo y ajusta el master a la duración exacta de TTS.
+    // Video generativo dentro del Automatizador (MiniMax H3 o Seedance 2.5).
+    // Divide cada voz según la duración máxima del modelo, conserva los clips
+    // originales y ajusta el master a la duración exacta de ElevenLabs.
     const automationH3BlockMatch = /^\/api\/automations\/([a-z0-9]+)\/h3-block$/.exec(p);
     if (automationH3BlockMatch && req.method === 'POST') {
       const body = await readJsonBody(req);
@@ -4625,10 +4759,15 @@ const server = http.createServer(async (req, res) => {
       if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
       const block = project.blocks?.find((item) => item.id === String(body.blockId || ''));
       if (!block) return send(res, 404, { error: 'Bloque no encontrado.' });
-      if (block.generator !== 'h3') return send(res, 400, { error: 'Este bloque no está configurado para MiniMax H3.' });
+      if (!['h3', 'seedance25'].includes(block.generator)) return send(res, 400, { error: 'Este bloque no está configurado para video generativo.' });
+
+      const isSeedance25 = block.generator === 'seedance25';
+      const model = getVideoModel(isSeedance25 ? 'seedance-2-5' : 'minimax-h3');
+      const serviceName = model.name;
 
       const cfg = await getConfig();
-      if (!cfg.keys.minimax) return send(res, 400, { error: 'Falta la API key de MiniMax en Configuración.' });
+      if (isSeedance25 && !cfg.keys.ark) return send(res, 400, { error: 'Falta la API key de BytePlus ModelArk en Configuración.' });
+      if (!isSeedance25 && !cfg.keys.minimax) return send(res, 400, { error: 'Falta la API key de MiniMax en Configuración.' });
       const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
       const audioKeys = (Array.isArray(body.audioKeys) ? body.audioKeys : []).map(String).filter((key) => /^audio\//.test(key));
       if (!audioKeys.length) return send(res, 400, { error: 'Falta la narración del bloque.' });
@@ -4638,36 +4777,38 @@ const server = http.createServer(async (req, res) => {
         return send(res, 400, { error: 'No pude calcular la duración de todos los audios del bloque.' });
       }
 
-      const mode = block.h3Mode === 'frames' ? 'frames' : 'reference';
-      const configuredKeys = normalizeAutomationH3ReferenceKeys(block.h3ReferenceKeys);
+      const mode = (isSeedance25 ? block.seedance25Mode : block.h3Mode) === 'frames' ? 'frames' : 'reference';
+      const configuredKeys = normalizeAutomationH3ReferenceKeys(isSeedance25 ? block.seedance25ReferenceKeys : block.h3ReferenceKeys);
       const imageKey = String(body.imageKey || '');
       let referenceKeys;
       if (mode === 'frames') {
         referenceKeys = configuredKeys;
         if (referenceKeys.length !== 2 || referenceKeys.some((key) => /^(video|audio)\//.test(key))) {
-          return send(res, 400, { error: 'Inicio → Fin de H3 necesita exactamente dos imágenes: entrada y salida.' });
+          return send(res, 400, { error: `Inicio → Fin de ${serviceName} necesita exactamente dos imágenes: entrada y salida.` });
         }
       } else {
-        if (!/^(generated|uploads)\//.test(imageKey)) return send(res, 400, { error: 'Falta la imagen base del bloque H3.' });
+        if (!/^(generated|uploads)\//.test(imageKey)) return send(res, 400, { error: `Falta la imagen base del bloque ${serviceName}.` });
         referenceKeys = [...new Set([imageKey, ...configuredKeys])];
       }
       const referencePaths = await Promise.all(referenceKeys.map((key) => resolveAssetKey(key)));
       const allStats = await Promise.all([...referencePaths, ...audioPaths].map((filePath) => fs.stat(filePath).catch(() => null)));
-      if (allStats.some((stat) => !stat?.isFile())) return send(res, 400, { error: 'No encuentro una o más referencias de MiniMax H3.' });
+      if (allStats.some((stat) => !stat?.isFile())) return send(res, 400, { error: `No encuentro una o más referencias de ${serviceName}.` });
 
       const chunks = [];
+      const maxChunkDuration = isSeedance25 ? 30 : 15;
       for (const [audioIndex, audioDuration] of audioDurations.entries()) {
         let start = 0;
         while (start < audioDuration - 0.001) {
-          const duration = Math.min(15, audioDuration - start);
-          chunks.push({ audioIndex, start, duration, requestDuration: Math.max(4, Math.min(15, Math.ceil(duration))) });
+          const duration = Math.min(maxChunkDuration, audioDuration - start);
+          chunks.push({ audioIndex, start, duration, requestDuration: Math.max(4, Math.min(maxChunkDuration, Math.ceil(duration))) });
           start += duration;
         }
       }
       if (!chunks.length) return send(res, 400, { error: 'La narración no contiene audio utilizable.' });
 
-      const model = getVideoModel('minimax-h3');
-      const resolution = block.h3Resolution === '2K' ? '2K' : '768P';
+      const resolution = isSeedance25
+        ? (block.seedance25Resolution === '480p' ? '480p' : '720p')
+        : (block.h3Resolution === '2K' ? '2K' : '768P');
       const aspectRatio = model.aspectRatios.includes(project.config?.aspectRatio) ? project.config.aspectRatio : '9:16';
       const { width, height } = automationVideoDimensions(aspectRatio);
       const outDir = resolveDir(cfg.paths.video);
@@ -4694,8 +4835,11 @@ const server = http.createServer(async (req, res) => {
               kind: key.startsWith('video/') ? 'video' : key.startsWith('audio/') ? 'audio' : 'image'
             });
           }
-          if (mode === 'reference' && block.h3UseNarrationReference !== false) {
-            const chunkPath = path.join(outDir, `.h3-voice-${projectId}-${block.id}-${index}-${newId()}.mp3`);
+          const useNarrationReference = isSeedance25
+            ? block.seedance25UseNarrationReference !== false
+            : block.h3UseNarrationReference !== false;
+          if (mode === 'reference' && useNarrationReference) {
+            const chunkPath = path.join(outDir, `.${isSeedance25 ? 'seedance25' : 'h3'}-voice-${projectId}-${block.id}-${index}-${newId()}.mp3`);
             await runFfmpeg(ffmpegExecutable, [
               '-y', '-ss', chunk.start.toFixed(6), '-i', audioPaths[chunk.audioIndex],
               '-af', 'apad', '-t', String(chunk.requestDuration), '-c:a', 'libmp3lame', '-b:a', '192k', chunkPath
@@ -4708,52 +4852,72 @@ const server = http.createServer(async (req, res) => {
             video: refs.filter((ref) => ref.kind === 'video').length,
             audio: refs.filter((ref) => ref.kind === 'audio').length
           };
-          if (refs.length > 12 || counts.image > 9 || counts.video > 3 || counts.audio > 3) {
-            throw new Error('Las referencias del bloque superan los límites de H3: 9 imágenes, 3 videos, 3 audios y 12 archivos en total.');
+          const limits = model.mediaLimits || {};
+          if (refs.length > (limits.total || model.maxRefs) || counts.image > (limits.image || model.maxRefs)
+            || counts.video > (limits.video || model.maxRefs) || counts.audio > (limits.audio || model.maxRefs)) {
+            throw new Error(`Las referencias del bloque superan los límites de ${serviceName}: ${limits.image} imágenes, ${limits.video} videos, ${limits.audio} audios y ${limits.total} archivos en total.`);
           }
-          await validateMiniMaxH3Media(refs, ffmpegExecutable);
+          const mediaDurations = isSeedance25
+            ? await validateSeedance25Media(refs, ffmpegExecutable)
+            : await validateMiniMaxH3Media(refs, ffmpegExecutable);
+          const narrationAudioNumber = refs.filter((ref) => ref.kind === 'audio').length;
           const prompt = [
             project.config?.artStyle ? `GLOBAL ART DIRECTION — preserve this aesthetic consistently: ${String(project.config.artStyle).slice(0, 1200)}` : '',
             block.imagePrompt,
             block.negativePrompt ? `Avoid: ${block.negativePrompt}` : '',
-            block.h3UseNarrationReference !== false && mode === 'reference'
-              ? 'Use the supplied voice audio as the exact performance and timing reference. Preserve speaker identity and synchronize visible speech when a person is on screen.'
+            isSeedance25 && mode === 'reference' && counts.image
+              ? 'Use @Image1 as the principal visual reference for subject identity, composition and scene continuity.'
+              : '',
+            useNarrationReference && mode === 'reference'
+              ? `${isSeedance25 ? `Use @Audio${narrationAudioNumber}` : 'Use the supplied voice audio'} as the exact performance and timing reference. Preserve speaker identity and synchronize visible speech when a person is on screen.`
               : ''
           ].filter(Boolean).join('\n\n').slice(0, 7000);
-          const generated = await generateMiniMaxH3Video({
-            apiKey: cfg.keys.minimax, endpoint: cfg.endpoints.minimax, apiModel: model.apiModel,
-            prompt, mediaRefs: refs, mode, aspectRatio, resolution,
-            duration: chunk.requestDuration, contextIr: block.h3ContextIr === true
-          });
-          const key = await saveBuffer('video', `${ts()}-auto-h3-${index + 1}-${newId()}.mp4`, generated.buffer);
+          const generated = isSeedance25
+            ? await generateSeedance25Video({
+              apiKey: cfg.keys.ark, apiModel: cfg.seedance25ModelId || model.apiModel,
+              endpoint: cfg.endpoints.ark, prompt, mediaRefs: refs,
+              mode, aspectRatio, resolution, duration: chunk.requestDuration,
+              audio: block.seedance25KeepGeneratedAudio === true
+            })
+            : await generateMiniMaxH3Video({
+              apiKey: cfg.keys.minimax, endpoint: cfg.endpoints.minimax, apiModel: model.apiModel,
+              prompt, mediaRefs: refs, mode, aspectRatio, resolution,
+              duration: chunk.requestDuration, contextIr: block.h3ContextIr === true
+            });
+          const key = await saveBuffer('video', `${ts()}-auto-${isSeedance25 ? 'seedance25' : 'h3'}-${index + 1}-${newId()}.mp4`, generated.buffer);
           const pricing = await getPricing();
           const outputSeconds = Number(generated.usage?.output_seconds) || chunk.requestDuration;
-          const inputSeconds = Number(generated.usage?.input_seconds) || 0;
+          const inputSeconds = Number(generated.usage?.input_seconds) || (isSeedance25 ? mediaDurations.video : 0) || 0;
           const inputImages = Number(generated.usage?.input_image_count) || counts.image;
           const contextCost = generated.contextUsage
             ? (Number(generated.contextUsage.prompt_tokens) || 0) * 0.9 / 1_000_000
               + (Number(generated.contextUsage.completion_tokens) || 0) * 3.6 / 1_000_000
             : 0;
-          const cost = videoPrice(pricing, model.id, resolution) * (outputSeconds + inputSeconds)
-            + Math.max(0, inputImages - 5) * 0.04 + contextCost;
+          const cost = isSeedance25
+            ? videoPrice(pricing, model.id, resolution) * (outputSeconds + inputSeconds)
+              * (counts.video ? (model.videoInputPriceMultiplier || 1) : 1)
+            : videoPrice(pricing, model.id, resolution) * (outputSeconds + inputSeconds)
+              + Math.max(0, inputImages - 5) * 0.04 + contextCost;
           await recordCost({
             type: 'video', modelId: model.id, label: `${model.name} ${resolution} · Automatizador`,
             units: outputSeconds, unitLabel: 'segundo(s)', cost
           });
-          clipResults[index] = { key, taskId: generated.taskId, finalPrompt: generated.finalPrompt, cost, reused: false };
+          clipResults[index] = { key, taskId: generated.taskId, finalPrompt: generated.finalPrompt || prompt, cost, reused: false };
           const partialKeys = clipResults.map((item) => item?.key || '').filter(Boolean);
           await updateJson('automations.json', [], (all) => all.map((item) => item.id !== projectId ? item : ({
             ...item, outputs: { ...(item.outputs || {}), [block.id]: {
               ...(item.outputs?.[block.id] || {}), h3SegmentVideoKeys: partialKeys,
-              generator: 'h3', h3Resolution: resolution, ts: Date.now()
+              generator: block.generator, h3Resolution: resolution, ts: Date.now()
             } }, updatedAt: Date.now()
           })));
           await updateJson('asset-metadata.json', {}, (metadata) => {
             metadata[key] = {
               type: 'video', modelId: model.id, modelName: model.name, ts: Date.now(),
               category: `Auto: ${project.name}`.slice(0, 80), automationId: projectId, blockId: block.id,
-              h3TaskId: generated.taskId, h3ContextIr: block.h3ContextIr === true,
-              h3ChunkIndex: index, h3Resolution: resolution, duration: chunk.duration,
+              h3TaskId: isSeedance25 ? '' : generated.taskId,
+              seedanceTaskId: isSeedance25 ? generated.taskId : '',
+              h3ContextIr: !isSeedance25 && block.h3ContextIr === true,
+              h3ChunkIndex: index, h3Resolution: resolution, generator: block.generator, duration: chunk.duration,
               cost: Number(cost.toFixed(6))
             };
             return metadata;
@@ -4767,7 +4931,7 @@ const server = http.createServer(async (req, res) => {
           project, block, audioKeys, audioPaths, ffmpegExecutable, width, height, outDir,
           textHints: (block.items || []).map((item) => item.text)
         });
-        const name = `${ts()}-auto-h3-${sanitizeName(block.title || block.id)}-${newId()}.mp4`;
+        const name = `${ts()}-auto-${isSeedance25 ? 'seedance25' : 'h3'}-${sanitizeName(block.title || block.id)}-${newId()}.mp4`;
         const outPath = path.join(outDir, name);
         const args = ['-y'];
         for (const segmentPath of segmentPaths) args.push('-i', segmentPath);
@@ -4794,7 +4958,8 @@ const server = http.createServer(async (req, res) => {
         }
         filters.push(`${visualLabels.join('')}concat=n=${visualLabels.length}:v=1:a=0[visual]`);
 
-        const useGeneratedAudio = block.h3KeepGeneratedAudio === true
+        const keepGeneratedAudio = isSeedance25 ? block.seedance25KeepGeneratedAudio === true : block.h3KeepGeneratedAudio === true;
+        const useGeneratedAudio = keepGeneratedAudio
           && (await Promise.all(segmentPaths.map((segmentPath) => probeHasAudioStream(ffmpegExecutable, segmentPath)))).every(Boolean);
         let audioLabel;
         if (useGeneratedAudio) {
@@ -4828,17 +4993,17 @@ const server = http.createServer(async (req, res) => {
         const videoKey = `video/${name}`;
         await updateJson('asset-metadata.json', {}, (metadata) => {
           metadata[videoKey] = {
-            type: 'video', modelId: 'minimax-h3-assembly', modelName: 'Automatizador · MiniMax H3', ts: Date.now(),
+            type: 'video', modelId: `${model.id}-assembly`, modelName: `Automatizador · ${model.name}`, ts: Date.now(),
             category: `Auto: ${project.name}`.slice(0, 80), automationId: projectId, blockId: block.id,
             h3SegmentVideoKeys: segmentVideoKeys, h3SegmentDurations: chunks.map((chunk) => chunk.duration), h3Resolution: resolution, h3Mode: mode,
-            h3KeepGeneratedAudio: useGeneratedAudio, motionOverlayKey: motionOverlay?.key || null,
+            h3KeepGeneratedAudio: useGeneratedAudio, generator: block.generator, motionOverlayKey: motionOverlay?.key || null,
             width, height, duration: exactDuration, cost: 0
           };
           return metadata;
         });
         return send(res, 200, {
           videoKey, segmentVideoKeys, segmentDurations: chunks.map((chunk) => chunk.duration), motionOverlayKey: motionOverlay?.key || '',
-          duration: exactDuration, h3Resolution: resolution, h3Mode: mode,
+          duration: exactDuration, resolution, mode,
           keptGeneratedAudio: useGeneratedAudio
         });
       } finally {
@@ -5483,7 +5648,7 @@ const server = http.createServer(async (req, res) => {
         const motionOverlayKey = String(output.motionOverlayKey || '');
         const blockVideoKey = String(output.videoKey || '');
         const isHeyGen = block.generator === 'heygen' || output.generator === 'heygen';
-        const isH3 = block.generator === 'h3' || output.generator === 'h3';
+        const isH3 = ['h3', 'seedance25'].includes(block.generator) || ['h3', 'seedance25'].includes(output.generator);
         const isAssetBlock = block.generator === 'assets' || output.generator === 'assets';
         const selectedAssetKeys = normalizeAutomationAssetKeys(block.assetKeys);
         const heygenSegmentKeys = (Array.isArray(output.heygenSegmentVideoKeys) ? output.heygenSegmentVideoKeys : [])
@@ -5502,7 +5667,8 @@ const server = http.createServer(async (req, res) => {
           return send(res, 400, { error: `Faltan los planos originales de HeyGen de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.` });
         }
         if (isH3 && !h3SegmentKeys.length) {
-          return send(res, 400, { error: `Faltan los tramos originales de MiniMax H3 de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.` });
+          const modelName = block.generator === 'seedance25' || output.generator === 'seedance25' ? 'Seedance 2.5' : 'MiniMax H3';
+          return send(res, 400, { error: `Faltan los tramos originales de ${modelName} de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.` });
         }
         if (isAssetBlock && !selectedAssetKeys.length) {
           return send(res, 400, { error: `Faltan los Assets seleccionados de “${block.title || block.id}”.` });
@@ -6014,10 +6180,11 @@ const server = http.createServer(async (req, res) => {
       const found = await searchUpdatedPricing({
         apiKey: cfg.keys.openai,
         model: cfg.openaiModel,
-        currentPricing: { image: current.image, audio: current.audio }
+        currentPricing: { image: current.image, video: current.video, audio: current.audio }
       });
       const next = mergePricing({
         image: found.image,
+        video: { ...current.video, ...(found.video || {}) },
         // El rastreador histórico conoce v3. Conservamos cualquier tarifa
         // específica de Multilingual v2 hasta que también sea devuelta.
         audio: { ...current.audio, ...(found.audio || {}) },
@@ -6048,8 +6215,7 @@ const server = http.createServer(async (req, res) => {
       const result = await testService({
         service,
         key: body.key || cfg.keys[service] || '',
-        endpoint,
-        seedreamModelId: body.seedreamModelId || cfg.seedreamModelId
+        endpoint
       });
       return send(res, 200, result);
     }

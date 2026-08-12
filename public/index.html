@@ -776,6 +776,7 @@
         <h3>Avanzado</h3>
         <div class="cfg-grid">
           <label>ID de modelo Seedream <input type="text" name="seedreamModelId"></label>
+          <label>ID de modelo Seedance 2.5 <input type="text" name="seedance25ModelId" placeholder="dreamina-seedance-2-5-260628"></label>
           <label>ID de modelo Seedance 2.0 <input type="text" name="seedanceModelId" placeholder="dreamina-seedance-2-0"></label>
           <label>ID de modelo Seedance 2.0 Mini <input type="text" name="seedanceMiniModelId" placeholder="dreamina-seedance-2-0-mini-260615"></label>
           <label>Endpoint Ark <input type="text" name="endpoint_ark"></label>
@@ -885,6 +886,11 @@
     </label>
     <label><span id="associateOwnerLabelText">Personaje</span><select id="associateCharacter" class="select" required></select></label>
     <label>Original o variante<select id="associateVariant" class="select"></select></label>
+    <div id="associateNewVariantFields" class="associate-new-variant" hidden>
+      <div class="associate-new-variant-head"><strong>Nueva variante</strong><span>Se creará antes de asociar el asset</span></div>
+      <label>Nombre<input id="associateNewVariantName" type="text" maxlength="80" placeholder="Ej: Vestido azul"></label>
+      <label>Descripción<textarea id="associateNewVariantDescription" maxlength="1000" placeholder="Ropa, accesorios, peinado y detalles que distinguen esta variante"></textarea></label>
+    </div>
     <label class="check-row"><input type="checkbox" id="associateAsPhoto"> Agregar también como foto del original o la variante elegida (para usarla de referencia)</label>
     <div class="form-modal-actions"><button type="button" class="mini-btn" id="associateAssetCancel">Cancelar</button><button type="submit" class="generate-btn small">Asociar</button></div>
   </form>

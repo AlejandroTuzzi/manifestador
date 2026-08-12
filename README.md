@@ -33,14 +33,12 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
 | Eleven v3 | ElevenLabs | TTS expresivo con indicaciones entre corchetes |
 | Eleven Multilingual v2 | ElevenLabs | TTS estable para narraciones y voces compatibles con v2 |
 
-`fal.ai` queda en Configuración para futuros modelos o integraciones, pero ahora mismo no hay un modelo activo que lo use.
 
 ## API keys
 
 - Gemini: para la familia Nano Banana.
 - Google Cloud Translation: para traducir prompts ES ↔ EN desde la caja.
 - BytePlus ModelArk: para Seedream.
-- fal.ai: reservado para futuros usos.
 - ElevenLabs: para voces.
 - OpenAI: solo para actualizar precios estimados con búsqueda web.
 

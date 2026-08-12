@@ -1310,6 +1310,12 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .auto-style-reference p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .associate-preview { display: flex; align-items: center; gap: 12px; padding: 9px; border: 1px solid var(--border-soft); }
 .associate-preview img { width: 72px; height: 72px; object-fit: cover; }
+.associate-new-variant { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--violet); background: rgba(139,92,246,.07); }
+.associate-new-variant-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.associate-new-variant-head strong { color: var(--text); font-size: 13px; }
+.associate-new-variant-head span { color: var(--muted); font-size: 11px; }
+.associate-new-variant label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.associate-new-variant textarea { min-height: 72px; }
 .asset-info-box { max-width: 760px; }
 .asset-info-preview { width: 100%; max-height: 320px; object-fit: contain; background: #09050e; margin-bottom: 14px; }
 .asset-info-grid { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--border-soft); border-left: 1px solid var(--border-soft); }
