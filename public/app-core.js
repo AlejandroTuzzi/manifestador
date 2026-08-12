@@ -100,6 +100,7 @@ const state = {
   variantEditor: null,
   promptEditor: null,
   promptStyleImagePick: false,
+  promptLoraMediaTarget: null,
   pendingAssociationKey: null,
   lightboxKeys: [],
   lightboxIndex: 0,

@@ -1835,25 +1835,29 @@ function renderPromptsPanel() {
     const input = $('#quickPromptSearch'); input.focus(); input.setSelectionRange(input.value.length, input.value.length);
   });
   const query = state.promptQuickSearch.trim().toLowerCase();
+  const visiblePromptTotal = state.prompts.filter(contentIsVisible).length;
   const filtered = state.prompts.filter((pr) =>
-    (!state.promptQuickCategory || (pr.category || 'General') === state.promptQuickCategory)
-    && (!query || `${pr.title} ${pr.text} ${pr.category || ''}`.toLowerCase().includes(query)));
-  toolbar.querySelector('#quickPromptCount').textContent = `${filtered.length} de ${state.prompts.length}`;
+    contentIsVisible(pr) && (!state.promptQuickCategory || (pr.category || 'General') === state.promptQuickCategory)
+    && (!query || (isLoraPrompt(pr) ? loraSearchText(pr) : `${pr.title} ${pr.text} ${pr.category || ''}`).toLowerCase().includes(query)));
+  toolbar.querySelector('#quickPromptCount').textContent = `${filtered.length} de ${visiblePromptTotal}`;
   if (!filtered.length) {
     panel.insertAdjacentHTML('beforeend', '<div class="empty-note" style="padding:14px 0">No hay prompts que coincidan con el filtro.</div>');
     return;
   }
   for (const pr of filtered) {
     const d = document.createElement('div');
-    d.className = `prompt-item${isStylePrompt(pr) ? ' style' : ''}`;
-    d.innerHTML = `${isStylePrompt(pr) && pr.styleImageKey ? `<span class="prompt-item-style-thumb"><img src="${esc(fileUrl(pr.styleImageKey))}" alt=""><span class="prompt-style-label">ARTISTIC STYLE</span></span>` : ''}<span class="p-mode">${pr.mode === 'audio' ? IC('mic') : pr.mode === 'video' ? IC('film') : IC('image')}</span>
+    d.className = `prompt-item${isStylePrompt(pr) ? ' style' : ''}${isLoraPrompt(pr) ? ' lora' : ''}`;
+    const mediaKey = isLoraPrompt(pr) ? (pr.lora?.mediaKey || pr.styleImageKey) : pr.styleImageKey;
+    d.innerHTML = `${(isStylePrompt(pr) || isLoraPrompt(pr)) && mediaKey ? `<span class="prompt-item-style-thumb">${promptMediaPreviewHtml(mediaKey, '')}${isStylePrompt(pr) ? '<span class="prompt-style-label">ARTISTIC STYLE</span>' : ''}</span>` : ''}<span class="p-mode">${pr.mode === 'audio' ? IC('mic') : pr.mode === 'video' ? IC('film') : IC('image')}</span>
       <span class="p-title">${esc(pr.category || 'General')} · ${esc(pr.title)}</span>
-      <span class="p-text">${esc(pr.text)}</span>
+      <span class="p-text">${esc(isLoraPrompt(pr) ? (pr.lora?.description || pr.lora?.fileName || '') : pr.text)}</span>
+      ${isLoraPrompt(pr) ? loraInvocationHtml(pr, 'quick-') : ''}
       <button class="icon-btn" title="Eliminar">${IC('x')}</button>`;
     d.addEventListener('click', (e) => {
-      if (e.target.closest('.icon-btn')) return;
+      if (e.target.closest('.icon-btn') || isLoraPrompt(pr)) return;
       usePrompt(pr);
     });
+    if (isLoraPrompt(pr)) bindLoraInvocation(d, pr, 'quick-');
     d.querySelector('.icon-btn').addEventListener('click', async () => {
       await api(`/api/prompts/${pr.id}`, { method: 'DELETE' });
       state.prompts = state.prompts.filter((x) => x.id !== pr.id);
@@ -1878,15 +1882,21 @@ function isVideoMultimediaPicker() {
     && !state.overlayBgPick;
 }
 
+function isPromptLoraMediaPicker() {
+  return Boolean(state.promptStyleImagePick && promptEditorIsLora());
+}
+
 function openPicker(replaceIndex = null) {
   state.replaceRefIndex = replaceIndex;
   const multimedia = isVideoMultimediaPicker();
+  const loraMedia = isPromptLoraMediaPicker();
   $('#pickerTitle').textContent = replaceIndex != null
     ? 'Reemplazar imagen de referencia'
-    : multimedia ? `Elegir referencia para ${currentVideoModel().name}` : 'Elegir imagen de referencia';
-  $('#pickerVideoTab').hidden = !multimedia;
+    : loraMedia ? 'Elegir imagen o video ilustrativo del LoRA' : multimedia ? `Elegir referencia para ${currentVideoModel().name}` : 'Elegir imagen de referencia';
+  $('#pickerVideoTab').hidden = !(multimedia || loraMedia);
   $('#pickerAudioTab').hidden = !multimedia;
-  if (!multimedia && ['video', 'audio'].includes(state.pickerTab)) state.pickerTab = 'upload';
+  if (!(multimedia || loraMedia) && ['video', 'audio'].includes(state.pickerTab)) state.pickerTab = 'upload';
+  if (loraMedia && state.pickerTab === 'audio') state.pickerTab = 'upload';
   $('#pickerModal').hidden = false;
   setPickerTab(state.pickerTab || 'upload');
 }
@@ -1906,8 +1916,18 @@ function pickRef(key, kind = 'image') {
     state.replaceRefIndex = null;
     $('#pickerModal').hidden = true;
     if (state.promptEditor) {
-      state.promptEditor.styleImageKey = key;
+      if (typeof state.promptLoraMediaTarget === 'number') {
+        const item = state.promptEditor.loraUseCases?.[state.promptLoraMediaTarget];
+        if (item) item.mediaKey = key;
+      } else {
+        state.promptEditor.styleImageKey = key;
+      }
+      state.promptLoraMediaTarget = null;
       renderPromptStylePreview();
+      renderPromptLoraUseCases();
+      $('#promptStyleStatus').textContent = promptEditorIsLora()
+        ? 'Imagen ilustrativa lista. No se enviará como referencia al generar.'
+        : 'Imagen de estilo lista y obligatoria.';
     }
     return;
   }
@@ -1934,14 +1954,16 @@ function replaceRef(i, key) {
   toast('Referencia reemplazada — el orden y la cita se mantienen');
 }
 
-$('#pickerClose').addEventListener('click', () => { $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.overlayBgPick = false; state.promptStyleImagePick = false; state.comfyPickerSlot = null; });
+$('#pickerClose').addEventListener('click', () => { $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.overlayBgPick = false; state.promptStyleImagePick = false; state.promptLoraMediaTarget = null; state.comfyPickerSlot = null; });
 $$('#pickerTabs .tab').forEach((t) => {
   t.addEventListener('click', () => setPickerTab(t.dataset.src));
 });
 
 async function setPickerTab(src) {
   const multimedia = isVideoMultimediaPicker();
-  if (['video', 'audio'].includes(src) && !multimedia) src = 'upload';
+  const loraMedia = isPromptLoraMediaPicker();
+  if (src === 'audio' && !multimedia) src = 'upload';
+  if (src === 'video' && !(multimedia || loraMedia)) src = 'upload';
   state.pickerTab = src;
   $$('#pickerTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.src === src));
   const body = $('#pickerBody');
@@ -1950,9 +1972,10 @@ async function setPickerTab(src) {
     const input = $('#fileInput');
     input.accept = multimedia
       ? '.jpg,.jpeg,.png,.webp,.mp4,.mov,.mp3,.wav,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,audio/mpeg,audio/wav'
-      : 'image/*';
+      : loraMedia ? '.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm' : 'image/*';
     body.innerHTML = `<div class="drop-zone" id="dropZone">${multimedia
       ? `Arrastrá imágenes, videos o audios acá<br><small>${esc(currentVideoModel()?.name || 'Video multimodal')}: JPG, PNG, WebP, MP4, MOV, MP3 o WAV</small>`
+      : loraMedia ? 'Arrastrá una imagen o video ilustrativo acá'
       : 'Arrastrá imágenes acá'}<br>o hacé clic para elegir archivos</div>`;
     const dz = $('#dropZone');
     dz.addEventListener('click', () => {
@@ -1966,6 +1989,7 @@ async function setPickerTab(src) {
       dz.classList.remove('over');
       const files = [...e.dataTransfer.files].filter((file) => multimedia
         ? ['image', 'video', 'audio'].includes(referenceFileKind(file))
+        : loraMedia ? ['image', 'video'].includes(referenceFileKind(file))
         : referenceFileKind(file) === 'image');
       await uploadFiles(files, true);
     });
@@ -2122,6 +2146,7 @@ async function uploadFiles(files, asRefs) {
   const replacing = asRefs && state.replaceRefIndex != null;
   const list = replacing ? files.slice(0, 1) : files;
   const multimedia = asRefs && isVideoMultimediaPicker();
+  const loraMedia = asRefs && isPromptLoraMediaPicker();
   const initialRefTotal = state.refs.length;
   const initialRefCounts = state.refs.reduce((counts, ref) => {
     counts[referenceKind(ref)]++;
@@ -2132,7 +2157,7 @@ async function uploadFiles(files, asRefs) {
   for (const f of list) {
     try {
       const kind = referenceFileKind(f);
-      if (!kind || (!multimedia && kind !== 'image')) {
+      if (!kind || (!multimedia && !loraMedia && kind !== 'image') || (loraMedia && !['image', 'video'].includes(kind))) {
         toast(`${f.name}: formato no admitido como referencia`, 'err');
         continue;
       }
@@ -2166,10 +2191,10 @@ async function uploadFiles(files, asRefs) {
         }
       }
       const dataUrl = await readFileAsDataUrl(f);
-      const upload = multimedia
+      const upload = (multimedia || loraMedia)
         ? kind === 'audio'
           ? await api('/api/assets/audio', { method: 'POST', body: { name: f.name, dataUrl, audioKind: 'sound' } })
-          : await api('/api/assets/visual', { method: 'POST', body: { name: f.name, dataUrl, category: '', tags: [] } })
+          : await api('/api/assets/visual', { method: 'POST', body: { name: f.name, dataUrl, category: loraMedia ? 'LORAS' : '', tags: [], nsfw: loraMedia && $('#promptEditorNsfw')?.checked } })
         : await api('/api/upload', { method: 'POST', body: { name: f.name, dataUrl } });
       const added = asRefs ? pickRef(upload.key, kind) : true;
       if (added !== false) {
@@ -2282,7 +2307,7 @@ $('#visualUploadForm').addEventListener('submit', async (event) => {
     try {
       await api('/api/assets/visual', {
         method: 'POST',
-        body: { name: file.name, dataUrl: await readFileAsDataUrl(file), category, tags }
+        body: { name: file.name, dataUrl: await readFileAsDataUrl(file), category, tags, nsfw: $('#visualUploadNsfw').checked }
       });
       uploaded++;
     } catch (error) {
@@ -2322,12 +2347,13 @@ $$('[data-password-toggle]').forEach((button) => {
   });
 });
 
-function openVisualClassify(keys, { category = '', tags = [] } = {}) {
+function openVisualClassify(keys, { category = '', tags = [], nsfw = false } = {}) {
   state.visualClassifyKeys = [...new Set(keys)].filter((key) => /^(generated|uploads|video)\//.test(key));
   if (!state.visualClassifyKeys.length) return toast('Seleccioná imágenes o videos para categorizar.', 'err');
   $('#visualClassifyForm').reset();
   $('#visualClassifyCategory').value = category || '';
   $('#visualClassifyTags').value = (tags || []).join(', ');
+  $('#visualClassifyNsfw').checked = Boolean(nsfw);
   $('#visualClassifyHint').textContent = `La clasificación se aplicará a ${state.visualClassifyKeys.length} asset${state.visualClassifyKeys.length === 1 ? '' : 's'}.`;
   updateVisualTaxonomyOptions();
   $('#visualClassifyModal').hidden = false;
@@ -2351,7 +2377,8 @@ $('#visualClassifyForm').addEventListener('submit', async (event) => {
       body: {
         keys: state.visualClassifyKeys,
         category: $('#visualClassifyCategory').value.trim(),
-        tags: splitVisualTags($('#visualClassifyTags').value)
+        tags: splitVisualTags($('#visualClassifyTags').value),
+        nsfw: $('#visualClassifyNsfw').checked
       }
     });
     const count = result.keys?.length || state.visualClassifyKeys.length;
@@ -2404,6 +2431,7 @@ $('#audioUploadForm').addEventListener('submit', async (event) => {
         name: file.name,
         dataUrl: await readFileAsDataUrl(file),
         audioKind,
+        nsfw: $('#audioUploadNsfw').checked,
         musicTags: {
           genres: splitMusicTags($('#audioUploadGenres').value),
           instruments: splitMusicTags($('#audioUploadInstruments').value),
@@ -2576,10 +2604,69 @@ function renderAssetsGrid() {
 }
 
 const STYLE_CATEGORY = 'Estilos';
+const LORA_CATEGORY = 'LORAS';
 const ARTISTIC_STYLE_LABEL = 'ARTISTIC STYLE';
 
 function isStylePrompt(pr) {
   return pr?.kind === 'style' || String(pr?.category || '').trim().toLowerCase() === STYLE_CATEGORY.toLowerCase();
+}
+
+function isLoraPrompt(pr) {
+  return pr?.kind === 'lora' || String(pr?.category || '').trim().toLowerCase() === LORA_CATEGORY.toLowerCase();
+}
+
+function contentIsVisible(item) {
+  return Boolean(state.config?.nsfwEnabled) || !item?.nsfw;
+}
+
+function loraSearchText(pr) {
+  const lora = pr?.lora || {};
+  return [pr?.title, pr?.category, lora.description, lora.fileName, lora.usageInfo,
+    ...(lora.triggerWords || []), ...(lora.useCases || []).flatMap((item) => [item.name, item.prompt])].filter(Boolean).join(' ');
+}
+
+function prepareLoraPromptTarget() {
+  if (!['image', 'comfyui'].includes(state.mode)) setMode('image');
+  goToCreate();
+  promptBox.focus();
+}
+
+function insertLoraTrigger(trigger) {
+  const word = String(trigger || '').trim();
+  if (!word) return;
+  prepareLoraPromptTarget();
+  const current = promptBox.value.trimEnd();
+  promptBox.value = current ? `${current.replace(/[\s,]+$/, '')}, ${word}` : word;
+  renderHighlight();
+  promptBox.setSelectionRange(promptBox.value.length, promptBox.value.length);
+  toast(`Trigger “${word}” añadido`);
+}
+
+function insertLoraUseCase(useCase) {
+  const text = String(useCase?.prompt || '').trim();
+  if (!text) return;
+  prepareLoraPromptTarget();
+  promptBox.value = text;
+  renderHighlight();
+  promptBox.setSelectionRange(promptBox.value.length, promptBox.value.length);
+  toast(`Caso de uso “${useCase.name || 'sin nombre'}” aplicado`);
+}
+
+function loraInvocationHtml(pr, prefix = '') {
+  const lora = pr?.lora || {};
+  return `${(lora.triggerWords || []).length ? `<div class="prompt-lora-triggers">${lora.triggerWords.map((trigger, index) => `<button type="button" class="prompt-lora-trigger" data-${prefix}lora-trigger="${index}" title="Añadir al prompt con coma">${esc(trigger)}</button>`).join('')}</div>` : ''}
+    ${(lora.useCases || []).length ? `<div class="prompt-lora-cases">${lora.useCases.map((item, index) => `<button type="button" class="prompt-lora-case${item.mediaKey ? ' has-media' : ''}" data-${prefix}lora-case="${index}" title="${esc(item.prompt)}">${item.mediaKey ? IC(isVideoMediaKey(item.mediaKey) ? 'film' : 'image') : ''}${esc(item.name)}</button>`).join('')}</div>` : ''}`;
+}
+
+function bindLoraInvocation(root, pr, prefix = '') {
+  root.querySelectorAll(`[data-${prefix}lora-trigger]`).forEach((button) => button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    insertLoraTrigger(pr.lora?.triggerWords?.[Number(button.getAttribute(`data-${prefix}lora-trigger`))]);
+  }));
+  root.querySelectorAll(`[data-${prefix}lora-case]`).forEach((button) => button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    insertLoraUseCase(pr.lora?.useCases?.[Number(button.getAttribute(`data-${prefix}lora-case`))]);
+  }));
 }
 
 function addStyleReference(key) {
@@ -2602,6 +2689,7 @@ function addStyleReference(key) {
 }
 
 function usePrompt(pr) {
+  if (isLoraPrompt(pr)) return;
   const mode = isStylePrompt(pr) ? 'image' : (['audio', 'video'].includes(pr.mode) ? pr.mode : 'image');
   setMode(mode);
   if (isStylePrompt(pr) && !addStyleReference(pr.styleImageKey)) return;
@@ -2617,7 +2705,7 @@ function promptCategories(mode = null) {
   const extra = mode
     ? (state.promptCategoriesExtra[mode] || [])
     : Object.values(state.promptCategoriesExtra).flat();
-  const builtIn = !mode || mode === 'image' ? [STYLE_CATEGORY] : [];
+  const builtIn = !mode || mode === 'image' ? [STYLE_CATEGORY, LORA_CATEGORY] : [];
   return [...new Set([...builtIn, ...fromPrompts, ...extra])].sort((a, b) => a.localeCompare(b));
 }
 
@@ -2625,20 +2713,120 @@ function promptEditorIsStyle() {
   return String($('#promptEditorCategory').value || '').trim().toLowerCase() === STYLE_CATEGORY.toLowerCase();
 }
 
+function promptEditorIsLora() {
+  return String($('#promptEditorCategory').value || '').trim().toLowerCase() === LORA_CATEGORY.toLowerCase();
+}
+
+function isVideoMediaKey(key) {
+  return /^video\//i.test(String(key || '')) || /\.(mp4|mov|m4v|webm)$/i.test(String(key || ''));
+}
+
+function promptMediaPreviewHtml(key, alt = '') {
+  if (!key) return '';
+  return isVideoMediaKey(key)
+    ? `<video src="${esc(fileUrl(key))}" muted controls preload="metadata" aria-label="${esc(alt)}"></video>`
+    : `<img src="${esc(fileUrl(key))}" alt="${esc(alt)}">`;
+}
+
 function renderPromptStylePreview() {
   const key = state.promptEditor?.styleImageKey || '';
   $('#promptStylePreview').innerHTML = key
-    ? `<img src="${esc(fileUrl(key))}" alt="Referencia de estilo"><span class="prompt-style-label">${ARTISTIC_STYLE_LABEL}</span>`
-    : '<div class="prompt-style-placeholder">Elegí la imagen que define la estética</div>';
+    ? `${promptMediaPreviewHtml(key, promptEditorIsLora() ? 'Archivo ilustrativo del LoRA' : 'Referencia de estilo')}${promptEditorIsLora() ? '' : `<span class="prompt-style-label">${ARTISTIC_STYLE_LABEL}</span>`}`
+    : `<div class="prompt-style-placeholder">${promptEditorIsLora() ? 'Imagen ilustrativa opcional del LoRA' : 'Elegí la imagen que define la estética'}</div>`;
+}
+
+function renderPromptLoraTriggers() {
+  const words = state.promptEditor?.loraTriggerWords || [];
+  $('#promptLoraTriggerChips').innerHTML = words.length
+    ? words.map((word, index) => `<span class="prompt-lora-editor-trigger">${esc(word)}<button type="button" data-lora-remove-trigger="${index}" title="Quitar">×</button></span>`).join('')
+    : '<span class="hint">Todavía no hay trigger words.</span>';
+  $('#promptLoraTriggerChips').querySelectorAll('[data-lora-remove-trigger]').forEach((button) => button.addEventListener('click', () => {
+    state.promptEditor.loraTriggerWords.splice(Number(button.dataset.loraRemoveTrigger), 1);
+    renderPromptLoraTriggers();
+  }));
+}
+
+function addPromptLoraTrigger() {
+  if (!state.promptEditor) return;
+  const input = $('#promptLoraTriggerInput');
+  const additions = input.value.split(',').map((word) => word.trim()).filter(Boolean);
+  const existing = new Set(state.promptEditor.loraTriggerWords.map((word) => word.toLocaleLowerCase()));
+  for (const word of additions) {
+    if (!existing.has(word.toLocaleLowerCase()) && state.promptEditor.loraTriggerWords.length < 50) {
+      state.promptEditor.loraTriggerWords.push(word.slice(0, 120));
+      existing.add(word.toLocaleLowerCase());
+    }
+  }
+  input.value = '';
+  renderPromptLoraTriggers();
+  input.focus();
+}
+
+function renderPromptLoraUseCases() {
+  const useCases = state.promptEditor?.loraUseCases || [];
+  $('#promptLoraUseCases').innerHTML = useCases.length ? useCases.map((item, index) => `
+    <div class="prompt-lora-use-case" data-lora-use-case="${index}">
+      <input type="text" maxlength="100" value="${esc(item.name || '')}" placeholder="Nombre del caso">
+      <textarea maxlength="4000" placeholder="Prompt completo para este caso">${esc(item.prompt || '')}</textarea>
+      <div class="prompt-lora-case-media">${item.mediaKey ? `<div class="prompt-lora-case-preview">${promptMediaPreviewHtml(item.mediaKey, `Referencia de ${item.name || 'caso de uso'}`)}</div>` : '<span class="hint">Sin imagen o video propio.</span>'}
+        <button type="button" class="mini-btn" data-lora-case-upload="${index}">${IC('upload')} Subir</button>
+        <button type="button" class="mini-btn" data-lora-case-assets="${index}">${IC('image')} Assets</button>
+        ${item.mediaKey ? `<button type="button" class="mini-btn danger" data-lora-case-clear="${index}">Quitar</button>` : ''}
+      </div>
+      <button type="button" class="icon-btn" data-lora-remove-case="${index}" title="Quitar caso">${IC('trash')}</button>
+    </div>`).join('') : '<span class="hint">Añadí casos de uso para invocar prompts completos.</span>';
+  $('#promptLoraUseCases').querySelectorAll('[data-lora-use-case]').forEach((row) => {
+    const index = Number(row.dataset.loraUseCase);
+    row.querySelector('input').addEventListener('input', (event) => { state.promptEditor.loraUseCases[index].name = event.target.value; });
+    row.querySelector('textarea').addEventListener('input', (event) => { state.promptEditor.loraUseCases[index].prompt = event.target.value; });
+  });
+  $('#promptLoraUseCases').querySelectorAll('[data-lora-remove-case]').forEach((button) => button.addEventListener('click', () => {
+    state.promptEditor.loraUseCases.splice(Number(button.dataset.loraRemoveCase), 1);
+    renderPromptLoraUseCases();
+  }));
+  $('#promptLoraUseCases').querySelectorAll('[data-lora-case-assets]').forEach((button) => button.addEventListener('click', () => {
+    state.promptLoraMediaTarget = Number(button.dataset.loraCaseAssets);
+    state.promptStyleImagePick = true;
+    openPicker();
+  }));
+  $('#promptLoraUseCases').querySelectorAll('[data-lora-case-upload]').forEach((button) => button.addEventListener('click', () => {
+    state.promptLoraMediaTarget = Number(button.dataset.loraCaseUpload);
+    $('#promptStyleUpload').click();
+  }));
+  $('#promptLoraUseCases').querySelectorAll('[data-lora-case-clear]').forEach((button) => button.addEventListener('click', () => {
+    state.promptEditor.loraUseCases[Number(button.dataset.loraCaseClear)].mediaKey = '';
+    renderPromptLoraUseCases();
+  }));
+}
+
+function fillPromptLoraFields() {
+  const lora = state.promptEditor?.lora || {};
+  $('#promptLoraDescription').value = lora.description || '';
+  $('#promptLoraFileName').value = lora.fileName || '';
+  $('#promptLoraUsageInfo').value = lora.usageInfo || '';
+  renderPromptLoraTriggers();
+  renderPromptLoraUseCases();
 }
 
 function syncPromptEditorStyleFields() {
   const isStyle = promptEditorIsStyle();
-  $('#promptStyleFields').hidden = !isStyle;
+  const isLora = promptEditorIsLora();
+  $('#promptStyleFields').hidden = !(isStyle || isLora);
+  $('#promptLoraFields').hidden = !isLora;
+  $('#promptStyleAnalyzeBtn').hidden = isLora;
+  $('#promptStyleStatus').textContent = isLora
+    ? 'La imagen es opcional e ilustrativa; no se enviará como referencia al generar.'
+    : 'La imagen es obligatoria. La IA describirá solo la estética, técnica, soporte, luz, color y textura.';
+  $('#promptEditorTextField').hidden = isLora;
   $('#promptEditorTextLabel').textContent = isStyle ? 'Prompt de estilo (en inglés)' : 'Prompt';
-  $('#promptEditorMode').disabled = isStyle;
-  if (isStyle) $('#promptEditorMode').value = 'image';
+  $('#promptEditorMode').disabled = isStyle || isLora;
+  $('#promptEditorText').required = !isLora;
+  if (isStyle || isLora) $('#promptEditorMode').value = 'image';
   renderPromptStylePreview();
+  if (isLora && !state.promptEditor?.loraFieldsFilled) {
+    state.promptEditor.loraFieldsFilled = true;
+    fillPromptLoraFields();
+  }
 }
 
 function renderPromptEditorCategories() {
@@ -2651,13 +2839,18 @@ function renderPromptEditorCategories() {
 }
 
 function openPromptEditor({ prompt = null, initialText = '', initialMode = state.mode, source = 'library' } = {}) {
-  state.promptEditor = { id: prompt?.id || null, source, styleImageKey: prompt?.styleImageKey || '' };
+  state.promptEditor = {
+    id: prompt?.id || null, source, styleImageKey: prompt?.lora?.mediaKey || prompt?.styleImageKey || '', lora: prompt?.lora || {}, nsfw: Boolean(prompt?.nsfw),
+    loraTriggerWords: [...(prompt?.lora?.triggerWords || [])],
+    loraUseCases: (prompt?.lora?.useCases || []).map((item) => ({ ...item })),
+    loraFieldsFilled: false
+  };
   $('#promptEditorTitle').textContent = prompt ? 'Editar prompt' : 'Nuevo prompt';
   $('#promptEditorName').value = prompt?.title || (initialText ? initialText.slice(0, 60) : '');
   $('#promptEditorCategory').value = prompt?.category || 'General';
   $('#promptEditorMode').value = prompt?.mode || (['audio', 'video'].includes(initialMode) ? initialMode : 'image');
   $('#promptEditorText').value = prompt?.text || initialText || '';
-  $('#promptStyleStatus').textContent = 'La IA describirá solo la estética, técnica, soporte, luz, color y textura; no copiará el contenido de la escena.';
+  $('#promptEditorNsfw').checked = Boolean(prompt?.nsfw);
   renderPromptEditorCategories();
   $('#promptEditorModal').hidden = false;
   setTimeout(() => $('#promptEditorName').focus(), 0);
@@ -2665,27 +2858,51 @@ function openPromptEditor({ prompt = null, initialText = '', initialMode = state
 
 $('#promptEditorMode').addEventListener('change', renderPromptEditorCategories);
 $('#promptEditorCategory').addEventListener('input', renderPromptEditorCategories);
+$('#promptLoraAddTrigger').addEventListener('click', addPromptLoraTrigger);
+$('#promptLoraTriggerInput').addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); addPromptLoraTrigger(); } });
+$('#promptLoraAddUseCase').addEventListener('click', () => {
+  if (!state.promptEditor) return;
+  state.promptEditor.loraUseCases.push({ name: '', prompt: '', mediaKey: '' });
+  renderPromptLoraUseCases();
+  $('#promptLoraUseCases [data-lora-use-case]:last-child input')?.focus();
+});
 
-$('#promptStyleUploadBtn').addEventListener('click', () => $('#promptStyleUpload').click());
+$('#promptStyleUploadBtn').addEventListener('click', () => { state.promptLoraMediaTarget = null; $('#promptStyleUpload').click(); });
 $('#promptStyleUpload').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   e.target.value = '';
   if (!file || !state.promptEditor) return;
   try {
     $('#promptStyleStatus').textContent = 'Subiendo imagen…';
-    const { key } = await api('/api/upload', { method: 'POST', body: { name: file.name, dataUrl: await readFileAsDataUrl(file) } });
-    state.promptEditor.styleImageKey = key;
+    const kind = referenceFileKind(file);
+    if (promptEditorIsStyle() && kind !== 'image') throw new Error('Los estilos necesitan una imagen.');
+    if (promptEditorIsLora() && !['image', 'video'].includes(kind)) throw new Error('El LoRA admite una imagen o video ilustrativo.');
+    const dataUrl = await readFileAsDataUrl(file);
+    const { key } = promptEditorIsLora()
+      ? await api('/api/assets/visual', { method: 'POST', body: { name: file.name, dataUrl, category: 'LORAS', tags: [], nsfw: $('#promptEditorNsfw').checked } })
+      : await api('/api/upload', { method: 'POST', body: { name: file.name, dataUrl } });
+    if (typeof state.promptLoraMediaTarget === 'number') {
+      const item = state.promptEditor.loraUseCases?.[state.promptLoraMediaTarget];
+      if (item) item.mediaKey = key;
+      renderPromptLoraUseCases();
+    } else {
+      state.promptEditor.styleImageKey = key;
+    }
+    state.promptLoraMediaTarget = null;
     renderPromptStylePreview();
-    $('#promptStyleStatus').textContent = 'Imagen lista. Podés escribir el estilo o pedir el análisis con IA.';
+    $('#promptStyleStatus').textContent = promptEditorIsLora()
+      ? 'Imagen ilustrativa lista. No se enviará como referencia al generar.'
+      : 'Imagen lista. Podés escribir el estilo o pedir el análisis con IA.';
   } catch (err) {
     $('#promptStyleStatus').textContent = err.message;
     toast(err.message, 'err');
   }
 });
 $('#promptStyleAssetsBtn').addEventListener('click', () => {
+  state.promptLoraMediaTarget = null;
   state.promptStyleImagePick = true;
   openPicker();
-  $('#pickerTitle').textContent = 'Elegir imagen para el estilo artístico';
+  $('#pickerTitle').textContent = promptEditorIsLora() ? 'Elegir imagen ilustrativa del LoRA' : 'Elegir imagen para el estilo artístico';
 });
 $('#promptStyleAnalyzeBtn').addEventListener('click', async () => {
   const key = state.promptEditor?.styleImageKey;
@@ -2710,6 +2927,7 @@ function closePromptEditor() {
   $('#promptEditorModal').hidden = true;
   state.promptEditor = null;
   state.promptStyleImagePick = false;
+  state.promptLoraMediaTarget = null;
 }
 
 $('#promptEditorClose').addEventListener('click', closePromptEditor);
@@ -2718,24 +2936,46 @@ $('#promptEditorModal').addEventListener('click', (e) => { if (e.target.id === '
 $('#promptEditorForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const editor = state.promptEditor || {};
+  const isLora = promptEditorIsLora();
+  const rawLoraUseCases = (editor.loraUseCases || []).map((item) => ({
+    name: String(item.name || '').trim(), prompt: String(item.prompt || '').trim(), mediaKey: item.mediaKey || ''
+  }));
+  if (isLora && rawLoraUseCases.some((item) => (item.name || item.prompt) && !(item.name && item.prompt))) {
+    return toast('Cada caso de uso debe tener nombre y prompt completos.', 'err');
+  }
+  const loraUseCases = rawLoraUseCases.filter((item) => item.name && item.prompt);
   const body = {
     title: $('#promptEditorName').value.trim(),
     category: $('#promptEditorCategory').value.trim() || 'General',
     mode: ['audio', 'video'].includes($('#promptEditorMode').value) ? $('#promptEditorMode').value : 'image',
-    text: $('#promptEditorText').value.trim(),
-    kind: promptEditorIsStyle() ? 'style' : 'prompt',
-    styleImageKey: promptEditorIsStyle() ? (editor.styleImageKey || '') : ''
+    text: isLora ? '' : $('#promptEditorText').value.trim(),
+    kind: isLora ? 'lora' : promptEditorIsStyle() ? 'style' : 'prompt',
+    nsfw: $('#promptEditorNsfw').checked,
+    styleImageKey: (promptEditorIsStyle() || isLora) ? (editor.styleImageKey || '') : '',
+    lora: isLora ? {
+      description: $('#promptLoraDescription').value.trim(),
+      mediaKey: editor.styleImageKey || '',
+      fileName: $('#promptLoraFileName').value.trim(),
+      triggerWords: editor.loraTriggerWords || [],
+      useCases: loraUseCases,
+      usageInfo: $('#promptLoraUsageInfo').value.trim()
+    } : null
   };
-  if (!body.title || !body.text) return;
+  if (!body.title || (!isLora && !body.text)) return;
   if (body.kind === 'style' && !body.styleImageKey) return toast('Elegí una imagen para este estilo.', 'err');
+  if (body.kind === 'lora' && !body.lora.fileName) return toast('Escribí el nombre del archivo LoRA.', 'err');
+  if (body.kind === 'lora' && !body.lora.triggerWords.length && !body.lora.useCases.length) {
+    return toast('Añadí al menos una trigger word o un caso de uso.', 'err');
+  }
   try {
     if (editor.id) {
       const updated = await api(`/api/prompts/${editor.id}`, { method: 'PUT', body });
-      state.prompts[state.prompts.findIndex((p) => p.id === editor.id)] = updated;
+      if (updated.nsfw && !state.config?.nsfwEnabled) state.prompts = state.prompts.filter((p) => p.id !== editor.id);
+      else state.prompts[state.prompts.findIndex((p) => p.id === editor.id)] = updated;
       toast('Prompt actualizado');
     } else {
       const item = await api('/api/prompts', { method: 'POST', body });
-      state.prompts.unshift(item);
+      if (!item.nsfw || state.config?.nsfwEnabled) state.prompts.unshift(item);
       if (editor.source === 'quick') $('#promptsPanel').hidden = false;
       toast('Prompt archivado');
     }
@@ -2756,18 +2996,20 @@ function renderPromptLibrary() {
   filter.innerHTML = '<option value="">Todas las categorías</option>' + categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
   filter.value = selected;
   const query = $('#promptSearch').value.trim().toLowerCase();
-  const items = state.prompts.filter((p) => (!filter.value || (p.category || 'General') === filter.value)
-    && (!query || `${p.title} ${p.text} ${p.category || ''}`.toLowerCase().includes(query)));
+  const items = state.prompts.filter((p) => contentIsVisible(p) && (!filter.value || (p.category || 'General') === filter.value)
+    && (!query || (isLoraPrompt(p) ? loraSearchText(p) : `${p.title} ${p.text} ${p.category || ''}`).toLowerCase().includes(query)));
   library.innerHTML = items.length ? items.map((pr) => `
     <article class="prompt-library-card" data-prompt="${pr.id}">
-      <div class="prompt-library-head"><div><span class="prompt-category">${esc(pr.category || 'General')}</span><h3>${esc(pr.title)}</h3></div><span>${pr.mode === 'audio' ? IC('mic') : pr.mode === 'video' ? IC('film') : IC('image')}</span></div>
+      <div class="prompt-library-head"><div><span class="prompt-category">${esc(pr.category || 'General')}</span>${pr.nsfw ? '<span class="nsfw-badge">NSFW</span>' : ''}<h3>${esc(pr.title)}</h3></div><span>${pr.mode === 'audio' ? IC('mic') : pr.mode === 'video' ? IC('film') : IC('image')}</span></div>
       ${isStylePrompt(pr) && pr.styleImageKey ? `<div class="prompt-style-image"><img src="${esc(fileUrl(pr.styleImageKey))}" alt="Referencia de ${esc(pr.title)}"><span class="prompt-style-label">${ARTISTIC_STYLE_LABEL}</span></div>` : ''}
-      <div class="prompt-library-text">${esc(pr.text)}</div>
-      <div class="prompt-library-actions"><button class="mini-btn" data-pact="use">Usar</button><button class="mini-btn" data-pact="edit">${IC('edit')} Editar</button><button class="mini-btn danger" data-pact="delete">${IC('trash')}</button></div>
+      ${isLoraPrompt(pr) && (pr.lora?.mediaKey || pr.styleImageKey) ? `<div class="prompt-lora-image">${promptMediaPreviewHtml(pr.lora?.mediaKey || pr.styleImageKey, `Archivo ilustrativo de ${pr.title}`)}</div>` : ''}
+      ${isLoraPrompt(pr) ? `${pr.lora?.fileName ? `<div class="prompt-lora-file">${esc(pr.lora.fileName)}</div>` : ''}<div class="prompt-lora-description">${esc(pr.lora?.description || '')}</div>${loraInvocationHtml(pr)}${pr.lora?.usageInfo ? `<div class="prompt-lora-usage"><strong>Uso correcto:</strong> ${esc(pr.lora.usageInfo)}</div>` : ''}` : `<div class="prompt-library-text">${esc(pr.text)}</div>`}
+      <div class="prompt-library-actions">${isLoraPrompt(pr) ? '' : '<button class="mini-btn" data-pact="use">Usar</button>'}<button class="mini-btn" data-pact="edit">${IC('edit')} Editar</button><button class="mini-btn danger" data-pact="delete">${IC('trash')}</button></div>
     </article>`).join('') : '<div class="empty-note">No hay prompts que coincidan.</div>';
   library.querySelectorAll('[data-prompt]').forEach((card) => {
     const pr = state.prompts.find((p) => p.id === card.dataset.prompt);
-    card.querySelector('[data-pact="use"]').addEventListener('click', () => usePrompt(pr));
+    card.querySelector('[data-pact="use"]')?.addEventListener('click', () => usePrompt(pr));
+    if (isLoraPrompt(pr)) bindLoraInvocation(card, pr);
     card.querySelector('[data-pact="edit"]').addEventListener('click', () => openPromptEditor({ prompt: pr }));
     card.querySelector('[data-pact="delete"]').addEventListener('click', async () => {
       if (!confirm(`¿Borrar “${pr.title}”?`)) return;
@@ -2925,7 +3167,11 @@ async function deleteAssets(keys) {
 
 $('#btnDeleteSelected').addEventListener('click', () => deleteAssets([...state.selectedAssets]));
 $('#btnSeriesSelected').addEventListener('click', () => openSeriesAssign([...state.selectedAssets]));
-$('#btnClassifySelected').addEventListener('click', () => openVisualClassify([...state.selectedAssets]));
+$('#btnClassifySelected').addEventListener('click', () => {
+  const selected = [...state.selectedAssets];
+  const first = [...state.assets.generated, ...state.assets.uploads, ...state.assets.video].find((item) => item.key === selected[0]);
+  openVisualClassify(selected, selected.length === 1 ? first || {} : {});
+});
 $('#btnSelectVisible').addEventListener('click', () => {
   const visible = visibleAssets();
   const every = visible.length && visible.every((a) => state.selectedAssets.has(a.key));
@@ -3247,12 +3493,14 @@ function openAssetInfo(asset) {
         <label>Instrumentos<input id="assetMusicInstruments" type="text" value="${esc((musicTags.instruments || []).join(', '))}" placeholder="piano, strings"></label>
         <label>Sentimientos<input id="assetMusicMoods" type="text" value="${esc((musicTags.moods || []).join(', '))}" placeholder="mysterious, tense"></label>
       </div>
+      <label class="check-row"><input id="assetAudioNsfw" type="checkbox"${asset.nsfw ? ' checked' : ''}> Contenido NSFW</label>
       <button type="button" class="mini-btn" id="assetAudioMetadataSave">Guardar clasificación</button>
     </div>` : ''}
     ${!isAudio ? `<div class="visual-metadata-editor">
       <h4>Clasificación visual</h4>
       <label>Categoría<input id="assetVisualCategory" type="text" maxlength="80" list="visualCategoryList" value="${esc(asset.category || '')}" placeholder="Ej: Archivo histórico"></label>
       <label>Etiquetas<input id="assetVisualTags" type="text" maxlength="500" value="${esc((asset.tags || []).join(', '))}" placeholder="noir, ciudad, noche"></label>
+      <label class="check-row"><input id="assetVisualNsfw" type="checkbox"${asset.nsfw ? ' checked' : ''}> Contenido NSFW</label>
       <span class="hint">Separá las etiquetas con comas. Podrás combinarlas desde los filtros de Assets.</span>
       <button type="button" class="mini-btn" id="assetVisualMetadataSave">Guardar clasificación</button>
     </div>` : ''}
@@ -3274,6 +3522,7 @@ function openAssetInfo(asset) {
         body: {
           key: asset.key,
           audioKind: $('#assetAudioKind').value,
+          nsfw: $('#assetAudioNsfw').checked,
           musicTags: {
             genres: splitMusicTags($('#assetMusicGenres').value),
             instruments: splitMusicTags($('#assetMusicInstruments').value),
@@ -3285,6 +3534,27 @@ function openAssetInfo(asset) {
       await refreshAssets();
       openAssetInfo(asset);
       toast('Clasificación de audio guardada.', 'ok');
+    } catch (error) {
+      event.currentTarget.disabled = false;
+      toast(error.message, 'err');
+    }
+  });
+  $('#charModalBody #assetVisualMetadataSave')?.addEventListener('click', async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      const result = await api('/api/assets/visual-metadata', {
+        method: 'POST',
+        body: {
+          key: asset.key,
+          category: $('#assetVisualCategory').value.trim(),
+          tags: splitVisualTags($('#assetVisualTags').value),
+          nsfw: $('#assetVisualNsfw').checked
+        }
+      });
+      Object.assign(asset, result.metadata?.[asset.key] || {});
+      await refreshAssets();
+      $('#assetInfoModal').hidden = true;
+      toast('Clasificación visual guardada.');
     } catch (error) {
       event.currentTarget.disabled = false;
       toast(error.message, 'err');
@@ -3568,12 +3838,13 @@ function updateSeriesStructureHint() {
 function renderSeriesCharacterChips() {
   sortEntities();
   const wrap = $('#seriesCharacterChips');
-  if (!state.characters.length) {
+  const visibleCharacters = state.characters.filter(contentIsVisible);
+  if (!visibleCharacters.length) {
     wrap.innerHTML = '<span class="hint">Todavía no hay personajes creados.</span>';
     return;
   }
   wrap.innerHTML = '';
-  for (const c of state.characters) {
+  for (const c of visibleCharacters) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'chip series-chip' + (state.seriesDraftCharacterIds.has(c.id) ? ' active' : '');
@@ -4332,7 +4603,7 @@ function openShotPromptPicker(si, hi) {
 function renderShotPromptList() {
   const query = $('#shotPromptSearch').value.trim().toLowerCase();
   const cat = $('#shotPromptCategory').value;
-  const items = state.prompts.filter((p) => (!cat || (p.category || 'General') === cat)
+  const items = state.prompts.filter((p) => !isLoraPrompt(p) && (!cat || (p.category || 'General') === cat)
     && (!query || `${p.title} ${p.text} ${p.category || ''}`.toLowerCase().includes(query)));
   $('#shotPromptList').innerHTML = items.length ? items.map((p) => `
     <button class="shot-prompt-row" data-p="${p.id}">
@@ -4486,7 +4757,7 @@ function renderCharacters() {
     const inSeries = state.series.filter((s) => (s.characterIds || []).includes(c.id));
     card.innerHTML = `
       <div class="char-top">${avatar}<div>
-        <div class="char-name">${esc(c.name)}</div>
+        <div class="char-name">${esc(c.name)}${c.nsfw ? ' <span class="nsfw-badge">NSFW</span>' : ''}</div>
         <div class="char-voice">${c.voiceName ? IC('mic') + ' ' + esc(c.voiceName) : '<span style="color:#6f5f8d">sin voz</span>'}</div>
       </div></div>
       <div class="char-desc">${esc(c.description || '')}</div>
@@ -4619,6 +4890,7 @@ function renderCharModal() {
     ${state.pendingCharacterAsset ? `<div class="character-source"><img src="${fileUrl(state.pendingCharacterAsset)}" alt=""><div><strong>Foto inicial</strong><span>Se copiará al archivo del personaje cuando lo crees.</span></div></div>` : ''}
     <div><label>Nombre</label><input type="text" id="chName" value="${esc(c.name)}" placeholder="ej: Luna"></div>
     <div><label>Descripción</label><textarea id="chDesc" placeholder="quién es, cómo se ve, su vibra…">${esc(c.description || '')}</textarea></div>
+    <label class="check-row"><input type="checkbox" id="chNsfw"${c.nsfw ? ' checked' : ''}> Contenido NSFW</label>
     <div><label>Voz de ElevenLabs</label>
       <select id="chVoice">
         <option value="">— sin voz —</option>
@@ -4685,6 +4957,7 @@ function renderCharModal() {
     const payload = {
       name: $('#chName').value,
       description: $('#chDesc').value,
+      nsfw: $('#chNsfw').checked,
       voiceId,
       voiceName: voices2.find((v) => v.id === voiceId)?.name || '',
       arkAssetId: $('#chArkAsset').value.trim(),
@@ -4701,6 +4974,7 @@ function renderCharModal() {
         $('#charModal').hidden = true;
         state.editingCharId = null;
         toast('Personaje actualizado');
+        if (updated.nsfw && !state.config?.nsfwEnabled) state.characters = state.characters.filter((item) => item.id !== updated.id);
       } else {
         let created = await api('/api/characters', { method: 'POST', body: payload });
         if (state.pendingCharacterAsset) {
@@ -4750,7 +5024,8 @@ function renderCharModal() {
         body: {
           key: asset.key,
           category: $('#assetVisualCategory').value.trim(),
-          tags: splitVisualTags($('#assetVisualTags').value)
+          tags: splitVisualTags($('#assetVisualTags').value),
+          nsfw: $('#assetVisualNsfw').checked
         }
       });
       Object.assign(asset, result.metadata?.[asset.key] || {});
@@ -5095,7 +5370,7 @@ function renderElements() {
 
   const grid = $('#elementsGrid');
   const items = state.elements.filter((el) =>
-    (!state.elementKindFilter || el.kind === state.elementKindFilter)
+    contentIsVisible(el) && (!state.elementKindFilter || el.kind === state.elementKindFilter)
     && (!state.elementCategoryFilter || (el.category || '') === state.elementCategoryFilter));
   if (!items.length) {
     grid.innerHTML = '<div class="empty-note">Creá tu primera locación u objeto: nombre, categoría, fotos y variantes (ej: “Fábrica abandonada” → “en invierno”).</div>';
@@ -5111,7 +5386,7 @@ function renderElements() {
     const linkedCount = state.elementLinks.filter((link) => link.elementId === el.id).length;
     card.innerHTML = `
       <div class="char-top">${avatar}<div>
-        <div class="char-name">${esc(el.name)}</div>
+        <div class="char-name">${esc(el.name)}${el.nsfw ? ' <span class="nsfw-badge">NSFW</span>' : ''}</div>
         <div class="element-meta"><span class="element-kind-badge ${el.kind}">${ELEMENT_KIND_LABEL[el.kind] || el.kind}</span>${el.category ? `<span class="element-category">${esc(el.category)}</span>` : ''}</div>
       </div></div>
       <div class="char-desc">${esc(el.description || '')}</div>
@@ -5188,6 +5463,7 @@ function renderElementModal() {
     <label>Categoría<input id="elCategory" type="text" maxlength="80" value="${esc(el?.category || '')}" placeholder="Ej: Exteriores, Armas… escribí para crear una nueva"></label>
     <div id="elCategoryChips" class="chips"></div>
     <label>Descripción<textarea id="elDescription" rows="3">${esc(el?.description || '')}</textarea></label>
+    <label class="check-row"><input type="checkbox" id="elNsfw"${el?.nsfw ? ' checked' : ''}> Contenido NSFW</label>
     ${el ? `
     ${el.photos.length ? '<div class="variant-manager"><label>Portada</label><div id="elCover"></div></div>' : ''}
     <div class="variant-manager">
@@ -5222,6 +5498,12 @@ function renderElementModal() {
   $('#elCategory').addEventListener('input', renderElCategoryChips);
 
   const refreshElement = (updated) => {
+    if (updated.nsfw && !state.config?.nsfwEnabled) {
+      state.elements = state.elements.filter((item) => item.id !== updated.id);
+      closeElementModal();
+      renderElements();
+      return;
+    }
     state.elements[state.elements.findIndex((x) => x.id === updated.id)] = updated;
     renderElementModal();
     renderElements();
@@ -5232,7 +5514,8 @@ function renderElementModal() {
       kind: $('#elKind').value,
       name: $('#elName').value.trim(),
       category: $('#elCategory').value.trim(),
-      description: $('#elDescription').value.trim()
+      description: $('#elDescription').value.trim(),
+      nsfw: $('#elNsfw').checked
     };
     if (!payload.name) return toast('Poné un nombre', 'err');
     try {
@@ -5720,7 +6003,7 @@ async function ensureOverlayFonts(...overlays) {
 
 function automationArtPromptOptions() {
   const prompts = (state.prompts || [])
-    .filter((prompt) => !['audio', 'video'].includes(prompt.mode))
+    .filter((prompt) => !['audio', 'video'].includes(prompt.mode) && !isLoraPrompt(prompt))
     .sort((a, b) => Number(isStylePrompt(b)) - Number(isStylePrompt(a)) || String(a.title).localeCompare(String(b.title)));
   if (!prompts.length) return '<option value="">— no hay prompts guardados —</option>';
   return '<option value="">— elegí un prompt guardado —</option>' + prompts.map((prompt) =>
@@ -9160,6 +9443,8 @@ function fillConfigForm() {
   f.poserPrompt.value = c.poserPrompt || '';
   f.photoshopPath.value = c.photoshopPath || '';
   f.ffmpegPath.value = c.ffmpegPath || '';
+  f.nsfwEnabled.checked = Boolean(c.nsfwEnabled);
+  f.nsfwAdminPassword.value = '';
   f.comfyui_host.value = c.comfyui?.host || '127.0.0.1';
   f.comfyui_port.value = c.comfyui?.port || 8188;
   renderComfyWorkflowsList();
@@ -9267,6 +9552,10 @@ $('#configForm').addEventListener('submit', async (e) => {
     return toast('Las claves de acceso no coinciden', 'err');
   }
   try {
+    const previousNsfwEnabled = Boolean(state.config?.nsfwEnabled);
+    if (previousNsfwEnabled !== f.nsfwEnabled.checked && !f.nsfwAdminPassword.value) {
+      return toast('Ingresá la contraseña administrativa para cambiar el acceso NSFW.', 'err');
+    }
     state.config = await api('/api/config', {
       method: 'PUT',
       body: {
@@ -9300,6 +9589,8 @@ $('#configForm').addEventListener('submit', async (e) => {
         poserPrompt: f.poserPrompt.value.trim(),
         photoshopPath: f.photoshopPath.value.trim(),
         ffmpegPath: f.ffmpegPath.value.trim(),
+        nsfwEnabled: f.nsfwEnabled.checked,
+        nsfwAdminPassword: f.nsfwAdminPassword.value,
         comfyui: {
           host: f.comfyui_host.value.trim(),
           port: Number(f.comfyui_port.value) || 8188
@@ -9311,6 +9602,7 @@ $('#configForm').addEventListener('submit', async (e) => {
     f.accessPassword.value = '';
     f.accessPasswordConfirm.value = '';
     fillConfigForm();
+    if (previousNsfwEnabled !== Boolean(state.config.nsfwEnabled)) location.reload();
     toast('Configuración guardada (queda solo en tu máquina)');
     state.voices = null; // por si cambió la key de ElevenLabs
   } catch (err) {

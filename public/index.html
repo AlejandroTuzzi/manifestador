@@ -655,6 +655,12 @@
     <section id="view-config" class="view">
       <h2>Configuración</h2>
       <form id="configForm" class="config-form">
+        <h3>Contenido</h3>
+        <label class="check-row nsfw-setting"><input type="checkbox" name="nsfwEnabled"> Habilitar Contenido NSFW</label>
+        <label>Contraseña administrativa para cambiar esta opción
+          <span class="key-row"><input type="password" name="nsfwAdminPassword" autocomplete="current-password" placeholder="Obligatoria al activar o desactivar"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button></span>
+        </label>
+        <p class="hint">Cuando está desactivado, los assets, personajes, locaciones, objetos, prompts y LoRA marcados como NSFW no aparecen en bibliotecas ni selectores.</p>
         <h3>API Keys</h3>
         <div class="cfg-grid">
           <label>Gemini (Google AI Studio)
@@ -824,6 +830,7 @@
     <label>Archivos<input id="visualUploadFiles" type="file" accept="image/png,image/jpeg,image/webp" multiple required></label>
     <label>Categoría<input id="visualUploadCategory" type="text" maxlength="80" list="visualCategoryList" placeholder="Ej: Archivo histórico"></label>
     <label>Etiquetas<input id="visualUploadTags" type="text" maxlength="500" placeholder="noir, ciudad, noche"></label>
+    <label class="check-row"><input id="visualUploadNsfw" type="checkbox"> Contenido NSFW</label>
     <p class="hint">Separá múltiples etiquetas con comas. La misma clasificación se aplicará a todos los archivos de esta carga.</p>
     <div id="visualUploadStatus" class="hint"></div>
     <div class="form-modal-actions"><button type="button" class="mini-btn" id="visualUploadCancel">Cancelar</button><button type="submit" class="generate-btn small" id="visualUploadSubmit">Subir</button></div>
@@ -836,6 +843,7 @@
     <div class="modal-head"><div><h3>Categorizar Assets</h3><p class="hint" id="visualClassifyHint">La clasificación se aplicará a la selección.</p></div><button type="button" class="icon-btn" id="visualClassifyClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
     <label>Categoría<input id="visualClassifyCategory" type="text" maxlength="80" list="visualCategoryList" placeholder="Ej: Recursos urbanos"></label>
     <label>Etiquetas<input id="visualClassifyTags" type="text" maxlength="500" placeholder="ciudad, exterior, noche"></label>
+    <label class="check-row"><input id="visualClassifyNsfw" type="checkbox"> Contenido NSFW</label>
     <p class="hint">Guardá ambos campos vacíos si querés quitar la clasificación actual.</p>
     <div class="form-modal-actions"><button type="button" class="mini-btn" id="visualClassifyCancel">Cancelar</button><button type="submit" class="generate-btn small">Guardar clasificación</button></div>
   </form>
@@ -859,6 +867,7 @@
       <label>Sentimientos<input id="audioUploadMoods" type="text" placeholder="mysterious, tense, melancholic"></label>
       <p class="hint">Separá múltiples etiquetas con comas.</p>
     </div>
+    <label class="check-row"><input id="audioUploadNsfw" type="checkbox"> Contenido NSFW</label>
     <div class="form-modal-actions"><button type="button" class="mini-btn" id="audioUploadCancel">Cancelar</button><button type="submit" class="generate-btn small">Subir audio</button></div>
   </form>
 </div>
@@ -995,6 +1004,7 @@
     </div>
     <label>Título<input id="promptEditorName" type="text" maxlength="120" placeholder="Ej: Retrato editorial" required></label>
     <label>Categoría<input id="promptEditorCategory" type="text" maxlength="80" placeholder="General"></label>
+    <label class="check-row"><input id="promptEditorNsfw" type="checkbox"> Contenido NSFW</label>
     <div id="promptEditorCategoryChips" class="chips"></div>
     <label>Tipo
       <select id="promptEditorMode" class="select">
@@ -1007,15 +1017,29 @@
       <div id="promptStylePreview" class="prompt-style-preview">
         <div class="prompt-style-placeholder">Elegí la imagen que define la estética</div>
       </div>
-      <input id="promptStyleUpload" type="file" accept="image/*" hidden>
+      <input id="promptStyleUpload" type="file" accept="image/*,video/mp4,video/quicktime,video/webm" hidden>
       <div class="prompt-style-actions">
-        <button type="button" class="mini-btn" id="promptStyleUploadBtn"><svg class="ic"><use href="#i-upload"/></svg> Subir imagen</button>
+        <button type="button" class="mini-btn" id="promptStyleUploadBtn"><svg class="ic"><use href="#i-upload"/></svg> Subir archivo</button>
         <button type="button" class="mini-btn" id="promptStyleAssetsBtn"><svg class="ic"><use href="#i-image"/></svg> Elegir de Assets</button>
         <button type="button" class="mini-btn" id="promptStyleAnalyzeBtn"><svg class="ic"><use href="#i-spark"/></svg> Escribir estilo con IA</button>
       </div>
       <span id="promptStyleStatus" class="hint">La IA describirá solo la estética, técnica, soporte, luz, color y textura; no copiará el contenido de la escena.</span>
     </section>
-    <label><span id="promptEditorTextLabel">Prompt</span><textarea id="promptEditorText" rows="8" placeholder="Texto del prompt…" required></textarea></label>
+    <section id="promptLoraFields" class="prompt-lora-fields" hidden>
+      <label>Descripción<textarea id="promptLoraDescription" maxlength="2000" placeholder="Qué representa o consigue este LoRA"></textarea></label>
+      <label>Nombre del archivo<input id="promptLoraFileName" type="text" maxlength="260" placeholder="Ej: cinematic_style_v2.safetensors"></label>
+      <div class="prompt-lora-group">
+        <div class="prompt-lora-group-head"><div><strong>Trigger words</strong><span>Se guardan como etiquetas invocables</span></div></div>
+        <div id="promptLoraTriggerChips" class="prompt-lora-trigger-chips"></div>
+        <div class="prompt-lora-add-row"><input id="promptLoraTriggerInput" type="text" maxlength="120" placeholder="Ej: cinematic lighting"><button type="button" class="mini-btn" id="promptLoraAddTrigger"><svg class="ic"><use href="#i-plus"/></svg> Añadir</button></div>
+      </div>
+      <div class="prompt-lora-group">
+        <div class="prompt-lora-group-head"><div><strong>Casos de uso</strong><span>Cada caso tiene un nombre y su prompt completo</span></div><button type="button" class="mini-btn" id="promptLoraAddUseCase"><svg class="ic"><use href="#i-plus"/></svg> Caso de uso</button></div>
+        <div id="promptLoraUseCases" class="prompt-lora-use-cases"></div>
+      </div>
+      <label>Información para un uso correcto<textarea id="promptLoraUsageInfo" maxlength="3000" placeholder="Ej: Weight recomendado 0.7. No funciona bien combinado con otros LoRA."></textarea></label>
+    </section>
+    <label id="promptEditorTextField"><span id="promptEditorTextLabel">Prompt</span><textarea id="promptEditorText" rows="8" placeholder="Texto del prompt…" required></textarea></label>
     <div class="form-modal-actions">
       <button type="button" class="mini-btn" id="promptEditorCancel">Cancelar</button>
       <button type="submit" class="generate-btn small">Guardar prompt</button>

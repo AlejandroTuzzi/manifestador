@@ -85,6 +85,7 @@ const DEFAULT_CONFIG = {
   seedanceMiniModelId: '',
   sunoModelId: 'V5_5',
   customAudioTags: [],
+  nsfwEnabled: false,
   accessPasswordHash: '',
   comfyui: { host: '127.0.0.1', port: 8188 }
 };
@@ -250,7 +251,8 @@ function metadataFromEntry(entry) {
     batch: entry.batch || 1, refs: entry.refs || [], voiceId: entry.voiceId || null,
     voiceName: entry.voiceName || null, cost: entry.cost || 0,
     audioKind: entry.audioKind || (entry.modelId === MUSIC_MODEL.id ? 'music' : entry.type === 'audio' ? 'voice' : null),
-    musicTags: normalizeMusicTags(entry.musicTags)
+    musicTags: normalizeMusicTags(entry.musicTags),
+    nsfw: Boolean(entry.nsfw)
   };
 }
 
@@ -2892,6 +2894,34 @@ function normalizeStyleImageKey(value) {
   return /^(generated|uploads|characters|elements|poser)\/[\w./ -]+$/i.test(key) ? key : '';
 }
 
+function normalizeLoraMediaKey(value) {
+  const key = String(value || '').trim();
+  if (!key || key.includes('..')) return '';
+  return /^(generated|uploads|video|characters|elements|poser)\/[\w./ -]+$/i.test(key) ? key : '';
+}
+
+function normalizeLoraData(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const triggerSource = Array.isArray(source.triggerWords) ? source.triggerWords : String(source.triggerWords || '').split(',');
+  const triggerSeen = new Set();
+  const triggerWords = triggerSource.map((word) => String(word || '').trim().replace(/\s+/g, ' ').slice(0, 120))
+    .filter((word) => word && !triggerSeen.has(word.toLocaleLowerCase('es')) && triggerSeen.add(word.toLocaleLowerCase('es')))
+    .slice(0, 50);
+  const useCases = (Array.isArray(source.useCases) ? source.useCases : []).map((item) => ({
+    name: String(item?.name || '').trim().replace(/\s+/g, ' ').slice(0, 100),
+    prompt: String(item?.prompt || '').trim().slice(0, 4000),
+    mediaKey: normalizeLoraMediaKey(item?.mediaKey)
+  })).filter((item) => item.name && item.prompt).slice(0, 30);
+  return {
+    mediaKey: normalizeLoraMediaKey(source.mediaKey),
+    description: String(source.description || '').trim().slice(0, 2000),
+    fileName: path.basename(String(source.fileName || '').trim()).slice(0, 260),
+    triggerWords,
+    useCases,
+    usageInfo: String(source.usageInfo || '').trim().slice(0, 3000)
+  };
+}
+
 function normalizeAutomationAssetKeys(value) {
   const seen = new Set();
   return (Array.isArray(value) ? value : []).map((item) => String(item || '').trim()).filter((key) => {
@@ -3010,6 +3040,7 @@ const ENTITY_META = {
       const wideMotionPrompt = String(body.heygenWideMotionPrompt ?? body.heygenMotionPrompt ?? '').trim().slice(0, 1000);
       const closeMotionPrompt = String(body.heygenCloseMotionPrompt ?? body.heygenMotionPrompt ?? '').trim().slice(0, 1000);
       return {
+        nsfw: Boolean(body.nsfw),
         name: String(body.name || '').trim() || 'Sin nombre',
         description: String(body.description || ''),
         voiceId: body.voiceId || '',
@@ -3027,6 +3058,7 @@ const ENTITY_META = {
       };
     },
     applyUpdate: (e, body) => {
+      if (body.nsfw !== undefined) e.nsfw = Boolean(body.nsfw);
       if (body.name !== undefined) e.name = String(body.name).trim() || e.name;
       if (body.description !== undefined) e.description = String(body.description);
       if (body.voiceId !== undefined) e.voiceId = body.voiceId;
@@ -3066,12 +3098,14 @@ const ENTITY_META = {
     notFound: 'Locación u objeto no encontrado',
     allowReorder: false,
     buildCreate: (body) => ({
+      nsfw: Boolean(body.nsfw),
       kind: body.kind === 'object' ? 'object' : 'location',
       name: String(body.name || '').trim() || 'Sin nombre',
       category: String(body.category || '').trim().slice(0, 80),
       description: String(body.description || '')
     }),
     applyUpdate: (e, body) => {
+      if (body.nsfw !== undefined) e.nsfw = Boolean(body.nsfw);
       if (body.kind !== undefined) e.kind = body.kind === 'object' ? 'object' : 'location';
       if (body.name !== undefined) e.name = String(body.name).trim() || e.name;
       if (body.category !== undefined) e.category = String(body.category).trim().slice(0, 80);
@@ -3519,15 +3553,15 @@ const server = http.createServer(async (req, res) => {
         audioModels: AUDIO_MODELS,
         audioModel: AUDIO_MODEL,
         musicModel: MUSIC_MODEL,
-        characters,
-        prompts,
+        characters: cfg.nsfwEnabled ? characters : characters.filter((item) => !item.nsfw),
+        prompts: cfg.nsfwEnabled ? prompts : prompts.filter((item) => !item.nsfw),
         promptCategories,
         history: history.slice(0, 200),
         pricing,
         assetLinks,
         series,
         scripts,
-        elements,
+        elements: cfg.nsfwEnabled ? elements : elements.filter((item) => !item.nsfw),
         elementLinks,
         automations: automations.map(automationForClient),
         fonts,
@@ -3799,6 +3833,15 @@ const server = http.createServer(async (req, res) => {
         return send(res, 400, { error: 'La clave debe tener al menos 6 caracteres.' });
       }
       const cfg = await getConfig();
+      const nsfwChanging = body.nsfwEnabled !== undefined && Boolean(body.nsfwEnabled) !== Boolean(cfg.nsfwEnabled);
+      if (nsfwChanging) {
+        if (!cfg.accessPasswordHash) {
+          return send(res, 400, { error: 'Primero configurá una contraseña administrativa en Acceso.' });
+        }
+        if (!verifyPassword(String(body.nsfwAdminPassword || ''), cfg.accessPasswordHash)) {
+          return send(res, 403, { error: 'Contraseña administrativa incorrecta.' });
+        }
+      }
       const next = {
         ...cfg,
         keys: { ...cfg.keys, ...(body.keys || {}) },
@@ -3821,6 +3864,7 @@ const server = http.createServer(async (req, res) => {
         customAudioTags: Array.isArray(body.customAudioTags)
           ? [...new Set(body.customAudioTags.map((tag) => String(tag).trim().replace(/^\[|\]$/g, '')).filter(Boolean))].slice(0, 100)
           : (cfg.customAudioTags || []),
+        nsfwEnabled: body.nsfwEnabled !== undefined ? Boolean(body.nsfwEnabled) : Boolean(cfg.nsfwEnabled),
         accessPasswordHash: body.accessPassword
           ? hashPassword(String(body.accessPassword))
           : cfg.accessPasswordHash
@@ -3857,7 +3901,7 @@ const server = http.createServer(async (req, res) => {
       const key = await saveBuffer(visual.zone, name, buffer);
       const metadata = {
         type: visual.kind, modelId: 'upload', modelName: 'Archivo subido', ts: Date.now(),
-        prompt: '', cost: 0, category, tags, mime: visual.mime
+        prompt: '', cost: 0, category, tags, mime: visual.mime, nsfw: Boolean(body.nsfw)
       };
       await updateJson('asset-metadata.json', {}, (all) => ({ ...all, [key]: metadata }));
       return send(res, 200, { key, name, ...metadata });
@@ -3882,7 +3926,7 @@ const server = http.createServer(async (req, res) => {
       const key = await saveBuffer('audio', name, buffer);
       const metadata = {
         type: 'audio', modelId: 'upload', modelName: 'Archivo subido', ts: Date.now(),
-        prompt: '', cost: 0, audioKind, musicTags
+        prompt: '', cost: 0, audioKind, musicTags, nsfw: Boolean(body.nsfw)
       };
       await updateJson('asset-metadata.json', {}, (all) => ({ ...all, [key]: metadata }));
       return send(res, 200, { key, name, ...metadata });
@@ -3904,7 +3948,9 @@ const server = http.createServer(async (req, res) => {
           item.tags = normalizeVisualTags(item.tags);
         }
       }
-      return send(res, 200, { generated, uploads, audio, video });
+      const cfg = await getConfig();
+      const visible = (items) => cfg.nsfwEnabled ? items : items.filter((item) => !item.nsfw);
+      return send(res, 200, { generated: visible(generated), uploads: visible(uploads), audio: visible(audio), video: visible(video) });
     }
 
     if (p === '/api/asset-links' && req.method === 'POST') {
@@ -5958,7 +6004,8 @@ const server = http.createServer(async (req, res) => {
         updated = {
           ...(all[key] || { type: 'audio', modelId: 'unknown', modelName: 'Audio', ts: Date.now(), cost: 0 }),
           audioKind,
-          musicTags
+          musicTags,
+          ...(body.nsfw !== undefined ? { nsfw: Boolean(body.nsfw) } : {})
         };
         all[key] = updated;
         return all;
@@ -5983,6 +6030,7 @@ const server = http.createServer(async (req, res) => {
             type: key.startsWith('video/') ? 'video' : (previous.type || 'image'),
             category,
             tags,
+            ...(body.nsfw !== undefined ? { nsfw: Boolean(body.nsfw) } : {}),
             metadataUpdatedAt: Date.now()
           };
           all[key] = updated[key];
@@ -6241,17 +6289,26 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/prompts' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const isStyle = body.kind === 'style' || String(body.category || '').trim().toLowerCase() === 'estilos';
+      const requestedCategory = String(body.category || '').trim();
+      const isLora = body.kind === 'lora' || requestedCategory.toLowerCase() === 'loras';
+      const isStyle = !isLora && (body.kind === 'style' || requestedCategory.toLowerCase() === 'estilos');
       const styleImageKey = isStyle ? normalizeStyleImageKey(body.styleImageKey) : '';
       if (isStyle && !styleImageKey) return send(res, 400, { error: 'Los estilos necesitan una imagen de referencia.' });
+      const lora = isLora ? normalizeLoraData({ ...(body.lora || {}), mediaKey: body.lora?.mediaKey || body.styleImageKey }) : null;
+      if (isLora && !lora.fileName) return send(res, 400, { error: 'Los LoRA necesitan el nombre del archivo.' });
+      if (isLora && !lora.triggerWords.length && !lora.useCases.length) {
+        return send(res, 400, { error: 'Los LoRA necesitan al menos una trigger word o un caso de uso.' });
+      }
       const item = {
         id: newId(),
         title: String(body.title || '').trim() || 'Sin título',
-        text: String(body.text || ''),
-        mode: isStyle ? 'image' : (['audio', 'video'].includes(body.mode) ? body.mode : 'image'),
-        category: isStyle ? 'Estilos' : (String(body.category || '').trim() || 'General'),
-        kind: isStyle ? 'style' : 'prompt',
+        text: isLora ? '' : String(body.text || ''),
+        mode: (isStyle || isLora) ? 'image' : (['audio', 'video'].includes(body.mode) ? body.mode : 'image'),
+        category: isLora ? 'LORAS' : isStyle ? 'Estilos' : (requestedCategory || 'General'),
+        kind: isLora ? 'lora' : isStyle ? 'style' : 'prompt',
         styleImageKey,
+        nsfw: Boolean(body.nsfw),
+        ...(isLora ? { lora } : {}),
         ts: Date.now()
       };
       await updateJson('prompts.json', [], (all) => [item, ...all]);
@@ -6262,27 +6319,39 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       let out = null;
       let invalidStyle = false;
+      let invalidLora = '';
       await updateJson('prompts.json', [], (all) => {
         const i = all.findIndex((x) => x.id === id);
         if (i === -1) return all;
         const requestedCategory = body.category !== undefined ? String(body.category).trim() || 'General' : (all[i].category || 'General');
-        const isStyle = body.kind === 'style' || requestedCategory.toLowerCase() === 'estilos';
+        const isLora = body.kind === 'lora' || requestedCategory.toLowerCase() === 'loras';
+        const isStyle = !isLora && (body.kind === 'style' || requestedCategory.toLowerCase() === 'estilos');
         const styleImageKey = isStyle
           ? normalizeStyleImageKey(body.styleImageKey !== undefined ? body.styleImageKey : all[i].styleImageKey)
           : '';
         if (isStyle && !styleImageKey) { invalidStyle = true; return all; }
+        const loraSource = body.lora !== undefined ? body.lora : all[i].lora;
+        const lora = isLora ? normalizeLoraData({ ...(loraSource || {}), mediaKey: loraSource?.mediaKey || body.styleImageKey || all[i].styleImageKey }) : null;
+        if (isLora && !lora.fileName) { invalidLora = 'Los LoRA necesitan el nombre del archivo.'; return all; }
+        if (isLora && !lora.triggerWords.length && !lora.useCases.length) {
+          invalidLora = 'Los LoRA necesitan al menos una trigger word o un caso de uso.'; return all;
+        }
         all[i] = {
           ...all[i],
           title: body.title !== undefined ? String(body.title).trim() || 'Sin título' : all[i].title,
-          text: body.text !== undefined ? String(body.text) : all[i].text,
-          category: isStyle ? 'Estilos' : requestedCategory,
-          mode: isStyle ? 'image' : (body.mode !== undefined ? (['audio', 'video'].includes(body.mode) ? body.mode : 'image') : all[i].mode),
-          kind: isStyle ? 'style' : 'prompt',
-          styleImageKey
+          text: isLora ? '' : (body.text !== undefined ? String(body.text) : all[i].text),
+          category: isLora ? 'LORAS' : isStyle ? 'Estilos' : requestedCategory,
+          mode: (isStyle || isLora) ? 'image' : (body.mode !== undefined ? (['audio', 'video'].includes(body.mode) ? body.mode : 'image') : all[i].mode),
+          kind: isLora ? 'lora' : isStyle ? 'style' : 'prompt',
+          styleImageKey,
+          nsfw: body.nsfw !== undefined ? Boolean(body.nsfw) : Boolean(all[i].nsfw),
+          ...(isLora ? { lora } : {})
         };
+        if (!isLora) delete all[i].lora;
         out = all[i]; return all;
       });
       if (invalidStyle) return send(res, 400, { error: 'Los estilos necesitan una imagen de referencia.' });
+      if (invalidLora) return send(res, 400, { error: invalidLora });
       return out ? send(res, 200, out) : send(res, 404, { error: 'Prompt no encontrado' });
     }
     if (p.startsWith('/api/prompts/') && req.method === 'DELETE') {
@@ -6554,7 +6623,7 @@ const server = http.createServer(async (req, res) => {
       const id = newId();
       const characterDir = path.join(DATA_DIR, 'characters', id);
       const item = {
-        id, name: String(source.name || 'Personaje importado'), description: String(source.description || ''),
+        id, name: String(source.name || 'Personaje importado'), description: String(source.description || ''), nsfw: Boolean(source.nsfw),
         voiceId: String(source.voiceId || ''), voiceName: String(source.voiceName || ''),
         heygen: {
           avatarId: String(source.heygen?.wideAvatarId || source.heygen?.avatarId || ''),
@@ -6632,7 +6701,7 @@ const server = http.createServer(async (req, res) => {
         heygen.image = `heygen/mirror${ext}`;
         entries.push({ name: heygen.image, data: await fs.readFile(await resolveAssetKey(character.heygen.imageKey)) });
       }
-      const manifest = { format: 'manifestador-character', version: 3, exportedAt: Date.now(), character: { name: character.name, description: character.description || '', voiceId: character.voiceId || '', voiceName: character.voiceName || '', photos, variants, heygen } };
+      const manifest = { format: 'manifestador-character', version: 3, exportedAt: Date.now(), character: { name: character.name, description: character.description || '', nsfw: Boolean(character.nsfw), voiceId: character.voiceId || '', voiceName: character.voiceName || '', photos, variants, heygen } };
       entries.unshift({ name: 'character.json', data: Buffer.from(JSON.stringify(manifest, null, 2), 'utf8') });
       const zip = createZip(entries);
       const filename = `${sanitizeName(character.name || 'personaje').replace(/\.[^.]+$/, '')}.manifestador.zip`;
