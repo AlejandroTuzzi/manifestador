@@ -36,6 +36,7 @@
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></symbol>
     <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12"/><path d="M16 8V4H4v12h4"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3L2 21h20L12 3z"/><path d="M12 9v5M12 18h.01"/></symbol>
     <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
     <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol>
     <symbol id="i-cube" viewBox="0 0 24 24"><path d="M21 16V8l-9-5-9 5v8l9 5 9-5z"/><path d="M3.3 7.3L12 12l8.7-4.7"/><path d="M12 22V12"/></symbol>
@@ -657,7 +658,7 @@
       <form id="configForm" class="config-form">
         <h3>Contenido</h3>
         <label class="check-row nsfw-setting"><input type="checkbox" name="nsfwEnabled"> Habilitar Contenido NSFW</label>
-        <label>Contraseña administrativa para cambiar esta opción
+        <label class="config-dark-field">Contraseña administrativa para cambiar esta opción
           <span class="key-row"><input type="password" name="nsfwAdminPassword" autocomplete="current-password" placeholder="Obligatoria al activar o desactivar"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button></span>
         </label>
         <p class="hint">Cuando está desactivado, los assets, personajes, locaciones, objetos, prompts y LoRA marcados como NSFW no aparecen en bibliotecas ni selectores.</p>

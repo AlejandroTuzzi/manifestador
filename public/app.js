@@ -1849,7 +1849,7 @@ function renderPromptsPanel() {
     d.className = `prompt-item${isStylePrompt(pr) ? ' style' : ''}${isLoraPrompt(pr) ? ' lora' : ''}`;
     const mediaKey = isLoraPrompt(pr) ? (pr.lora?.mediaKey || pr.styleImageKey) : pr.styleImageKey;
     d.innerHTML = `${(isStylePrompt(pr) || isLoraPrompt(pr)) && mediaKey ? `<span class="prompt-item-style-thumb">${promptMediaPreviewHtml(mediaKey, '')}${isStylePrompt(pr) ? '<span class="prompt-style-label">ARTISTIC STYLE</span>' : ''}</span>` : ''}<span class="p-mode">${pr.mode === 'audio' ? IC('mic') : pr.mode === 'video' ? IC('film') : IC('image')}</span>
-      <span class="p-title">${esc(pr.category || 'General')} · ${esc(pr.title)}</span>
+      <span class="p-title">${esc(pr.category || 'General')} · ${esc(pr.title)}${nsfwBadgeHtml(pr, 'compact')}</span>
       <span class="p-text">${esc(isLoraPrompt(pr) ? (pr.lora?.description || pr.lora?.fileName || '') : pr.text)}</span>
       ${isLoraPrompt(pr) ? loraInvocationHtml(pr, 'quick-') : ''}
       <button class="icon-btn" title="Eliminar">${IC('x')}</button>`;
@@ -2019,7 +2019,7 @@ async function setPickerTab(src) {
     const kind = src === 'video' ? 'video' : src === 'audio' ? 'audio' : 'image';
     body.innerHTML = items.length
       ? `<div class="picker-grid">${items.map((a) =>
-          `<div class="pick pick-${kind}" data-key="${esc(a.key)}" data-kind="${kind}">${kind === 'video'
+          `<div class="pick pick-${kind}" data-key="${esc(a.key)}" data-kind="${kind}">${nsfwBadgeHtml(a, 'overlay')}${kind === 'video'
             ? `<video src="${fileUrl(a.key)}" muted preload="metadata"></video>`
             : kind === 'audio' ? `<span class="picker-audio">${IC('mic', 'ic ic-lg')}<small>Audio</small></span>`
               : `<img src="${fileUrl(a.key)}" loading="lazy" alt="">`}<div class="p-label">${esc(a.name)}</div></div>`
@@ -2053,7 +2053,7 @@ function renderEntityPicker(cfg) {
           // respeta el encuadre de portada (avatarPos) igual que la tarjeta,
           // solo cuando la miniatura es la foto de portada del personaje/elemento
           const style = it.avatarPos && cover === it.photos?.[0] ? ` style="${avatarStyle(it)}"` : '';
-          return `<div class="pick" data-id="${it.id}">${cover
+          return `<div class="pick" data-id="${it.id}">${nsfwBadgeHtml(it, 'overlay')}${cover
             ? `<img src="${fileUrl(cover)}"${style} loading="lazy" alt="">`
             : `<div class="pick-ph">${IC(cfg.icon, 'ic ic-lg')}</div>`}<div class="p-label">${esc(cfg.label(it))}</div></div>`;
         }).join('')}</div>`
@@ -2573,6 +2573,7 @@ function renderAssetsGrid() {
       card.className = `asset-card${state.selectedAssets.has(a.key) ? ' selected' : ''}`;
       card.innerHTML = `<button class="asset-check" title="Seleccionar">${state.selectedAssets.has(a.key) ? '✓' : ''}</button><button class="asset-series" title="Asociar a serie">${IC('layers')}</button><a class="asset-download" href="${fileUrl(a.key)}" download="${esc(a.name)}" title="Descargar">${IC('download')}</a><button class="asset-info" title="Información">${IC('info')}</button>${a.prompt ? `<button class="asset-copy" title="Copiar prompt">${IC('copy')}</button>` : ''}<button class="asset-delete" title="Borrar">${IC('trash')}</button>`;
       const automationProjectLabel = automationAssetProjectLabel(a);
+      if (a.nsfw) card.insertAdjacentHTML('beforeend', nsfwBadgeHtml(a, 'overlay'));
       if (automationProjectLabel) card.insertAdjacentHTML('beforeend', `<span class="asset-project-badge" title="Generado por el Automatizador · ${esc(automationProjectLabel)}">${IC('spark')} ${esc(automationProjectLabel)}</span>`);
       if (state.assetsZone === 'audio') {
         const kind = a.audioKind || 'voice';
@@ -2617,6 +2618,12 @@ function isLoraPrompt(pr) {
 
 function contentIsVisible(item) {
   return Boolean(state.config?.nsfwEnabled) || !item?.nsfw;
+}
+
+function nsfwBadgeHtml(item, extraClass = '') {
+  return item?.nsfw
+    ? `<span class="nsfw-badge${extraClass ? ` ${extraClass}` : ''}" title="Contenido NSFW" aria-label="Contenido NSFW">${IC('alert')}<span>NSFW</span></span>`
+    : '';
 }
 
 function loraSearchText(pr) {
@@ -3000,7 +3007,7 @@ function renderPromptLibrary() {
     && (!query || (isLoraPrompt(p) ? loraSearchText(p) : `${p.title} ${p.text} ${p.category || ''}`).toLowerCase().includes(query)));
   library.innerHTML = items.length ? items.map((pr) => `
     <article class="prompt-library-card" data-prompt="${pr.id}">
-      <div class="prompt-library-head"><div><span class="prompt-category">${esc(pr.category || 'General')}</span>${pr.nsfw ? '<span class="nsfw-badge">NSFW</span>' : ''}<h3>${esc(pr.title)}</h3></div><span>${pr.mode === 'audio' ? IC('mic') : pr.mode === 'video' ? IC('film') : IC('image')}</span></div>
+      <div class="prompt-library-head"><div><span class="prompt-category">${esc(pr.category || 'General')}</span>${nsfwBadgeHtml(pr)}<h3>${esc(pr.title)}</h3></div><span>${pr.mode === 'audio' ? IC('mic') : pr.mode === 'video' ? IC('film') : IC('image')}</span></div>
       ${isStylePrompt(pr) && pr.styleImageKey ? `<div class="prompt-style-image"><img src="${esc(fileUrl(pr.styleImageKey))}" alt="Referencia de ${esc(pr.title)}"><span class="prompt-style-label">${ARTISTIC_STYLE_LABEL}</span></div>` : ''}
       ${isLoraPrompt(pr) && (pr.lora?.mediaKey || pr.styleImageKey) ? `<div class="prompt-lora-image">${promptMediaPreviewHtml(pr.lora?.mediaKey || pr.styleImageKey, `Archivo ilustrativo de ${pr.title}`)}</div>` : ''}
       ${isLoraPrompt(pr) ? `${pr.lora?.fileName ? `<div class="prompt-lora-file">${esc(pr.lora.fileName)}</div>` : ''}<div class="prompt-lora-description">${esc(pr.lora?.description || '')}</div>${loraInvocationHtml(pr)}${pr.lora?.usageInfo ? `<div class="prompt-lora-usage"><strong>Uso correcto:</strong> ${esc(pr.lora.usageInfo)}</div>` : ''}` : `<div class="prompt-library-text">${esc(pr.text)}</div>`}
@@ -4757,7 +4764,7 @@ function renderCharacters() {
     const inSeries = state.series.filter((s) => (s.characterIds || []).includes(c.id));
     card.innerHTML = `
       <div class="char-top">${avatar}<div>
-        <div class="char-name">${esc(c.name)}${c.nsfw ? ' <span class="nsfw-badge">NSFW</span>' : ''}</div>
+        <div class="char-name">${esc(c.name)}${nsfwBadgeHtml(c)}</div>
         <div class="char-voice">${c.voiceName ? IC('mic') + ' ' + esc(c.voiceName) : '<span style="color:#6f5f8d">sin voz</span>'}</div>
       </div></div>
       <div class="char-desc">${esc(c.description || '')}</div>
@@ -5386,7 +5393,7 @@ function renderElements() {
     const linkedCount = state.elementLinks.filter((link) => link.elementId === el.id).length;
     card.innerHTML = `
       <div class="char-top">${avatar}<div>
-        <div class="char-name">${esc(el.name)}${el.nsfw ? ' <span class="nsfw-badge">NSFW</span>' : ''}</div>
+        <div class="char-name">${esc(el.name)}${nsfwBadgeHtml(el)}</div>
         <div class="element-meta"><span class="element-kind-badge ${el.kind}">${ELEMENT_KIND_LABEL[el.kind] || el.kind}</span>${el.category ? `<span class="element-category">${esc(el.category)}</span>` : ''}</div>
       </div></div>
       <div class="char-desc">${esc(el.description || '')}</div>
