@@ -133,6 +133,7 @@ function renderComfyControls() {
   if (state.comfyuiWorkflows.length && !state.comfyuiWorkflows.some((w) => w.id === state.comfyui.workflowId)) {
     state.comfyui.workflowId = state.comfyuiWorkflows[0].id;
   }
+  $('#comfyLoopToggle').checked = state.comfyui.loop;
   chipRow($('#comfyWorkflowChips'), state.comfyuiWorkflows.map((w) => w.id), state.comfyui.workflowId,
     (id) => { state.comfyui.workflowId = id; renderComfyControls(); refreshComfySlots(); },
     (id) => state.comfyuiWorkflows.find((w) => w.id === id)?.name || id);
@@ -215,6 +216,56 @@ function resolveComfyCustomValues() {
   });
   return { values, postIncrement };
 }
+
+function applyComfyPostIncrement(postIncrement) {
+  if (!postIncrement?.length) return;
+  for (const i of postIncrement) {
+    const st = state.comfyui.customValues[i];
+    st.value = String((Number(st.value) || 0) + 1);
+  }
+  renderComfyCustomValues();
+}
+
+// Arma el body de una generación ComfyUI a partir del estado actual de la
+// pestaña (no depende de state.mode) — lo usan tanto el botón "Manifestar"
+// como la generación ininterrumpida, para no duplicar la lógica.
+function buildComfyGenerationBody(prompt) {
+  const comfyResolved = resolveComfyCustomValues();
+  const body = {
+    workflowId: state.comfyui.workflowId, prompt,
+    aspectRatio: state.comfyui.aspectRatio, resolution: state.comfyui.resolution,
+    refs: { ...state.comfyui.refs }, customValues: comfyResolved.values,
+    genId: `comfyui-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  };
+  return { body, postIncrement: comfyResolved.postIncrement };
+}
+
+function comfyJobLabel() {
+  return `ComfyUI · ${state.comfyuiWorkflows.find((w) => w.id === state.comfyui.workflowId)?.name || 'workflow'} · ${state.comfyui.aspectRatio} · ${state.comfyui.resolution}`;
+}
+
+// Encola la siguiente vuelta de la generación ininterrumpida, con el mismo
+// prompt de la vuelta anterior. Se llama sola cuando termina cada job
+// marcado comfyLoop, mientras state.comfyui.loop siga activo.
+function queueComfyLoopJob(prompt) {
+  const { body, postIncrement } = buildComfyGenerationBody(prompt);
+  applyComfyPostIncrement(postIncrement);
+  const job = {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    status: 'queued', prompt, createdAt: Date.now(),
+    label: `${comfyJobLabel()} · ininterrumpida`,
+    path: '/api/generate/comfyui', body,
+    comfyLoop: true, loopPrompt: prompt
+  };
+  state.generationJobs.unshift(job);
+  renderGenerationQueue();
+  pumpGenerationQueue();
+}
+
+$('#comfyLoopToggle').addEventListener('change', (e) => {
+  state.comfyui.loop = e.target.checked;
+  if (!state.comfyui.loop) toast('Generación ininterrumpida desactivada — se corta después de la que esté corriendo');
+});
 
 function renderComfyRefSlot(slot) {
   const el = $(COMFY_REF_SLOTS[slot].strip);
@@ -1442,14 +1493,14 @@ async function generate() {
   const refsUsed = isImage ? state.refs : isVideo ? state.refs.slice(0, activeRefLimit()) : [];
   const labeledRefs = !supportsMultimediaVideoRefs(model) && !(isVideo && state.video.mode === 'frames') && refsUsed.some((r) => r.label)
     ? await buildLabeledRefs(refsUsed) : {};
-  const comfyResolved = isComfy ? resolveComfyCustomValues() : null;
+  const comfyBuild = isComfy ? buildComfyGenerationBody(prompt) : null;
   const job = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     status: 'queued', prompt, createdAt: Date.now(),
     label: isImage ? `${model.name} · ${state.resolution} · ×${state.batch}`
       : isVideo ? `${model.name} · ${state.video.resolution}${isHeyGen ? '' : ` · ${state.video.duration}s`}`
       : isMusic ? `Suno ${state.music.version}${state.music.instrumental ? ' · instrumental' : ''}`
-      : isComfy ? `ComfyUI · ${state.comfyuiWorkflows.find((w) => w.id === state.comfyui.workflowId)?.name || 'workflow'} · ${state.comfyui.aspectRatio} · ${state.comfyui.resolution}`
+      : isComfy ? comfyJobLabel()
       : `${audioModel?.name || 'ElevenLabs'} · ${voice?.name || pc?.voiceName || 'voz'}`,
     path: isImage ? '/api/generate/image' : isVideo ? '/api/generate/video' : isMusic ? '/api/generate/music' : isComfy ? '/api/generate/comfyui' : '/api/generate/audio',
     body: isImage ? {
@@ -1474,11 +1525,7 @@ async function generate() {
       model: state.music.version, prompt,
       style: state.music.style, title: state.music.title,
       instrumental: state.music.instrumental, customMode: state.music.customMode
-    } : isComfy ? {
-      workflowId: state.comfyui.workflowId, prompt, aspectRatio: state.comfyui.aspectRatio, resolution: state.comfyui.resolution,
-      refs: { ...state.comfyui.refs }, customValues: comfyResolved.values,
-      genId: `comfyui-${Date.now()}-${Math.random().toString(16).slice(2)}`
-    } : {
+    } : isComfy ? comfyBuild.body : {
       text: prompt,
       audioModelId: audioModel?.id || state.audioModelId,
       voiceId,
@@ -1487,16 +1534,11 @@ async function generate() {
     }
   };
   if (isHeyGen) job.body.idempotencyKey = job.id;
+  if (isComfy && state.comfyui.loop) { job.comfyLoop = true; job.loopPrompt = prompt; }
   state.generationJobs.unshift(job);
   renderGenerationQueue();
   pumpGenerationQueue();
-  if (isComfy && comfyResolved.postIncrement.length) {
-    for (const i of comfyResolved.postIncrement) {
-      const st = state.comfyui.customValues[i];
-      st.value = String((Number(st.value) || 0) + 1);
-    }
-    renderComfyCustomValues();
-  }
+  if (isComfy) applyComfyPostIncrement(comfyBuild.postIncrement);
   toast('Generación añadida a la cola');
 }
 
@@ -1538,12 +1580,18 @@ async function runGenerationJob(job) {
   } catch (e) {
     job.status = 'error'; job.error = e.message; job.finishedAt = Date.now();
     toast(e.message, 'err');
+    if (job.comfyLoop && state.comfyui.loop) {
+      state.comfyui.loop = false;
+      $('#comfyLoopToggle').checked = false;
+      toast('Generación ininterrumpida detenida por un error', 'err');
+    }
   } finally {
     if (progressTimer) clearInterval(progressTimer);
     job.progress = null;
     state.activeGenerations -= 1;
     renderGenerationQueue();
     pumpGenerationQueue();
+    if (job.status === 'done' && job.comfyLoop && state.comfyui.loop) queueComfyLoopJob(job.loopPrompt);
   }
 }
 

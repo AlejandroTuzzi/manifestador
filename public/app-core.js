@@ -40,7 +40,8 @@ const state = {
     workflowId: '', aspectRatio: '1:1', resolution: '1K',
     refs: { reference: null, poseControlNet: null, poseIpAdapter: null },
     slots: null,           // último resultado de /api/comfyui/scan
-    customValues: {}        // { [slotIndex]: { mode: 'fixed'|'increment'|'random', value: string } }
+    customValues: {},       // { [slotIndex]: { mode: 'fixed'|'increment'|'random', value: string } }
+    loop: false             // generación ininterrumpida: repite el prompt tras cada generación exitosa
   },
   comfyuiWorkflows: [],      // biblioteca de workflows guardados (nombre, descripción, ruta/url)
   comfyPickerSlot: null,    // slot de state.comfyui.refs que el picker va a llenar (null = flujo genérico)
