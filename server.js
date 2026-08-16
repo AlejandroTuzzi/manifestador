@@ -6577,6 +6577,29 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, deleted: allowed.length, history: cleaned.slice(0, 200) });
     }
 
+    if (p === '/api/assets/duplicate' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const keys = [...new Set(Array.isArray(body.keys) ? body.keys.map(String) : [])]
+        .filter((key) => /^(generated|uploads|audio|video)\//.test(key));
+      if (!keys.length) throw new Error('No se seleccionaron assets.');
+      if (keys.length > 500) throw new Error('Demasiados assets en una sola operación.');
+      const metadata = await readJson('asset-metadata.json', {});
+      const created = [];
+      const newMetadata = {};
+      for (const key of keys) {
+        const buf = await fs.readFile(await resolveAssetKey(key)).catch(() => null);
+        if (!buf) continue;
+        const zone = key.split('/')[0];
+        const ext = path.extname(key);
+        const newKey = await saveBuffer(zone, `${ts()}-copia-${newId()}${ext}`, buf);
+        created.push(newKey);
+        if (metadata[key]) newMetadata[newKey] = { ...metadata[key] };
+      }
+      if (!created.length) throw new Error('No se encontró ninguno de los archivos.');
+      if (Object.keys(newMetadata).length) await updateJson('asset-metadata.json', {}, (meta) => ({ ...meta, ...newMetadata }));
+      return send(res, 200, { keys: created });
+    }
+
     // Imagen espejo local del avatar que ya fue registrado en HeyGen. Nunca se
     // sube ni registra automáticamente: sirve para identificar visualmente el
     // código remoto y para impedir que se elija el personaje equivocado.

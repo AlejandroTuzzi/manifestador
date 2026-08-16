@@ -3161,6 +3161,8 @@ function updateAssetSelection() {
   $('#btnDownloadSelected').disabled = !n;
   $('#classifySelectedCount').textContent = n;
   $('#btnClassifySelected').disabled = !n || state.assetsZone === 'audio';
+  $('#duplicateSelectedCount').textContent = n;
+  $('#btnDuplicateSelected').disabled = !n;
 }
 
 // descarga en lote: pide el ZIP y lo baja vía blob (el POST no puede ser un link)
@@ -3218,9 +3220,23 @@ async function deleteAssets(keys) {
   renderHistory();
   await refreshAssets();
   toast(`${result.deleted} asset${result.deleted === 1 ? '' : 's'} eliminado${result.deleted === 1 ? '' : 's'}`);
+  return true;
+}
+
+async function duplicateAssets(keys) {
+  if (!keys.length) return;
+  try {
+    const result = await api('/api/assets/duplicate', { method: 'POST', body: { keys } });
+    await refreshAssets();
+    toast(`${result.keys.length} asset${result.keys.length === 1 ? '' : 's'} duplicado${result.keys.length === 1 ? '' : 's'}`);
+    return result.keys;
+  } catch (e) {
+    toast(e.message, 'err');
+  }
 }
 
 $('#btnDeleteSelected').addEventListener('click', () => deleteAssets([...state.selectedAssets]));
+$('#btnDuplicateSelected').addEventListener('click', () => duplicateAssets([...state.selectedAssets]));
 $('#btnSeriesSelected').addEventListener('click', () => openSeriesAssign([...state.selectedAssets]));
 $('#btnClassifySelected').addEventListener('click', () => {
   const selected = [...state.selectedAssets];
@@ -3441,6 +3457,7 @@ function openLightbox(key, keys = null) {
     <button class="mini-btn" id="lbSeries">${IC('layers')} Asociar a serie</button>
     ${!isVideo && isReusableImageKey(key) ? `<button class="mini-btn" id="lbCharacter">${IC('user')} Convertir en personaje</button>` : ''}
     ${!isVideo ? `<button class="mini-btn" id="lbPhotoshop">${IC('pen')} Abrir en Photoshop</button>` : ''}
+    ${/^(generated|uploads|audio|video)\//.test(key) ? `<button class="mini-btn" id="lbDuplicate">${IC('copy')} Duplicar</button>` : ''}
     <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} Descargar</a>`;
   $('#lbPhotoshop')?.addEventListener('click', async () => {
     try {
@@ -3466,6 +3483,7 @@ function openLightbox(key, keys = null) {
   });
   $('#lbAssociate')?.addEventListener('click', () => associateAsset(key));
   $('#lbSeries')?.addEventListener('click', () => openSeriesAssign(key));
+  $('#lbDuplicate')?.addEventListener('click', () => duplicateAssets([key]));
 }
 
 function navigateLightbox(delta) {
@@ -3475,6 +3493,21 @@ function navigateLightbox(delta) {
 }
 $('#lbPrev').addEventListener('click', () => navigateLightbox(-1));
 $('#lbNext').addEventListener('click', () => navigateLightbox(1));
+
+// Delete mientras se está viendo un asset en el lightbox: borra el archivo del
+// disco (misma confirmación y limpieza que el borrado en masa de Assets) y
+// pasa al siguiente de la tanda, o cierra si era el único.
+async function deleteLightboxAsset() {
+  const key = state.lightboxKeys[state.lightboxIndex];
+  if (!key) return;
+  const remaining = state.lightboxKeys.filter((k) => k !== key);
+  const deleted = await deleteAssets([key]);
+  if (!deleted) return;
+  if (!remaining.length) { closeLightbox(); return; }
+  state.lightboxKeys = remaining;
+  state.lightboxIndex = Math.min(state.lightboxIndex, remaining.length - 1);
+  openLightbox(state.lightboxKeys[state.lightboxIndex], state.lightboxKeys);
+}
 
 // --- lupita: click en la imagen → 100% centrado en el punto; arrastre para recorrerla ---
 const lbZoomWrap = $('#lbZoomWrap');
@@ -3767,6 +3800,7 @@ $('#lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox'
 document.addEventListener('keydown', (e) => {
   if (!$('#lightbox').hidden && e.key === 'ArrowLeft') { e.preventDefault(); navigateLightbox(-1); return; }
   if (!$('#lightbox').hidden && e.key === 'ArrowRight') { e.preventDefault(); navigateLightbox(1); return; }
+  if (!$('#lightbox').hidden && e.key === 'Delete') { e.preventDefault(); deleteLightboxAsset(); return; }
   if (e.key === 'Escape') {
     closeLightbox(); $('#pickerModal').hidden = true; $('#charModal').hidden = true;
     closeAudioUpload();
