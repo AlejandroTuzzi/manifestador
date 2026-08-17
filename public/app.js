@@ -2314,6 +2314,7 @@ function updateVisualTaxonomyOptions() {
 function openVisualUpload(kind = 'image') {
   state.visualUploadKind = kind === 'video' ? 'video' : 'image';
   $('#visualUploadForm').reset();
+  $('#visualUploadNsfw').checked = Boolean(state.config?.nsfwUploadDefault);
   $('#visualUploadTitle').textContent = state.visualUploadKind === 'video' ? 'Subir videos' : 'Subir imágenes';
   $('#visualUploadHint').textContent = state.visualUploadKind === 'video'
     ? 'MP4, MOV o WebM · hasta 100 MB por archivo.'
@@ -2443,6 +2444,7 @@ $('#visualClassifyForm').addEventListener('submit', async (event) => {
 function openAudioUpload({ automationId = null, kind = 'voice', musicTags = {} } = {}) {
   state.audioUploadAutomationId = automationId;
   $('#audioUploadForm').reset();
+  $('#audioUploadNsfw').checked = Boolean(state.config?.nsfwUploadDefault);
   $('#audioUploadKind').value = ['voice', 'music', 'sound'].includes(kind) ? kind : 'voice';
   $('#audioUploadKind').disabled = Boolean(automationId);
   if (automationId) $('#audioUploadKind').value = 'music';
@@ -9534,6 +9536,7 @@ function fillConfigForm() {
   f.ffmpegPath.value = c.ffmpegPath || '';
   f.nsfwEnabled.checked = Boolean(c.nsfwEnabled);
   f.nsfwAdminPassword.value = '';
+  f.nsfwUploadDefault.checked = Boolean(c.nsfwUploadDefault);
   f.comfyui_host.value = c.comfyui?.host || '127.0.0.1';
   f.comfyui_port.value = c.comfyui?.port || 8188;
   renderComfyWorkflowsList();
@@ -9680,6 +9683,7 @@ $('#configForm').addEventListener('submit', async (e) => {
         ffmpegPath: f.ffmpegPath.value.trim(),
         nsfwEnabled: f.nsfwEnabled.checked,
         nsfwAdminPassword: f.nsfwAdminPassword.value,
+        nsfwUploadDefault: f.nsfwUploadDefault.checked,
         comfyui: {
           host: f.comfyui_host.value.trim(),
           port: Number(f.comfyui_port.value) || 8188

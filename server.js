@@ -86,6 +86,7 @@ const DEFAULT_CONFIG = {
   sunoModelId: 'V5_5',
   customAudioTags: [],
   nsfwEnabled: false,
+  nsfwUploadDefault: false,
   accessPasswordHash: '',
   comfyui: { host: '127.0.0.1', port: 8188 }
 };
@@ -3865,6 +3866,7 @@ const server = http.createServer(async (req, res) => {
           ? [...new Set(body.customAudioTags.map((tag) => String(tag).trim().replace(/^\[|\]$/g, '')).filter(Boolean))].slice(0, 100)
           : (cfg.customAudioTags || []),
         nsfwEnabled: body.nsfwEnabled !== undefined ? Boolean(body.nsfwEnabled) : Boolean(cfg.nsfwEnabled),
+        nsfwUploadDefault: body.nsfwUploadDefault !== undefined ? Boolean(body.nsfwUploadDefault) : Boolean(cfg.nsfwUploadDefault),
         accessPasswordHash: body.accessPassword
           ? hashPassword(String(body.accessPassword))
           : cfg.accessPasswordHash
