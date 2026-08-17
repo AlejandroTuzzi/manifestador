@@ -105,6 +105,7 @@ const state = {
   pendingAssociationKey: null,
   lightboxKeys: [],
   lightboxIndex: 0,
+  lightboxRefRemover: null, // si se abrió desde una tira de referencias: (key) => boolean; Delete quita la ref en vez de borrar el archivo
   generationJobs: [],
   activeGenerations: 0,
   uiTasks: [],             // monitor global de operaciones, visible desde cualquier vista

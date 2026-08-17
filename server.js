@@ -243,7 +243,11 @@ async function recordCost(entry) {
   return recorded;
 }
 
-function metadataFromEntry(entry) {
+// entry.nsfw solo lo mandan las cargas manuales (checkbox del modal de
+// subida); las generaciones (imagen/video/audio/música/ComfyUI) nunca lo
+// setean, así que sin este fallback el toggle "NSFW por defecto" de
+// Configuración jamás se aplicaba a nada generado — quedaba false siempre.
+function metadataFromEntry(entry, cfg) {
   return {
     prompt: entry.prompt || '', type: entry.type, modelId: entry.modelId,
     modelName: entry.modelName, characterId: entry.characterId || null,
@@ -253,7 +257,7 @@ function metadataFromEntry(entry) {
     voiceName: entry.voiceName || null, cost: entry.cost || 0,
     audioKind: entry.audioKind || (entry.modelId === MUSIC_MODEL.id ? 'music' : entry.type === 'audio' ? 'voice' : null),
     musicTags: normalizeMusicTags(entry.musicTags),
-    nsfw: Boolean(entry.nsfw)
+    nsfw: entry.nsfw !== undefined ? Boolean(entry.nsfw) : Boolean(cfg?.nsfwUploadDefault)
   };
 }
 
@@ -280,8 +284,9 @@ function normalizeMusicTags(value = {}) {
 // La metadata de cada asset se persiste al generarlo (acá). /api/assets solo la
 // lee, sin re-derivarla del historial en cada refresco.
 async function recordAssetMetadata(entry) {
+  const cfg = await getConfig();
   await updateJson('asset-metadata.json', {}, (metadata) => {
-    for (const key of entry.outputs || []) metadata[key] = metadataFromEntry(entry);
+    for (const key of entry.outputs || []) metadata[key] = metadataFromEntry(entry, cfg);
     return metadata;
   });
 }
@@ -295,10 +300,11 @@ async function backfilledAssetMetadata(liveKeys = null) {
   const metadata = await readJson('asset-metadata.json', {});
   if (assetMetadataBackfilled) return metadata;
   assetMetadataBackfilled = true;
+  const cfg = await getConfig();
   const history = await readJson('history.json', []);
   const missing = {};
   for (const entry of history) for (const key of entry.outputs || []) {
-    if (!metadata[key]) missing[key] = metadataFromEntry(entry);
+    if (!metadata[key]) missing[key] = metadataFromEntry(entry, cfg);
   }
   const next = { ...missing, ...metadata };
   // huérfanos: metadata de archivos que ya no existen (borrados por fuera)
@@ -3903,7 +3909,8 @@ const server = http.createServer(async (req, res) => {
       const key = await saveBuffer(visual.zone, name, buffer);
       const metadata = {
         type: visual.kind, modelId: 'upload', modelName: 'Archivo subido', ts: Date.now(),
-        prompt: '', cost: 0, category, tags, mime: visual.mime, nsfw: Boolean(body.nsfw)
+        prompt: '', cost: 0, category, tags, mime: visual.mime,
+        nsfw: body.nsfw !== undefined ? Boolean(body.nsfw) : Boolean(cfg.nsfwUploadDefault)
       };
       await updateJson('asset-metadata.json', {}, (all) => ({ ...all, [key]: metadata }));
       return send(res, 200, { key, name, ...metadata });
@@ -3920,7 +3927,8 @@ const server = http.createServer(async (req, res) => {
       const audioKind = sanitizeAudioKind(body.audioKind);
       const musicTags = audioKind === 'music' ? normalizeMusicTags(body.musicTags) : normalizeMusicTags();
       const base = sanitizeName(body.name || 'audio').replace(/\.[^.]+$/, '') || 'audio';
-      const audioDir = resolveDir((await getConfig()).paths.audio);
+      const cfg = await getConfig();
+      const audioDir = resolveDir(cfg.paths.audio);
       await fs.mkdir(audioDir, { recursive: true });
       const existing = new Set(await fs.readdir(audioDir).catch(() => []));
       let name = `${ts()}-${base}${audioFile.extension}`;
@@ -3928,7 +3936,8 @@ const server = http.createServer(async (req, res) => {
       const key = await saveBuffer('audio', name, buffer);
       const metadata = {
         type: 'audio', modelId: 'upload', modelName: 'Archivo subido', ts: Date.now(),
-        prompt: '', cost: 0, audioKind, musicTags, nsfw: Boolean(body.nsfw)
+        prompt: '', cost: 0, audioKind, musicTags,
+        nsfw: body.nsfw !== undefined ? Boolean(body.nsfw) : Boolean(cfg.nsfwUploadDefault)
       };
       await updateJson('asset-metadata.json', {}, (all) => ({ ...all, [key]: metadata }));
       return send(res, 200, { key, name, ...metadata });

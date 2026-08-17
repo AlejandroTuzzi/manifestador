@@ -275,7 +275,9 @@ function renderComfyRefSlot(slot) {
     const d = document.createElement('div');
     d.className = 'ref-thumb ref-image';
     d.innerHTML = `<img src="${fileUrl(key)}" alt=""><button class="rm" title="Quitar">×</button>`;
-    d.querySelector('img').addEventListener('click', () => openLightbox(key));
+    d.querySelector('img').addEventListener('click', () => openLightbox(key, null, {
+      refRemover: () => { state.comfyui.refs[slot] = null; renderComfyRefSlot(slot); return true; }
+    }));
     d.querySelector('.rm').addEventListener('click', () => { state.comfyui.refs[slot] = null; renderComfyRefSlot(slot); });
     el.appendChild(d);
   } else {
@@ -867,8 +869,16 @@ function renderRefs() {
       renderHighlight();
     });
     d.querySelector('.ref-at')?.addEventListener('click', () => insertAtCursor(`${mention} `));
-    d.querySelector('img')?.addEventListener('click', () => openLightbox(r.key, state.refs.filter((ref) => !ref.key.startsWith('asset://')).map((ref) => ref.key)));
-    d.querySelector('video')?.addEventListener('click', () => openLightbox(r.key));
+    const refRemover = (key) => {
+      const idx = state.refs.findIndex((ref) => ref.key === key);
+      if (idx === -1) return false;
+      state.refs.splice(idx, 1);
+      renderRefs();
+      renderHighlight();
+      return true;
+    };
+    d.querySelector('img')?.addEventListener('click', () => openLightbox(r.key, state.refs.filter((ref) => !ref.key.startsWith('asset://')).map((ref) => ref.key), { refRemover }));
+    d.querySelector('video')?.addEventListener('click', () => openLightbox(r.key, null, { refRemover }));
     strip.appendChild(d);
   });
   if (state.refs.length < maxRefs) {
@@ -3428,11 +3438,17 @@ function closeLightbox() {
   const v = $('#lbVideo');
   v.pause();
   v.removeAttribute('src');
+  state.lightboxRefRemover = null;
 }
 
-function openLightbox(key, keys = null) {
+// opts.refRemover: si el lightbox se abre desde una tira de referencias (no
+// desde Assets), pasar (key) => boolean que quite esa key de la selección
+// actual y devuelva true si lo hizo. Mientras esté seteado, Delete quita la
+// referencia en vez de borrar el archivo del disco.
+function openLightbox(key, keys = null, opts = {}) {
   state.lightboxKeys = keys?.length ? [...new Set(keys)] : [key];
   state.lightboxIndex = Math.max(0, state.lightboxKeys.indexOf(key));
+  state.lightboxRefRemover = typeof opts.refRemover === 'function' ? opts.refRemover : null;
   $('#lightbox').hidden = false;
   $('#lbZoomWrap').classList.remove('zoomed');
   const isVideo = isVideoKey(key);
@@ -3491,7 +3507,8 @@ function openLightbox(key, keys = null) {
 function navigateLightbox(delta) {
   if (state.lightboxKeys.length < 2) return;
   state.lightboxIndex = (state.lightboxIndex + delta + state.lightboxKeys.length) % state.lightboxKeys.length;
-  openLightbox(state.lightboxKeys[state.lightboxIndex], state.lightboxKeys);
+  const refRemover = state.lightboxRefRemover;
+  openLightbox(state.lightboxKeys[state.lightboxIndex], state.lightboxKeys, { refRemover });
 }
 $('#lbPrev').addEventListener('click', () => navigateLightbox(-1));
 $('#lbNext').addEventListener('click', () => navigateLightbox(1));
@@ -3802,7 +3819,16 @@ $('#lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox'
 document.addEventListener('keydown', (e) => {
   if (!$('#lightbox').hidden && e.key === 'ArrowLeft') { e.preventDefault(); navigateLightbox(-1); return; }
   if (!$('#lightbox').hidden && e.key === 'ArrowRight') { e.preventDefault(); navigateLightbox(1); return; }
-  if (!$('#lightbox').hidden && e.key === 'Delete') { e.preventDefault(); deleteLightboxAsset(); return; }
+  if (!$('#lightbox').hidden && e.key === 'Delete') {
+    e.preventDefault();
+    if (state.lightboxRefRemover) {
+      const key = state.lightboxKeys[state.lightboxIndex];
+      if (state.lightboxRefRemover(key)) closeLightbox();
+    } else {
+      deleteLightboxAsset();
+    }
+    return;
+  }
   if (e.key === 'Escape') {
     closeLightbox(); $('#pickerModal').hidden = true; $('#charModal').hidden = true;
     closeAudioUpload();
