@@ -359,6 +359,11 @@ h3 { font-size: 15px; }
 .prompt-category { color: var(--pink); border: 1px solid rgba(236,72,153,.3); padding: 3px 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .7px; }
 .prompt-library-text { color: var(--muted); font-size: 12px; line-height: 1.5; white-space: pre-wrap; max-height: 110px; overflow: hidden; }
 .prompt-library-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
+.snippet-lang-badge { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; white-space: nowrap; }
+.snippet-code-block, .code-textarea { font-family: "Cascadia Code", Consolas, "Courier New", monospace; }
+.snippet-code-block { max-height: 220px; overflow: auto; font-size: 12px; margin: 0; }
+.code-textarea { font-size: 12px; }
+pre[class*="language-"] { background: rgba(10,5,18,.65); border: 1px solid var(--border-soft); margin: 0; }
 .prompt-style-image { position: relative; width: 100%; aspect-ratio: 16 / 10; overflow: hidden; border: 1px solid var(--border-soft); background: #09050e; }
 .prompt-style-image img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .prompt-style-label { position: absolute; top: 0; left: 25%; width: 50%; padding: 6px 8px; background: rgba(255,255,255,.72); color: #09050e; text-align: center; font-size: 10px; font-weight: 900; letter-spacing: .7px; }
@@ -1330,6 +1335,8 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .form-modal-box input:focus, .form-modal-box textarea:focus { outline: none; border-color: var(--violet); }
 .form-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .prompt-editor-box { max-width: 680px; }
+.form-modal-box.snippet-view-box { max-width: min(1400px, 95vw); }
+.snippet-code-block-large { max-height: 75vh; font-size: 11px; white-space: pre-wrap; word-break: break-word; overflow-x: hidden; }
 .prompt-editor-box textarea { min-height: 190px; line-height: 1.5; }
 .prompt-editor-box select {
   width: 100%;

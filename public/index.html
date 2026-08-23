@@ -2,6 +2,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Manifestador</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="vendor/prism/prism.css">
 <link rel="icon" href="brand/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="brand/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="brand/favicon-16x16.png">
@@ -21,6 +22,7 @@
     <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M19.1 4.9l-2.2 2.2M7.1 16.9l-2.2 2.2"/></symbol>
     <symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></symbol>
     <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="M9 18l-6-6 6-6"/><path d="M15 6l6 6-6 6"/></symbol>
     <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/></symbol>
     <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.5 15"/></symbol>
@@ -66,6 +68,7 @@
       <button class="nav-btn" data-view="subtitler"><svg class="ic"><use href="#i-clapper"/></svg> Subtitulador</button>
       <button class="nav-btn" data-view="poser"><svg class="ic"><use href="#i-cube"/></svg> Poser</button>
       <button class="nav-btn" data-view="prompts"><svg class="ic"><use href="#i-book"/></svg> Prompts</button>
+      <button class="nav-btn" data-view="snippets"><svg class="ic"><use href="#i-code"/></svg> Snippets</button>
       <button class="nav-btn" data-view="costs"><svg class="ic"><use href="#i-dollar"/></svg> Consumo</button>
       <button class="nav-btn" data-view="config"><svg class="ic"><use href="#i-gear"/></svg> Configuración</button>
     </nav>
@@ -457,6 +460,27 @@
         <button type="button" id="newCategoryCancel" class="icon-btn" title="Cancelar"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
       <div id="promptLibrary" class="prompt-library"></div>
+    </section>
+
+    <section id="view-snippets" class="view">
+      <div class="chars-head"><h2>Snippets de código</h2><button id="btnNewSnippet" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Nuevo snippet</button></div>
+      <div class="prompt-library-tools">
+        <input id="snippetSearch" type="search" placeholder="Buscar snippets…">
+        <select id="snippetLanguageFilter" class="select">
+          <option value="">Todos los lenguajes</option>
+          <option value="javascript">JavaScript / ExtendScript</option>
+          <option value="python">Python</option>
+          <option value="bash">Bash</option>
+        </select>
+        <select id="snippetCategoryFilter" class="select"><option value="">Todas las categorías</option></select>
+        <button type="button" id="btnNewSnippetCategory" class="mini-btn" title="Crear categoría nueva"><svg class="ic"><use href="#i-plus"/></svg> Categoría</button>
+      </div>
+      <div id="newSnippetCategoryRow" class="prompt-library-tools" hidden>
+        <input id="newSnippetCategoryName" type="text" maxlength="80" placeholder="Nombre de la categoría">
+        <button type="button" id="newSnippetCategorySave" class="mini-btn">Crear</button>
+        <button type="button" id="newSnippetCategoryCancel" class="icon-btn" title="Cancelar"><svg class="ic"><use href="#i-x"/></svg></button>
+      </div>
+      <div id="snippetLibrary" class="prompt-library"></div>
     </section>
 
     <!-- ==================== ASSETS ==================== -->
@@ -1055,6 +1079,46 @@
   </form>
 </div>
 
+<div id="snippetEditorModal" class="modal" hidden>
+  <form id="snippetEditorForm" class="modal-box form-modal-box prompt-editor-box">
+    <div class="modal-head">
+      <div><h3 id="snippetEditorTitle">Guardar snippet</h3><p class="hint">Título, lenguaje y código reutilizable</p></div>
+      <button type="button" class="icon-btn" id="snippetEditorClose"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <label>Título<input id="snippetEditorName" type="text" maxlength="120" placeholder="Ej: Loop de opacidad" required></label>
+    <label>Lenguaje
+      <select id="snippetEditorLanguage" class="select">
+        <option value="javascript">JavaScript / ExtendScript</option>
+        <option value="python">Python</option>
+        <option value="bash">Bash</option>
+      </select>
+    </label>
+    <label>Categoría (opcional)<input id="snippetEditorCategory" type="text" maxlength="80" placeholder="Ej: AE Expressions, Instaladores"></label>
+    <div id="snippetEditorCategoryChips" class="chips"></div>
+    <label>Código<textarea id="snippetEditorCode" class="code-textarea" rows="12" placeholder="Pegá el código acá…" required></textarea></label>
+    <label>Notas (opcional)<textarea id="snippetEditorNotes" rows="3" placeholder="Cómo usarlo, dependencias, advertencias…"></textarea></label>
+    <div class="form-modal-actions">
+      <button type="button" class="mini-btn" id="snippetEditorCancel">Cancelar</button>
+      <button type="submit" class="generate-btn small">Guardar snippet</button>
+    </div>
+  </form>
+</div>
+
+<div id="snippetViewModal" class="modal" hidden>
+  <div class="modal-box form-modal-box snippet-view-box">
+    <div class="modal-head">
+      <div><h3 id="snippetViewTitle"></h3><p class="hint" id="snippetViewMeta"></p></div>
+      <button type="button" class="icon-btn" id="snippetViewClose"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <pre class="snippet-code-block snippet-code-block-large"><code id="snippetViewCode"></code></pre>
+    <div id="snippetViewNotes" class="prompt-library-text" hidden></div>
+    <div class="form-modal-actions">
+      <button type="button" class="mini-btn" id="snippetViewCopy"><svg class="ic"><use href="#i-copy"/></svg> Copiar</button>
+      <button type="button" class="mini-btn" id="snippetViewEdit"><svg class="ic"><use href="#i-edit"/></svg> Editar</button>
+    </div>
+  </div>
+</div>
+
 <div id="loginModal" class="modal login-modal" hidden>
   <form id="loginForm" class="modal-box login-box">
     <div class="login-mark"><img src="brand/manifestador-isologo.png" alt=""></div>
@@ -1170,6 +1234,7 @@
 <input type="file" id="characterImportInput" accept=".zip,application/zip" hidden>
 <input type="file" id="scriptImportInput" accept=".json,application/json" hidden>
 
+<script src="vendor/prism/prism.js"></script>
 <script src="app-core.js"></script>
 <script src="app.js"></script>
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>

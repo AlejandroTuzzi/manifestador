@@ -144,6 +144,41 @@ async function updateJson(file, fallback, updater) {
   return task;
 }
 
+// Plumbing común a los recursos "array JSON con id + GET/POST/PUT/DELETE"
+// (workflows de ComfyUI, estilos de overlay, etc.) — cada entidad solo aporta
+// su función de saneo; el read/mutate/write y la búsqueda por id son iguales
+// en todos lados, así que no hace falta repetirlos endpoint por endpoint.
+function crudStore(file, sanitize, { maxItems } = {}) {
+  return {
+    list: () => readJson(file, []),
+    async create(body) {
+      const item = sanitize(body);
+      await updateJson(file, [], (all) => {
+        const next = [item, ...all];
+        return maxItems ? next.slice(0, maxItems) : next;
+      });
+      return item;
+    },
+    async update(id, body) {
+      let updated = null;
+      await updateJson(file, [], (all) => all.map((item) => {
+        if (item.id !== id) return item;
+        updated = sanitize(body, item);
+        return updated;
+      }));
+      return updated;
+    },
+    async remove(id) {
+      let found = false;
+      await updateJson(file, [], (all) => {
+        found = all.some((item) => item.id === id);
+        return all.filter((item) => item.id !== id);
+      });
+      return found;
+    }
+  };
+}
+
 async function getConfig() {
   const cfg = await readJson('config.json', {});
   const savedKeys = cfg.keys || {};
@@ -312,6 +347,15 @@ async function backfilledAssetMetadata(liveKeys = null) {
   const changed = Object.keys(missing).length || (liveKeys && Object.keys(next).length !== Object.keys(metadata).length);
   if (changed) await updateJson('asset-metadata.json', {}, () => next);
   return next;
+}
+
+// entry.nsfw no existe en el historial: el flag vive en asset-metadata.json
+// por asset key, así que una entrada se considera NSFW si alguna de sus
+// salidas lo está — mismo criterio que ya usa /api/assets. Acepta la
+// metadata ya leída (assetMetadata) para no releerla si el caller ya la tiene.
+function filterNsfwHistory(history, cfg, assetMetadata) {
+  if (cfg.nsfwEnabled) return history;
+  return history.filter((entry) => !(entry.outputs || []).some((key) => assetMetadata[key]?.nsfw));
 }
 
 // ZIP mínimo y portable (entradas almacenadas, sin dependencias externas).
@@ -800,6 +844,12 @@ function sanitizeName(name) {
   return String(name || 'archivo').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80);
 }
 
+// Nombre saneado sin extensión, para armar un nombre de archivo nuevo a
+// partir de uno subido por el usuario. Si queda vacío, usa el fallback.
+function baseName(name, fallback = 'archivo') {
+  return sanitizeName(name).replace(/\.[^.]+$/, '') || fallback;
+}
+
 // slug legible a partir de un texto: quita [tags] y su interior, deja pocas
 // palabras. Sirve para nombrar el audio con una pista de lo que dice.
 function textSlug(text) {
@@ -878,8 +928,11 @@ async function detectPhotoshop() {
 async function timedGeneration(fn) {
   const startedAt = Date.now();
   const entry = await fn();
-  entry.durationMs = Date.now() - startedAt;
-  await updateJson('history.json', [], (history) => history.map((h) => (h.id === entry.id ? { ...h, durationMs: entry.durationMs } : h)));
+  const durationMs = Date.now() - startedAt;
+  entry.durationMs = durationMs;
+  const ids = new Set([entry.id, ...(entry.siblingEntries || []).map((sibling) => sibling.id)]);
+  for (const sibling of entry.siblingEntries || []) sibling.durationMs = durationMs;
+  await updateJson('history.json', [], (history) => history.map((h) => (ids.has(h.id) ? { ...h, durationMs } : h)));
   return entry;
 }
 
@@ -1020,19 +1073,19 @@ async function resolveComfyRefUrl(key, tempFiles) {
 async function runComfyUIGeneration(req) {
   const cfg = await getConfig();
   const prompt = String(req.prompt || '').trim();
-  if (!prompt) throw new Error('El prompt está vacío.');
+  if (!prompt) throw badRequest('El prompt está vacío.');
 
   const workflowId = String(req.workflowId || '').trim();
-  if (!workflowId) throw new Error('Elegí un workflow de ComfyUI.');
+  if (!workflowId) throw badRequest('Elegí un workflow de ComfyUI.');
   const workflows = await readJson('comfy-workflows.json', []);
   const wf = workflows.find((w) => w.id === workflowId);
-  if (!wf) throw new Error('El workflow elegido ya no existe. Volvé a elegirlo.');
+  if (!wf) throw badRequest('El workflow elegido ya no existe. Volvé a elegirlo.');
 
   const graph = await loadWorkflow(wf.path);
   const slots = scanWorkflowSlots(graph);
   const hasOutput = slots[TUZZI_TYPES.outputImage] || slots[TUZZI_TYPES.outputVideo] || slots[TUZZI_TYPES.outputAudio];
   if (!hasOutput) {
-    throw new Error('Este workflow no tiene ningún nodo Tuzzi de salida (Imagen/Video/Audio) — Manifestador no podría recibir el resultado.');
+    throw badRequest('Este workflow no tiene ningún nodo Tuzzi de salida (Imagen/Video/Audio) — Manifestador no podría recibir el resultado.');
   }
 
   const refsIn = req.refs && typeof req.refs === 'object' ? req.refs : {};
@@ -1041,7 +1094,7 @@ async function runComfyUIGeneration(req) {
     .filter(([key, required]) => required && !refsIn[key])
     .map(([key]) => refLabels[key] || key);
   if (missingRefs.length) {
-    throw new Error(`Este workflow requiere: ${missingRefs.join(', ')}.`);
+    throw badRequest(`Este workflow requiere: ${missingRefs.join(', ')}.`);
   }
   const tempFiles = [];
   const genId = String(req.genId || '').trim();
@@ -1094,7 +1147,12 @@ async function runComfyUIGeneration(req) {
       await recordAssetMetadata(entry);
       entries.push(entry);
     }
-    return entries[0];
+    // Un workflow con más de un nodo Tuzzi de salida (ej. imagen + audio en
+    // el mismo grafo) genera varias entradas de historial; todas ya quedaron
+    // guardadas arriba, pero el cliente solo recibe una respuesta — viajan
+    // las demás como siblingEntries para que las agregue también.
+    const [primary, ...siblingEntries] = entries;
+    return siblingEntries.length ? { ...primary, siblingEntries } : primary;
   } finally {
     stopProgress?.();
     if (genId) comfyProgress.delete(genId);
@@ -1628,6 +1686,20 @@ function validateUploadedAudio(mime, buffer) {
 // ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
+
+// Un throw new Error(...) normal cae al catch global como 500 — correcto
+// para fallos inesperados, pero semánticamente incorrecto para errores de
+// validación de entrada (prompt vacío, id inexistente, etc.). HttpError deja
+// elegir el status; badRequest() es el atajo para el caso más común (400).
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+function badRequest(message) {
+  return new HttpError(400, message);
+}
 
 function send(res, status, body, headers = {}) {
   const isBuf = Buffer.isBuffer(body);
@@ -2861,6 +2933,21 @@ function sanitizeOverlayPreset(body = {}, previous = {}) {
     updatedAt: Date.now()
   };
 }
+const overlayPresetStore = crudStore('overlay-presets.json', sanitizeOverlayPreset, { maxItems: 200 });
+
+const SNIPPET_LANGUAGES = ['javascript', 'python', 'bash'];
+function sanitizeSnippet(body = {}, previous = {}) {
+  return {
+    id: previous.id || newId(),
+    title: String(body.title ?? previous.title ?? '').trim().slice(0, 120) || 'Sin título',
+    language: SNIPPET_LANGUAGES.includes(body.language) ? body.language : (previous.language || 'javascript'),
+    code: body.code !== undefined ? String(body.code) : (previous.code || ''),
+    notes: String(body.notes ?? previous.notes ?? '').trim().slice(0, 1000),
+    category: String(body.category ?? previous.category ?? '').trim().slice(0, 80),
+    ts: previous.ts || Date.now()
+  };
+}
+const snippetStore = crudStore('snippets.json', sanitizeSnippet);
 
 // Los 5 slots de TuzziCustomValues (val1..val5): cada uno se puede activar y
 // titular por workflow; el valor real que se manda en cada generación lo
@@ -2894,6 +2981,7 @@ function sanitizeComfyWorkflow(body = {}, previous = {}) {
     ts: previous.ts || Date.now()
   };
 }
+const comfyWorkflowStore = crudStore('comfy-workflows.json', sanitizeComfyWorkflow);
 
 function normalizeStyleImageKey(value) {
   const key = String(value || '').trim();
@@ -3138,7 +3226,7 @@ async function saveEntityPhoto(destDir, body) {
     return name;
   }
   const { mime, buffer } = parseDataUrl(body.dataUrl);
-  const name = `${ts()}-${sanitizeName(body.name).replace(/\.[^.]+$/, '')}${extForMime(mime)}`;
+  const name = `${ts()}-${baseName(body.name)}${extForMime(mime)}`;
   await fs.writeFile(path.join(destDir, name), buffer);
   return name;
 }
@@ -3534,7 +3622,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations, fonts, overlayPresets, transitionSounds, subtitler, comfyWorkflows] = await Promise.all([
+      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations, fonts, overlayPresets, transitionSounds, subtitler, comfyWorkflows, assetMetadata, snippets, snippetCategories] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
@@ -3551,8 +3639,12 @@ const server = http.createServer(async (req, res) => {
         readJson('overlay-presets.json', []),
         listTransitionSounds(),
         readJson('subtitler.json', DEFAULT_SUBTITLER_STORE),
-        readJson('comfy-workflows.json', [])
+        readJson('comfy-workflows.json', []),
+        readJson('asset-metadata.json', {}),
+        readJson('snippets.json', []),
+        readJson('snippet-categories.json', [])
       ]);
+      const visibleHistory = filterNsfwHistory(history, cfg, assetMetadata);
       return send(res, 200, {
         config: publicConfig(cfg),
         models: IMAGE_MODELS,
@@ -3563,7 +3655,7 @@ const server = http.createServer(async (req, res) => {
         characters: cfg.nsfwEnabled ? characters : characters.filter((item) => !item.nsfw),
         prompts: cfg.nsfwEnabled ? prompts : prompts.filter((item) => !item.nsfw),
         promptCategories,
-        history: history.slice(0, 200),
+        history: visibleHistory.slice(0, 200),
         pricing,
         assetLinks,
         series,
@@ -3574,6 +3666,8 @@ const server = http.createServer(async (req, res) => {
         fonts,
         overlayPresets,
         comfyWorkflows,
+        snippets,
+        snippetCategories,
         subtitler: subtitlerForClient(subtitler),
         transitionSounds: transitionSounds.map((sound) => ({
           id: sound.id,
@@ -3594,6 +3688,36 @@ const server = http.createServer(async (req, res) => {
         return forMode.includes(name) ? all : { ...all, [mode]: [...forMode, name] };
       });
       return send(res, 200, { promptCategories });
+    }
+
+    // --- snippets de código (JS/ExtendScript, Python, Bash) — separados de
+    // Prompts a propósito: no tienen "Usar" hacia la caja de generación ni
+    // se mezclan en ninguna lista/búsqueda de prompts.
+    if (p === '/api/snippet-categories' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const name = String(body.name || '').trim().slice(0, 80);
+      if (!name) throw badRequest('Falta el nombre de la categoría.');
+      const snippetCategories = await updateJson('snippet-categories.json', [], (all) => (all.includes(name) ? all : [...all, name]));
+      return send(res, 200, { snippetCategories });
+    }
+    if (p === '/api/snippets' && req.method === 'GET') {
+      return send(res, 200, { snippets: await snippetStore.list() });
+    }
+    if (p === '/api/snippets' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      if (!String(body.code || '').trim()) throw badRequest('El snippet no tiene código.');
+      return send(res, 200, await snippetStore.create(body));
+    }
+    if (p.startsWith('/api/snippets/') && req.method === 'PUT') {
+      const id = decodeURIComponent(p.split('/').pop());
+      const body = await readJsonBody(req);
+      const updated = await snippetStore.update(id, body);
+      return updated ? send(res, 200, updated) : send(res, 404, { error: 'Snippet no encontrado.' });
+    }
+    if (p.startsWith('/api/snippets/') && req.method === 'DELETE') {
+      const id = decodeURIComponent(p.split('/').pop());
+      const found = await snippetStore.remove(id);
+      return found ? send(res, 200, { ok: true }) : send(res, 404, { error: 'Snippet no encontrado.' });
     }
 
     if (p === '/api/fonts' && req.method === 'POST') {
@@ -3635,17 +3759,11 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/overlay-presets' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const item = sanitizeOverlayPreset(body);
-      await updateJson('overlay-presets.json', [], (all) => [item, ...all].slice(0, 200));
-      return send(res, 200, item);
+      return send(res, 200, await overlayPresetStore.create(body));
     }
     if (p.startsWith('/api/overlay-presets/') && req.method === 'DELETE') {
       const id = p.split('/').pop();
-      let found = false;
-      await updateJson('overlay-presets.json', [], (all) => {
-        found = all.some((item) => item.id === id);
-        return all.filter((item) => item.id !== id);
-      });
+      const found = await overlayPresetStore.remove(id);
       return found ? send(res, 200, { ok: true }) : send(res, 404, { error: 'Estilo no encontrado.' });
     }
 
@@ -3884,7 +4002,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/upload' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const { mime, buffer } = parseDataUrl(body.dataUrl);
-      const name = `${ts()}-${sanitizeName(body.name).replace(/\.[^.]+$/, '')}${extForMime(mime)}`;
+      const name = `${ts()}-${baseName(body.name)}${extForMime(mime)}`;
       const key = await saveBuffer('uploads', name, buffer);
       return send(res, 200, { key, name });
     }
@@ -3899,7 +4017,7 @@ const server = http.createServer(async (req, res) => {
       const visual = validateUploadedVisual(mime, buffer, body.name);
       const category = sanitizeVisualCategory(body.category);
       const tags = normalizeVisualTags(body.tags);
-      const base = sanitizeName(body.name || visual.kind).replace(/\.[^.]+$/, '') || visual.kind;
+      const base = baseName(body.name || visual.kind, visual.kind);
       const cfg = await getConfig();
       const targetDir = resolveDir(visual.zone === 'video' ? cfg.paths.video : cfg.paths.uploads);
       await fs.mkdir(targetDir, { recursive: true });
@@ -3926,7 +4044,7 @@ const server = http.createServer(async (req, res) => {
       const audioFile = validateUploadedAudio(mime, buffer);
       const audioKind = sanitizeAudioKind(body.audioKind);
       const musicTags = audioKind === 'music' ? normalizeMusicTags(body.musicTags) : normalizeMusicTags();
-      const base = sanitizeName(body.name || 'audio').replace(/\.[^.]+$/, '') || 'audio';
+      const base = baseName(body.name || 'audio', 'audio');
       const cfg = await getConfig();
       const audioDir = resolveDir(cfg.paths.audio);
       await fs.mkdir(audioDir, { recursive: true });
@@ -6129,33 +6247,22 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/comfyui/workflows' && req.method === 'GET') {
-      return send(res, 200, { workflows: await readJson('comfy-workflows.json', []) });
+      return send(res, 200, { workflows: await comfyWorkflowStore.list() });
     }
     if (p === '/api/comfyui/workflows' && req.method === 'POST') {
       const body = await readJsonBody(req);
       if (!String(body.path || '').trim()) return send(res, 400, { error: 'Falta la ruta (URL) del workflow.' });
-      const item = sanitizeComfyWorkflow(body);
-      await updateJson('comfy-workflows.json', [], (all) => [item, ...all]);
-      return send(res, 200, item);
+      return send(res, 200, await comfyWorkflowStore.create(body));
     }
     if (p.startsWith('/api/comfyui/workflows/') && req.method === 'PUT') {
       const id = decodeURIComponent(p.split('/').pop());
       const body = await readJsonBody(req);
-      let updated = null;
-      await updateJson('comfy-workflows.json', [], (all) => all.map((item) => {
-        if (item.id !== id) return item;
-        updated = sanitizeComfyWorkflow(body, item);
-        return updated;
-      }));
+      const updated = await comfyWorkflowStore.update(id, body);
       return updated ? send(res, 200, updated) : send(res, 404, { error: 'Workflow no encontrado.' });
     }
     if (p.startsWith('/api/comfyui/workflows/') && req.method === 'DELETE') {
       const id = decodeURIComponent(p.split('/').pop());
-      let found = false;
-      await updateJson('comfy-workflows.json', [], (all) => {
-        found = all.some((item) => item.id === id);
-        return all.filter((item) => item.id !== id);
-      });
+      const found = await comfyWorkflowStore.remove(id);
       return found ? send(res, 200, { ok: true }) : send(res, 404, { error: 'Workflow no encontrado.' });
     }
 
@@ -6585,7 +6692,10 @@ const server = http.createServer(async (req, res) => {
         }));
         return { ...project, blocks, generatedCharacters, assignments, outputs, config: { ...project.config, music, overlay }, finalOutput, effectOutput };
       }));
-      return send(res, 200, { ok: true, deleted: allowed.length, history: cleaned.slice(0, 200) });
+      const cfgAfterDelete = await getConfig();
+      const metadataAfterDelete = await readJson('asset-metadata.json', {});
+      const visibleCleaned = filterNsfwHistory(cleaned, cfgAfterDelete, metadataAfterDelete);
+      return send(res, 200, { ok: true, deleted: allowed.length, history: visibleCleaned.slice(0, 200) });
     }
 
     if (p === '/api/assets/duplicate' && req.method === 'POST') {
@@ -6738,7 +6848,7 @@ const server = http.createServer(async (req, res) => {
       const manifest = { format: 'manifestador-character', version: 3, exportedAt: Date.now(), character: { name: character.name, description: character.description || '', nsfw: Boolean(character.nsfw), voiceId: character.voiceId || '', voiceName: character.voiceName || '', photos, variants, heygen } };
       entries.unshift({ name: 'character.json', data: Buffer.from(JSON.stringify(manifest, null, 2), 'utf8') });
       const zip = createZip(entries);
-      const filename = `${sanitizeName(character.name || 'personaje').replace(/\.[^.]+$/, '')}.manifestador.zip`;
+      const filename = `${baseName(character.name || 'personaje', 'personaje')}.manifestador.zip`;
       return send(res, 200, zip, { mime: 'application/zip', extra: { 'Content-Disposition': `attachment; filename="${filename}"` } });
     }
 
@@ -6786,7 +6896,7 @@ const server = http.createServer(async (req, res) => {
       }
       entries.unshift({ name: 'guion.txt', data: Buffer.from(lines.join('\n'), 'utf8') });
       const zip = createZip(entries);
-      const filename = `${sanitizeName(script.title || 'guion').replace(/\.[^.]+$/, '')}.assets.zip`;
+      const filename = `${baseName(script.title || 'guion', 'guion')}.assets.zip`;
       return send(res, 200, zip, { mime: 'application/zip', extra: { 'Content-Disposition': `attachment; filename="${filename}"` } });
     }
 
@@ -6861,7 +6971,7 @@ const server = http.createServer(async (req, res) => {
       const { buffer } = parseDataUrl(body.dataUrl);
       const dir = path.join(DATA_DIR, 'poser', 'captures');
       await fs.mkdir(dir, { recursive: true });
-      const name = `${ts()}-${sanitizeName(body.name).replace(/\.[^.]+$/, '')}.png`;
+      const name = `${ts()}-${baseName(body.name)}.png`;
       await fs.writeFile(path.join(dir, name), buffer);
       return send(res, 200, { key: `poser/captures/${name}` });
     }
@@ -6956,7 +7066,7 @@ const server = http.createServer(async (req, res) => {
 
     return send(res, 404, { error: 'Ruta no encontrada' });
   } catch (err) {
-    return send(res, 500, { error: err.message || String(err) });
+    return send(res, err.status || 500, { error: err.message || String(err) });
   }
 });
 
@@ -6964,6 +7074,15 @@ const server = http.createServer(async (req, res) => {
 // el timeout por defecto de Node (5 min) lo cortaría a mitad de camino.
 server.requestTimeout = 30 * 60 * 1000;
 server.headersTimeout = 31 * 60 * 1000;
+
+// sessions y heygenOAuthStates solo se limpian al usarse (logout explícito,
+// o al consumir el state de OAuth); sin esto, entradas vencidas se quedan en
+// memoria para siempre en un proceso de larga vida.
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, expiresAt] of sessions) if (expiresAt <= now) sessions.delete(token);
+  for (const [state, entry] of heygenOAuthStates) if (entry.expiresAt <= now) heygenOAuthStates.delete(state);
+}, 10 * 60 * 1000).unref();
 
 server.listen(PORT, () => {
   console.log('');

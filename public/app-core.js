@@ -14,6 +14,11 @@ const state = {
   fonts: [],              // fuentes tipográficas personalizadas persistentes
   overlayPresets: [],
   promptCategoriesExtra: {},
+  snippets: [],           // biblioteca de código (JS/ExtendScript, Python, Bash) — separada de prompts
+  snippetCategoriesExtra: [],
+  snippetLanguageFilter: '',
+  snippetSearch: '',
+  snippetEditor: null,    // { id } del snippet en edición, o null = nuevo
   assetLinks: [],
   promptQuickCategory: '',
   promptQuickSearch: '',

@@ -21,6 +21,7 @@ $$('.nav-btn').forEach((btn) => {
     if (view === 'elements') renderElements();
     if (view === 'poser') window.poserEnter?.();
     if (view === 'prompts') renderPromptLibrary();
+    if (view === 'snippets') renderSnippetLibrary();
     if (view === 'costs') { state.costProjectId = ''; loadCosts(); }
   });
 });
@@ -878,7 +879,7 @@ function renderRefs() {
       return true;
     };
     d.querySelector('img')?.addEventListener('click', () => openLightbox(r.key, state.refs.filter((ref) => !ref.key.startsWith('asset://')).map((ref) => ref.key), { refRemover }));
-    d.querySelector('video')?.addEventListener('click', () => openLightbox(r.key, null, { refRemover }));
+    d.querySelector('video')?.addEventListener('click', () => openLightbox(r.key, state.refs.filter((ref) => referenceKind(ref) === 'video').map((ref) => ref.key), { refRemover }));
     strip.appendChild(d);
   });
   if (state.refs.length < maxRefs) {
@@ -1577,6 +1578,10 @@ async function runGenerationJob(job) {
   try {
     const entry = await api(job.path, { method: 'POST', body: job.body });
     job.status = 'done'; job.entry = entry; job.finishedAt = Date.now();
+    // Un workflow de ComfyUI con más de un nodo de salida (ej. imagen + audio
+    // en el mismo grafo) devuelve entradas hermanas ya guardadas en el
+    // historial del servidor — hay que sumarlas acá también.
+    if (entry.siblingEntries?.length) state.history.unshift(...entry.siblingEntries);
     state.history.unshift(entry);
     if (entry.type === 'image' && entry.characterId) {
       for (const key of entry.outputs) state.assetLinks.unshift({ key, characterId: entry.characterId, variantId: entry.characterVariantId || null, ts: entry.ts });
@@ -3037,7 +3042,7 @@ $('#promptEditorForm').addEventListener('submit', async (e) => {
   try {
     if (editor.id) {
       const updated = await api(`/api/prompts/${editor.id}`, { method: 'PUT', body });
-      if (updated.nsfw && !state.config?.nsfwEnabled) state.prompts = state.prompts.filter((p) => p.id !== editor.id);
+      if (!contentIsVisible(updated)) state.prompts = state.prompts.filter((p) => p.id !== editor.id);
       else state.prompts[state.prompts.findIndex((p) => p.id === editor.id)] = updated;
       toast('Prompt actualizado');
     } else {
@@ -3114,6 +3119,161 @@ $('#newCategorySave').addEventListener('click', async () => {
   }
 });
 $('#btnNewPrompt').addEventListener('click', () => openPromptEditor({ initialMode: state.mode }));
+
+// ---------------------------------------------------------------------------
+// snippets de código (JS/ExtendScript, Python, Bash) — biblioteca separada de
+// Prompts a propósito: sin botón "Usar" hacia la caja de generación, sin
+// mezclarse en ninguna lista/búsqueda de prompts.
+// ---------------------------------------------------------------------------
+
+const SNIPPET_LANGUAGE_LABELS = { javascript: 'JavaScript / ExtendScript', python: 'Python', bash: 'Bash' };
+
+function snippetCategories() {
+  const fromSnippets = state.snippets.map((s) => s.category).filter(Boolean);
+  return [...new Set([...fromSnippets, ...state.snippetCategoriesExtra])].sort((a, b) => a.localeCompare(b));
+}
+
+function renderSnippetEditorCategories() {
+  chipRow($('#snippetEditorCategoryChips'), snippetCategories(), $('#snippetEditorCategory').value.trim(), (c) => {
+    $('#snippetEditorCategory').value = c;
+    renderSnippetEditorCategories();
+  });
+}
+
+function openSnippetEditor(snippet = null) {
+  state.snippetEditor = { id: snippet?.id || null };
+  $('#snippetEditorTitle').textContent = snippet ? 'Editar snippet' : 'Guardar snippet';
+  $('#snippetEditorName').value = snippet?.title || '';
+  $('#snippetEditorLanguage').value = snippet?.language || 'javascript';
+  $('#snippetEditorCategory').value = snippet?.category || '';
+  $('#snippetEditorCode').value = snippet?.code || '';
+  $('#snippetEditorNotes').value = snippet?.notes || '';
+  renderSnippetEditorCategories();
+  $('#snippetEditorModal').hidden = false;
+  setTimeout(() => $('#snippetEditorName').focus(), 0);
+}
+
+function closeSnippetEditor() {
+  $('#snippetEditorModal').hidden = true;
+  state.snippetEditor = null;
+}
+
+$('#btnNewSnippet').addEventListener('click', () => openSnippetEditor());
+$('#snippetEditorClose').addEventListener('click', closeSnippetEditor);
+$('#snippetEditorCancel').addEventListener('click', closeSnippetEditor);
+$('#snippetEditorModal').addEventListener('click', (e) => { if (e.target.id === 'snippetEditorModal') closeSnippetEditor(); });
+$('#snippetEditorCategory').addEventListener('input', renderSnippetEditorCategories);
+
+function openSnippetView(sn) {
+  $('#snippetViewTitle').textContent = sn.title;
+  $('#snippetViewMeta').textContent = `${SNIPPET_LANGUAGE_LABELS[sn.language] || sn.language}${sn.category ? ` · ${sn.category}` : ''}`;
+  const codeEl = $('#snippetViewCode');
+  codeEl.className = `language-${sn.language}`;
+  codeEl.textContent = sn.code;
+  window.Prism?.highlightElement(codeEl);
+  $('#snippetViewNotes').hidden = !sn.notes;
+  $('#snippetViewNotes').textContent = sn.notes || '';
+  $('#snippetViewCopy').onclick = () => copyPrompt(sn.code);
+  $('#snippetViewEdit').onclick = () => { closeSnippetView(); openSnippetEditor(sn); };
+  $('#snippetViewModal').hidden = false;
+}
+
+function closeSnippetView() {
+  $('#snippetViewModal').hidden = true;
+}
+
+$('#snippetViewClose').addEventListener('click', closeSnippetView);
+$('#snippetViewModal').addEventListener('click', (e) => { if (e.target.id === 'snippetViewModal') closeSnippetView(); });
+
+$('#snippetEditorForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const editor = state.snippetEditor || {};
+  const body = {
+    title: $('#snippetEditorName').value.trim(),
+    language: $('#snippetEditorLanguage').value,
+    category: $('#snippetEditorCategory').value.trim(),
+    code: $('#snippetEditorCode').value,
+    notes: $('#snippetEditorNotes').value.trim()
+  };
+  if (!body.title || !body.code.trim()) return toast('Falta el título o el código', 'err');
+  try {
+    if (editor.id) {
+      const updated = await api(`/api/snippets/${editor.id}`, { method: 'PUT', body });
+      state.snippets[state.snippets.findIndex((s) => s.id === editor.id)] = updated;
+      toast('Snippet actualizado');
+    } else {
+      const item = await api('/api/snippets', { method: 'POST', body });
+      state.snippets.unshift(item);
+      toast('Snippet guardado');
+    }
+    closeSnippetEditor();
+    renderSnippetLibrary();
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+});
+
+function renderSnippetLibrary() {
+  const library = $('#snippetLibrary');
+  if (!library) return;
+  const categories = snippetCategories();
+  const filter = $('#snippetCategoryFilter');
+  const selectedCategory = filter.value;
+  filter.innerHTML = '<option value="">Todas las categorías</option>' + categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  filter.value = selectedCategory;
+  const language = $('#snippetLanguageFilter').value;
+  const query = $('#snippetSearch').value.trim().toLowerCase();
+  const items = state.snippets.filter((s) => (!language || s.language === language)
+    && (!selectedCategory || s.category === selectedCategory)
+    && (!query || `${s.title} ${s.code} ${s.notes} ${s.category || ''}`.toLowerCase().includes(query)));
+  library.innerHTML = items.length ? items.map((sn) => `
+    <article class="prompt-library-card" data-snippet="${sn.id}">
+      <div class="prompt-library-head"><div>${sn.category ? `<span class="prompt-category">${esc(sn.category)}</span>` : ''}<h3>${esc(sn.title)}</h3></div><span class="snippet-lang-badge">${esc(SNIPPET_LANGUAGE_LABELS[sn.language] || sn.language)}</span></div>
+      <pre class="snippet-code-block"><code class="language-${esc(sn.language)}">${esc(sn.code)}</code></pre>
+      ${sn.notes ? `<div class="prompt-library-text">${esc(sn.notes)}</div>` : ''}
+      <div class="prompt-library-actions"><button class="mini-btn" data-sact="view">${IC('eye')} Ver</button><button class="mini-btn" data-sact="copy">${IC('copy')} Copiar</button><button class="mini-btn" data-sact="edit">${IC('edit')} Editar</button><button class="mini-btn danger" data-sact="delete">${IC('trash')}</button></div>
+    </article>`).join('') : '<div class="empty-note">No hay snippets que coincidan.</div>';
+  library.querySelectorAll('[data-snippet]').forEach((card) => {
+    const sn = state.snippets.find((s) => s.id === card.dataset.snippet);
+    card.querySelector('[data-sact="view"]').addEventListener('click', () => openSnippetView(sn));
+    card.querySelector('[data-sact="copy"]').addEventListener('click', () => copyPrompt(sn.code));
+    card.querySelector('[data-sact="edit"]').addEventListener('click', () => openSnippetEditor(sn));
+    card.querySelector('[data-sact="delete"]').addEventListener('click', async () => {
+      if (!confirm(`¿Borrar “${sn.title}”?`)) return;
+      await api(`/api/snippets/${sn.id}`, { method: 'DELETE' });
+      state.snippets = state.snippets.filter((s) => s.id !== sn.id);
+      renderSnippetLibrary();
+    });
+  });
+  window.Prism?.highlightAllUnder(library);
+}
+
+$('#snippetSearch').addEventListener('input', renderSnippetLibrary);
+$('#snippetLanguageFilter').addEventListener('change', renderSnippetLibrary);
+$('#snippetCategoryFilter').addEventListener('change', renderSnippetLibrary);
+
+$('#btnNewSnippetCategory').addEventListener('click', () => {
+  $('#newSnippetCategoryRow').hidden = false;
+  $('#newSnippetCategoryName').value = '';
+  $('#newSnippetCategoryName').focus();
+});
+$('#newSnippetCategoryCancel').addEventListener('click', () => { $('#newSnippetCategoryRow').hidden = true; });
+$('#newSnippetCategoryName').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#newSnippetCategorySave').click(); } });
+$('#newSnippetCategorySave').addEventListener('click', async () => {
+  const name = $('#newSnippetCategoryName').value.trim();
+  if (!name) return toast('Escribí un nombre para la categoría', 'err');
+  try {
+    const { snippetCategories: updated } = await api('/api/snippet-categories', { method: 'POST', body: { name } });
+    state.snippetCategoriesExtra = updated;
+    $('#newSnippetCategoryRow').hidden = true;
+    renderSnippetLibrary();
+    $('#snippetCategoryFilter').value = name;
+    renderSnippetLibrary();
+    toast(`Categoría "${name}" creada`);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+});
 
 function groupAssetSessions(items) {
   const groups = [];
@@ -3528,6 +3688,19 @@ async function deleteLightboxAsset() {
   openLightbox(state.lightboxKeys[state.lightboxIndex], state.lightboxKeys);
 }
 
+// Espejo de deleteLightboxAsset(): si quedan más referencias en la tira,
+// sigue mostrándolas en vez de cerrar el visor de una.
+function removeLightboxRef() {
+  const key = state.lightboxKeys[state.lightboxIndex];
+  if (!key || !state.lightboxRefRemover(key)) return;
+  const remover = state.lightboxRefRemover;
+  const remaining = state.lightboxKeys.filter((k) => k !== key);
+  if (!remaining.length) { closeLightbox(); return; }
+  state.lightboxKeys = remaining;
+  state.lightboxIndex = Math.min(state.lightboxIndex, remaining.length - 1);
+  openLightbox(state.lightboxKeys[state.lightboxIndex], state.lightboxKeys, { refRemover: remover });
+}
+
 // --- lupita: click en la imagen → 100% centrado en el punto; arrastre para recorrerla ---
 const lbZoomWrap = $('#lbZoomWrap');
 let lbPan = null;
@@ -3646,7 +3819,7 @@ function openAssetInfo(asset) {
       toast(error.message, 'err');
     }
   });
-  $('#charModalBody #assetVisualMetadataSave')?.addEventListener('click', async (event) => {
+  $('#assetVisualMetadataSave')?.addEventListener('click', async (event) => {
     event.currentTarget.disabled = true;
     try {
       const result = await api('/api/assets/visual-metadata', {
@@ -3821,12 +3994,8 @@ document.addEventListener('keydown', (e) => {
   if (!$('#lightbox').hidden && e.key === 'ArrowRight') { e.preventDefault(); navigateLightbox(1); return; }
   if (!$('#lightbox').hidden && e.key === 'Delete') {
     e.preventDefault();
-    if (state.lightboxRefRemover) {
-      const key = state.lightboxKeys[state.lightboxIndex];
-      if (state.lightboxRefRemover(key)) closeLightbox();
-    } else {
-      deleteLightboxAsset();
-    }
+    if (state.lightboxRefRemover) removeLightboxRef();
+    else deleteLightboxAsset();
     return;
   }
   if (e.key === 'Escape') {
@@ -3840,6 +4009,8 @@ document.addEventListener('keydown', (e) => {
     $('#elementModal').hidden = true; state.editingElementId = null;
     if (!$('#shotAssetsModal').hidden) closeShotAssets();
     $('#promptEditorModal').hidden = true; state.promptEditor = null;
+    $('#snippetEditorModal').hidden = true; state.snippetEditor = null;
+    $('#snippetViewModal').hidden = true;
   }
 });
 
@@ -5091,7 +5262,7 @@ function renderCharModal() {
         $('#charModal').hidden = true;
         state.editingCharId = null;
         toast('Personaje actualizado');
-        if (updated.nsfw && !state.config?.nsfwEnabled) state.characters = state.characters.filter((item) => item.id !== updated.id);
+        if (!contentIsVisible(updated)) state.characters = state.characters.filter((item) => item.id !== updated.id);
       } else {
         let created = await api('/api/characters', { method: 'POST', body: payload });
         if (state.pendingCharacterAsset) {
@@ -5132,27 +5303,6 @@ function renderCharModal() {
       renderPinned();
     };
     $('#fileInput').click();
-  });
-  $('#assetVisualMetadataSave')?.addEventListener('click', async (event) => {
-    event.currentTarget.disabled = true;
-    try {
-      const result = await api('/api/assets/visual-metadata', {
-        method: 'POST',
-        body: {
-          key: asset.key,
-          category: $('#assetVisualCategory').value.trim(),
-          tags: splitVisualTags($('#assetVisualTags').value),
-          nsfw: $('#assetVisualNsfw').checked
-        }
-      });
-      Object.assign(asset, result.metadata?.[asset.key] || {});
-      await refreshAssets();
-      openAssetInfo(asset);
-      toast('Clasificación visual guardada.');
-    } catch (error) {
-      event.currentTarget.disabled = false;
-      toast(error.message, 'err');
-    }
   });
 
   $('#chHeyGenUpload')?.addEventListener('click', () => $('#chHeyGenFileInput').click());
@@ -5615,7 +5765,7 @@ function renderElementModal() {
   $('#elCategory').addEventListener('input', renderElCategoryChips);
 
   const refreshElement = (updated) => {
-    if (updated.nsfw && !state.config?.nsfwEnabled) {
+    if (!contentIsVisible(updated)) {
       state.elements = state.elements.filter((item) => item.id !== updated.id);
       closeElementModal();
       renderElements();
@@ -9753,6 +9903,8 @@ async function init() {
     state.comfyuiWorkflows = s.comfyWorkflows || [];
     await registerCustomFonts(state.fonts);
     state.promptCategoriesExtra = s.promptCategories || {};
+    state.snippets = s.snippets || [];
+    state.snippetCategoriesExtra = s.snippetCategories || [];
     state.assetLinks = s.assetLinks || [];
     state.series = s.series || [];
     state.scripts = s.scripts || [];
@@ -9788,7 +9940,7 @@ async function init() {
   // deep-links: #audio, #assets, #characters, #series, #subtitler, #prompts, #costs, #config
   const h = location.hash.slice(1);
   if (h === 'audio') setMode('audio');
-  else if (['assets', 'characters', 'series', 'subtitler', 'prompts', 'costs', 'config'].includes(h)) {
+  else if (['assets', 'characters', 'series', 'subtitler', 'prompts', 'snippets', 'costs', 'config'].includes(h)) {
     $(`.nav-btn[data-view="${h}"]`)?.click();
   }
 }
