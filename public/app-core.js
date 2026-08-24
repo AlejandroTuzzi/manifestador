@@ -228,6 +228,7 @@ function inferredApiTask(path, method, body) {
   if (method === 'GET') return null;
   if (path === '/api/generate/image') return { title: 'Generando imagen', detail: 'Esperando al modelo de imagen…', total: Math.max(1, Number(body?.batch) || 1), current: 1 };
   if (path === '/api/generate/video') return { title: 'Generando video', detail: 'Esperando al modelo de video…' };
+  if (path === '/api/generate/video/h3-regenerate-2k') return { title: 'Promoviendo video a 2K', detail: 'Esperando la regeneración de MiniMax H3…' };
   if (path === '/api/generate/audio') return { title: 'Generando voz', detail: 'Esperando a ElevenLabs…' };
   if (path === '/api/generate/music' || /\/music\/generate$/.test(path)) return { title: 'Generando música', detail: 'Esperando a Suno…', total: 2, current: 1 };
   if (path === '/api/translate') return { title: 'Traduciendo texto', detail: 'Esperando la traducción…' };

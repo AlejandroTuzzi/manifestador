@@ -16,6 +16,16 @@ import {
   listVoices, generateSpeech, generateMusic, translateText, searchUpdatedPricing, testService
 } from './lib/providers.js';
 import { mergePricing, imagePrice, videoPrice, audioPrice, musicPrice, translatePrice, scriptPrice } from './lib/pricing.js';
+import { createH3PromotionCoordinator, findExistingH3Promotion } from './lib/h3Promotion.js';
+import {
+  categoryExists,
+  deletePromptCategoryData,
+  deleteSnippetCategoryData,
+  isReservedPromptCategory,
+  renamePromptCategoryData,
+  renameSnippetCategoryData,
+  sameCategory
+} from './lib/categories.js';
 import { renderDynamicTextOverlay } from './lib/remotion-renderer.js';
 import { POSER_BODY_PARTS } from './public/poser-bodyparts.js';
 import {
@@ -46,6 +56,7 @@ const sessions = new Map();
 const automationAssemblyJobs = new Set();
 const heygenOAuthStates = new Map();
 const comfyProgress = new Map(); // genId -> { current, total }
+const h3PromotionCoordinator = createH3PromotionCoordinator();
 
 // Se agrega automáticamente (sin mostrarse en la caja) cuando alguna
 // referencia viene del Poser, para que el modelo la tome solo como pose.
@@ -1439,6 +1450,80 @@ async function runVideoGeneration(req) {
   await updateJson('history.json', [], (history) => [entry, ...history].slice(0, 1000));
   await recordAssetMetadata(entry);
   return entry;
+}
+
+async function promoteMiniMaxH3To2K(historyId) {
+  const sourceId = String(historyId || '');
+  if (!sourceId) throw new Error('Falta la generación MiniMax H3 original.');
+
+  const initialHistory = await readJson('history.json', []);
+  const existing = findExistingH3Promotion(initialHistory, sourceId);
+  if (existing) return existing;
+
+  return h3PromotionCoordinator.run(sourceId, async () => {
+    // Volvemos a leer dentro de la exclusión: otra solicitud pudo completar y
+    // persistir la promoción entre la primera lectura y la toma del bloqueo.
+    const history = await readJson('history.json', []);
+    const persisted = findExistingH3Promotion(history, sourceId);
+    if (persisted) return persisted;
+
+    const source = history.find((entry) => entry.id === sourceId);
+    if (!source || source.modelId !== 'minimax-h3') {
+      const error = new Error('No encuentro la generación MiniMax H3 original.');
+      error.statusCode = 404;
+      throw error;
+    }
+    if (source.resolution !== '768P') {
+      const error = new Error('Sólo se pueden promover a 2K los videos H3 generados en 768P.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const sourceKey = source.outputs?.[0];
+    if (!/^video\//.test(String(sourceKey || ''))) {
+      const error = new Error('Falta el MP4 768P original.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const refs = Array.isArray(source.refs) ? source.refs : [];
+    const refKinds = Array.isArray(source.refKinds) ? source.refKinds : [];
+    const mediaRefs = [];
+    for (const [index, key] of refs.entries()) {
+      if (/^asset:\/\//.test(key)) {
+        const error = new Error('La regeneración 2K no admite referencias remotas de ModelArk.');
+        error.statusCode = 400;
+        throw error;
+      }
+      mediaRefs.push({
+        path: await resolveAssetKey(key), key,
+        kind: ['image', 'video', 'audio'].includes(refKinds[index]) ? refKinds[index]
+          : key.startsWith('video/') ? 'video' : key.startsWith('audio/') ? 'audio' : 'image'
+      });
+    }
+
+    const startedAt = Date.now();
+    const cfg = await getConfig();
+    const regenerated = await regenerateMiniMaxH3Video({
+      apiKey: cfg.keys.minimax, endpoint: cfg.endpoints.minimax,
+      prompt: source.sentPrompt || source.prompt, mediaRefs, mode: source.mode,
+      baseVideoPath: await resolveAssetKey(sourceKey)
+    });
+    const key = await saveBuffer('video', `${ts()}-minimax-h3-2k-${newId()}.mp4`, regenerated.buffer);
+    const outputSeconds = Number(regenerated.usage?.output_seconds) || Number(source.duration) || 0;
+    const inputSeconds = Number(regenerated.usage?.input_seconds) || 0;
+    const inputImages = Number(regenerated.usage?.input_image_count) || mediaRefs.filter((ref) => ref.kind === 'image').length;
+    const cost = 0.05 * (outputSeconds + inputSeconds) + Math.max(0, inputImages - 5) * 0.025;
+    await recordCost({ type: 'video', modelId: 'minimax-h3-regeneration', label: 'MiniMax H3 · 768P → 2K', units: outputSeconds, unitLabel: 'segundo(s)', cost });
+    const entry = {
+      ...source, id: newId(), ts: Date.now(), resolution: '2K', outputs: [key],
+      cost: Number(cost.toFixed(6)), h3TaskId: regenerated.taskId,
+      h3RegeneratedFrom: source.id, errors: [], durationMs: Date.now() - startedAt
+    };
+    await updateJson('history.json', [], (items) => [entry, ...items].slice(0, 1000));
+    await recordAssetMetadata(entry);
+    return entry;
+  });
 }
 
 function captionWordsFromAlignment(alignment) {
@@ -3682,12 +3767,60 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const mode = ['image', 'video', 'audio'].includes(body.mode) ? body.mode : null;
       const name = String(body.name || '').trim().slice(0, 80);
-      if (!mode || !name) throw new Error('Faltan el tipo o el nombre de la categoría.');
+      if (!mode || !name) throw badRequest('Faltan el tipo o el nombre de la categoría.');
+      if (isReservedPromptCategory(name)) throw badRequest(`La categoría “${name}” ya está disponible como categoría del sistema.`);
       const promptCategories = await updateJson('prompt-categories.json', {}, (all) => {
         const forMode = all[mode] || [];
-        return forMode.includes(name) ? all : { ...all, [mode]: [...forMode, name] };
+        return forMode.some((category) => sameCategory(category, name)) ? all : { ...all, [mode]: [...forMode, name] };
       });
       return send(res, 200, { promptCategories });
+    }
+    if (p === '/api/prompt-categories' && req.method === 'PUT') {
+      const body = await readJsonBody(req);
+      const name = String(body.name || '').trim();
+      const newName = String(body.newName || '').trim().slice(0, 80);
+      if (!name || !newName) throw badRequest('Faltan la categoría actual o el nombre nuevo.');
+      if (isReservedPromptCategory(name)) throw badRequest(`La categoría “${name}” es del sistema y no se puede editar.`);
+      if (isReservedPromptCategory(newName)) throw badRequest(`“${newName}” es una categoría reservada del sistema.`);
+      const [storedCategories, prompts] = await Promise.all([
+        readJson('prompt-categories.json', {}),
+        readJson('prompts.json', [])
+      ]);
+      if (!categoryExists(storedCategories, prompts, name)) throw new HttpError(404, 'Categoría de prompts no encontrada.');
+      if (!sameCategory(name, newName) && categoryExists(storedCategories, prompts, newName)) {
+        throw new HttpError(409, `La categoría “${newName}” ya existe.`);
+      }
+      let affected = 0;
+      const [promptCategories] = await Promise.all([
+        updateJson('prompt-categories.json', {}, (current) => renamePromptCategoryData(current, [], name, newName).promptCategories),
+        updateJson('prompts.json', [], (current) => {
+          const transformed = renamePromptCategoryData({}, current, name, newName);
+          affected = transformed.affected;
+          return transformed.prompts;
+        })
+      ]);
+      return send(res, 200, { promptCategories, affected });
+    }
+    if (p === '/api/prompt-categories' && req.method === 'DELETE') {
+      const body = await readJsonBody(req);
+      const name = String(body.name || '').trim();
+      if (!name) throw badRequest('Falta la categoría que querés borrar.');
+      if (isReservedPromptCategory(name)) throw badRequest(`La categoría “${name}” es del sistema y no se puede borrar.`);
+      const [storedCategories, prompts] = await Promise.all([
+        readJson('prompt-categories.json', {}),
+        readJson('prompts.json', [])
+      ]);
+      if (!categoryExists(storedCategories, prompts, name)) throw new HttpError(404, 'Categoría de prompts no encontrada.');
+      let affected = 0;
+      const [promptCategories] = await Promise.all([
+        updateJson('prompt-categories.json', {}, (current) => deletePromptCategoryData(current, [], name).promptCategories),
+        updateJson('prompts.json', [], (current) => {
+          const transformed = deletePromptCategoryData({}, current, name);
+          affected = transformed.affected;
+          return transformed.prompts;
+        })
+      ]);
+      return send(res, 200, { promptCategories, affected });
     }
 
     // --- snippets de código (JS/ExtendScript, Python, Bash) — separados de
@@ -3697,8 +3830,54 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const name = String(body.name || '').trim().slice(0, 80);
       if (!name) throw badRequest('Falta el nombre de la categoría.');
-      const snippetCategories = await updateJson('snippet-categories.json', [], (all) => (all.includes(name) ? all : [...all, name]));
+      const snippetCategories = await updateJson('snippet-categories.json', [], (all) => (
+        all.some((category) => sameCategory(category, name)) ? all : [...all, name]
+      ));
       return send(res, 200, { snippetCategories });
+    }
+    if (p === '/api/snippet-categories' && req.method === 'PUT') {
+      const body = await readJsonBody(req);
+      const name = String(body.name || '').trim();
+      const newName = String(body.newName || '').trim().slice(0, 80);
+      if (!name || !newName) throw badRequest('Faltan la categoría actual o el nombre nuevo.');
+      const [storedCategories, snippets] = await Promise.all([
+        readJson('snippet-categories.json', []),
+        readJson('snippets.json', [])
+      ]);
+      if (!categoryExists(storedCategories, snippets, name)) throw new HttpError(404, 'Categoría de snippets no encontrada.');
+      if (!sameCategory(name, newName) && categoryExists(storedCategories, snippets, newName)) {
+        throw new HttpError(409, `La categoría “${newName}” ya existe.`);
+      }
+      let affected = 0;
+      const [snippetCategories] = await Promise.all([
+        updateJson('snippet-categories.json', [], (current) => renameSnippetCategoryData(current, [], name, newName).snippetCategories),
+        updateJson('snippets.json', [], (current) => {
+          const transformed = renameSnippetCategoryData([], current, name, newName);
+          affected = transformed.affected;
+          return transformed.snippets;
+        })
+      ]);
+      return send(res, 200, { snippetCategories, affected });
+    }
+    if (p === '/api/snippet-categories' && req.method === 'DELETE') {
+      const body = await readJsonBody(req);
+      const name = String(body.name || '').trim();
+      if (!name) throw badRequest('Falta la categoría que querés borrar.');
+      const [storedCategories, snippets] = await Promise.all([
+        readJson('snippet-categories.json', []),
+        readJson('snippets.json', [])
+      ]);
+      if (!categoryExists(storedCategories, snippets, name)) throw new HttpError(404, 'Categoría de snippets no encontrada.');
+      let affected = 0;
+      const [snippetCategories] = await Promise.all([
+        updateJson('snippet-categories.json', [], (current) => deleteSnippetCategoryData(current, [], name).snippetCategories),
+        updateJson('snippets.json', [], (current) => {
+          const transformed = deleteSnippetCategoryData([], current, name);
+          affected = transformed.affected;
+          return transformed.snippets;
+        })
+      ]);
+      return send(res, 200, { snippetCategories, affected });
     }
     if (p === '/api/snippets' && req.method === 'GET') {
       return send(res, 200, { snippets: await snippetStore.list() });
@@ -6182,45 +6361,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/generate/video/h3-regenerate-2k' && req.method === 'POST') {
-      const startedAt = Date.now();
       const body = await readJsonBody(req);
-      const history = await readJson('history.json', []);
-      const source = history.find((entry) => entry.id === String(body.historyId || ''));
-      if (!source || source.modelId !== 'minimax-h3') return send(res, 404, { error: 'No encuentro la generación MiniMax H3 original.' });
-      if (source.resolution !== '768P') return send(res, 400, { error: 'Sólo se pueden promover a 2K los videos H3 generados en 768P.' });
-      const sourceKey = source.outputs?.[0];
-      if (!/^video\//.test(String(sourceKey || ''))) return send(res, 400, { error: 'Falta el MP4 768P original.' });
-      const refs = Array.isArray(source.refs) ? source.refs : [];
-      const refKinds = Array.isArray(source.refKinds) ? source.refKinds : [];
-      const mediaRefs = [];
-      for (const [index, key] of refs.entries()) {
-        if (/^asset:\/\//.test(key)) return send(res, 400, { error: 'La regeneración 2K no admite referencias remotas de ModelArk.' });
-        mediaRefs.push({
-          path: await resolveAssetKey(key), key,
-          kind: ['image', 'video', 'audio'].includes(refKinds[index]) ? refKinds[index]
-            : key.startsWith('video/') ? 'video' : key.startsWith('audio/') ? 'audio' : 'image'
-        });
+      try {
+        return send(res, 200, await promoteMiniMaxH3To2K(body.historyId));
+      } catch (error) {
+        return send(res, Number(error?.statusCode) || 500, { error: error.message });
       }
-      const cfg = await getConfig();
-      const regenerated = await regenerateMiniMaxH3Video({
-        apiKey: cfg.keys.minimax, endpoint: cfg.endpoints.minimax,
-        prompt: source.sentPrompt || source.prompt, mediaRefs, mode: source.mode,
-        baseVideoPath: await resolveAssetKey(sourceKey)
-      });
-      const key = await saveBuffer('video', `${ts()}-minimax-h3-2k-${newId()}.mp4`, regenerated.buffer);
-      const outputSeconds = Number(regenerated.usage?.output_seconds) || Number(source.duration) || 0;
-      const inputSeconds = Number(regenerated.usage?.input_seconds) || 0;
-      const inputImages = Number(regenerated.usage?.input_image_count) || mediaRefs.filter((ref) => ref.kind === 'image').length;
-      const cost = 0.05 * (outputSeconds + inputSeconds) + Math.max(0, inputImages - 5) * 0.025;
-      await recordCost({ type: 'video', modelId: 'minimax-h3-regeneration', label: 'MiniMax H3 · 768P → 2K', units: outputSeconds, unitLabel: 'segundo(s)', cost });
-      const entry = {
-        ...source, id: newId(), ts: Date.now(), resolution: '2K', outputs: [key],
-        cost: Number(cost.toFixed(6)), h3TaskId: regenerated.taskId,
-        h3RegeneratedFrom: source.id, errors: [], durationMs: Date.now() - startedAt
-      };
-      await updateJson('history.json', [], (items) => [entry, ...items].slice(0, 1000));
-      await recordAssetMetadata(entry);
-      return send(res, 200, entry);
     }
 
     if (p === '/api/generate/audio' && req.method === 'POST') {

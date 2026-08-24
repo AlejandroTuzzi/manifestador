@@ -959,7 +959,8 @@ pre[class*="language-"] { background: rgba(10,5,18,.65); border: 1px solid var(-
   cursor: pointer; transition: all 0.12s;
   white-space: nowrap;
 }
-.mini-btn:hover { border-color: var(--pink); color: white; background: rgba(236, 72, 153, 0.12); }
+.mini-btn:not(:disabled):hover { border-color: var(--pink); color: white; background: rgba(236, 72, 153, 0.12); }
+.mini-btn:disabled { opacity: 0.48; cursor: wait; }
 .mini-btn.danger:hover { border-color: #fb7185; background: rgba(251, 113, 133, 0.1); color: #fda4af; }
 
 /* Los controles nativos mantienen accesibilidad y atajos del navegador, pero
@@ -1823,7 +1824,7 @@ body.asset-player-open main { padding-bottom: 132px; }
 
 /* ---------- Ver guion (lectura) ---------- */
 .mini-btn.accent { border-color: var(--pink); color: white; background: rgba(236, 72, 153, 0.14); }
-.mini-btn.accent:hover { background: rgba(236, 72, 153, 0.28); }
+.mini-btn.accent:not(:disabled):hover { background: rgba(236, 72, 153, 0.28); }
 .vg-summary { color: var(--muted); margin: 0 0 12px; max-width: 720px; }
 .vg-cast { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
 .vg-cast-chip { display: inline-flex; align-items: center; gap: 6px; cursor: default; }

@@ -1591,9 +1591,13 @@ async function runGenerationJob(job) {
     renderHistory();
     const costTxt = entry.cost ? ` — $${entry.cost.toFixed(3)}` : '';
     if (entry.errors?.length) toast(`Listo, pero ${entry.errors.length} del lote fallaron: ${entry.errors[0]}`, 'err');
+    else if (job.kind === 'h3-promotion') toast(`Versión MiniMax H3 2K terminada${costTxt}`);
     else toast(`Manifestado${costTxt}`);
   } catch (e) {
     job.status = 'error'; job.error = e.message; job.finishedAt = Date.now();
+    if (job.kind === 'h3-promotion' && state.currentEntry?.id === job.body?.historyId) {
+      showEntry(state.currentEntry);
+    }
     toast(e.message, 'err');
     if (job.comfyLoop && state.comfyui.loop) {
       state.comfyui.loop = false;
@@ -1642,6 +1646,69 @@ promptBox.addEventListener('keydown', (e) => {
 // vista grande + historial
 // ---------------------------------------------------------------------------
 
+function existingH3Promotion(sourceId) {
+  return state.history.find((item) => (
+    item.modelId === 'minimax-h3'
+    && item.resolution === '2K'
+    && item.h3RegeneratedFrom === sourceId
+  ));
+}
+
+function activeH3PromotionJob(sourceId) {
+  return state.generationJobs.find((job) => (
+    job.kind === 'h3-promotion'
+    && job.body?.historyId === sourceId
+    && ['queued', 'running'].includes(job.status)
+  ));
+}
+
+function h3PromotionAction(entry) {
+  if (entry.modelId !== 'minimax-h3' || entry.resolution !== '768P') return '';
+  if (existingH3Promotion(entry.id)) {
+    return `<button class="mini-btn accent" data-act="h3-2k-view">${IC('spark')} Ver versión 2K</button>`;
+  }
+  if (activeH3PromotionJob(entry.id)) {
+    return `<button class="mini-btn accent" disabled>${IC('spark')} Promoción a 2K en curso…</button>`;
+  }
+  return `<button class="mini-btn accent" data-act="h3-2k">${IC('spark')} Promover a 2K</button>`;
+}
+
+function queueH3Promotion(entry) {
+  const existing = existingH3Promotion(entry.id);
+  if (existing) {
+    showEntry(existing);
+    toast('La versión MiniMax H3 2K ya existe');
+    return;
+  }
+  if (activeH3PromotionJob(entry.id)) {
+    toast('La promoción a 2K ya está en la cola');
+    return;
+  }
+  if (!confirm('¿Crear la versión 2K aprobada de este video H3? La regeneración cuesta USD 0,05 por segundo, más las referencias facturables.')) return;
+  // La confirmación puede dejar pasar tiempo suficiente para que otra vista o
+  // acción haya encolado la misma promoción; comprobamos una vez más.
+  if (existingH3Promotion(entry.id) || activeH3PromotionJob(entry.id)) {
+    toast('La promoción a 2K ya está en la cola');
+    return;
+  }
+
+  const jobId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  state.generationJobs.unshift({
+    id: jobId,
+    kind: 'h3-promotion',
+    status: 'queued',
+    prompt: entry.prompt,
+    createdAt: Date.now(),
+    label: `MiniMax H3 · ${entry.resolution} → 2K`,
+    path: '/api/generate/video/h3-regenerate-2k',
+    body: { historyId: entry.id, idempotencyKey: jobId }
+  });
+  renderGenerationQueue();
+  pumpGenerationQueue();
+  showEntry(entry);
+  toast('Promoción a 2K añadida a la cola');
+}
+
 function showEntry(entry, outputIdx = 0) {
   state.currentEntry = entry;
   state.currentOutput = outputIdx;
@@ -1668,7 +1735,7 @@ function showEntry(entry, outputIdx = 0) {
       <div class="bv-actions">
         <button class="mini-btn" data-act="copy">${IC('copy')} Copiar prompt</button>
         <button class="mini-btn" data-act="regen">${IC('refresh')} Regenerar</button>
-        ${entry.modelId === 'minimax-h3' && entry.resolution === '768P' ? `<button class="mini-btn accent" data-act="h3-2k">${IC('spark')} Promover a 2K</button>` : ''}
+        ${h3PromotionAction(entry)}
         <button class="mini-btn" data-act="edit">${IC('edit')} Editar envío</button>
         <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} Descargar</a>
       </div>`;
@@ -1712,18 +1779,10 @@ function showEntry(entry, outputIdx = 0) {
       if (act === 'edit') editEntry(entry);
       if (act === 'ref') { addRef(entry.outputs[state.currentOutput]); toast('Agregada como referencia'); }
       if (act === 'character') openCharModal(null, entry.outputs[state.currentOutput]);
-      if (act === 'h3-2k') {
-        if (!confirm('¿Crear la versión 2K aprobada de este video H3? La regeneración cuesta USD 0,05 por segundo, más las referencias facturables.')) return;
-        b.disabled = true;
-        try {
-          const upgraded = await api('/api/generate/video/h3-regenerate-2k', { method: 'POST', body: { historyId: entry.id } });
-          state.history.unshift(upgraded);
-          showEntry(upgraded);
-          toast('Versión MiniMax H3 2K terminada');
-        } catch (error) {
-          b.disabled = false;
-          toast(error.message, 'err');
-        }
+      if (act === 'h3-2k') queueH3Promotion(entry);
+      if (act === 'h3-2k-view') {
+        const upgraded = existingH3Promotion(entry.id);
+        if (upgraded) showEntry(upgraded);
       }
     });
   });
@@ -2781,6 +2840,14 @@ function promptCategories(mode = null) {
   return [...new Set([...builtIn, ...fromPrompts, ...extra])].sort((a, b) => a.localeCompare(b));
 }
 
+function sameCategoryName(left, right) {
+  return String(left || '').trim().toLocaleLowerCase('es') === String(right || '').trim().toLocaleLowerCase('es');
+}
+
+function isManagedPromptCategory(name) {
+  return Boolean(name) && !['General', STYLE_CATEGORY, LORA_CATEGORY].some((reserved) => sameCategoryName(reserved, name));
+}
+
 function promptEditorIsStyle() {
   return String($('#promptEditorCategory').value || '').trim().toLowerCase() === STYLE_CATEGORY.toLowerCase();
 }
@@ -3067,6 +3134,7 @@ function renderPromptLibrary() {
   const selected = filter.value;
   filter.innerHTML = '<option value="">Todas las categorías</option>' + categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
   filter.value = selected;
+  updatePromptCategoryActions();
   const query = $('#promptSearch').value.trim().toLowerCase();
   const items = state.prompts.filter((p) => contentIsVisible(p) && (!filter.value || (p.category || 'General') === filter.value)
     && (!query || (isLoraPrompt(p) ? loraSearchText(p) : `${p.title} ${p.text} ${p.category || ''}`).toLowerCase().includes(query)));
@@ -3095,25 +3163,90 @@ function renderPromptLibrary() {
 $('#promptSearch').addEventListener('input', renderPromptLibrary);
 $('#promptCategoryFilter').addEventListener('change', renderPromptLibrary);
 
-$('#btnNewPromptCategory').addEventListener('click', () => {
-  $('#newCategoryRow').hidden = false;
-  $('#newCategoryName').value = '';
+function updatePromptCategoryActions() {
+  const editable = isManagedPromptCategory($('#promptCategoryFilter').value);
+  $('#btnEditPromptCategory').hidden = !editable;
+  $('#btnDeletePromptCategory').hidden = !editable;
+}
+
+function openPromptCategoryForm(category = '') {
+  const row = $('#newCategoryRow');
+  const editing = Boolean(category);
+  row.dataset.action = editing ? 'edit' : 'create';
+  row.dataset.originalName = category;
+  row.hidden = false;
+  $('#newCategoryMode').hidden = editing;
+  $('#newCategoryName').value = category;
+  $('#newCategorySave').textContent = editing ? 'Guardar cambios' : 'Crear';
   $('#newCategoryName').focus();
+  $('#newCategoryName').select();
+}
+
+function closePromptCategoryForm() {
+  const row = $('#newCategoryRow');
+  row.hidden = true;
+  row.dataset.action = '';
+  row.dataset.originalName = '';
+  $('#newCategoryMode').hidden = false;
+  $('#newCategorySave').textContent = 'Crear';
+}
+
+function updateOpenPromptCategory(oldName, newName) {
+  state.prompts = state.prompts.map((prompt) => (
+    sameCategoryName(prompt.category || 'General', oldName) ? { ...prompt, category: newName } : prompt
+  ));
+  if (sameCategoryName(state.promptQuickCategory, oldName)) state.promptQuickCategory = newName === 'General' ? '' : newName;
+  if (!$('#promptEditorModal').hidden && sameCategoryName($('#promptEditorCategory').value, oldName)) {
+    $('#promptEditorCategory').value = newName;
+    renderPromptEditorCategories();
+  }
+}
+
+$('#btnNewPromptCategory').addEventListener('click', () => openPromptCategoryForm());
+$('#btnEditPromptCategory').addEventListener('click', () => {
+  const category = $('#promptCategoryFilter').value;
+  if (isManagedPromptCategory(category)) openPromptCategoryForm(category);
 });
-$('#newCategoryCancel').addEventListener('click', () => { $('#newCategoryRow').hidden = true; });
+$('#btnDeletePromptCategory').addEventListener('click', async () => {
+  const name = $('#promptCategoryFilter').value;
+  if (!isManagedPromptCategory(name)) return;
+  if (!confirm(`¿Borrar la categoría “${name}”?\n\nLos prompts que la usan se conservarán y pasarán a General.`)) return;
+  try {
+    const { promptCategories: updated, affected = 0 } = await api('/api/prompt-categories', { method: 'DELETE', body: { name } });
+    state.promptCategoriesExtra = updated;
+    updateOpenPromptCategory(name, 'General');
+    $('#promptCategoryFilter').value = '';
+    closePromptCategoryForm();
+    renderPromptLibrary();
+    renderPromptsPanel();
+    toast(`Categoría “${name}” borrada${affected ? ` · ${affected} prompt${affected === 1 ? '' : 's'} movido${affected === 1 ? '' : 's'} a General` : ''}`);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+});
+$('#newCategoryCancel').addEventListener('click', closePromptCategoryForm);
 $('#newCategoryName').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#newCategorySave').click(); } });
 $('#newCategorySave').addEventListener('click', async () => {
+  const row = $('#newCategoryRow');
+  const editing = row.dataset.action === 'edit';
+  const originalName = row.dataset.originalName || '';
   const mode = $('#newCategoryMode').value;
   const name = $('#newCategoryName').value.trim();
   if (!name) return toast('Escribí un nombre para la categoría', 'err');
   try {
-    const { promptCategories: updated } = await api('/api/prompt-categories', { method: 'POST', body: { mode, name } });
+    const { promptCategories: updated, affected = 0 } = editing
+      ? await api('/api/prompt-categories', { method: 'PUT', body: { name: originalName, newName: name } })
+      : await api('/api/prompt-categories', { method: 'POST', body: { mode, name } });
     state.promptCategoriesExtra = updated;
-    $('#newCategoryRow').hidden = true;
+    if (editing) updateOpenPromptCategory(originalName, name);
+    closePromptCategoryForm();
     renderPromptLibrary();
     $('#promptCategoryFilter').value = name;
     renderPromptLibrary();
-    toast(`Categoría "${name}" creada`);
+    renderPromptsPanel();
+    toast(editing
+      ? `Categoría actualizada${affected ? ` en ${affected} prompt${affected === 1 ? '' : 's'}` : ''}`
+      : `Categoría "${name}" creada`);
   } catch (err) {
     toast(err.message, 'err');
   }
@@ -3221,6 +3354,7 @@ function renderSnippetLibrary() {
   const selectedCategory = filter.value;
   filter.innerHTML = '<option value="">Todas las categorías</option>' + categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
   filter.value = selectedCategory;
+  updateSnippetCategoryActions();
   const language = $('#snippetLanguageFilter').value;
   const query = $('#snippetSearch').value.trim().toLowerCase();
   const items = state.snippets.filter((s) => (!language || s.language === language)
@@ -3252,24 +3386,84 @@ $('#snippetSearch').addEventListener('input', renderSnippetLibrary);
 $('#snippetLanguageFilter').addEventListener('change', renderSnippetLibrary);
 $('#snippetCategoryFilter').addEventListener('change', renderSnippetLibrary);
 
-$('#btnNewSnippetCategory').addEventListener('click', () => {
-  $('#newSnippetCategoryRow').hidden = false;
-  $('#newSnippetCategoryName').value = '';
+function updateSnippetCategoryActions() {
+  const selected = Boolean($('#snippetCategoryFilter').value);
+  $('#btnEditSnippetCategory').hidden = !selected;
+  $('#btnDeleteSnippetCategory').hidden = !selected;
+}
+
+function openSnippetCategoryForm(category = '') {
+  const row = $('#newSnippetCategoryRow');
+  const editing = Boolean(category);
+  row.dataset.action = editing ? 'edit' : 'create';
+  row.dataset.originalName = category;
+  row.hidden = false;
+  $('#newSnippetCategoryName').value = category;
+  $('#newSnippetCategorySave').textContent = editing ? 'Guardar cambios' : 'Crear';
   $('#newSnippetCategoryName').focus();
+  $('#newSnippetCategoryName').select();
+}
+
+function closeSnippetCategoryForm() {
+  const row = $('#newSnippetCategoryRow');
+  row.hidden = true;
+  row.dataset.action = '';
+  row.dataset.originalName = '';
+  $('#newSnippetCategorySave').textContent = 'Crear';
+}
+
+function updateOpenSnippetCategory(oldName, newName) {
+  state.snippets = state.snippets.map((snippet) => (
+    sameCategoryName(snippet.category, oldName) ? { ...snippet, category: newName } : snippet
+  ));
+  if (!$('#snippetEditorModal').hidden && sameCategoryName($('#snippetEditorCategory').value, oldName)) {
+    $('#snippetEditorCategory').value = newName;
+    renderSnippetEditorCategories();
+  }
+}
+
+$('#btnNewSnippetCategory').addEventListener('click', () => openSnippetCategoryForm());
+$('#btnEditSnippetCategory').addEventListener('click', () => {
+  const category = $('#snippetCategoryFilter').value;
+  if (category) openSnippetCategoryForm(category);
 });
-$('#newSnippetCategoryCancel').addEventListener('click', () => { $('#newSnippetCategoryRow').hidden = true; });
+$('#btnDeleteSnippetCategory').addEventListener('click', async () => {
+  const name = $('#snippetCategoryFilter').value;
+  if (!name) return;
+  if (!confirm(`¿Borrar la categoría “${name}”?\n\nLos snippets que la usan se conservarán sin categoría.`)) return;
+  try {
+    const { snippetCategories: updated, affected = 0 } = await api('/api/snippet-categories', { method: 'DELETE', body: { name } });
+    state.snippetCategoriesExtra = updated;
+    updateOpenSnippetCategory(name, '');
+    $('#snippetCategoryFilter').value = '';
+    closeSnippetCategoryForm();
+    renderSnippetLibrary();
+    toast(`Categoría “${name}” borrada${affected ? ` · ${affected} snippet${affected === 1 ? '' : 's'} conservado${affected === 1 ? '' : 's'} sin categoría` : ''}`);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+});
+$('#newSnippetCategoryCancel').addEventListener('click', closeSnippetCategoryForm);
 $('#newSnippetCategoryName').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#newSnippetCategorySave').click(); } });
 $('#newSnippetCategorySave').addEventListener('click', async () => {
+  const row = $('#newSnippetCategoryRow');
+  const editing = row.dataset.action === 'edit';
+  const originalName = row.dataset.originalName || '';
   const name = $('#newSnippetCategoryName').value.trim();
   if (!name) return toast('Escribí un nombre para la categoría', 'err');
   try {
-    const { snippetCategories: updated } = await api('/api/snippet-categories', { method: 'POST', body: { name } });
+    const { snippetCategories: updated, affected = 0 } = editing
+      ? await api('/api/snippet-categories', { method: 'PUT', body: { name: originalName, newName: name } })
+      : await api('/api/snippet-categories', { method: 'POST', body: { name } });
     state.snippetCategoriesExtra = updated;
-    $('#newSnippetCategoryRow').hidden = true;
+    if (editing) updateOpenSnippetCategory(originalName, name);
+    closeSnippetCategoryForm();
     renderSnippetLibrary();
     $('#snippetCategoryFilter').value = name;
     renderSnippetLibrary();
-    toast(`Categoría "${name}" creada`);
+    toast(editing
+      ? `Categoría actualizada${affected ? ` en ${affected} snippet${affected === 1 ? '' : 's'}` : ''}`
+      : `Categoría "${name}" creada`);
   } catch (err) {
     toast(err.message, 'err');
   }
