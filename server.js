@@ -4228,8 +4228,9 @@ const server = http.createServer(async (req, res) => {
       const audioDir = resolveDir(cfg.paths.audio);
       await fs.mkdir(audioDir, { recursive: true });
       const existing = new Set(await fs.readdir(audioDir).catch(() => []));
-      let name = `${ts()}-${base}${audioFile.extension}`;
-      for (let n = 2; existing.has(name); n++) name = `${ts()}-${base}-${n}${audioFile.extension}`;
+      const uploadedAt = ts();
+      let name = `${base}-${uploadedAt}${audioFile.extension}`;
+      for (let n = 2; existing.has(name); n++) name = `${base}-${uploadedAt}-${n}${audioFile.extension}`;
       const key = await saveBuffer('audio', name, buffer);
       const metadata = {
         type: 'audio', modelId: 'upload', modelName: 'Archivo subido', ts: Date.now(),
