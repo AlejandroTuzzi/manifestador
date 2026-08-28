@@ -471,8 +471,11 @@ function renderHighlight() {
       return label ? `@${label}` : `@image${index + 1}`;
     });
     highlighter.innerHTML = highlightReferenceMentions(text, mentions) + '\n';
-  } else if (state.mode === 'video' && state.video.mode === 'reference') {
-    highlighter.innerHTML = esc(text).replace(/@(image|video|audio)\d+/gi, '<span class="tag">$&</span>') + '\n';
+  } else if (state.mode === 'video' && videoModeAllowsMultimedia()) {
+    const pattern = currentVideoModel()?.provider === 'omni'
+      ? /<(?:IMAGE|VIDEO)_REF_\d+>/gi
+      : /@(image|video|audio)\d+/gi;
+    highlighter.innerHTML = esc(text).replace(pattern, '<span class="tag">$&</span>') + '\n';
   } else if (state.mode === 'video') {
     highlighter.innerHTML = esc(text) + '\n';
   } else {
@@ -712,8 +715,14 @@ function supportsMultimediaVideoRefs(model = currentVideoModel()) {
   return Boolean(model?.supportsMultimediaReferences || model?.provider === 'minimax');
 }
 
+function videoModeAllowsMultimedia(model = currentVideoModel(), mode = state.video.mode) {
+  if (!supportsMultimediaVideoRefs(model)) return false;
+  return mode === 'reference' || (model?.provider === 'omni' && ['edit', 'extend'].includes(mode));
+}
+
 function typedVideoReferenceMention(model, kind, number) {
   const type = `${kind[0].toUpperCase()}${kind.slice(1)}`;
+  if (model?.provider === 'omni') return `<${kind.toUpperCase()}_REF_${number - 1}>`;
   return model?.id === 'seedance-2-5' ? `@${type}${number}` : `${type} ${number}`;
 }
 
@@ -722,6 +731,7 @@ function renderVideoControls() {
   if (!m) return;
   const isHeyGen = m.provider === 'heygen';
   const isH3 = m.provider === 'minimax';
+  const isOmni = m.provider === 'omni';
   const isSeedance25 = m.id === 'seedance-2-5';
   const multimediaRefs = supportsMultimediaVideoRefs(m);
   state.video.modelId = m.id;
@@ -734,19 +744,37 @@ function renderVideoControls() {
     (id) => {
       state.video.modelId = id;
       const next = state.videoModels.find((model) => model.id === id);
+      if (next?.provider !== 'omni' && ['edit', 'extend'].includes(state.video.mode)) state.video.mode = 'reference';
       if (!supportsMultimediaVideoRefs(next)) state.refs = state.refs.filter((ref) => referenceKind(ref) === 'image');
       applyPinnedCharacterPhotos(); renderVideoControls();
     },
     (id) => state.videoModels.find((x) => x.id === id).name);
-  chipRow($('#videoModeChips'), ['reference', 'frames'], state.video.mode,
-    (v) => { state.video.mode = v; renderVideoControls(); },
-    (v) => (v === 'reference' ? 'Referencias (@)' : 'Inicio → Fin'));
+  const videoModes = isOmni ? ['reference', 'frames', 'edit', 'extend'] : ['reference', 'frames'];
+  if (!videoModes.includes(state.video.mode)) state.video.mode = 'reference';
+  chipRow($('#videoModeChips'), videoModes, state.video.mode,
+    (v) => {
+      state.video.mode = v;
+      if (!['edit', 'extend'].includes(v)) {
+        state.video.omniPreviousInteractionId = '';
+        state.video.omniSourceHistoryId = '';
+        state.video.omniChainDepth = 0;
+        state.video.omniCumulativeDuration = 0;
+      }
+      renderVideoControls();
+    },
+    (v) => ({ reference: 'Referencias (@)', frames: 'Inicio → Fin', edit: 'Editar video', extend: 'Extender video' }[v]));
   $('#videoRefsHint').textContent = isHeyGen
     ? 'Usá una imagen JPG o PNG: puede venir de cualquier asset o personaje.'
     : isH3 && state.video.mode === 'reference'
     ? 'Citá las referencias como Image 1, Video 1 o Audio 1. Podés combinar estética, personaje, movimiento, cámara, voz y ritmo.'
     : isSeedance25 && state.video.mode === 'reference'
     ? 'Citá las referencias como @Image1, @Video1 o @Audio1. Podés combinar hasta 50 archivos entre imagen, video y audio.'
+    : isOmni && state.video.mode === 'reference'
+    ? 'Citá imágenes como <IMAGE_REF_0> y videos como <VIDEO_REF_0>. Hasta 6 imágenes y 3 clips de 3 segundos; el audio de esos clips se ignora.'
+    : isOmni && state.video.mode === 'edit'
+    ? (state.video.omniPreviousInteractionId ? 'Esta edición continúa el resultado Omni elegido. Podés sumar imágenes de referencia.' : 'Elegí un video de hasta 10 segundos. Pedí un cambio simple; Omni conservará lo demás.')
+    : isOmni && state.video.mode === 'extend'
+    ? (state.video.omniPreviousInteractionId ? 'Continúa la conversación elegida y agrega una toma al final, hasta 40 segundos acumulados.' : 'Elegí un video de hasta 10 segundos para generar una continuación al final.')
     : state.video.mode === 'reference'
     ? 'mencionalas en el prompt con @image1, @image2… (botón @ en cada miniatura)'
     : '1ª imagen = fotograma inicial · 2ª = final';
@@ -774,6 +802,14 @@ function renderVideoControls() {
   $('#videoAudioRow').hidden = isHeyGen || !m.audio;
   $('#heygenVideoControls').hidden = !isHeyGen;
   $('#h3VideoControls').hidden = !isH3;
+  $('#omniVideoControls').hidden = !isOmni;
+  if (isOmni) {
+    const linked = ['edit', 'extend'].includes(state.video.mode) && Boolean(state.video.omniPreviousInteractionId);
+    $('#omniChainHint').textContent = linked
+      ? `Continuando una generación Omni · turno ${state.video.omniChainDepth + 1}${state.video.omniCumulativeDuration ? ` · ${state.video.omniCumulativeDuration}s actuales` : ''}.`
+      : 'Nueva generación independiente; para continuidad elegí Editar o Extender desde un resultado del historial.';
+    $('#omniClearConversation').hidden = !linked;
+  }
   $('#h3ContextIr').checked = isH3 && state.video.h3ContextIr;
   $('#videoRefsStrip').closest('.control-row').hidden = isHeyGen && m.requiresRegisteredCharacter;
   $('#btnShotList').hidden = isHeyGen;
@@ -811,6 +847,13 @@ function renderVideoControls() {
 
 $('#videoAudio').addEventListener('change', (e) => { state.video.audio = e.target.checked; });
 $('#h3ContextIr').addEventListener('change', (e) => { state.video.h3ContextIr = e.target.checked; });
+$('#omniClearConversation').addEventListener('click', () => {
+  state.video.omniPreviousInteractionId = '';
+  state.video.omniSourceHistoryId = '';
+  state.video.omniChainDepth = 0;
+  state.video.omniCumulativeDuration = 0;
+  renderVideoControls();
+});
 $('#heygenAuthMode').addEventListener('change', (e) => { state.video.heygenAuthMode = e.target.value; renderVideoControls(); });
 $('#heygenCharacterSelect').addEventListener('change', (e) => { state.video.heygenCharacterId = e.target.value; });
 $('#heygenVoiceId').addEventListener('input', (e) => { state.video.heygenVoiceId = e.target.value.trim(); });
@@ -835,7 +878,7 @@ function renderRefs() {
     const isAsset = r.key.startsWith('asset://');
     const kind = referenceKind(r);
     const videoModel = isVideo ? currentVideoModel() : null;
-    const typedMultimedia = isVideo && supportsMultimediaVideoRefs(videoModel);
+    const typedMultimedia = isVideo && videoModeAllowsMultimedia(videoModel, refMode);
     const typeNumber = state.refs.slice(0, i + 1).filter((ref) => referenceKind(ref) === kind).length;
     const d = document.createElement('div');
     d.className = `ref-thumb ref-${kind}` + (r.fromChar ? ' from-char' : '') + (isAsset ? ' verified-asset' : '');
@@ -886,8 +929,8 @@ function renderRefs() {
     const add = document.createElement('button');
     add.className = 'ref-add';
     add.textContent = '+';
-    add.title = isVideo && supportsMultimediaVideoRefs() && state.video.mode === 'reference'
-      ? `Agregar imagen, video o audio de referencia para ${currentVideoModel().name}`
+    add.title = isVideo && videoModeAllowsMultimedia()
+      ? `Agregar imagen${(currentVideoModel()?.mediaLimits?.video || 0) > 0 ? ', video' : ''}${(currentVideoModel()?.mediaLimits?.audio || 0) > 0 ? ' o audio' : ''} de referencia para ${currentVideoModel().name}`
       : 'Agregar imagen de referencia';
     add.addEventListener('click', () => openPicker());
     strip.appendChild(add);
@@ -898,9 +941,7 @@ function addRef(key, fromChar = false, kind = 'image') {
   const m = activeRefModel();
   const maxRefs = activeRefLimit();
   const normalizedKind = ['image', 'video', 'audio'].includes(kind) ? kind : 'image';
-  const isMultimediaReference = state.mode === 'video'
-    && supportsMultimediaVideoRefs()
-    && state.video.mode === 'reference';
+  const isMultimediaReference = state.mode === 'video' && videoModeAllowsMultimedia();
   if (state.refs.some((r) => r.key === key)) return false;
   if (normalizedKind !== 'image' && !isMultimediaReference) {
     toast('Este modo sólo admite imágenes como referencia.', 'err');
@@ -1465,6 +1506,7 @@ async function generate() {
   const model = isVideo ? currentVideoModel() : currentModel();
   const isHeyGen = isVideo && model?.provider === 'heygen';
   const isH3 = isVideo && model?.provider === 'minimax';
+  const isOmni = isVideo && model?.provider === 'omni';
   const isSeedance25 = isVideo && model?.id === 'seedance-2-5';
   if (isHeyGen && model.requiresRegisteredCharacter) {
     const character = state.characters.find((item) => item.id === state.video.heygenCharacterId);
@@ -1479,6 +1521,7 @@ async function generate() {
   if (isHeyGen && state.video.heygenAuthMode === 'oauth' && !state.heygenOAuth.connected) return toast('Conectá HeyGen OAuth desde Configuración', 'err');
   if (isHeyGen && state.video.heygenAuthMode === 'key' && !state.config?.keys?.heygen) return toast('Guardá la API key de HeyGen en Configuración', 'err');
   if (isH3 && !state.config?.keys?.minimax) return toast('Guardá la API key de MiniMax en Configuración', 'err');
+  if (isOmni && !state.config?.keys?.gemini) return toast('Guardá la API key de Gemini en Configuración', 'err');
   if (isSeedance25 && !state.config?.keys?.ark) return toast('Guardá la API key de BytePlus ModelArk en Configuración', 'err');
   if (isH3) {
     const counts = state.refs.reduce((out, ref) => {
@@ -1496,6 +1539,22 @@ async function generate() {
     }, { image: 0, video: 0, audio: 0 });
     if (state.video.mode === 'frames' && (counts.video || counts.audio)) return toast('Inicio → Fin sólo admite imágenes.', 'err');
     if (counts.image > 30 || counts.video > 10 || counts.audio > 10 || state.refs.length > 50) return toast('Seedance 2.5 admite 30 imágenes, 10 videos y 10 audios; máximo 50 referencias.', 'err');
+  }
+  if (isOmni) {
+    const counts = state.refs.reduce((out, ref) => {
+      out[referenceKind(ref)] += 1;
+      return out;
+    }, { image: 0, video: 0, audio: 0 });
+    if (counts.audio) return toast('Gemini Omni todavía no admite audio subido como referencia.', 'err');
+    if (counts.image > 6 || counts.video > 3 || state.refs.length > 9) return toast('Gemini Omni admite hasta 6 imágenes y 3 clips de referencia.', 'err');
+    if (state.video.mode === 'frames' && (counts.image !== 2 || counts.video)) return toast('Inicio → Fin de Omni necesita exactamente dos imágenes.', 'err');
+    if (['edit', 'extend'].includes(state.video.mode) && !state.video.omniPreviousInteractionId && counts.video !== 1) {
+      return toast(`${state.video.mode === 'edit' ? 'Editar' : 'Extender'} necesita un video de origen o un resultado Omni elegido desde el historial.`, 'err');
+    }
+    if (state.video.mode === 'extend' && state.video.omniPreviousInteractionId
+      && state.video.omniCumulativeDuration + state.video.duration > 40) {
+      return toast('Esta extensión superaría el máximo acumulado de 40 segundos de Omni.', 'err');
+    }
   }
   if (isVideo && !isHeyGen && state.video.mode === 'frames' && state.refs.length !== 2) {
     return toast('Inicio → Fin necesita exactamente dos imágenes: la primera es entrada y la segunda es salida.', 'err');
@@ -1526,6 +1585,8 @@ async function generate() {
       refs: state.refs.slice(0, activeRefLimit()).map((r) => r.key), labeledRefs,
       refKinds: state.refs.slice(0, activeRefLimit()).map(referenceKind),
       h3ContextIr: isH3 && state.video.h3ContextIr,
+      omniPreviousInteractionId: isOmni && ['edit', 'extend'].includes(state.video.mode) ? state.video.omniPreviousInteractionId : '',
+      omniSourceHistoryId: isOmni && ['edit', 'extend'].includes(state.video.mode) ? state.video.omniSourceHistoryId : '',
       characterId: state.pinnedId || null,
       heygenAuthMode: state.video.heygenAuthMode,
       heygenCharacterId: state.video.heygenCharacterId,
@@ -1673,6 +1734,42 @@ function h3PromotionAction(entry) {
   return `<button class="mini-btn accent" data-act="h3-2k">${IC('spark')} Promover a 2K</button>`;
 }
 
+function omniHistoryActions(entry) {
+  if (entry.type !== 'video') return '';
+  const canUseUploaded = Number(entry.duration) > 0 && Number(entry.duration) <= 10.01;
+  const canContinue = entry.modelId === 'gemini-omni-1-1-flash' && Boolean(entry.omniInteractionId);
+  if (!canUseUploaded && !canContinue) return '';
+  const cumulative = Number(entry.omniCumulativeDuration) || Number(entry.duration) || 0;
+  return `<button class="mini-btn accent" data-act="omni-edit">${IC('edit')} Editar con Omni</button>
+    ${canContinue && cumulative >= 40 ? '' : `<button class="mini-btn accent" data-act="omni-extend">${IC('right')} Extender con Omni</button>`}`;
+}
+
+function loadVideoIntoOmni(entry, mode) {
+  const canContinue = entry.modelId === 'gemini-omni-1-1-flash' && Boolean(entry.omniInteractionId);
+  if (!canContinue && Number(entry.duration) > 10.01) {
+    toast('Para subirlo a Omni, el video de origen debe durar como máximo 10 segundos.', 'err');
+    return;
+  }
+  setMode('video');
+  state.video.modelId = 'gemini-omni-1-1-flash';
+  state.video.mode = mode;
+  state.video.aspectRatio = ['16:9', '9:16'].includes(entry.aspectRatio) ? entry.aspectRatio : '16:9';
+  state.video.resolution = ['360p', '720p', '1080p', '4K'].includes(entry.resolution) ? entry.resolution : '720p';
+  state.video.duration = mode === 'extend' ? 10 : Math.max(3, Math.min(10, Number(entry.duration) || 5));
+  state.video.audio = true;
+  state.video.omniPreviousInteractionId = canContinue ? entry.omniInteractionId : '';
+  state.video.omniSourceHistoryId = canContinue ? entry.id : '';
+  state.video.omniChainDepth = Number(entry.omniChainDepth) || 0;
+  state.video.omniCumulativeDuration = Number(entry.omniCumulativeDuration) || Number(entry.duration) || 0;
+  state.refs = canContinue ? [] : [{ key: entry.outputs[0], fromChar: false, kind: 'video', label: '' }];
+  promptBox.value = '';
+  renderVideoControls();
+  renderHighlight();
+  goToCreate();
+  promptBox.focus();
+  toast(mode === 'edit' ? 'Video preparado para una edición conversacional con Omni' : 'Video preparado para extender con Omni');
+}
+
 function queueH3Promotion(entry) {
   const existing = existingH3Promotion(entry.id);
   if (existing) {
@@ -1736,6 +1833,7 @@ function showEntry(entry, outputIdx = 0) {
         <button class="mini-btn" data-act="copy">${IC('copy')} Copiar prompt</button>
         <button class="mini-btn" data-act="regen">${IC('refresh')} Regenerar</button>
         ${h3PromotionAction(entry)}
+        ${omniHistoryActions(entry)}
         <button class="mini-btn" data-act="edit">${IC('edit')} Editar envío</button>
         <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} Descargar</a>
       </div>`;
@@ -1780,6 +1878,8 @@ function showEntry(entry, outputIdx = 0) {
       if (act === 'ref') { addRef(entry.outputs[state.currentOutput]); toast('Agregada como referencia'); }
       if (act === 'character') openCharModal(null, entry.outputs[state.currentOutput]);
       if (act === 'h3-2k') queueH3Promotion(entry);
+      if (act === 'omni-edit') loadVideoIntoOmni(entry, 'edit');
+      if (act === 'omni-extend') loadVideoIntoOmni(entry, 'extend');
       if (act === 'h3-2k-view') {
         const upgraded = existingH3Promotion(entry.id);
         if (upgraded) showEntry(upgraded);
@@ -1808,7 +1908,14 @@ async function regenerate(entry) {
     state.video.mode = entry.mode || 'reference';
     state.video.duration = entry.duration || 5;
     state.video.audio = Boolean(entry.audio);
-    state.refs = (entry.refs || []).map((k) => ({ key: k, fromChar: false, kind: 'image' }));
+    state.video.h3ContextIr = entry.h3ContextIr === true;
+    state.video.omniPreviousInteractionId = entry.omniPreviousInteractionId || '';
+    state.video.omniSourceHistoryId = entry.omniSourceHistoryId || '';
+    state.video.omniChainDepth = Math.max(0, (Number(entry.omniChainDepth) || 0) - (entry.omniPreviousInteractionId ? 1 : 0));
+    state.video.omniCumulativeDuration = entry.mode === 'extend'
+      ? Math.max(0, (Number(entry.omniCumulativeDuration) || 0) - (Number(entry.duration) || 0))
+      : Number(entry.omniCumulativeDuration) || 0;
+    state.refs = (entry.refs || []).map((k, index) => ({ key: k, fromChar: false, kind: entry.refKinds?.[index] }));
     renderVideoControls();
   } else {
     setMode('image');
@@ -1839,6 +1946,12 @@ function editEntry(entry) {
     state.video.duration = entry.duration || 5;
     state.video.audio = Boolean(entry.audio);
     state.video.h3ContextIr = entry.h3ContextIr === true;
+    state.video.omniPreviousInteractionId = entry.omniPreviousInteractionId || '';
+    state.video.omniSourceHistoryId = entry.omniSourceHistoryId || '';
+    state.video.omniChainDepth = Math.max(0, (Number(entry.omniChainDepth) || 0) - (entry.omniPreviousInteractionId ? 1 : 0));
+    state.video.omniCumulativeDuration = entry.mode === 'extend'
+      ? Math.max(0, (Number(entry.omniCumulativeDuration) || 0) - (Number(entry.duration) || 0))
+      : Number(entry.omniCumulativeDuration) || 0;
     state.refs = (entry.refs || []).map((k, index) => ({ key: k, fromChar: false, kind: entry.refKinds?.[index] }));
     renderVideoControls();
   } else {
@@ -1997,8 +2110,7 @@ function renderPromptsPanel() {
 // referencia in-place (conserva posición, cita y etiqueta)
 function isVideoMultimediaPicker() {
   return state.mode === 'video'
-    && supportsMultimediaVideoRefs()
-    && state.video.mode === 'reference'
+    && videoModeAllowsMultimedia()
     && state.replaceRefIndex == null
     && !state.promptStyleImagePick
     && !state.overlayBgPick;
@@ -2012,12 +2124,14 @@ function openPicker(replaceIndex = null) {
   state.replaceRefIndex = replaceIndex;
   const multimedia = isVideoMultimediaPicker();
   const loraMedia = isPromptLoraMediaPicker();
+  const multimediaAudio = multimedia && (currentVideoModel()?.mediaLimits?.audio || 0) > 0;
   $('#pickerTitle').textContent = replaceIndex != null
     ? 'Reemplazar imagen de referencia'
     : loraMedia ? 'Elegir imagen o video ilustrativo del LoRA' : multimedia ? `Elegir referencia para ${currentVideoModel().name}` : 'Elegir imagen de referencia';
   $('#pickerVideoTab').hidden = !(multimedia || loraMedia);
-  $('#pickerAudioTab').hidden = !multimedia;
+  $('#pickerAudioTab').hidden = !multimediaAudio;
   if (!(multimedia || loraMedia) && ['video', 'audio'].includes(state.pickerTab)) state.pickerTab = 'upload';
+  if (!multimediaAudio && state.pickerTab === 'audio') state.pickerTab = 'upload';
   if (loraMedia && state.pickerTab === 'audio') state.pickerTab = 'upload';
   $('#pickerModal').hidden = false;
   setPickerTab(state.pickerTab || 'upload');
@@ -2110,7 +2224,7 @@ async function setPickerTab(src) {
       e.preventDefault();
       dz.classList.remove('over');
       const files = [...e.dataTransfer.files].filter((file) => multimedia
-        ? ['image', 'video', 'audio'].includes(referenceFileKind(file))
+        ? ['image', 'video', ...((currentVideoModel()?.mediaLimits?.audio || 0) > 0 ? ['audio'] : [])].includes(referenceFileKind(file))
         : loraMedia ? ['image', 'video'].includes(referenceFileKind(file))
         : referenceFileKind(file) === 'image');
       await uploadFiles(files, true);
@@ -2256,7 +2370,7 @@ function renderPickerSeries() {
 function referenceFileKind(file) {
   const type = String(file?.type || '').toLowerCase();
   const name = String(file?.name || '').toLowerCase();
-  if (type.startsWith('video/') || /\.(mp4|mov)$/.test(name)) return 'video';
+  if (type.startsWith('video/') || /\.(mp4|mov|webm)$/.test(name)) return 'video';
   if (type.startsWith('audio/') || /\.(mp3|wav)$/.test(name)) return 'audio';
   if (type.startsWith('image/') || /\.(png|jpe?g|webp)$/.test(name)) return 'image';
   return '';
@@ -6974,19 +7088,22 @@ async function openAutomationAssetsPicker(blockElement, block) {
 async function openGenerativeVideoBlockAssetsPicker(blockElement, block, modelId) {
   try { await refreshAssets(); } catch { /* el modal mostrará el último estado disponible */ }
   const isSeedance25 = modelId === 'seedance-2-5';
+  const isOmni = modelId === 'gemini-omni-1-1-flash';
   const model = state.videoModels.find((item) => item.id === modelId);
-  const settingsSelector = isSeedance25 ? '[data-block-seedance25-settings]' : '[data-block-h3-settings]';
+  const settingsSelector = isOmni ? '[data-block-omni-settings]' : isSeedance25 ? '[data-block-seedance25-settings]' : '[data-block-h3-settings]';
   const settings = blockElement.querySelector(settingsSelector);
-  const datasetKey = isSeedance25 ? 'seedance25ReferenceKeys' : 'h3ReferenceKeys';
+  const datasetKey = isOmni ? 'omniReferenceKeys' : isSeedance25 ? 'seedance25ReferenceKeys' : 'h3ReferenceKeys';
   let keys = [];
   try { keys = JSON.parse(settings?.dataset[datasetKey] || '[]'); } catch { keys = []; }
   state.automationAssetPicker = {
     purpose: 'generative-video-block', blockElement, blockId: block?.id || '', modelId,
-    modelName: model?.name || modelId, mediaLimits: model?.mediaLimits || {}, settingsSelector,
-    datasetKey, listSelector: isSeedance25 ? '[data-block-seedance25-list]' : '[data-block-h3-list]',
+    modelName: model?.name || modelId,
+    mediaLimits: isOmni ? { ...(model?.mediaLimits || {}), image: 5, total: 8 } : (model?.mediaLimits || {}), settingsSelector,
+    datasetKey, listSelector: isOmni ? '[data-block-omni-list]' : isSeedance25 ? '[data-block-seedance25-list]' : '[data-block-h3-list]',
     keys: Array.isArray(keys) ? [...keys] : [], zone: 'all', search: ''
   };
-  $('#automationAssetsAudioTab').hidden = false;
+  $('#automationAssetsAudioTab').hidden = (model?.mediaLimits?.audio || 0) === 0;
+  if ((model?.mediaLimits?.audio || 0) === 0 && state.automationAssetPicker.zone === 'audio') state.automationAssetPicker.zone = 'all';
   $('#automationAssetsTitle').textContent = `Referencias ${model?.name || ''} · ${block.title || 'Bloque'}`;
   renderAutomationAssetsPicker();
   $('#automationAssetsModal').hidden = false;
@@ -7372,7 +7489,7 @@ function renderAutomationProject() {
         const reusableAudioReady = Array.isArray(out?.audioKeys) && out.audioKeys.length >= (b.items || []).length;
         const heygenCharacters = automationHeyGenCharacters();
         const selectedHeyGenCharacter = automationBlockHeyGenCharacter(pr, b);
-        const blockGenerator = ['heygen', 'assets', 'h3', 'seedance25'].includes(b.generator) ? b.generator : 'image';
+        const blockGenerator = ['heygen', 'assets', 'h3', 'seedance25', 'omni'].includes(b.generator) ? b.generator : 'image';
         return `
         <div class="auto-block${done ? ' is-done' : ''}" data-block="${b.id}">
           <div class="auto-block-head">
@@ -7385,7 +7502,7 @@ function renderAutomationProject() {
           </div>
           <div class="auto-block-editor">
             <div class="auto-block-generator">
-              <label><span>Generador de la toma</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>Imagen + audio</option><option value="seedance25"${blockGenerator === 'seedance25' ? ' selected' : ''}>Seedance 2.5 · video multimodal</option><option value="h3"${blockGenerator === 'h3' ? ' selected' : ''}>MiniMax H3 · video multimodal</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + audio de ElevenLabs</option><option value="assets"${blockGenerator === 'assets' ? ' selected' : ''}>Assets · imágenes y videos</option></select></label>
+              <label><span>Generador de la toma</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>Imagen + audio</option><option value="seedance25"${blockGenerator === 'seedance25' ? ' selected' : ''}>Seedance 2.5 · video multimodal</option><option value="h3"${blockGenerator === 'h3' ? ' selected' : ''}>MiniMax H3 · video multimodal</option><option value="omni"${blockGenerator === 'omni' ? ' selected' : ''}>Gemini Omni 1.1 Flash · video</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + audio de ElevenLabs</option><option value="assets"${blockGenerator === 'assets' ? ' selected' : ''}>Assets · imágenes y videos</option></select></label>
               <div class="auto-block-heygen-settings" data-block-heygen-settings${blockGenerator === 'heygen' ? '' : ' hidden'}>
                 <label><span>Personaje · variante HeyGen</span><select class="select" data-block-heygen-character>${heygenCharacters.length ? heygenCharacters.map((character) => `<option value="${character.id}"${character.id === selectedHeyGenCharacter?.id ? ' selected' : ''}>${esc(character.name)} · HeyGen · ${character.heygen?.closeAvatarId ? '2 planos' : '1 plano'}</option>`).join('') : '<option value="">— no hay personajes HeyGen listos —</option>'}</select></label>
                 <label><span>Encuadre</span><select class="select" data-block-heygen-framing><option value="wide"${b.heygenFraming === 'wide' || !b.heygenFraming ? ' selected' : ''}>Plano general</option><option value="close"${b.heygenFraming === 'close' ? ' selected' : ''}>Primer plano</option><option value="split"${b.heygenFraming === 'split' ? ' selected' : ''}>Alternar general → primer plano</option></select></label>
@@ -7419,6 +7536,18 @@ function renderAutomationProject() {
                 <label class="poser-toggle"><input type="checkbox" data-block-seedance25-narration${b.seedance25UseNarrationReference !== false ? ' checked' : ''}> enviar la narración como @Audio de referencia</label>
                 <label class="poser-toggle"><input type="checkbox" data-block-seedance25-native-audio${b.seedance25KeepGeneratedAudio ? ' checked' : ''}> conservar el audio generado por Seedance en lugar del archivo original de ElevenLabs</label>
                 <span class="hint">En Referencias, la imagen base y la voz se envían a Seedance. Podés citar cada tipo por separado como @Image1, @Video1 o @Audio1. En Inicio → Fin elegí exactamente dos imágenes; la voz se añade durante el ensamblado.</span>
+              </div>
+              <div class="auto-block-assets-settings auto-block-h3-settings" data-block-omni-settings${blockGenerator === 'omni' ? '' : ' hidden'} data-omni-reference-keys="${esc(JSON.stringify(b.omniReferenceKeys || []))}">
+                <div class="auto-block-assets-head">
+                  <div><strong>Gemini Omni 1.1 Flash</strong><span class="hint">Tomas de hasta 10 segundos; el montaje conserva la narración exacta de ElevenLabs.</span></div>
+                  <button type="button" class="mini-btn" data-pick-block-omni>${IC('image')} Referencias adicionales</button>
+                </div>
+                <div class="auto-block-assets-list" data-block-omni-list>${automationBlockAssetSelectionMarkup(b.omniReferenceKeys || [])}</div>
+                <div class="auto-block-create-grid">
+                  <label><span>Modo</span><select class="select" data-block-omni-mode><option value="reference"${b.omniMode !== 'frames' ? ' selected' : ''}>Referencias</option><option value="frames"${b.omniMode === 'frames' ? ' selected' : ''}>Fotograma de entrada → salida</option></select></label>
+                  <label><span>Resolución</span><select class="select" data-block-omni-resolution>${['360p', '720p', '1080p', '4K'].map((value) => `<option value="${value}"${value === (b.omniResolution || '720p') ? ' selected' : ''}>${value}</option>`).join('')}</select></label>
+                </div>
+                <span class="hint">En Referencias usa la imagen base del bloque y hasta 6 imágenes / 3 clips de 3s. Omni no acepta la narración como audio de referencia; se reemplaza por el audio de ElevenLabs al ensamblar.</span>
               </div>
               <div class="auto-block-assets-settings" data-block-assets-settings${blockGenerator === 'assets' ? '' : ' hidden'} data-asset-keys="${esc(JSON.stringify(b.assetKeys || []))}">
                 <div class="auto-block-assets-head">
@@ -8069,6 +8198,7 @@ function renderAutomationProject() {
     const assetSettings = blockElement.querySelector('[data-block-assets-settings]');
     const h3Settings = blockElement.querySelector('[data-block-h3-settings]');
     const seedance25Settings = blockElement.querySelector('[data-block-seedance25-settings]');
+    const omniSettings = blockElement.querySelector('[data-block-omni-settings]');
     const characterSelect = blockElement.querySelector('[data-block-heygen-character]');
     const framingSelect = blockElement.querySelector('[data-block-heygen-framing]');
     const hint = blockElement.querySelector('[data-block-heygen-hint]');
@@ -8077,6 +8207,7 @@ function renderAutomationProject() {
       assetSettings.hidden = select.value !== 'assets';
       h3Settings.hidden = select.value !== 'h3';
       seedance25Settings.hidden = select.value !== 'seedance25';
+      omniSettings.hidden = select.value !== 'omni';
       blockElement.querySelectorAll('[data-block-prompt-field]').forEach((field) => { field.hidden = select.value === 'assets'; });
       const character = state.characters.find((item) => item.id === characterSelect?.value);
       if (hint) hint.textContent = character?.heygen?.closeAvatarId
@@ -8104,6 +8235,11 @@ function renderAutomationProject() {
     const block = pr.blocks.find((item) => item.id === blockElement?.dataset.block);
     if (blockElement && block) openGenerativeVideoBlockAssetsPicker(blockElement, block, 'seedance-2-5');
   }));
+  $('#automationRoot').querySelectorAll('[data-pick-block-omni]').forEach((button) => button.addEventListener('click', () => {
+    const blockElement = button.closest('.auto-block');
+    const block = pr.blocks.find((item) => item.id === blockElement?.dataset.block);
+    if (blockElement && block) openGenerativeVideoBlockAssetsPicker(blockElement, block, 'gemini-omni-1-1-flash');
+  }));
 
   $('#automationRoot').querySelectorAll('[data-save-block]').forEach((button) => button.addEventListener('click', async () => {
     const blockElement = button.closest('.auto-block');
@@ -8114,7 +8250,7 @@ function renderAutomationProject() {
     const negativePrompt = blockElement.querySelector('[data-block-negative]').value.trim();
     const title = blockElement.querySelector('[data-block-title]').value.trim() || currentBlock.title || 'Bloque';
     const selectedGenerator = blockElement.querySelector('[data-block-generator]').value;
-    const generator = ['image', 'heygen', 'assets', 'h3', 'seedance25'].includes(selectedGenerator) ? selectedGenerator : 'image';
+    const generator = ['image', 'heygen', 'assets', 'h3', 'seedance25', 'omni'].includes(selectedGenerator) ? selectedGenerator : 'image';
     const heygenCharacterId = generator === 'heygen' ? (blockElement.querySelector('[data-block-heygen-character]').value || '') : '';
     const heygenFraming = generator === 'heygen' ? blockElement.querySelector('[data-block-heygen-framing]').value : 'wide';
     const heygenCharacter = state.characters.find((character) => character.id === heygenCharacterId);
@@ -8137,6 +8273,12 @@ function renderAutomationProject() {
     const seedance25Resolution = seedance25Settings?.querySelector('[data-block-seedance25-resolution]')?.value === '480p' ? '480p' : '720p';
     const seedance25UseNarrationReference = seedance25Settings?.querySelector('[data-block-seedance25-narration]')?.checked !== false;
     const seedance25KeepGeneratedAudio = seedance25Settings?.querySelector('[data-block-seedance25-native-audio]')?.checked === true;
+    const omniSettings = blockElement.querySelector('[data-block-omni-settings]');
+    let omniReferenceKeys = [];
+    try { omniReferenceKeys = JSON.parse(omniSettings?.dataset.omniReferenceKeys || '[]'); } catch { omniReferenceKeys = []; }
+    const omniMode = omniSettings?.querySelector('[data-block-omni-mode]')?.value === 'frames' ? 'frames' : 'reference';
+    const omniResolutionValue = omniSettings?.querySelector('[data-block-omni-resolution]')?.value;
+    const omniResolution = ['360p', '720p', '1080p', '4K'].includes(omniResolutionValue) ? omniResolutionValue : '720p';
     const items = currentBlock.items.map((item, index) => ({
       ...item,
       text: blockElement.querySelector(`[data-block-item="${index}"]`)?.value.trim() || ''
@@ -8157,12 +8299,21 @@ function renderAutomationProject() {
         return toast('Inicio → Fin de Seedance 2.5 necesita exactamente dos imágenes.', 'err');
       }
     }
+    if (generator === 'omni' && omniMode === 'frames') {
+      if (omniReferenceKeys.length !== 2 || omniReferenceKeys.some((key) => /^(video|audio)\//.test(key))) {
+        return toast('Inicio → Fin de Gemini Omni necesita exactamente dos imágenes.', 'err');
+      }
+    }
+    if (generator === 'omni' && omniReferenceKeys.some((key) => /^audio\//.test(key))) {
+      return toast('Gemini Omni todavía no admite audio subido como referencia.', 'err');
+    }
     button.disabled = true;
     const updated = await saveAutomation({
       blocks: pr.blocks.map((block) => block.id === blockId
         ? { ...block, title, imagePrompt, negativePrompt, items, generator, heygenCharacterId, heygenFraming, assetKeys, assetMuteOriginal,
           h3Mode, h3Resolution, h3ContextIr, h3UseNarrationReference, h3KeepGeneratedAudio, h3ReferenceKeys,
-          seedance25Mode, seedance25Resolution, seedance25UseNarrationReference, seedance25KeepGeneratedAudio, seedance25ReferenceKeys }
+          seedance25Mode, seedance25Resolution, seedance25UseNarrationReference, seedance25KeepGeneratedAudio, seedance25ReferenceKeys,
+          omniMode, omniResolution, omniReferenceKeys }
         : block)
     });
     if (updated) {
@@ -8180,6 +8331,7 @@ function renderAutomationProject() {
       ? 'audios y videos HeyGen nuevos'
       : block?.generator === 'h3' ? 'audios y videos MiniMax H3 nuevos'
       : block?.generator === 'seedance25' ? 'audios y videos Seedance 2.5 nuevos'
+      : block?.generator === 'omni' ? 'audios y videos Gemini Omni nuevos'
       : block?.generator === 'assets' ? 'audios nuevos y un montaje local de los Assets elegidos' : 'una imagen y audios nuevos';
     if (force && !confirm(`¿Regenerar “${block?.title || 'este bloque'}” desde cero? Se crearán ${newMaterials}.`)) return;
     if (block) await runAutomationBlock(pr.id, block, btn.closest('.auto-block'), { regenerate: force });
@@ -8192,19 +8344,19 @@ function renderAutomationProject() {
     const existingAudioKeys = Array.isArray(output.audioKeys) ? output.audioKeys.slice(0, block.items.length) : [];
     if (existingAudioKeys.length !== block.items.length) return toast('Este bloque no tiene todos sus audios guardados para reensamblar.', 'err');
     const visualDescription = block.generator === 'assets' ? `los ${(block.assetKeys || []).length} Assets seleccionados`
-      : ['h3', 'seedance25'].includes(block.generator)
-        ? `los ${(output.h3SegmentVideoKeys || []).length} tramos ${block.generator === 'seedance25' ? 'Seedance 2.5' : 'H3'} y la imagen base`
+      : ['h3', 'seedance25', 'omni'].includes(block.generator)
+        ? `los ${(output.h3SegmentVideoKeys || []).length} tramos ${block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'H3'} y la imagen base`
         : 'la imagen limpia';
     if (!confirm(`¿Rehacer el texto y el video de “${block.title || 'este bloque'}”? Se conservarán exactamente ${visualDescription} y los ${existingAudioKeys.length} audio${existingAudioKeys.length === 1 ? '' : 's'} existentes; no se llamará a ElevenLabs.`)) return;
     const preservedOutput = {
       ...(block.generator === 'assets' ? {
         generator: 'assets', assetKeys: [...block.assetKeys], assetMuteOriginal: block.assetMuteOriginal !== false
-      } : ['h3', 'seedance25'].includes(block.generator) ? {
+      } : ['h3', 'seedance25', 'omni'].includes(block.generator) ? {
         generator: block.generator, imageKey: output.imageKey,
         imageModelId: output.imageModelId || '', imageModelName: output.imageModelName || '',
         h3SegmentVideoKeys: [...(output.h3SegmentVideoKeys || [])],
         h3SegmentDurations: [...(output.h3SegmentDurations || [])],
-        h3Resolution: output.h3Resolution || (block.generator === 'seedance25' ? block.seedance25Resolution : block.h3Resolution) || (block.generator === 'seedance25' ? '720p' : '768P')
+        h3Resolution: output.h3Resolution || (block.generator === 'seedance25' ? block.seedance25Resolution : block.generator === 'omni' ? block.omniResolution : block.h3Resolution) || (block.generator === 'h3' ? '768P' : '720p')
       } : {
         imageKey: output.imageKey,
         imageModelId: output.imageModelId || '',
@@ -8230,8 +8382,10 @@ function renderAutomationProject() {
       ? 'audios y videos HeyGen'
       : block?.generator === 'seedance25'
         ? 'audios y videos Seedance 2.5'
-        : block?.generator === 'h3'
+      : block?.generator === 'h3'
           ? 'audios y videos MiniMax H3'
+          : block?.generator === 'omni'
+            ? 'audios y videos Gemini Omni'
           : block?.generator === 'assets' ? 'audios y montaje local' : 'imagen y audios';
     if (!block || !confirm(`¿Descartar los parciales de “${block.title || 'este bloque'}” y regenerar ${materials}?`)) return;
     await runAutomationBlock(pr.id, block, btn.closest('.auto-block'), { regenerate: true });
@@ -8571,6 +8725,7 @@ function automationBlockOutHtml(out, block = null) {
   const isAssets = out.generator === 'assets';
   const isH3 = out.generator === 'h3';
   const isSeedance25 = out.generator === 'seedance25';
+  const isOmni = out.generator === 'omni';
   const canRegenerateHeyGenPlanes = isHeyGen && out.heygenFraming === 'split' && segmentVideoKeys.length === 2 && block?.id;
   const sourceStatus = isHeyGen
     ? `HeyGen · ${out.heygenFraming === 'split' ? '2 planos' : '1 plano'}`
@@ -8578,6 +8733,8 @@ function automationBlockOutHtml(out, block = null) {
       ? `MiniMax H3 · ${out.h3Resolution || '768P'} · ${h3SegmentVideoKeys.length} tramo${h3SegmentVideoKeys.length === 1 ? '' : 's'}`
     : isSeedance25
       ? `Seedance 2.5 · ${out.h3Resolution || '720p'} · ${h3SegmentVideoKeys.length} tramo${h3SegmentVideoKeys.length === 1 ? '' : 's'}`
+    : isOmni
+      ? `Gemini Omni · ${out.h3Resolution || '720p'} · ${h3SegmentVideoKeys.length} tramo${h3SegmentVideoKeys.length === 1 ? '' : 's'}`
     : isAssets
       ? `Assets · ${(out.assetKeys || []).length} visuales · ${out.assetMuteOriginal !== false ? 'audio original silenciado' : 'audio original mezclado'} · ${out.motionOverlayKey ? 'texto dinámico ✓' : `capa ${out.textLayerKey ? '✓' : '—'}`}`
       : `Imagen ${out.imageKey ? '✓' : '—'} · ${out.motionOverlayKey ? 'Texto dinámico ✓' : `Texto ${out.textImageKey ? '✓' : '—'} · Capa ${out.textLayerKey ? '✓' : '—'}`}`;
@@ -8595,7 +8752,7 @@ function automationBlockOutHtml(out, block = null) {
       const label = out.heygenFraming === 'split' ? (index === 0 ? 'Plano general' : 'Primer plano') : 'Toma HeyGen';
       return `<span class="heygen-segment-row"><button type="button" class="mini-btn" data-open-asset="${esc(key)}">${label}</button>${canRegenerateHeyGenPlanes ? `<button type="button" class="mini-btn accent" data-regenerate-heygen-segment data-block-id="${esc(block.id)}" data-segment-index="${index}">${IC('refresh')} Regenerar</button>` : ''}</span>`;
     }).join('')}</span>` : ''}
-    ${h3SegmentVideoKeys.length ? `<span class="heygen-segment-list"><small>Tramos ${isSeedance25 ? 'Seedance 2.5' : 'MiniMax H3'}</small>${h3SegmentVideoKeys.map((key, index) => `<span class="heygen-segment-row"><button type="button" class="mini-btn" data-open-asset="${esc(key)}">Tramo ${index + 1}</button></span>`).join('')}</span>` : ''}
+    ${h3SegmentVideoKeys.length ? `<span class="heygen-segment-list"><small>Tramos ${isSeedance25 ? 'Seedance 2.5' : isOmni ? 'Gemini Omni' : 'MiniMax H3'}</small>${h3SegmentVideoKeys.map((key, index) => `<span class="heygen-segment-row"><button type="button" class="mini-btn" data-open-asset="${esc(key)}">Tramo ${index + 1}</button></span>`).join('')}</span>` : ''}
     ${out.videoKey ? `<span class="auto-output-video"><video src="${fileUrl(out.videoKey)}" controls preload="metadata"></video><button type="button" class="mini-btn" data-open-asset="${esc(out.videoKey)}">Acciones del video</button></span>` : ''}`;
 }
 
@@ -8981,13 +9138,13 @@ async function runAutomationBlock(projectId, block, blockEl, {
     const { refs, labeledRefs, prompt } = await automationRefsAndPrompt(pr, block);
     let historyLoaded = false;
     let imageKey = output.imageKey;
-    const isGenerativeVideo = ['h3', 'seedance25'].includes(block.generator);
-    const generativeVideoMode = block.generator === 'seedance25' ? block.seedance25Mode : block.h3Mode;
-    const generativeReferenceKeys = block.generator === 'seedance25' ? block.seedance25ReferenceKeys : block.h3ReferenceKeys;
+    const isGenerativeVideo = ['h3', 'seedance25', 'omni'].includes(block.generator);
+    const generativeVideoMode = block.generator === 'omni' ? block.omniMode : block.generator === 'seedance25' ? block.seedance25Mode : block.h3Mode;
+    const generativeReferenceKeys = block.generator === 'omni' ? block.omniReferenceKeys : block.generator === 'seedance25' ? block.seedance25ReferenceKeys : block.h3ReferenceKeys;
     if (!imageKey && isGenerativeVideo && generativeVideoMode === 'frames') {
       imageKey = (generativeReferenceKeys || [])[0] || '';
       if (imageKey) output = await persistAutomationBlockOutput(projectId, block.id, {
-        imageKey, imageModelId: `${block.generator}-frame`, imageModelName: `Fotograma de entrada ${block.generator === 'seedance25' ? 'Seedance 2.5' : 'H3'}`,
+        imageKey, imageModelId: `${block.generator}-frame`, imageModelName: `Fotograma de entrada ${block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'H3'}`,
         fallbackUsed: false, recoveredImage: true, audioCountExpected: block.items.length
       });
     }
@@ -9091,7 +9248,7 @@ async function runAutomationBlock(projectId, block, blockEl, {
     }
 
     setStatus(isGenerativeVideo
-      ? `Generando y ensamblando los tramos ${block.generator === 'seedance25' ? 'Seedance 2.5' : 'MiniMax H3'}…`
+      ? `Generando y ensamblando los tramos ${block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'MiniMax H3'}…`
       : dynamicTextEnabled ? 'Animando títulos y subtítulos con Remotion…' : 'Armando el video…');
     const category = `Auto: ${pr.name}`;
     const v = isGenerativeVideo
@@ -9108,18 +9265,18 @@ async function runAutomationBlock(projectId, block, blockEl, {
       ...(isGenerativeVideo ? {
         h3SegmentVideoKeys: v.segmentVideoKeys || [], generator: block.generator,
         h3SegmentDurations: v.segmentDurations || [],
-        h3Resolution: block.generator === 'seedance25' ? (block.seedance25Resolution || '720p') : (block.h3Resolution || '768P')
+        h3Resolution: block.generator === 'seedance25' ? (block.seedance25Resolution || '720p') : block.generator === 'omni' ? (block.omniResolution || '720p') : (block.h3Resolution || '768P')
       } : {}),
       completedAt: Date.now()
     });
     await tagAutomationStage(pr, block, [imageKey, textImageKey, textLayerKey, v.motionOverlayKey, ...(v.segmentVideoKeys || []), ...audioKeys, v.videoKey]);
-    if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: isGenerativeVideo ? `Toma ${block.generator === 'seedance25' ? 'Seedance 2.5' : 'MiniMax H3'} terminada.` : 'Toma terminada.' });
+    if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: isGenerativeVideo ? `Toma ${block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'MiniMax H3'} terminada.` : 'Toma terminada.' });
     renderAutomationProject();
     return true;
   } catch (err) {
     if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { error: err.message });
     toast(err.message, 'err');
-    if (block.generator === 'heygen' || ['h3', 'seedance25'].includes(block.generator)) {
+    if (block.generator === 'heygen' || ['h3', 'seedance25', 'omni'].includes(block.generator)) {
       try {
         const snapshot = await api('/api/state');
         state.automations = snapshot.automations || state.automations;
@@ -9705,7 +9862,7 @@ function renderProjectCostEstimate(projects) {
       </div>
       <div class="project-cost-stat">
         <span>Material previsto</span>
-        <strong>${detail.resourceImages + detail.blockImages} imágenes · ${detail.audioItems} voces${detail.h3Blocks ? ` · ${detail.h3Blocks} toma${detail.h3Blocks === 1 ? '' : 's'} H3` : ''}${detail.seedance25Blocks ? ` · ${detail.seedance25Blocks} toma${detail.seedance25Blocks === 1 ? '' : 's'} Seedance 2.5` : ''}${detail.musicEnabled ? ' · 1 música' : ''}</strong>
+        <strong>${detail.resourceImages + detail.blockImages} imágenes · ${detail.audioItems} voces${detail.h3Blocks ? ` · ${detail.h3Blocks} toma${detail.h3Blocks === 1 ? '' : 's'} H3` : ''}${detail.seedance25Blocks ? ` · ${detail.seedance25Blocks} toma${detail.seedance25Blocks === 1 ? '' : 's'} Seedance 2.5` : ''}${detail.omniBlocks ? ` · ${detail.omniBlocks} toma${detail.omniBlocks === 1 ? '' : 's'} Omni` : ''}${detail.musicEnabled ? ' · 1 música' : ''}</strong>
       </div>
     </div>
     <div class="project-cost-breakdown">
@@ -9728,6 +9885,10 @@ function renderProjectCostEstimate(projects) {
       ${detail.seedance25Blocks ? `<div class="cost-row">
         <span class="cr-label">Video generativo Seedance 2.5<span class="cr-sub">${detail.seedance25Blocks} bloque${detail.seedance25Blocks === 1 ? '' : 's'} · ~${Math.round(detail.seedance25EstimatedSeconds || 0)} segundos facturables · resolución según cada bloque</span></span>
         <span class="cr-value">${fmtUsd(detail.seedance25VideoCost)}</span>
+      </div>` : ''}
+      ${detail.omniBlocks ? `<div class="cost-row">
+        <span class="cr-label">Video generativo Gemini Omni<span class="cr-sub">${detail.omniBlocks} bloque${detail.omniBlocks === 1 ? '' : 's'} · ~${Math.round(detail.omniEstimatedSeconds || 0)} segundos facturables · resolución según cada bloque</span></span>
+        <span class="cr-value">${fmtUsd(detail.omniVideoCost)}</span>
       </div>` : ''}
       ${detail.musicEnabled ? `<div class="cost-row">
         <span class="cr-label">Música de fondo<span class="cr-sub">${detail.musicSource === 'suno' ? `${detail.generatedMusicTracks} variantes generadas con Suno` : detail.musicSource === 'auto' ? 'Selección automática desde Assets' : 'Pista existente de Assets'}</span></span>

@@ -11,7 +11,7 @@ import { spawn, execFile } from 'node:child_process';
 import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel, getAudioModel } from './lib/models.js';
 import {
   generateGemini, analyzeArtStyle, generateSeedream, generateOpenAIImage, generateSeedanceVideo,
-  generateSeedance25Video,
+  generateSeedance25Video, generateGeminiOmniVideo,
   generateMiniMaxH3Video, regenerateMiniMaxH3Video, generateScreenplay,
   listVoices, generateSpeech, generateMusic, translateText, searchUpdatedPricing, testService
 } from './lib/providers.js';
@@ -684,6 +684,50 @@ async function validateMiniMaxH3Media(mediaRefs, ffmpegExecutable) {
   if (totals.audio > 15.01) throw new Error('Los audios de referencia H3 no pueden superar 15 segundos en total.');
 }
 
+async function validateGeminiOmniMedia(mediaRefs, ffmpegExecutable, mode, hasPreviousInteraction) {
+  const allowedImages = new Set(['.jpg', '.jpeg', '.png', '.webp']);
+  const allowedVideos = new Set(['.mp4', '.mov', '.webm']);
+  const images = mediaRefs.filter((ref) => ref.kind === 'image');
+  const videos = mediaRefs.filter((ref) => ref.kind === 'video');
+  const audios = mediaRefs.filter((ref) => ref.kind === 'audio');
+  if (audios.length) throw new Error('Gemini Omni 1.1 Flash todavía no admite audio subido como referencia.');
+  if (images.length > 6 || videos.length > 3 || mediaRefs.length > 9) {
+    throw new Error('Gemini Omni admite hasta 6 imágenes y 3 videos; máximo 9 referencias.');
+  }
+  if (mode === 'frames' && (images.length !== 2 || videos.length)) {
+    throw new Error('Inicio → Fin de Gemini Omni necesita exactamente dos imágenes.');
+  }
+  if ((mode === 'edit' || mode === 'extend') && !hasPreviousInteraction && videos.length !== 1) {
+    throw new Error(`${mode === 'edit' ? 'Editar' : 'Extender'} necesita un video de origen o continuar una generación Omni desde el historial.`);
+  }
+  for (const ref of mediaRefs) {
+    if (String(ref.path || '').startsWith('data:')) continue;
+    const extension = path.extname(ref.path).toLowerCase();
+    if (ref.kind === 'image' && !allowedImages.has(extension)) {
+      throw new Error(`Gemini Omni no admite ${extension || 'ese formato'} como imagen. Usá JPG, PNG o WebP.`);
+    }
+    if (ref.kind === 'video' && !allowedVideos.has(extension)) {
+      throw new Error(`Gemini Omni no admite ${extension || 'ese formato'} como video. Usá MP4, MOV o WebM.`);
+    }
+    const stat = await fs.stat(ref.path);
+    if (stat.size > 2 * 1024 * 1024 * 1024) throw new Error('Una referencia supera el límite de 2 GB de Gemini Files.');
+  }
+  const videoDurations = [];
+  for (const [index, ref] of videos.entries()) {
+    const mediaDuration = await probeMediaDuration(ffmpegExecutable, ref.path);
+    if (!mediaDuration) throw new Error('No pude comprobar la duración de un video de referencia de Gemini Omni.');
+    const isUploadedSource = !hasPreviousInteraction && (mode === 'edit' || mode === 'extend') && index === 0;
+    const maximum = isUploadedSource ? 10.01 : 3.01;
+    if (mediaDuration > maximum) {
+      throw new Error(isUploadedSource
+        ? 'El video de origen para editar o extender con Gemini Omni debe durar como máximo 10 segundos.'
+        : 'Cada video usado como referencia de Gemini Omni debe durar como máximo 3 segundos.');
+    }
+    videoDurations.push(mediaDuration);
+  }
+  return { videoDurations };
+}
+
 async function validateSeedance25Media(mediaRefs, ffmpegExecutable) {
   const limitsMb = { image: 30, video: 200, audio: 15 };
   const allowed = {
@@ -1276,7 +1320,10 @@ async function runVideoGeneration(req) {
   const prompt = String(req.prompt || '').trim();
   if (!prompt) throw new Error('El prompt está vacío.');
 
-  const mode = req.mode === 'frames' ? 'frames' : 'reference';
+  const requestedMode = String(req.mode || 'reference');
+  const mode = model.provider === 'omni' && ['reference', 'frames', 'edit', 'extend'].includes(requestedMode)
+    ? requestedMode
+    : requestedMode === 'frames' ? 'frames' : 'reference';
   const refLimit = model.refLimits?.[mode] ?? model.maxRefs;
   const refs = Array.isArray(req.refs) ? req.refs.slice(0, refLimit) : [];
   const labeledRefs = req.labeledRefs && typeof req.labeledRefs === 'object' ? req.labeledRefs : {};
@@ -1309,6 +1356,67 @@ async function runVideoGeneration(req) {
   const preface = refs.some((key) => validStamp(labeledRefs[key])) ? LABELED_REFS_PROMPT : '';
   const suffix = hasPoserRef && cfg.poserPrompt?.trim() ? cfg.poserPrompt.trim() : '';
   const sentPrompt = [preface, prompt, suffix].filter(Boolean).join('\n\n');
+
+  if (model.provider === 'omni') {
+    if (mediaRefs.some((ref) => String(ref.path || '').startsWith('asset://'))) {
+      throw new Error('Gemini Omni no puede leer IDs privados de ModelArk. Elegí las fotos locales desde Assets.');
+    }
+    let sourceEntry = null;
+    const acceptsConversation = mode === 'edit' || mode === 'extend';
+    const requestedPreviousId = acceptsConversation ? String(req.omniPreviousInteractionId || '').trim() : '';
+    const sourceHistoryId = acceptsConversation ? String(req.omniSourceHistoryId || '').trim() : '';
+    if (requestedPreviousId || sourceHistoryId) {
+      const history = await readJson('history.json', []);
+      sourceEntry = history.find((item) => item.id === sourceHistoryId && item.modelId === model.id) || null;
+      if (!sourceEntry || !sourceEntry.omniInteractionId || sourceEntry.omniInteractionId !== requestedPreviousId) {
+        throw new Error('La conversación de Gemini Omni no coincide con una generación del historial. Volvé a elegir Editar o Extender desde el video original.');
+      }
+    }
+    const previousInteractionId = sourceEntry?.omniInteractionId || '';
+    if ((mode === 'edit' || mode === 'extend') && !previousInteractionId && mediaRefs.every((ref) => ref.kind !== 'video')) {
+      throw new Error(`${mode === 'edit' ? 'Editar' : 'Extender'} necesita un video de origen o una generación Omni elegida desde el historial.`);
+    }
+    const videoRefCount = mediaRefs.filter((ref) => ref.kind === 'video').length;
+    const omniFfmpeg = videoRefCount ? await resolveFfmpegExecutable(cfg.ffmpegPath) : null;
+    const omniMedia = await validateGeminiOmniMedia(mediaRefs, omniFfmpeg, mode, Boolean(previousInteractionId));
+    const previousCumulative = Number(sourceEntry?.omniCumulativeDuration) || Number(sourceEntry?.duration) || 0;
+    const uploadedSourceDuration = !previousInteractionId && mode === 'extend' ? Number(omniMedia.videoDurations?.[0]) || 0 : 0;
+    const cumulativeDuration = mode === 'extend'
+      ? previousCumulative + uploadedSourceDuration + duration
+      : (previousCumulative || duration);
+    if (mode === 'extend' && previousInteractionId && cumulativeDuration > 40.01) {
+      throw new Error(`Gemini Omni permite extensiones encadenadas hasta 40 segundos. Esta cadena llegaría a ${cumulativeDuration}s.`);
+    }
+    const video = await generateGeminiOmniVideo({
+      apiKey: cfg.keys.gemini, apiModel: model.apiModel, prompt: sentPrompt,
+      mediaRefs, mode, aspectRatio, resolution, duration, audio, previousInteractionId
+    });
+    const name = `${ts()}-${model.id}-${newId()}.mp4`;
+    const key = await saveBuffer('video', name, video.buffer);
+    const pricing = await getPricing();
+    const inputTokens = Number(video.usage?.input_tokens || video.usage?.inputTokenCount || video.usage?.prompt_token_count) || 0;
+    const cost = videoPrice(pricing, model.id, resolution) * duration
+      + inputTokens * (model.inputPricePerMillionTokens || 0) / 1_000_000;
+    await recordCost({
+      type: 'video', modelId: model.id, label: `${model.name} ${resolution}`,
+      units: duration, unitLabel: 'segundo(s)', cost
+    });
+    const entry = {
+      id: newId(), ts: Date.now(), type: 'video', modelId: model.id, modelName: model.name,
+      prompt, sentPrompt: video.finalPrompt, mode, aspectRatio, resolution, duration,
+      audio: Boolean(audio), refs, refKinds: mediaRefs.map((ref) => ref.kind),
+      characterId: req.characterId || null, outputs: [key], errors: [], cost: Number(cost.toFixed(6)),
+      omniInteractionId: video.interactionId,
+      omniPreviousInteractionId: previousInteractionId,
+      omniRootInteractionId: sourceEntry?.omniRootInteractionId || previousInteractionId || video.interactionId,
+      omniChainDepth: (Number(sourceEntry?.omniChainDepth) || 0) + (previousInteractionId ? 1 : 0),
+      omniCumulativeDuration: cumulativeDuration,
+      omniSourceHistoryId: sourceEntry?.id || ''
+    };
+    await updateJson('history.json', [], (history) => [entry, ...history].slice(0, 1000));
+    await recordAssetMetadata(entry);
+    return entry;
+  }
 
   if (model.id === 'seedance-2-5') {
     const counts = {
@@ -2664,7 +2772,8 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
     (project.requirements?.objects?.length || 0);
   const blockImages = (project.blocks || []).filter((block) => block.generator === 'image'
     || (block.generator === 'h3' && block.h3Mode !== 'frames')
-    || (block.generator === 'seedance25' && block.seedance25Mode !== 'frames')).length;
+    || (block.generator === 'seedance25' && block.seedance25Mode !== 'frames')
+    || (block.generator === 'omni' && block.omniMode !== 'frames')).length;
   const audioModel = getAudioModel(project.config?.audioModelId);
   const audioTexts = (project.blocks || []).flatMap((block) =>
     (block.items || []).map((item) => audioModel.supportsAudioTags ? automationAudioText(item.text) : stripTags(item.text)).filter(Boolean)
@@ -2712,7 +2821,22 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
     seedance25EstimatedSeconds += billedSeconds;
     return sum + billedSeconds * videoPrice(pricing, 'seedance-2-5', block.seedance25Resolution === '480p' ? '480p' : '720p');
   }, 0);
-  const estimatedTotal = resourceImageCost + blockImageCost + audioCost + generatedMusicCost + h3ResolutionCosts + seedance25VideoCost;
+  const omniBlocks = (project.blocks || []).filter((block) => block.generator === 'omni');
+  let omniEstimatedSeconds = 0;
+  const omniVideoCost = omniBlocks.reduce((sum, block) => {
+    const approximate = Number(block.estimatedDuration) > 0
+      ? Number(block.estimatedDuration)
+      : Math.max(1, (block.items || []).reduce((total, item) => total + String(item.text || '').length, 0) / 14);
+    let billedSeconds = 0;
+    for (let remaining = approximate; remaining > 0.001; remaining -= Math.min(10, remaining)) {
+      billedSeconds += Math.max(3, Math.ceil(Math.min(10, remaining)));
+    }
+    omniEstimatedSeconds += billedSeconds;
+    const resolution = ['360p', '720p', '1080p', '4K'].includes(block.omniResolution) ? block.omniResolution : '720p';
+    return sum + billedSeconds * videoPrice(pricing, 'gemini-omni-1-1-flash', resolution);
+  }, 0);
+  const estimatedTotal = resourceImageCost + blockImageCost + audioCost + generatedMusicCost
+    + h3ResolutionCosts + seedance25VideoCost + omniVideoCost;
 
   const linkedMetadata = Object.values(assetMetadata || {}).filter((metadata) =>
     metadata?.automationId === project.id
@@ -2742,6 +2866,9 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
       seedance25Blocks: seedance25Blocks.length,
       seedance25EstimatedSeconds,
       seedance25VideoCost: Number(seedance25VideoCost.toFixed(6)),
+      omniBlocks: omniBlocks.length,
+      omniEstimatedSeconds,
+      omniVideoCost: Number(omniVideoCost.toFixed(6)),
       audioItems: audioTexts.length,
       audioCharacters,
       audioModelId: audioModel.id,
@@ -2836,7 +2963,7 @@ function sanitizeAutomation(src, prev = {}) {
       sourceQuote: String(b.sourceQuote || '').slice(0, 4000),
       quoteReference: String(b.quoteReference || '').slice(0, 80),
       estimatedDuration: Math.max(0, Math.min(3600, Number(b.estimatedDuration) || 0)),
-      generator: ['image', 'heygen', 'assets', 'h3', 'seedance25'].includes(b.generator) ? b.generator : 'image',
+      generator: ['image', 'heygen', 'assets', 'h3', 'seedance25', 'omni'].includes(b.generator) ? b.generator : 'image',
       heygenCharacterId: /^[a-z0-9]+$/.test(String(b.heygenCharacterId || '')) ? String(b.heygenCharacterId) : '',
       heygenFraming: ['wide', 'close', 'split'].includes(b.heygenFraming) ? b.heygenFraming : 'wide',
       assetKeys: normalizeAutomationAssetKeys(b.assetKeys),
@@ -2851,7 +2978,10 @@ function sanitizeAutomation(src, prev = {}) {
       seedance25Resolution: b.seedance25Resolution === '480p' ? '480p' : '720p',
       seedance25UseNarrationReference: b.seedance25UseNarrationReference !== false,
       seedance25KeepGeneratedAudio: b.seedance25KeepGeneratedAudio === true,
-      seedance25ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.seedance25ReferenceKeys)
+      seedance25ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.seedance25ReferenceKeys),
+      omniMode: b.omniMode === 'frames' ? 'frames' : 'reference',
+      omniResolution: ['360p', '720p', '1080p', '4K'].includes(b.omniResolution) ? b.omniResolution : '720p',
+      omniReferenceKeys: normalizeAutomationH3ReferenceKeys(b.omniReferenceKeys)
     };
   });
 
@@ -4649,11 +4779,18 @@ const server = http.createServer(async (req, res) => {
                   || previousBlock.seedance25UseNarrationReference !== block.seedance25UseNarrationReference
                   || JSON.stringify(previousBlock.seedance25ReferenceKeys || []) !== JSON.stringify(block.seedance25ReferenceKeys || [])
                 );
+                const omniIsRelevant = previousBlock.generator === 'omni' || block.generator === 'omni';
+                const omniGenerationChanged = omniIsRelevant && (
+                  previousBlock.omniMode !== block.omniMode
+                  || previousBlock.omniResolution !== block.omniResolution
+                  || JSON.stringify(previousBlock.omniReferenceKeys || []) !== JSON.stringify(block.omniReferenceKeys || [])
+                );
                 const generatorChanged = previousBlock.generator !== block.generator
                   || previousBlock.heygenCharacterId !== block.heygenCharacterId
                   || previousBlock.heygenFraming !== block.heygenFraming
                   || h3GenerationChanged
-                  || seedance25GenerationChanged;
+                  || seedance25GenerationChanged
+                  || omniGenerationChanged;
                 const h3AudioOutputChanged = h3IsRelevant
                   && previousBlock.h3KeepGeneratedAudio !== block.h3KeepGeneratedAudio;
                 const seedance25AudioOutputChanged = seedance25IsRelevant
@@ -5102,7 +5239,7 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // Video generativo dentro del Automatizador (MiniMax H3 o Seedance 2.5).
+    // Video generativo dentro del Automatizador (MiniMax H3, Seedance 2.5 u Omni).
     // Divide cada voz según la duración máxima del modelo, conserva los clips
     // originales y ajusta el master a la duración exacta de ElevenLabs.
     const automationH3BlockMatch = /^\/api\/automations\/([a-z0-9]+)\/h3-block$/.exec(p);
@@ -5114,15 +5251,18 @@ const server = http.createServer(async (req, res) => {
       if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
       const block = project.blocks?.find((item) => item.id === String(body.blockId || ''));
       if (!block) return send(res, 404, { error: 'Bloque no encontrado.' });
-      if (!['h3', 'seedance25'].includes(block.generator)) return send(res, 400, { error: 'Este bloque no está configurado para video generativo.' });
+      if (!['h3', 'seedance25', 'omni'].includes(block.generator)) return send(res, 400, { error: 'Este bloque no está configurado para video generativo.' });
 
       const isSeedance25 = block.generator === 'seedance25';
-      const model = getVideoModel(isSeedance25 ? 'seedance-2-5' : 'minimax-h3');
+      const isOmni = block.generator === 'omni';
+      const model = getVideoModel(isOmni ? 'gemini-omni-1-1-flash' : isSeedance25 ? 'seedance-2-5' : 'minimax-h3');
       const serviceName = model.name;
+      const serviceSlug = isOmni ? 'omni' : isSeedance25 ? 'seedance25' : 'h3';
 
       const cfg = await getConfig();
       if (isSeedance25 && !cfg.keys.ark) return send(res, 400, { error: 'Falta la API key de BytePlus ModelArk en Configuración.' });
-      if (!isSeedance25 && !cfg.keys.minimax) return send(res, 400, { error: 'Falta la API key de MiniMax en Configuración.' });
+      if (isOmni && !cfg.keys.gemini) return send(res, 400, { error: 'Falta la API key de Gemini en Configuración.' });
+      if (!isSeedance25 && !isOmni && !cfg.keys.minimax) return send(res, 400, { error: 'Falta la API key de MiniMax en Configuración.' });
       const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
       const audioKeys = (Array.isArray(body.audioKeys) ? body.audioKeys : []).map(String).filter((key) => /^audio\//.test(key));
       if (!audioKeys.length) return send(res, 400, { error: 'Falta la narración del bloque.' });
@@ -5132,8 +5272,9 @@ const server = http.createServer(async (req, res) => {
         return send(res, 400, { error: 'No pude calcular la duración de todos los audios del bloque.' });
       }
 
-      const mode = (isSeedance25 ? block.seedance25Mode : block.h3Mode) === 'frames' ? 'frames' : 'reference';
-      const configuredKeys = normalizeAutomationH3ReferenceKeys(isSeedance25 ? block.seedance25ReferenceKeys : block.h3ReferenceKeys);
+      const configuredMode = isOmni ? block.omniMode : isSeedance25 ? block.seedance25Mode : block.h3Mode;
+      const mode = configuredMode === 'frames' ? 'frames' : 'reference';
+      const configuredKeys = normalizeAutomationH3ReferenceKeys(isOmni ? block.omniReferenceKeys : isSeedance25 ? block.seedance25ReferenceKeys : block.h3ReferenceKeys);
       const imageKey = String(body.imageKey || '');
       let referenceKeys;
       if (mode === 'frames') {
@@ -5150,18 +5291,20 @@ const server = http.createServer(async (req, res) => {
       if (allStats.some((stat) => !stat?.isFile())) return send(res, 400, { error: `No encuentro una o más referencias de ${serviceName}.` });
 
       const chunks = [];
-      const maxChunkDuration = isSeedance25 ? 30 : 15;
+      const maxChunkDuration = isOmni ? 10 : isSeedance25 ? 30 : 15;
       for (const [audioIndex, audioDuration] of audioDurations.entries()) {
         let start = 0;
         while (start < audioDuration - 0.001) {
           const duration = Math.min(maxChunkDuration, audioDuration - start);
-          chunks.push({ audioIndex, start, duration, requestDuration: Math.max(4, Math.min(maxChunkDuration, Math.ceil(duration))) });
+          chunks.push({ audioIndex, start, duration, requestDuration: Math.max(isOmni ? 3 : 4, Math.min(maxChunkDuration, Math.ceil(duration))) });
           start += duration;
         }
       }
       if (!chunks.length) return send(res, 400, { error: 'La narración no contiene audio utilizable.' });
 
-      const resolution = isSeedance25
+      const resolution = isOmni
+        ? (['360p', '720p', '1080p', '4K'].includes(block.omniResolution) ? block.omniResolution : '720p')
+        : isSeedance25
         ? (block.seedance25Resolution === '480p' ? '480p' : '720p')
         : (block.h3Resolution === '2K' ? '2K' : '768P');
       const aspectRatio = model.aspectRatios.includes(project.config?.aspectRatio) ? project.config.aspectRatio : '9:16';
@@ -5192,9 +5335,9 @@ const server = http.createServer(async (req, res) => {
           }
           const useNarrationReference = isSeedance25
             ? block.seedance25UseNarrationReference !== false
-            : block.h3UseNarrationReference !== false;
+            : isOmni ? false : block.h3UseNarrationReference !== false;
           if (mode === 'reference' && useNarrationReference) {
-            const chunkPath = path.join(outDir, `.${isSeedance25 ? 'seedance25' : 'h3'}-voice-${projectId}-${block.id}-${index}-${newId()}.mp3`);
+            const chunkPath = path.join(outDir, `.${serviceSlug}-voice-${projectId}-${block.id}-${index}-${newId()}.mp3`);
             await runFfmpeg(ffmpegExecutable, [
               '-y', '-ss', chunk.start.toFixed(6), '-i', audioPaths[chunk.audioIndex],
               '-af', 'apad', '-t', String(chunk.requestDuration), '-c:a', 'libmp3lame', '-b:a', '192k', chunkPath
@@ -5212,9 +5355,10 @@ const server = http.createServer(async (req, res) => {
             || counts.video > (limits.video || model.maxRefs) || counts.audio > (limits.audio || model.maxRefs)) {
             throw new Error(`Las referencias del bloque superan los límites de ${serviceName}: ${limits.image} imágenes, ${limits.video} videos, ${limits.audio} audios y ${limits.total} archivos en total.`);
           }
-          const mediaDurations = isSeedance25
-            ? await validateSeedance25Media(refs, ffmpegExecutable)
-            : await validateMiniMaxH3Media(refs, ffmpegExecutable);
+          const mediaDurations = isOmni
+            ? (await validateGeminiOmniMedia(refs, ffmpegExecutable, mode, false), { video: 0, audio: 0 })
+            : isSeedance25 ? await validateSeedance25Media(refs, ffmpegExecutable)
+              : await validateMiniMaxH3Media(refs, ffmpegExecutable);
           const narrationAudioNumber = refs.filter((ref) => ref.kind === 'audio').length;
           const prompt = [
             project.config?.artStyle ? `GLOBAL ART DIRECTION — preserve this aesthetic consistently: ${String(project.config.artStyle).slice(0, 1200)}` : '',
@@ -5223,11 +5367,20 @@ const server = http.createServer(async (req, res) => {
             isSeedance25 && mode === 'reference' && counts.image
               ? 'Use @Image1 as the principal visual reference for subject identity, composition and scene continuity.'
               : '',
+            isOmni && mode === 'reference' && counts.image
+              ? 'Use <IMAGE_REF_0> as the principal visual reference for subject identity, composition and scene continuity.'
+              : '',
             useNarrationReference && mode === 'reference'
               ? `${isSeedance25 ? `Use @Audio${narrationAudioNumber}` : 'Use the supplied voice audio'} as the exact performance and timing reference. Preserve speaker identity and synchronize visible speech when a person is on screen.`
               : ''
           ].filter(Boolean).join('\n\n').slice(0, 7000);
-          const generated = isSeedance25
+          const generated = isOmni
+            ? await generateGeminiOmniVideo({
+              apiKey: cfg.keys.gemini, apiModel: model.apiModel,
+              prompt, mediaRefs: refs, mode, aspectRatio, resolution,
+              duration: chunk.requestDuration, audio: false
+            })
+            : isSeedance25
             ? await generateSeedance25Video({
               apiKey: cfg.keys.ark, apiModel: cfg.seedance25ModelId || model.apiModel,
               endpoint: cfg.endpoints.ark, prompt, mediaRefs: refs,
@@ -5239,7 +5392,7 @@ const server = http.createServer(async (req, res) => {
               prompt, mediaRefs: refs, mode, aspectRatio, resolution,
               duration: chunk.requestDuration, contextIr: block.h3ContextIr === true
             });
-          const key = await saveBuffer('video', `${ts()}-auto-${isSeedance25 ? 'seedance25' : 'h3'}-${index + 1}-${newId()}.mp4`, generated.buffer);
+          const key = await saveBuffer('video', `${ts()}-auto-${serviceSlug}-${index + 1}-${newId()}.mp4`, generated.buffer);
           const pricing = await getPricing();
           const outputSeconds = Number(generated.usage?.output_seconds) || chunk.requestDuration;
           const inputSeconds = Number(generated.usage?.input_seconds) || (isSeedance25 ? mediaDurations.video : 0) || 0;
@@ -5248,7 +5401,11 @@ const server = http.createServer(async (req, res) => {
             ? (Number(generated.contextUsage.prompt_tokens) || 0) * 0.9 / 1_000_000
               + (Number(generated.contextUsage.completion_tokens) || 0) * 3.6 / 1_000_000
             : 0;
-          const cost = isSeedance25
+          const omniInputTokens = Number(generated.usage?.input_tokens || generated.usage?.inputTokenCount || generated.usage?.prompt_token_count) || 0;
+          const cost = isOmni
+            ? videoPrice(pricing, model.id, resolution) * outputSeconds
+              + omniInputTokens * (model.inputPricePerMillionTokens || 0) / 1_000_000
+            : isSeedance25
             ? videoPrice(pricing, model.id, resolution) * (outputSeconds + inputSeconds)
               * (counts.video ? (model.videoInputPriceMultiplier || 1) : 1)
             : videoPrice(pricing, model.id, resolution) * (outputSeconds + inputSeconds)
@@ -5269,9 +5426,10 @@ const server = http.createServer(async (req, res) => {
             metadata[key] = {
               type: 'video', modelId: model.id, modelName: model.name, ts: Date.now(),
               category: `Auto: ${project.name}`.slice(0, 80), automationId: projectId, blockId: block.id,
-              h3TaskId: isSeedance25 ? '' : generated.taskId,
+              h3TaskId: isSeedance25 || isOmni ? '' : generated.taskId,
               seedanceTaskId: isSeedance25 ? generated.taskId : '',
-              h3ContextIr: !isSeedance25 && block.h3ContextIr === true,
+              omniInteractionId: isOmni ? generated.interactionId : '',
+              h3ContextIr: !isSeedance25 && !isOmni && block.h3ContextIr === true,
               h3ChunkIndex: index, h3Resolution: resolution, generator: block.generator, duration: chunk.duration,
               cost: Number(cost.toFixed(6))
             };
@@ -5286,7 +5444,7 @@ const server = http.createServer(async (req, res) => {
           project, block, audioKeys, audioPaths, ffmpegExecutable, width, height, outDir,
           textHints: (block.items || []).map((item) => item.text)
         });
-        const name = `${ts()}-auto-${isSeedance25 ? 'seedance25' : 'h3'}-${sanitizeName(block.title || block.id)}-${newId()}.mp4`;
+        const name = `${ts()}-auto-${serviceSlug}-${sanitizeName(block.title || block.id)}-${newId()}.mp4`;
         const outPath = path.join(outDir, name);
         const args = ['-y'];
         for (const segmentPath of segmentPaths) args.push('-i', segmentPath);
@@ -5313,7 +5471,7 @@ const server = http.createServer(async (req, res) => {
         }
         filters.push(`${visualLabels.join('')}concat=n=${visualLabels.length}:v=1:a=0[visual]`);
 
-        const keepGeneratedAudio = isSeedance25 ? block.seedance25KeepGeneratedAudio === true : block.h3KeepGeneratedAudio === true;
+        const keepGeneratedAudio = isOmni ? false : isSeedance25 ? block.seedance25KeepGeneratedAudio === true : block.h3KeepGeneratedAudio === true;
         const useGeneratedAudio = keepGeneratedAudio
           && (await Promise.all(segmentPaths.map((segmentPath) => probeHasAudioStream(ffmpegExecutable, segmentPath)))).every(Boolean);
         let audioLabel;
@@ -6003,7 +6161,7 @@ const server = http.createServer(async (req, res) => {
         const motionOverlayKey = String(output.motionOverlayKey || '');
         const blockVideoKey = String(output.videoKey || '');
         const isHeyGen = block.generator === 'heygen' || output.generator === 'heygen';
-        const isH3 = ['h3', 'seedance25'].includes(block.generator) || ['h3', 'seedance25'].includes(output.generator);
+        const isH3 = ['h3', 'seedance25', 'omni'].includes(block.generator) || ['h3', 'seedance25', 'omni'].includes(output.generator);
         const isAssetBlock = block.generator === 'assets' || output.generator === 'assets';
         const selectedAssetKeys = normalizeAutomationAssetKeys(block.assetKeys);
         const heygenSegmentKeys = (Array.isArray(output.heygenSegmentVideoKeys) ? output.heygenSegmentVideoKeys : [])
@@ -6022,7 +6180,8 @@ const server = http.createServer(async (req, res) => {
           return send(res, 400, { error: `Faltan los planos originales de HeyGen de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.` });
         }
         if (isH3 && !h3SegmentKeys.length) {
-          const modelName = block.generator === 'seedance25' || output.generator === 'seedance25' ? 'Seedance 2.5' : 'MiniMax H3';
+          const modelName = block.generator === 'seedance25' || output.generator === 'seedance25' ? 'Seedance 2.5'
+            : block.generator === 'omni' || output.generator === 'omni' ? 'Gemini Omni' : 'MiniMax H3';
           return send(res, 400, { error: `Faltan los tramos originales de ${modelName} de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.` });
         }
         if (isAssetBlock && !selectedAssetKeys.length) {

@@ -751,6 +751,20 @@ pre[class*="language-"] { background: rgba(10,5,18,.65); border: 1px solid var(-
 .refs-row { align-items: flex-start; }
 .refs-count { color: var(--pink); }
 .refs-strip { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; }
+.video-refs-content {
+  display: flex;
+  flex: 1;
+  min-width: 220px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+}
+.video-refs-content .refs-strip { flex: none; width: 100%; }
+#videoRefsHint {
+  display: block;
+  max-width: 920px;
+  line-height: 1.45;
+}
 .ref-thumb {
   position: relative; width: 64px; height: 64px;
   border-radius: 0; overflow: hidden;
