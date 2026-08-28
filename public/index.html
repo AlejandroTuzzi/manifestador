@@ -482,7 +482,12 @@
     <section id="view-vocabulary" class="view">
       <div class="chars-head">
         <div><h2>Vocabulario</h2><p class="section-lead">Referencias visuales con términos precisos para construir prompts en inglés.</p></div>
-        <button id="btnNewVocabulary" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Nueva ficha</button>
+        <div class="chars-head-actions">
+          <a id="btnExportVocabulary" class="mini-btn" href="/api/vocabulary/export" download title="Descargar todo el vocabulario en un ZIP (imágenes + términos + categorías)"><svg class="ic"><use href="#i-download"/></svg> Exportar ZIP</a>
+          <button id="btnImportVocabulary" class="mini-btn" title="Importar un ZIP de vocabulario de otro Manifestador"><svg class="ic"><use href="#i-upload"/></svg> Importar ZIP</button>
+          <input id="vocabularyImportInput" type="file" accept=".zip,application/zip" hidden>
+          <button id="btnNewVocabulary" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Nueva ficha</button>
+        </div>
       </div>
       <div class="prompt-library-tools vocabulary-library-tools">
         <input id="vocabularySearch" type="search" placeholder="Buscar por título, categoría o palabra…">

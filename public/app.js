@@ -3428,16 +3428,28 @@ async function copyVocabularyWord(word) {
   toast(`“${text}” copiado`);
 }
 
-function vocabularyWordsMarkup(item) {
+// En el panel rápido (mientras se escribe) el click INSERTA en el cursor del
+// prompt; en la biblioteca (sin prompt a la vista) copia al portapapeles.
+function insertVocabularyWord(word) {
+  const text = String(word || '').trim();
+  if (!text) return;
+  const caret = promptBox.selectionStart ?? promptBox.value.length;
+  const before = promptBox.value.slice(0, caret);
+  const lead = before.length && !/[\s,([{]$/.test(before) ? ' ' : '';
+  insertAtCursor(`${lead}${text} `);
+  toast(`“${text}” insertado`);
+}
+
+function vocabularyWordsMarkup(item, actionLabel = 'Copiar', icon = 'copy') {
   return `<div class="vocabulary-words">${(item.words || []).map((word, index) => `
-    <button type="button" class="vocabulary-word" data-vocabulary-word="${index}" title="Copiar ${esc(word)}">
-      <span>${esc(word)}</span>${IC('copy')}
+    <button type="button" class="vocabulary-word" data-vocabulary-word="${index}" title="${esc(actionLabel)} ${esc(word)}">
+      <span>${esc(word)}</span>${IC(icon)}
     </button>`).join('')}</div>`;
 }
 
-function bindVocabularyWords(root, item) {
+function bindVocabularyWords(root, item, onWord = copyVocabularyWord) {
   root.querySelectorAll('[data-vocabulary-word]').forEach((button) => button.addEventListener('click', () => {
-    copyVocabularyWord(item.words?.[Number(button.dataset.vocabularyWord)]);
+    onWord(item.words?.[Number(button.dataset.vocabularyWord)]);
   }));
 }
 
@@ -3525,7 +3537,7 @@ function renderVocabularyQuickPanel() {
   const items = filteredVocabulary(state.vocabularyQuickSearch, state.vocabularyQuickCategory);
   panel.innerHTML = `
     <div class="vocabulary-quick-head">
-      <div><strong>Vocabulario visual</strong><span class="hint">Consultá la imagen y copiá una palabra para pegarla en el prompt.</span></div>
+      <div><strong>Vocabulario visual</strong><span class="hint">Consultá la imagen y hacé click en una palabra para insertarla en el prompt donde tengas el cursor.</span></div>
       <button type="button" class="icon-btn" data-vocabulary-quick-close title="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
     <div class="vocabulary-quick-tools">
@@ -3539,7 +3551,7 @@ function renderVocabularyQuickPanel() {
         <div class="vocabulary-quick-copy">
           <span class="prompt-category">${esc(item.category)}</span>
           <h4>${esc(item.title)}${nsfwBadgeHtml(item, 'compact')}</h4>
-          ${vocabularyWordsMarkup(item)}
+          ${vocabularyWordsMarkup(item, 'Insertar', 'plus')}
         </div>
       </article>`).join('') : `<div class="empty-note">No hay coincidencias. <button type="button" class="mini-btn" data-open-vocabulary-section>${IC('plus')} Administrar vocabulario</button></div>`}</div>`;
   const category = panel.querySelector('[data-vocabulary-quick-category]');
@@ -3562,7 +3574,7 @@ function renderVocabularyQuickPanel() {
   panel.querySelectorAll('[data-vocabulary-quick-id]').forEach((card) => {
     const item = state.vocabulary.find((entry) => entry.id === card.dataset.vocabularyQuickId);
     if (!item) return;
-    bindVocabularyWords(card, item);
+    bindVocabularyWords(card, item, insertVocabularyWord);
     card.querySelector('[data-vocabulary-quick-image]').addEventListener('click', () => openLightbox(item.imageKey, visibleImageKeys));
   });
 }
@@ -3656,6 +3668,23 @@ async function deleteVocabularyEntry(item) {
 }
 
 $('#btnNewVocabulary').addEventListener('click', () => openVocabularyEditor());
+$('#btnImportVocabulary').addEventListener('click', () => $('#vocabularyImportInput').click());
+$('#vocabularyImportInput').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    const { imported = 0, entries = [], vocabularyCategories = [] } = await api('/api/vocabulary/import', {
+      method: 'POST', body: { zipBase64: dataUrl.split(',')[1] }
+    });
+    state.vocabularyCategoriesExtra = vocabularyCategories;
+    state.vocabulary = [...entries.filter((item) => contentIsVisible(item)), ...state.vocabulary];
+    renderVocabularyLibrary();
+    renderVocabularyQuickPanel();
+    toast(imported ? `${imported} ficha${imported === 1 ? '' : 's'} de vocabulario importada${imported === 1 ? '' : 's'}` : 'No había fichas nuevas en el ZIP', imported ? 'ok' : 'err');
+  } catch (err) { toast(`No se pudo importar: ${err.message}`, 'err'); }
+});
 $('#vocabularySearch').addEventListener('input', (event) => { state.vocabularySearch = event.target.value; renderVocabularyLibrary(); });
 $('#vocabularyCategoryFilter').addEventListener('change', (event) => { state.vocabularyCategoryFilter = event.target.value; renderVocabularyLibrary(); });
 $('#btnNewVocabularyCategory').addEventListener('click', () => openVocabularyCategoryForm());

@@ -4061,6 +4061,104 @@ const server = http.createServer(async (req, res) => {
       const [cfg, vocabulary] = await Promise.all([getConfig(), vocabularyStore.list()]);
       return send(res, 200, { vocabulary: cfg.nsfwEnabled ? vocabulary : vocabulary.filter((item) => !item.nsfw) });
     }
+
+    // Exporta TODO el vocabulario a un ZIP (manifest + imágenes) para llevarlo a
+    // otro Manifestador. Respeta NSFW: con NSFW apagado no se exportan esas fichas.
+    if (p === '/api/vocabulary/export' && req.method === 'GET') {
+      const [cfg, vocabulary, storedCategories] = await Promise.all([
+        getConfig(), vocabularyStore.list(), readJson('vocabulary-categories.json', [])
+      ]);
+      const items = cfg.nsfwEnabled ? vocabulary : vocabulary.filter((item) => !item.nsfw);
+      const entries = [];
+      const imageNames = new Map(); // imageKey → nombre en el zip (dedup)
+      const manifestEntries = [];
+      for (const item of items) {
+        let image = imageNames.get(item.imageKey);
+        if (image === undefined) {
+          image = '';
+          if (item.imageKey) {
+            try {
+              const data = await fs.readFile(await resolveAssetKey(item.imageKey));
+              const ext = path.extname(item.imageKey).toLowerCase() || '.png';
+              image = `images/${imageNames.size + 1}${ext}`;
+              entries.push({ name: image, data });
+            } catch { image = ''; }
+          }
+          imageNames.set(item.imageKey, image);
+        }
+        manifestEntries.push({ title: item.title, category: item.category, words: item.words, nsfw: Boolean(item.nsfw), image });
+      }
+      const categories = [...new Set([...storedCategories, ...items.map((i) => i.category)].filter(Boolean))];
+      const manifest = { format: 'manifestador-vocabulary', version: 1, exportedAt: Date.now(), categories, entries: manifestEntries };
+      entries.unshift({ name: 'vocabulary.json', data: Buffer.from(JSON.stringify(manifest, null, 2), 'utf8') });
+      const zip = createZip(entries);
+      return send(res, 200, zip, { mime: 'application/zip', extra: { 'Content-Disposition': 'attachment; filename="vocabulario.manifestador.zip"' } });
+    }
+
+    // Importa un ZIP de vocabulario: escribe las imágenes en uploads (con su
+    // metadata visual, igual que al crear una ficha), crea las fichas y suma las
+    // categorías. No pisa lo existente: agrega.
+    if (p === '/api/vocabulary/import' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const zipBuffer = Buffer.from(String(body.zipBase64 || ''), 'base64');
+      if (!zipBuffer.length || zipBuffer.length > 150 * 1024 * 1024) throw new Error('ZIP vacío o demasiado grande.');
+      const files = readStoredZip(zipBuffer);
+      const manifestBuffer = files.get('vocabulary.json');
+      if (!manifestBuffer) throw new Error('El ZIP no contiene vocabulary.json.');
+      let manifest;
+      try { manifest = JSON.parse(manifestBuffer.toString('utf8')); } catch { throw new Error('vocabulary.json inválido.'); }
+      if (manifest.format !== 'manifestador-vocabulary' || !Array.isArray(manifest.entries)) throw new Error('Este ZIP no es un vocabulario de Manifestador.');
+      const cfg = await getConfig();
+      const uploadsDir = resolveDir(cfg.paths.uploads);
+      await fs.mkdir(uploadsDir, { recursive: true });
+      const existing = new Set(await fs.readdir(uploadsDir).catch(() => []));
+      const written = new Map(); // nombre en el zip → imageKey nuevo (dedup)
+      const metadataPatch = {};
+      const now = Date.now();
+      const newItems = [];
+      for (const src of manifest.entries) {
+        const title = String(src.title || '').trim();
+        const category = String(src.category || '').trim();
+        const words = normalizeVocabularyWords(src.words);
+        if (!title || !category || !words.length || !src.image) continue;
+        let imageKey = written.get(src.image);
+        if (!imageKey) {
+          const data = files.get(src.image);
+          if (!data) continue;
+          const ext = path.extname(src.image).toLowerCase();
+          if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) continue;
+          const base = baseName(title, 'vocabulario');
+          let name = `${ts()}-${base}${ext}`;
+          for (let i = 2; existing.has(name); i++) name = `${ts()}-${base}-${i}${ext}`;
+          existing.add(name);
+          imageKey = await saveBuffer('uploads', name, data);
+          written.set(src.image, imageKey);
+          const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+          metadataPatch[imageKey] = {
+            type: 'image', modelId: 'upload', modelName: 'Archivo subido', ts: now,
+            prompt: '', cost: 0, category: 'Vocabulario', tags: [category, ...words], mime, nsfw: Boolean(src.nsfw)
+          };
+        }
+        newItems.push(sanitizeVocabularyEntry({ title, category, imageKey, words, nsfw: Boolean(src.nsfw) }, {}, { id: newId(), now }));
+      }
+      if (Object.keys(metadataPatch).length) await updateJson('asset-metadata.json', {}, (all) => ({ ...all, ...metadataPatch }));
+      if (newItems.length) await updateJson('vocabulary.json', [], (all) => [...newItems, ...all].slice(0, 2000));
+      let vocabularyCategories = await readJson('vocabulary-categories.json', []);
+      const manifestCategories = Array.isArray(manifest.categories) ? manifest.categories : [];
+      const wanted = [...new Set([...manifestCategories, ...newItems.map((i) => i.category)].filter(Boolean))];
+      if (wanted.length) {
+        vocabularyCategories = await updateJson('vocabulary-categories.json', [], (current) => {
+          const next = [...current];
+          for (const raw of wanted) {
+            const name = String(raw || '').trim();
+            if (name && !sameCategory(name, 'General') && !next.some((x) => sameCategory(x, name))) next.push(name);
+          }
+          return next;
+        });
+      }
+      return send(res, 200, { imported: newItems.length, entries: newItems, vocabularyCategories });
+    }
+
     if (p === '/api/vocabulary-categories' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const name = String(body.name || '').trim().slice(0, 80);

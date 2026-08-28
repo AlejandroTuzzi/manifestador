@@ -1188,6 +1188,7 @@ audio::-webkit-media-controls-volume-slider {
 
 /* ---------- personajes ---------- */
 .chars-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.chars-head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .chars-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
