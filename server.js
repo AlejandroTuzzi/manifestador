@@ -10,7 +10,7 @@ import { spawn, execFile } from 'node:child_process';
 
 import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel, getAudioModel } from './lib/models.js';
 import {
-  generateGemini, analyzeArtStyle, generateSeedream, generateOpenAIImage, generateSeedanceVideo,
+  generateGemini, analyzeArtStyle, analyzeVocabularyImage, generateSeedream, generateOpenAIImage, generateSeedanceVideo,
   generateSeedance25Video, generateGeminiOmniVideo,
   generateMiniMaxH3Video, regenerateMiniMaxH3Video, generateScreenplay,
   listVoices, generateSpeech, generateMusic, translateText, searchUpdatedPricing, testService
@@ -21,11 +21,14 @@ import {
   categoryExists,
   deletePromptCategoryData,
   deleteSnippetCategoryData,
+  deleteVocabularyCategoryData,
   isReservedPromptCategory,
   renamePromptCategoryData,
   renameSnippetCategoryData,
+  renameVocabularyCategoryData,
   sameCategory
 } from './lib/categories.js';
+import { normalizeVocabularyImageKey, normalizeVocabularyWords, sanitizeVocabularyEntry } from './lib/vocabulary.js';
 import { renderDynamicTextOverlay } from './lib/remotion-renderer.js';
 import { POSER_BODY_PARTS } from './public/poser-bodyparts.js';
 import {
@@ -3164,6 +3167,27 @@ function sanitizeSnippet(body = {}, previous = {}) {
 }
 const snippetStore = crudStore('snippets.json', sanitizeSnippet);
 
+function sanitizeVocabularyForStore(body = {}, previous = {}) {
+  const item = sanitizeVocabularyEntry(body, previous, { id: previous.id || newId(), now: Date.now() });
+  if (!item.title) throw badRequest('Falta el título de la ficha de vocabulario.');
+  if (!item.category) throw badRequest('Falta la categoría de la ficha de vocabulario.');
+  if (!item.imageKey) throw badRequest('Falta una imagen válida para la ficha de vocabulario.');
+  if (!item.words.length) throw badRequest('Añadí al menos una palabra al vocabulario.');
+  return item;
+}
+
+async function assertVocabularyImageExists(value) {
+  const key = normalizeVocabularyImageKey(value);
+  if (!key) throw badRequest('La imagen del vocabulario no es válida.');
+  const extension = path.extname(key).toLowerCase();
+  if (!['.png', '.jpg', '.jpeg', '.webp'].includes(extension)) throw badRequest('El vocabulario sólo admite imágenes PNG, JPG o WebP.');
+  const stat = await fs.stat(await resolveAssetKey(key)).catch(() => null);
+  if (!stat?.isFile()) throw badRequest('No encuentro la imagen elegida para el vocabulario.');
+  return key;
+}
+
+const vocabularyStore = crudStore('vocabulary.json', sanitizeVocabularyForStore, { maxItems: 2000 });
+
 // Los 5 slots de TuzziCustomValues (val1..val5): cada uno se puede activar y
 // titular por workflow; el valor real que se manda en cada generación lo
 // resuelve el cliente (fijo/autoincremental/random), acá solo se guarda si
@@ -3837,7 +3861,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations, fonts, overlayPresets, transitionSounds, subtitler, comfyWorkflows, assetMetadata, snippets, snippetCategories] = await Promise.all([
+      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations, fonts, overlayPresets, transitionSounds, subtitler, comfyWorkflows, assetMetadata, snippets, snippetCategories, vocabulary, vocabularyCategories] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
@@ -3857,7 +3881,9 @@ const server = http.createServer(async (req, res) => {
         readJson('comfy-workflows.json', []),
         readJson('asset-metadata.json', {}),
         readJson('snippets.json', []),
-        readJson('snippet-categories.json', [])
+        readJson('snippet-categories.json', []),
+        vocabularyStore.list(),
+        readJson('vocabulary-categories.json', [])
       ]);
       const visibleHistory = filterNsfwHistory(history, cfg, assetMetadata);
       return send(res, 200, {
@@ -3883,6 +3909,8 @@ const server = http.createServer(async (req, res) => {
         comfyWorkflows,
         snippets,
         snippetCategories,
+        vocabulary: cfg.nsfwEnabled ? vocabulary : vocabulary.filter((item) => !item.nsfw),
+        vocabularyCategories,
         subtitler: subtitlerForClient(subtitler),
         transitionSounds: transitionSounds.map((sound) => ({
           id: sound.id,
@@ -4027,6 +4055,102 @@ const server = http.createServer(async (req, res) => {
       const id = decodeURIComponent(p.split('/').pop());
       const found = await snippetStore.remove(id);
       return found ? send(res, 200, { ok: true }) : send(res, 404, { error: 'Snippet no encontrado.' });
+    }
+
+    if (p === '/api/vocabulary' && req.method === 'GET') {
+      const [cfg, vocabulary] = await Promise.all([getConfig(), vocabularyStore.list()]);
+      return send(res, 200, { vocabulary: cfg.nsfwEnabled ? vocabulary : vocabulary.filter((item) => !item.nsfw) });
+    }
+    if (p === '/api/vocabulary-categories' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const name = String(body.name || '').trim().slice(0, 80);
+      if (!name) throw badRequest('Falta el nombre de la categoría.');
+      if (sameCategory(name, 'General')) throw badRequest('General es una categoría del sistema.');
+      const vocabularyCategories = await updateJson('vocabulary-categories.json', [], (all) => (
+        all.some((category) => sameCategory(category, name)) ? all : [...all, name]
+      ));
+      return send(res, 200, { vocabularyCategories });
+    }
+    if (p === '/api/vocabulary-categories' && req.method === 'PUT') {
+      const body = await readJsonBody(req);
+      const name = String(body.name || '').trim();
+      const newName = String(body.newName || '').trim().slice(0, 80);
+      if (!name || !newName) throw badRequest('Faltan la categoría actual o el nombre nuevo.');
+      if (sameCategory(name, 'General') || sameCategory(newName, 'General')) throw badRequest('General es una categoría del sistema.');
+      const [storedCategories, vocabulary] = await Promise.all([
+        readJson('vocabulary-categories.json', []),
+        vocabularyStore.list()
+      ]);
+      if (!categoryExists(storedCategories, vocabulary, name)) throw new HttpError(404, 'Categoría de vocabulario no encontrada.');
+      if (!sameCategory(name, newName) && categoryExists(storedCategories, vocabulary, newName)) {
+        throw new HttpError(409, `La categoría “${newName}” ya existe.`);
+      }
+      let affected = 0;
+      const [vocabularyCategories] = await Promise.all([
+        updateJson('vocabulary-categories.json', [], (current) => renameVocabularyCategoryData(current, [], name, newName).vocabularyCategories),
+        updateJson('vocabulary.json', [], (current) => {
+          const transformed = renameVocabularyCategoryData([], current, name, newName);
+          affected = transformed.affected;
+          return transformed.vocabulary;
+        })
+      ]);
+      return send(res, 200, { vocabularyCategories, affected });
+    }
+    if (p === '/api/vocabulary-categories' && req.method === 'DELETE') {
+      const body = await readJsonBody(req);
+      const name = String(body.name || '').trim();
+      if (!name) throw badRequest('Falta la categoría que querés borrar.');
+      if (sameCategory(name, 'General')) throw badRequest('General es una categoría del sistema y no se puede borrar.');
+      const [storedCategories, vocabulary] = await Promise.all([
+        readJson('vocabulary-categories.json', []),
+        vocabularyStore.list()
+      ]);
+      if (!categoryExists(storedCategories, vocabulary, name)) throw new HttpError(404, 'Categoría de vocabulario no encontrada.');
+      let affected = 0;
+      const [vocabularyCategories] = await Promise.all([
+        updateJson('vocabulary-categories.json', [], (current) => deleteVocabularyCategoryData(current, [], name).vocabularyCategories),
+        updateJson('vocabulary.json', [], (current) => {
+          const transformed = deleteVocabularyCategoryData([], current, name);
+          affected = transformed.affected;
+          return transformed.vocabulary;
+        })
+      ]);
+      return send(res, 200, { vocabularyCategories, affected });
+    }
+    if (p === '/api/vocabulary/analyze-image' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      let imagePath = '';
+      if (body.imageKey) {
+        imagePath = await resolveAssetKey(await assertVocabularyImageExists(body.imageKey));
+      } else if (body.dataUrl) {
+        const { mime, buffer } = parseDataUrl(body.dataUrl);
+        if (buffer.length > 20 * 1024 * 1024) throw badRequest('La imagen supera el límite de 20 MB para análisis con IA.');
+        const visual = validateUploadedVisual(mime, buffer, body.name || 'vocabulario.png');
+        if (visual.kind !== 'image') throw badRequest('Elegí una imagen PNG, JPG o WebP para analizar.');
+        imagePath = String(body.dataUrl);
+      } else {
+        throw badRequest('Subí una imagen antes de analizar el vocabulario.');
+      }
+      const cfg = await getConfig();
+      const result = await analyzeVocabularyImage({ apiKey: cfg.keys.gemini, imagePath });
+      return send(res, 200, { ...result, words: normalizeVocabularyWords(result.words) });
+    }
+    if (p === '/api/vocabulary' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      body.imageKey = await assertVocabularyImageExists(body.imageKey);
+      return send(res, 200, await vocabularyStore.create(body));
+    }
+    if (p.startsWith('/api/vocabulary/') && req.method === 'PUT') {
+      const id = decodeURIComponent(p.split('/').pop());
+      const body = await readJsonBody(req);
+      if (body.imageKey !== undefined) body.imageKey = await assertVocabularyImageExists(body.imageKey);
+      const updated = await vocabularyStore.update(id, body);
+      return updated ? send(res, 200, updated) : send(res, 404, { error: 'Ficha de vocabulario no encontrada.' });
+    }
+    if (p.startsWith('/api/vocabulary/') && req.method === 'DELETE') {
+      const id = decodeURIComponent(p.split('/').pop());
+      const found = await vocabularyStore.remove(id);
+      return found ? send(res, 200, { ok: true }) : send(res, 404, { error: 'Ficha de vocabulario no encontrada.' });
     }
 
     if (p === '/api/fonts' && req.method === 'POST') {

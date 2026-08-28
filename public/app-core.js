@@ -14,6 +14,13 @@ const state = {
   fonts: [],              // fuentes tipográficas personalizadas persistentes
   overlayPresets: [],
   promptCategoriesExtra: {},
+  vocabulary: [],          // fichas visuales con términos reutilizables para prompts
+  vocabularyCategoriesExtra: [],
+  vocabularySearch: '',
+  vocabularyCategoryFilter: '',
+  vocabularyQuickSearch: '',
+  vocabularyQuickCategory: '',
+  vocabularyEditor: null,  // { id, imageKey, pendingDataUrl, pendingFileName, words }
   snippets: [],           // biblioteca de código (JS/ExtendScript, Python, Bash) — separada de prompts
   snippetCategoriesExtra: [],
   snippetLanguageFilter: '',
@@ -233,6 +240,7 @@ function inferredApiTask(path, method, body) {
   if (path === '/api/generate/audio') return { title: 'Generando voz', detail: 'Esperando a ElevenLabs…' };
   if (path === '/api/generate/music' || /\/music\/generate$/.test(path)) return { title: 'Generando música', detail: 'Esperando a Suno…', total: 2, current: 1 };
   if (path === '/api/translate') return { title: 'Traduciendo texto', detail: 'Esperando la traducción…' };
+  if (path === '/api/vocabulary/analyze-image') return { title: 'Leyendo vocabulario visual', detail: 'Separando etiquetas, títulos y texto explicativo con Gemini…' };
   if (/\/automations\/[a-z0-9]+\/assemble$/.test(path)) return { title: 'Ensamblando video final', detail: 'Uniendo tomas, audio y música con FFmpeg…' };
   if (/\/automations\/[a-z0-9]+\/text-layer$/.test(path)) return { title: 'Renderizando textos', detail: 'Creando una nueva capa animada con Remotion…' };
   if (path === '/api/subtitler/transcribe') return { title: 'Transcribiendo video', detail: 'Extrayendo el audio y esperando a ElevenLabs Scribe v2…' };

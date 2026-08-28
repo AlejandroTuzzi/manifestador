@@ -21,6 +21,7 @@ $$('.nav-btn').forEach((btn) => {
     if (view === 'elements') renderElements();
     if (view === 'poser') window.poserEnter?.();
     if (view === 'prompts') renderPromptLibrary();
+    if (view === 'vocabulary') renderVocabularyLibrary();
     if (view === 'snippets') renderSnippetLibrary();
     if (view === 'costs') { state.costProjectId = ''; loadCosts(); }
   });
@@ -2042,6 +2043,7 @@ $('#btnSavePrompt').addEventListener('click', async () => {
 
 $('#btnPrompts').addEventListener('click', () => {
   const panel = $('#promptsPanel');
+  $('#vocabularyQuickPanel').hidden = true;
   panel.hidden = !panel.hidden;
   if (!panel.hidden) renderPromptsPanel();
 });
@@ -3366,6 +3368,452 @@ $('#newCategorySave').addEventListener('click', async () => {
   }
 });
 $('#btnNewPrompt').addEventListener('click', () => openPromptEditor({ initialMode: state.mode }));
+
+// ---------------------------------------------------------------------------
+// vocabulario visual — fichas ilustradas y consulta rápida desde Creación
+// ---------------------------------------------------------------------------
+
+function normalizeVocabularyWordsClient(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(/[,;\n]/);
+  const seen = new Set();
+  return source.map((word) => String(word || '').trim().replace(/\s+/g, ' ').slice(0, 120)).filter((word) => {
+    const key = word.toLocaleLowerCase('es');
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 100);
+}
+
+function vocabularyCategories() {
+  return [...new Set(['General', ...state.vocabularyCategoriesExtra, ...state.vocabulary.map((item) => item.category).filter(Boolean)])]
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function isManagedVocabularyCategory(name) {
+  return Boolean(name) && !sameCategoryName(name, 'General');
+}
+
+function updateVocabularyCategoryActions() {
+  const editable = isManagedVocabularyCategory($('#vocabularyCategoryFilter').value);
+  $('#btnEditVocabularyCategory').hidden = !editable;
+  $('#btnDeleteVocabularyCategory').hidden = !editable;
+}
+
+function vocabularySearchText(item) {
+  return `${item.title || ''} ${item.category || ''} ${(item.words || []).join(' ')}`.toLocaleLowerCase('es');
+}
+
+function filteredVocabulary(query = '', category = '') {
+  const needle = String(query || '').trim().toLocaleLowerCase('es');
+  return state.vocabulary.filter((item) => contentIsVisible(item)
+    && (!category || sameCategoryName(item.category, category))
+    && (!needle || vocabularySearchText(item).includes(needle)));
+}
+
+async function copyVocabularyWord(word) {
+  const text = String(word || '').trim();
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand('copy');
+    area.remove();
+  }
+  toast(`“${text}” copiado`);
+}
+
+function vocabularyWordsMarkup(item) {
+  return `<div class="vocabulary-words">${(item.words || []).map((word, index) => `
+    <button type="button" class="vocabulary-word" data-vocabulary-word="${index}" title="Copiar ${esc(word)}">
+      <span>${esc(word)}</span>${IC('copy')}
+    </button>`).join('')}</div>`;
+}
+
+function bindVocabularyWords(root, item) {
+  root.querySelectorAll('[data-vocabulary-word]').forEach((button) => button.addEventListener('click', () => {
+    copyVocabularyWord(item.words?.[Number(button.dataset.vocabularyWord)]);
+  }));
+}
+
+function vocabularyImageKeys(items = state.vocabulary) {
+  return [...new Set(items.map((item) => item.imageKey).filter(Boolean))];
+}
+
+function renderVocabularyLibrary() {
+  const library = $('#vocabularyLibrary');
+  if (!library) return;
+  const categories = vocabularyCategories();
+  if (state.vocabularyCategoryFilter && !categories.some((category) => sameCategoryName(category, state.vocabularyCategoryFilter))) {
+    state.vocabularyCategoryFilter = '';
+  }
+  $('#vocabularySearch').value = state.vocabularySearch;
+  const filter = $('#vocabularyCategoryFilter');
+  filter.innerHTML = '<option value="">Todas las categorías</option>'
+    + categories.map((category) => `<option value="${esc(category)}">${esc(category)}</option>`).join('');
+  filter.value = state.vocabularyCategoryFilter;
+  updateVocabularyCategoryActions();
+  const items = filteredVocabulary(state.vocabularySearch, state.vocabularyCategoryFilter);
+  $('#vocabularyCount').textContent = `${items.length} de ${state.vocabulary.length} ficha${state.vocabulary.length === 1 ? '' : 's'}`;
+  library.innerHTML = items.length ? items.map((item) => `
+    <article class="vocabulary-card" data-vocabulary-id="${esc(item.id)}">
+      <button type="button" class="vocabulary-card-image" data-vocabulary-image aria-label="Ampliar ${esc(item.title)}"><img src="${esc(fileUrl(item.imageKey))}" alt="Referencia visual de ${esc(item.title)}" loading="lazy"></button>
+      <div class="vocabulary-card-head">
+        <div><span class="prompt-category">${esc(item.category)}</span><h3>${esc(item.title)}</h3></div>
+        ${nsfwBadgeHtml(item)}
+      </div>
+      ${vocabularyWordsMarkup(item)}
+      <div class="vocabulary-card-actions">
+        <button type="button" class="mini-btn" data-vocabulary-action="edit">${IC('edit')} Editar</button>
+        <button type="button" class="mini-btn danger" data-vocabulary-action="delete">${IC('trash')} Borrar</button>
+      </div>
+    </article>`).join('') : '<div class="empty-note">No hay fichas de vocabulario que coincidan con la búsqueda.</div>';
+  const visibleImageKeys = vocabularyImageKeys(items);
+  library.querySelectorAll('[data-vocabulary-id]').forEach((card) => {
+    const item = state.vocabulary.find((entry) => entry.id === card.dataset.vocabularyId);
+    if (!item) return;
+    bindVocabularyWords(card, item);
+    card.querySelector('[data-vocabulary-image]').addEventListener('click', () => openLightbox(item.imageKey, visibleImageKeys));
+    card.querySelector('[data-vocabulary-action="edit"]').addEventListener('click', () => openVocabularyEditor(item));
+    card.querySelector('[data-vocabulary-action="delete"]').addEventListener('click', () => deleteVocabularyEntry(item));
+  });
+}
+
+function openVocabularyCategoryForm(category = '') {
+  const row = $('#newVocabularyCategoryRow');
+  const editing = Boolean(category);
+  row.dataset.action = editing ? 'edit' : 'create';
+  row.dataset.originalName = category;
+  row.hidden = false;
+  $('#newVocabularyCategoryName').value = category;
+  $('#newVocabularyCategorySave').textContent = editing ? 'Guardar cambios' : 'Crear';
+  $('#newVocabularyCategoryName').focus();
+  $('#newVocabularyCategoryName').select();
+}
+
+function closeVocabularyCategoryForm() {
+  const row = $('#newVocabularyCategoryRow');
+  row.hidden = true;
+  row.dataset.action = '';
+  row.dataset.originalName = '';
+  $('#newVocabularyCategorySave').textContent = 'Crear';
+}
+
+function updateOpenVocabularyCategory(oldName, newName) {
+  state.vocabulary = state.vocabulary.map((item) => (
+    sameCategoryName(item.category, oldName) ? { ...item, category: newName } : item
+  ));
+  if (sameCategoryName(state.vocabularyCategoryFilter, oldName)) state.vocabularyCategoryFilter = newName === 'General' ? '' : newName;
+  if (sameCategoryName(state.vocabularyQuickCategory, oldName)) state.vocabularyQuickCategory = newName === 'General' ? '' : newName;
+  if (!$('#vocabularyEditorModal').hidden && sameCategoryName($('#vocabularyEditorCategory').value, oldName)) {
+    $('#vocabularyEditorCategory').value = newName;
+  }
+}
+
+function renderVocabularyQuickPanel() {
+  const panel = $('#vocabularyQuickPanel');
+  if (!panel || panel.hidden) return;
+  const categories = vocabularyCategories();
+  if (state.vocabularyQuickCategory && !categories.some((category) => sameCategoryName(category, state.vocabularyQuickCategory))) {
+    state.vocabularyQuickCategory = '';
+  }
+  const items = filteredVocabulary(state.vocabularyQuickSearch, state.vocabularyQuickCategory);
+  panel.innerHTML = `
+    <div class="vocabulary-quick-head">
+      <div><strong>Vocabulario visual</strong><span class="hint">Consultá la imagen y copiá una palabra para pegarla en el prompt.</span></div>
+      <button type="button" class="icon-btn" data-vocabulary-quick-close title="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="vocabulary-quick-tools">
+      <input type="search" data-vocabulary-quick-search placeholder="Buscar prendas, construcciones, materiales…" value="${esc(state.vocabularyQuickSearch)}">
+      <select class="select" data-vocabulary-quick-category><option value="">Todas las categorías</option>${categories.map((category) => `<option value="${esc(category)}">${esc(category)}</option>`).join('')}</select>
+      <span class="hint">${items.length} resultado${items.length === 1 ? '' : 's'}</span>
+    </div>
+    <div class="vocabulary-quick-grid">${items.length ? items.map((item) => `
+      <article class="vocabulary-quick-card" data-vocabulary-quick-id="${esc(item.id)}">
+        <button type="button" class="vocabulary-quick-image" data-vocabulary-quick-image aria-label="Ampliar ${esc(item.title)}"><img src="${esc(fileUrl(item.imageKey))}" alt="Referencia visual de ${esc(item.title)}" loading="lazy"></button>
+        <div class="vocabulary-quick-copy">
+          <span class="prompt-category">${esc(item.category)}</span>
+          <h4>${esc(item.title)}${nsfwBadgeHtml(item, 'compact')}</h4>
+          ${vocabularyWordsMarkup(item)}
+        </div>
+      </article>`).join('') : `<div class="empty-note">No hay coincidencias. <button type="button" class="mini-btn" data-open-vocabulary-section>${IC('plus')} Administrar vocabulario</button></div>`}</div>`;
+  const category = panel.querySelector('[data-vocabulary-quick-category]');
+  category.value = state.vocabularyQuickCategory;
+  category.addEventListener('change', () => {
+    state.vocabularyQuickCategory = category.value;
+    renderVocabularyQuickPanel();
+  });
+  panel.querySelector('[data-vocabulary-quick-search]').addEventListener('input', (event) => {
+    const caret = event.target.selectionStart;
+    state.vocabularyQuickSearch = event.target.value;
+    renderVocabularyQuickPanel();
+    const input = panel.querySelector('[data-vocabulary-quick-search]');
+    input.focus();
+    input.setSelectionRange(caret, caret);
+  });
+  panel.querySelector('[data-vocabulary-quick-close]').addEventListener('click', () => { panel.hidden = true; });
+  panel.querySelector('[data-open-vocabulary-section]')?.addEventListener('click', () => $('.nav-btn[data-view="vocabulary"]')?.click());
+  const visibleImageKeys = vocabularyImageKeys(items);
+  panel.querySelectorAll('[data-vocabulary-quick-id]').forEach((card) => {
+    const item = state.vocabulary.find((entry) => entry.id === card.dataset.vocabularyQuickId);
+    if (!item) return;
+    bindVocabularyWords(card, item);
+    card.querySelector('[data-vocabulary-quick-image]').addEventListener('click', () => openLightbox(item.imageKey, visibleImageKeys));
+  });
+}
+
+$('#btnVocabulary').addEventListener('click', () => {
+  const panel = $('#vocabularyQuickPanel');
+  $('#promptsPanel').hidden = true;
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) renderVocabularyQuickPanel();
+});
+
+function renderVocabularyEditorWords() {
+  const words = state.vocabularyEditor?.words || [];
+  $('#vocabularyEditorWordChips').innerHTML = words.length ? words.map((word, index) => `
+    <span class="vocabulary-editor-chip">${esc(word)}<button type="button" data-vocabulary-remove-word="${index}" title="Quitar">×</button></span>`).join('') : '<span class="hint">Todavía no hay palabras.</span>';
+  $('#vocabularyEditorWordChips').querySelectorAll('[data-vocabulary-remove-word]').forEach((button) => button.addEventListener('click', () => {
+    state.vocabularyEditor.words.splice(Number(button.dataset.vocabularyRemoveWord), 1);
+    renderVocabularyEditorWords();
+  }));
+}
+
+function addVocabularyEditorWords() {
+  if (!state.vocabularyEditor) return;
+  const input = $('#vocabularyEditorWordInput');
+  state.vocabularyEditor.words = normalizeVocabularyWordsClient([
+    ...state.vocabularyEditor.words,
+    ...String(input.value || '').split(/[,;\n]/)
+  ]);
+  input.value = '';
+  renderVocabularyEditorWords();
+}
+
+function renderVocabularyEditorImage() {
+  const editor = state.vocabularyEditor;
+  const preview = $('#vocabularyEditorPreview');
+  preview.innerHTML = '';
+  const source = editor?.pendingDataUrl || (editor?.imageKey ? fileUrl(editor.imageKey) : '');
+  if (!source) {
+    preview.innerHTML = '<span>Elegí una imagen ilustrativa</span>';
+    $('#vocabularyEditorImageStatus').textContent = 'La imagen es obligatoria.';
+    $('#vocabularyEditorAnalyze').disabled = true;
+    return;
+  }
+  const image = document.createElement('img');
+  image.src = source;
+  image.alt = 'Vista previa del vocabulario';
+  preview.appendChild(image);
+  $('#vocabularyEditorAnalyze').disabled = false;
+  $('#vocabularyEditorImageStatus').textContent = editor.pendingFileName || 'Imagen guardada. Podés reemplazarla.';
+  if (!editor.pendingDataUrl && editor.imageKey) preview.onclick = () => openLightbox(editor.imageKey, [editor.imageKey]);
+  else preview.onclick = null;
+}
+
+function openVocabularyEditor(item = null) {
+  state.vocabularyEditor = {
+    id: item?.id || null,
+    imageKey: item?.imageKey || '',
+    pendingDataUrl: '',
+    pendingFileName: '',
+    words: [...(item?.words || [])]
+  };
+  $('#vocabularyEditorTitle').textContent = item ? 'Editar ficha de vocabulario' : 'Nueva ficha de vocabulario';
+  $('#vocabularyEditorName').value = item?.title || '';
+  $('#vocabularyEditorCategory').value = item?.category || '';
+  $('#vocabularyEditorNsfw').checked = Boolean(item?.nsfw);
+  $('#vocabularyCategoryList').innerHTML = vocabularyCategories().map((category) => `<option value="${esc(category)}"></option>`).join('');
+  $('#vocabularyEditorWordInput').value = '';
+  renderVocabularyEditorWords();
+  renderVocabularyEditorImage();
+  $('#vocabularyEditorModal').hidden = false;
+  setTimeout(() => $('#vocabularyEditorName').focus(), 0);
+}
+
+function closeVocabularyEditor() {
+  $('#vocabularyEditorModal').hidden = true;
+  $('#vocabularyEditorFile').value = '';
+  state.vocabularyEditor = null;
+}
+
+async function deleteVocabularyEntry(item) {
+  if (!confirm(`¿Borrar la ficha “${item.title}”?\n\nLa imagen se conservará en Assets.`)) return;
+  try {
+    await api(`/api/vocabulary/${item.id}`, { method: 'DELETE' });
+    state.vocabulary = state.vocabulary.filter((entry) => entry.id !== item.id);
+    renderVocabularyLibrary();
+    renderVocabularyQuickPanel();
+    toast('Ficha de vocabulario borrada');
+  } catch (error) {
+    toast(error.message, 'err');
+  }
+}
+
+$('#btnNewVocabulary').addEventListener('click', () => openVocabularyEditor());
+$('#vocabularySearch').addEventListener('input', (event) => { state.vocabularySearch = event.target.value; renderVocabularyLibrary(); });
+$('#vocabularyCategoryFilter').addEventListener('change', (event) => { state.vocabularyCategoryFilter = event.target.value; renderVocabularyLibrary(); });
+$('#btnNewVocabularyCategory').addEventListener('click', () => openVocabularyCategoryForm());
+$('#btnEditVocabularyCategory').addEventListener('click', () => {
+  const category = $('#vocabularyCategoryFilter').value;
+  if (isManagedVocabularyCategory(category)) openVocabularyCategoryForm(category);
+});
+$('#btnDeleteVocabularyCategory').addEventListener('click', async () => {
+  const name = $('#vocabularyCategoryFilter').value;
+  if (!isManagedVocabularyCategory(name)) return;
+  if (!confirm(`¿Borrar la categoría “${name}”?\n\nLas fichas se conservarán y pasarán a General.`)) return;
+  try {
+    const { vocabularyCategories: updated, affected = 0 } = await api('/api/vocabulary-categories', { method: 'DELETE', body: { name } });
+    state.vocabularyCategoriesExtra = updated;
+    updateOpenVocabularyCategory(name, 'General');
+    state.vocabularyCategoryFilter = '';
+    closeVocabularyCategoryForm();
+    renderVocabularyLibrary();
+    renderVocabularyQuickPanel();
+    toast(`Categoría “${name}” borrada${affected ? ` · ${affected} ficha${affected === 1 ? '' : 's'} movida${affected === 1 ? '' : 's'} a General` : ''}`);
+  } catch (error) {
+    toast(error.message, 'err');
+  }
+});
+$('#newVocabularyCategoryCancel').addEventListener('click', closeVocabularyCategoryForm);
+$('#newVocabularyCategoryName').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    $('#newVocabularyCategorySave').click();
+  }
+});
+$('#newVocabularyCategorySave').addEventListener('click', async () => {
+  const row = $('#newVocabularyCategoryRow');
+  const editing = row.dataset.action === 'edit';
+  const originalName = row.dataset.originalName || '';
+  const name = $('#newVocabularyCategoryName').value.trim();
+  if (!name) return toast('Escribí un nombre para la categoría.', 'err');
+  try {
+    const { vocabularyCategories: updated, affected = 0 } = editing
+      ? await api('/api/vocabulary-categories', { method: 'PUT', body: { name: originalName, newName: name } })
+      : await api('/api/vocabulary-categories', { method: 'POST', body: { name } });
+    state.vocabularyCategoriesExtra = updated;
+    if (editing) updateOpenVocabularyCategory(originalName, name);
+    closeVocabularyCategoryForm();
+    state.vocabularyCategoryFilter = name;
+    renderVocabularyLibrary();
+    renderVocabularyQuickPanel();
+    toast(editing
+      ? `Categoría actualizada${affected ? ` en ${affected} ficha${affected === 1 ? '' : 's'}` : ''}`
+      : `Categoría “${name}” creada`);
+  } catch (error) {
+    toast(error.message, 'err');
+  }
+});
+$('#vocabularyEditorClose').addEventListener('click', closeVocabularyEditor);
+$('#vocabularyEditorCancel').addEventListener('click', closeVocabularyEditor);
+$('#vocabularyEditorModal').addEventListener('click', (event) => { if (event.target.id === 'vocabularyEditorModal') closeVocabularyEditor(); });
+$('#vocabularyEditorUpload').addEventListener('click', () => $('#vocabularyEditorFile').click());
+$('#vocabularyEditorAnalyze').addEventListener('click', async () => {
+  const editor = state.vocabularyEditor;
+  if (!editor?.pendingDataUrl && !editor?.imageKey) return toast('Subí una imagen antes de analizarla.', 'err');
+  const button = $('#vocabularyEditorAnalyze');
+  button.disabled = true;
+  $('#vocabularyEditorImageStatus').textContent = 'La IA está leyendo la jerarquía visual y separando etiquetas de títulos y descripciones…';
+  try {
+    const result = await api('/api/vocabulary/analyze-image', {
+      method: 'POST',
+      body: editor.pendingDataUrl
+        ? { dataUrl: editor.pendingDataUrl, name: editor.pendingFileName || 'vocabulario.png' }
+        : { imageKey: editor.imageKey }
+    });
+    const before = editor.words.length;
+    editor.words = normalizeVocabularyWordsClient([...editor.words, ...(result.words || [])]);
+    renderVocabularyEditorWords();
+    const added = editor.words.length - before;
+    const titleNote = result.ignoredTitle ? ` Se reconoció y omitió el título “${result.ignoredTitle}”.` : '';
+    $('#vocabularyEditorImageStatus').textContent = `${result.words?.length || 0} término${result.words?.length === 1 ? '' : 's'} detectado${result.words?.length === 1 ? '' : 's'}${added !== (result.words?.length || 0) ? ` · ${added} nuevo${added === 1 ? '' : 's'}` : ''}.${titleNote}`;
+    toast(`${added} palabra${added === 1 ? '' : 's'} añadida${added === 1 ? '' : 's'} por IA`);
+  } catch (error) {
+    $('#vocabularyEditorImageStatus').textContent = error.message;
+    toast(error.message, 'err');
+  } finally {
+    button.disabled = !state.vocabularyEditor || (!state.vocabularyEditor.pendingDataUrl && !state.vocabularyEditor.imageKey);
+  }
+});
+$('#vocabularyEditorAddWord').addEventListener('click', () => { addVocabularyEditorWords(); $('#vocabularyEditorWordInput').focus(); });
+$('#vocabularyEditorWordInput').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    addVocabularyEditorWords();
+  }
+});
+$('#vocabularyEditorFile').addEventListener('change', async (event) => {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file || !state.vocabularyEditor) return;
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return toast('Usá una imagen PNG, JPG o WebP.', 'err');
+  if (file.size > 100 * 1024 * 1024) return toast('La imagen supera el límite de 100 MB.', 'err');
+  try {
+    state.vocabularyEditor.pendingDataUrl = await readFileAsDataUrl(file);
+    state.vocabularyEditor.pendingFileName = file.name;
+    renderVocabularyEditorImage();
+  } catch (error) {
+    toast(error.message, 'err');
+  }
+});
+
+$('#vocabularyEditorForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const editor = state.vocabularyEditor;
+  if (!editor) return;
+  if ($('#vocabularyEditorWordInput').value.trim()) addVocabularyEditorWords();
+  const title = $('#vocabularyEditorName').value.trim();
+  const category = $('#vocabularyEditorCategory').value.trim();
+  const words = normalizeVocabularyWordsClient(editor.words);
+  const nsfw = $('#vocabularyEditorNsfw').checked;
+  if (!title) return toast('Escribí un título para la ficha.', 'err');
+  if (!category) return toast('Escribí o elegí una categoría.', 'err');
+  if (!words.length) return toast('Añadí al menos una palabra.', 'err');
+  if (!editor.imageKey && !editor.pendingDataUrl) return toast('Subí una imagen para esta ficha.', 'err');
+  const submit = event.submitter;
+  if (submit) submit.disabled = true;
+  try {
+    let imageKey = editor.imageKey;
+    if (editor.pendingDataUrl) {
+      const uploaded = await api('/api/assets/visual', {
+        method: 'POST',
+        body: {
+          name: editor.pendingFileName || `${title}.png`,
+          dataUrl: editor.pendingDataUrl,
+          category: 'Vocabulario',
+          tags: [category, ...words],
+          nsfw
+        }
+      });
+      imageKey = uploaded.key;
+    } else {
+      await api('/api/assets/visual-metadata', {
+        method: 'POST',
+        body: { keys: [imageKey], category: 'Vocabulario', tags: [category, ...words], nsfw }
+      });
+    }
+    const body = { title, category, imageKey, words, nsfw };
+    const saved = editor.id
+      ? await api(`/api/vocabulary/${editor.id}`, { method: 'PUT', body })
+      : await api('/api/vocabulary', { method: 'POST', body });
+    state.vocabulary = state.vocabulary.filter((item) => item.id !== saved.id);
+    if (contentIsVisible(saved)) state.vocabulary.unshift(saved);
+    closeVocabularyEditor();
+    renderVocabularyLibrary();
+    renderVocabularyQuickPanel();
+    toast(editor.id ? 'Ficha de vocabulario actualizada' : 'Ficha de vocabulario guardada');
+  } catch (error) {
+    toast(error.message, 'err');
+  } finally {
+    if (submit?.isConnected) submit.disabled = false;
+  }
+});
 
 // ---------------------------------------------------------------------------
 // snippets de código (JS/ExtendScript, Python, Bash) — biblioteca separada de
@@ -10253,6 +10701,8 @@ async function init() {
     if (s.musicModel?.defaultVersion) state.music.version = s.config?.sunoModelId || s.musicModel.defaultVersion;
     state.characters = s.characters;
     state.prompts = s.prompts;
+    state.vocabulary = s.vocabulary || [];
+    state.vocabularyCategoriesExtra = s.vocabularyCategories || [];
     state.fonts = s.fonts || [];
     state.overlayPresets = s.overlayPresets || [];
     state.comfyuiWorkflows = s.comfyWorkflows || [];
@@ -10292,10 +10742,10 @@ async function init() {
   if (state.pinnedId && !pinnedChar()) setPinned('');
   startAutomationSync();
 
-  // deep-links: #audio, #assets, #characters, #series, #subtitler, #prompts, #costs, #config
+  // deep-links: #audio, #assets, #characters, #series, #subtitler, #prompts, #vocabulary, #costs, #config
   const h = location.hash.slice(1);
   if (h === 'audio') setMode('audio');
-  else if (['assets', 'characters', 'series', 'subtitler', 'prompts', 'snippets', 'costs', 'config'].includes(h)) {
+  else if (['assets', 'characters', 'series', 'subtitler', 'prompts', 'vocabulary', 'snippets', 'costs', 'config'].includes(h)) {
     $(`.nav-btn[data-view="${h}"]`)?.click();
   }
 }

@@ -5,9 +5,11 @@ import {
   categoryExists,
   deletePromptCategoryData,
   deleteSnippetCategoryData,
+  deleteVocabularyCategoryData,
   isReservedPromptCategory,
   renamePromptCategoryData,
-  renameSnippetCategoryData
+  renameSnippetCategoryData,
+  renameVocabularyCategoryData
 } from '../lib/categories.js';
 
 describe('administración de categorías', () => {
@@ -57,5 +59,19 @@ describe('administración de categorías', () => {
     assert.equal(categoryExists([], [{ category: 'Código' }], 'CÓDIGO'), true);
     assert.equal(isReservedPromptCategory(' estilos '), true);
     assert.equal(isReservedPromptCategory('Personal'), false);
+  });
+  test('renombra y elimina categorías de vocabulario conservando las fichas', () => {
+    const renamed = renameVocabularyCategoryData(
+      ['Prendas', 'Arquitectura'],
+      [{ id: 'a', category: 'prendas' }],
+      'Prendas',
+      'Moda'
+    );
+    assert.deepEqual(renamed.vocabularyCategories, ['Moda', 'Arquitectura']);
+    assert.equal(renamed.vocabulary[0].category, 'Moda');
+
+    const deleted = deleteVocabularyCategoryData(renamed.vocabularyCategories, renamed.vocabulary, 'Moda');
+    assert.deepEqual(deleted.vocabularyCategories, ['Arquitectura']);
+    assert.equal(deleted.vocabulary[0].category, 'General');
   });
 });
