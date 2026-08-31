@@ -752,6 +752,10 @@
             <span class="key-row"><input type="password" name="key_ark" placeholder="key de Ark"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="ark">Probar</button></span>
             <span class="test-result" data-result="ark"></span>
           </label>
+          <label>WaveSpeed (FireRed)
+            <span class="key-row"><input type="password" name="key_wavespeed" placeholder="key de WaveSpeed"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="wavespeed">Probar</button></span>
+            <span class="test-result" data-result="wavespeed"></span>
+          </label>
           <label>MiniMax H3
             <span class="key-row"><input type="password" name="key_minimax" placeholder="API key de MiniMax"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="minimax">Probar</button></span>
             <span class="test-result" data-result="minimax"></span>
@@ -858,11 +862,14 @@
         <p id="accessStatus" class="hint"></p>
         <h3>Avanzado</h3>
         <div class="cfg-grid">
-          <label>ID de modelo Seedream <input type="text" name="seedreamModelId"></label>
+          <label>ID de Seedream 5.0 Pro <input type="text" name="seedreamProModelId" placeholder="dola-seedream-5-0-pro-260628"></label>
+          <label>ID de Seedream 5.0 Lite <input type="text" name="seedreamModelId"></label>
+          <label>ID de FireRed <input type="text" name="fireRedModelId" placeholder="wavespeed-ai/firered-image-v1.1/edit"></label>
           <label>ID de modelo Seedance 2.5 <input type="text" name="seedance25ModelId" placeholder="dreamina-seedance-2-5-260628"></label>
           <label>ID de modelo Seedance 2.0 <input type="text" name="seedanceModelId" placeholder="dreamina-seedance-2-0"></label>
           <label>ID de modelo Seedance 2.0 Mini <input type="text" name="seedanceMiniModelId" placeholder="dreamina-seedance-2-0-mini-260615"></label>
           <label>Endpoint Ark <input type="text" name="endpoint_ark"></label>
+          <label>Endpoint WaveSpeed <input type="text" name="endpoint_wavespeed" placeholder="https://api.wavespeed.ai/api/v3"></label>
           <label>Endpoint MiniMax <input type="text" name="endpoint_minimax" placeholder="https://api.minimax.io"></label>
           <label>Endpoint Suno <input type="text" name="endpoint_suno" placeholder="https://api.sunoapi.org"></label>
           <label>Modelo Suno por defecto <input type="text" name="sunoModelId" placeholder="V5_5"></label>

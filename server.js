@@ -10,7 +10,7 @@ import { spawn, execFile } from 'node:child_process';
 
 import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel, getAudioModel } from './lib/models.js';
 import {
-  generateGemini, analyzeArtStyle, analyzeVocabularyImage, generateSeedream, generateOpenAIImage, generateSeedanceVideo,
+  generateGemini, analyzeArtStyle, analyzeVocabularyImage, generateSeedream, generateFireRed, generateOpenAIImage, generateSeedanceVideo,
   generateSeedance25Video, generateGeminiOmniVideo,
   generateMiniMaxH3Video, regenerateMiniMaxH3Video, generateScreenplay,
   listVoices, generateSpeech, generateMusic, translateText, searchUpdatedPricing, testService
@@ -77,7 +77,7 @@ const DEFAULT_CONFIG = {
   poserPrompt: DEFAULT_POSER_PROMPT,
   photoshopPath: '',
   ffmpegPath: '',
-  keys: { gemini: '', googleTranslate: '', ark: '', minimax: '', elevenlabs: '', openai: '', suno: '', heygen: '' },
+  keys: { gemini: '', googleTranslate: '', ark: '', wavespeed: '', minimax: '', elevenlabs: '', openai: '', suno: '', heygen: '' },
   openaiModel: 'gpt-5-mini',
   audioModelId: AUDIO_MODEL.id,
   heygenAuthMode: 'key',
@@ -90,10 +90,13 @@ const DEFAULT_CONFIG = {
   },
   endpoints: {
     ark: 'https://ark.ap-southeast.bytepluses.com/api/v3',
+    wavespeed: 'https://api.wavespeed.ai/api/v3',
     minimax: 'https://api.minimax.io',
     suno: 'https://api.sunoapi.org'
   },
   seedreamModelId: 'seedream-5-0-lite',
+  seedreamProModelId: 'dola-seedream-5-0-pro-260628',
+  fireRedModelId: 'wavespeed-ai/firered-image-v1.1/edit',
   seedance25ModelId: '',
   seedanceModelId: '',
   seedanceMiniModelId: '',
@@ -1020,7 +1023,7 @@ async function runImageGeneration(req) {
     : null;
 
   const batch = Math.max(1, Math.min(4, Number(req.batch) || 1));
-  const apiModel = model.provider === 'seedream' ? (cfg.seedreamModelId || model.apiModel) : model.apiModel;
+  const apiModel = model.configModelKey ? (cfg[model.configModelKey] || model.apiModel) : model.apiModel;
 
   // Si alguna referencia viene del Poser, se anexa el prompt de pose
   // (invisible en la caja) para que la IA la use solo como pose/encuadre.
@@ -1044,7 +1047,13 @@ async function runImageGeneration(req) {
       case 'seedream':
         return generateSeedream({
           apiKey: cfg.keys.ark, apiModel, endpoint: cfg.endpoints.ark,
-          prompt: sentPrompt, preface, refPaths, aspectRatio: req.aspectRatio, resolution: req.resolution
+          prompt: sentPrompt, preface, refPaths, aspectRatio: req.aspectRatio, resolution: req.resolution,
+          nativeResolutionLevels: model.nativeResolutionLevels === true
+        });
+      case 'wavespeed':
+        return generateFireRed({
+          apiKey: cfg.keys.wavespeed, apiModel, endpoint: cfg.endpoints.wavespeed,
+          prompt: sentPrompt, preface, refPaths, aspectRatio: req.aspectRatio
         });
       case 'openai':
         return generateOpenAIImage({
@@ -2223,8 +2232,8 @@ function invalidateAutomationOutput(output = {}, { image = false, text = false, 
 // La voz del narrador es del proyecto; los diálogos usan la voz del personaje
 // asignado (si tiene), con la del narrador como respaldo.
 const DEFAULT_AUTOMATION_CONFIG = {
-  imageModelId: 'nano-banana-pro',
-  fallbackImageModelId: '',
+  imageModelId: 'seedream-5-pro',
+  fallbackImageModelId: 'firered-image-edit-1-1',
   artStyle: 'Photorealistic cinematic realism, natural human anatomy, realistic skin and materials, restrained color grading, consistent lighting and lens language',
   artStylePromptId: '',
   artStyleImageKey: '',
@@ -4504,6 +4513,8 @@ const server = http.createServer(async (req, res) => {
         paths: { ...cfg.paths, ...(body.paths || {}) },
         endpoints: { ...cfg.endpoints, ...(body.endpoints || {}) },
         seedreamModelId: body.seedreamModelId ?? cfg.seedreamModelId,
+        seedreamProModelId: body.seedreamProModelId ?? cfg.seedreamProModelId,
+        fireRedModelId: body.fireRedModelId ?? cfg.fireRedModelId,
         seedance25ModelId: body.seedance25ModelId ?? cfg.seedance25ModelId,
         seedanceModelId: body.seedanceModelId ?? cfg.seedanceModelId,
         seedanceMiniModelId: body.seedanceMiniModelId ?? cfg.seedanceMiniModelId,
@@ -6904,6 +6915,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { ok: true, detail: 'ComfyUI responde. Agregá tus workflows abajo y usá "Detectar nodos" en cada uno.' });
       }
       const endpoint = body.endpoint || (service === 'ark' ? cfg.endpoints.ark
+        : service === 'wavespeed' ? cfg.endpoints.wavespeed
         : service === 'minimax' ? cfg.endpoints.minimax
           : service === 'suno' ? cfg.endpoints.suno : '');
       const result = await testService({

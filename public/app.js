@@ -1509,6 +1509,9 @@ async function generate() {
   const isH3 = isVideo && model?.provider === 'minimax';
   const isOmni = isVideo && model?.provider === 'omni';
   const isSeedance25 = isVideo && model?.id === 'seedance-2-5';
+  if (isImage && state.refs.length < (model?.minRefs || 0)) {
+    return toast(`${model.name} necesita al menos ${model.minRefs} imagen(es) de referencia`, 'err');
+  }
   if (isHeyGen && model.requiresRegisteredCharacter) {
     const character = state.characters.find((item) => item.id === state.video.heygenCharacterId);
     if (!heygenCharacterReady(character)) {
@@ -5992,11 +5995,14 @@ function renderCharModal() {
     </div>
     ${id ? `
     ${c.photos.length ? '<div><label>Portada</label><div id="chCover"></div></div>' : ''}
-    <div><label>Fotos (${c.photos.length})</label>
+    <div>
+      <div class="variant-manager-head"><label>Fotos (${c.photos.length})</label><div>
+        <button type="button" class="mini-btn" id="chAddPhoto">${IC('upload')} Subir</button>
+        <button type="button" class="mini-btn" id="chAddPhotoFromAssets">${IC('image')} Desde assets</button>
+      </div></div>
       ${c.photos.length > 1 ? '<div class="hint" style="margin-bottom:6px">Arrastrá para ordenar — la primera es la foto de perfil</div>' : ''}
       <div class="char-photos-grid" id="chPhotos">
         ${c.photos.map((p, pi) => `<div class="ref-thumb${pi === 0 ? ' is-profile' : ''}${p === c.sheet ? ' is-sheet' : ''}" draggable="true" data-photo="${esc(p)}"><img src="${fileUrl(p)}" draggable="false" alt=""><button class="ficha-btn" data-ficha="${esc(p)}" title="${p === c.sheet ? 'Ficha del personaje (clic para quitar)' : 'Marcar como ficha de personaje'}">${IC('star')}</button><button class="rm" data-key="${esc(p)}">×</button></div>`).join('')}
-        <button class="ref-add" id="chAddPhoto">+</button>
       </div>
     </div>
     <div class="variant-manager">
@@ -6089,6 +6095,9 @@ function renderCharModal() {
     };
     $('#fileInput').click();
   });
+  $('#chAddPhotoFromAssets')?.addEventListener('click', () => openCharAssetPicker({
+    entity: 'character', ownerId: id, variantId: null
+  }));
 
   $('#chHeyGenUpload')?.addEventListener('click', () => $('#chHeyGenFileInput').click());
   $('#chHeyGenFileInput')?.addEventListener('change', async (event) => {
@@ -9263,6 +9272,10 @@ async function generateAutomationImage(pr, request, setStatus) {
     const fallback = state.models.find((model) =>
       model.id === pr.config.fallbackImageModelId && model.id !== primary.id);
     if (!fallback) throw primaryError;
+    const referenceCount = Array.isArray(request.refs) ? request.refs.length : 0;
+    if (referenceCount < (fallback.minRefs || 0)) {
+      throw new Error(`${primary.name} falló: ${primaryError.message}. ${fallback.name} no puede usarse como respaldo en esta toma porque necesita al menos ${fallback.minRefs} referencia(s).`);
+    }
     setStatus(`${primary.name} falló. Reintentando con ${fallback.name}…`);
     try {
       const result = await attempt(fallback);
@@ -10521,6 +10534,7 @@ function fillConfigForm() {
   f.key_gemini.value = c.keys.gemini || '';
   f.key_googleTranslate.value = c.keys.googleTranslate || '';
   f.key_ark.value = c.keys.ark || '';
+  f.key_wavespeed.value = c.keys.wavespeed || '';
   f.key_elevenlabs.value = c.keys.elevenlabs || '';
   f.key_openai.value = c.keys.openai || '';
   f.key_minimax.value = c.keys.minimax || '';
@@ -10532,11 +10546,14 @@ function fillConfigForm() {
   f.path_audio.value = c.paths.audio || '';
   f.path_video.value = c.paths.video || '';
   f.seedreamModelId.value = c.seedreamModelId || '';
+  f.seedreamProModelId.value = c.seedreamProModelId || '';
+  f.fireRedModelId.value = c.fireRedModelId || '';
   f.seedance25ModelId.value = c.seedance25ModelId || '';
   f.seedanceModelId.value = c.seedanceModelId || '';
   f.seedanceMiniModelId.value = c.seedanceMiniModelId || '';
   f.sunoModelId.value = c.sunoModelId || 'V5_5';
   f.endpoint_ark.value = c.endpoints.ark || '';
+  f.endpoint_wavespeed.value = c.endpoints.wavespeed || '';
   f.endpoint_suno.value = c.endpoints.suno || '';
   f.endpoint_minimax.value = c.endpoints.minimax || '';
   f.poserPrompt.value = c.poserPrompt || '';
@@ -10610,6 +10627,7 @@ $$('.test-btn').forEach((btn) => {
         body.endpoint = f.endpoint_ark.value.trim();
         body.seedreamModelId = f.seedreamModelId.value.trim();
       }
+      if (service === 'wavespeed') body.endpoint = f.endpoint_wavespeed.value.trim();
       if (service === 'suno') body.endpoint = f.endpoint_suno.value.trim();
       if (service === 'minimax') body.endpoint = f.endpoint_minimax.value.trim();
       const r = await api('/api/test', { method: 'POST', body });
@@ -10663,6 +10681,7 @@ $('#configForm').addEventListener('submit', async (e) => {
           gemini: f.key_gemini.value.trim(),
           googleTranslate: f.key_googleTranslate.value.trim(),
           ark: f.key_ark.value.trim(),
+          wavespeed: f.key_wavespeed.value.trim(),
           elevenlabs: f.key_elevenlabs.value.trim(),
           openai: f.key_openai.value.trim(),
           minimax: f.key_minimax.value.trim(),
@@ -10678,10 +10697,13 @@ $('#configForm').addEventListener('submit', async (e) => {
         },
         endpoints: {
           ark: f.endpoint_ark.value.trim(),
+          wavespeed: f.endpoint_wavespeed.value.trim(),
           suno: f.endpoint_suno.value.trim(),
           minimax: f.endpoint_minimax.value.trim()
         },
         seedreamModelId: f.seedreamModelId.value.trim(),
+        seedreamProModelId: f.seedreamProModelId.value.trim(),
+        fireRedModelId: f.fireRedModelId.value.trim(),
         seedance25ModelId: f.seedance25ModelId.value.trim(),
         seedanceModelId: f.seedanceModelId.value.trim(),
         seedanceMiniModelId: f.seedanceMiniModelId.value.trim(),
