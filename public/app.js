@@ -462,8 +462,16 @@ function highlightReferenceMentions(text, mentions) {
     : esc(part)).join('');
 }
 
+function updateCharCount() {
+  const el = $('#promptCharCount');
+  if (!el) return;
+  const n = promptBox.value.length;
+  el.textContent = `${n.toLocaleString('es-AR')} ${n === 1 ? 'carácter' : 'caracteres'}`;
+}
+
 function renderHighlight() {
   const text = promptBox.value;
+  updateCharCount();
   if (state.mode === 'audio') {
     highlighter.innerHTML = esc(text).replace(/\[([^\]\n]{1,60})\]/g, '<span class="tag">[$1]</span>') + '\n';
   } else if (state.mode === 'image') {

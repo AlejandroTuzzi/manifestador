@@ -288,6 +288,10 @@ h3 { font-size: 15px; }
   /* sin padding/margin que altere el avance: el resaltado no debe mover el texto */
 }
 
+/* contador de caracteres bajo la caja de prompt */
+.prompt-meta { display: flex; justify-content: flex-end; margin-top: 4px; }
+.char-count { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; user-select: none; }
+
 /* ---------- paleta de tags ---------- */
 .tag-palette { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .tag-chip {
