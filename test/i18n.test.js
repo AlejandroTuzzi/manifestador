@@ -44,7 +44,7 @@ describe('infraestructura multilenguaje', () => {
   });
 
   test('todas las claves literales usadas desde JavaScript existen en ambos catálogos', () => {
-    const source = `${read('public/app-core.js')}\n${read('public/app.js')}`;
+    const source = `${read('public/app-core.js')}\n${read('public/app.js')}\n${read('public/poser.js')}`;
     const used = [...source.matchAll(/\btr\(\s*['"]([^'"]+)['"]/g)].map((match) => match[1]);
     assert.ok(used.length > 0);
     for (const key of used) {
@@ -57,6 +57,17 @@ describe('infraestructura multilenguaje', () => {
         assert.ok(`${key}.${suffix}` in es.messages, `Falta ${key}.${suffix} en español`);
         assert.ok(`${key}.${suffix}` in en.messages, `Falta ${key}.${suffix} en inglés`);
       }
+    }
+  });
+
+  test('cada código de error localizado del servidor existe en ambos catálogos', () => {
+    const server = read('server.js');
+    const codes = [...server.matchAll(/\bsendError\(\s*res\s*,\s*\d+\s*,\s*['"]([^'"]+)['"]/g)]
+      .map((match) => `errors.${match[1]}`);
+    assert.ok(codes.length > 0);
+    for (const key of codes) {
+      assert.ok(key in es.messages, `Falta ${key} en español`);
+      assert.ok(key in en.messages, `Falta ${key} en inglés`);
     }
   });
 

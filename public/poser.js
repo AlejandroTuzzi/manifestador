@@ -298,7 +298,7 @@ function registerMeshItem(mesh, rawName) {
 function renderParts() {
   const box = $('#poserPartsList');
   if (!P.meshItems.length) {
-    box.innerHTML = '<div class="hint">Cargá un modelo para ver sus partes.</div>';
+    box.innerHTML = `<div class="hint">${B.esc(B.tr('poser.loadModelForParts'))}</div>`;
     return;
   }
   const groups = new Map();
@@ -366,7 +366,7 @@ function updateBoneOverlay() {
 function renderBoneList() {
   const list = $('#poserBoneList');
   if (!P.boneObjs.length) {
-    list.innerHTML = '<div class="hint" style="padding:8px">Cargá un modelo para ver sus huesos.</div>';
+    list.innerHTML = `<div class="hint" style="padding:8px">${B.esc(B.tr('poser.loadModelForBones'))}</div>`;
     return;
   }
   const q = P.boneSearch.toLowerCase();
@@ -375,12 +375,12 @@ function renderBoneList() {
     .map((bone, i) => ({ bone, i }))
     .filter(({ bone, i }) => (!q || bone.name.toLowerCase().includes(q)) && (!onlyTouched || isBoneTouched(i)));
   if (onlyTouched && !rows.length) {
-    list.innerHTML = '<div class="hint" style="padding:8px">Todavía no modificaste ningún hueso.</div>';
+    list.innerHTML = `<div class="hint" style="padding:8px">${B.esc(B.tr('poser.noModifiedBones'))}</div>`;
     return;
   }
   list.innerHTML = rows.map(({ bone, i }) =>
     `<button class="poser-bone${i === P.selectedBone ? ' active' : ''}" data-bone="${i}">${isBoneTouched(i) ? '<span class="poser-touched">●</span> ' : ''}${B.esc(bone.name)}</button>`
-  ).join('') || '<div class="hint" style="padding:8px">Ningún hueso coincide.</div>';
+  ).join('') || `<div class="hint" style="padding:8px">${B.esc(B.tr('poser.noBoneMatches'))}</div>`;
   list.querySelectorAll('[data-bone]').forEach((btn) => btn.addEventListener('click', () => selectBone(Number(btn.dataset.bone))));
 }
 
@@ -447,8 +447,14 @@ function renderAliasChips() {
 // Mapa corporal: vocabulario fijo de 16 partes, convive con los alias libres.
 // Un clic sobre el monigote selecciona el hueso asignado a esa parte; para
 // asignar, se elige el hueso primero y se guarda desde su ventana.
-$('#poserBodyPartSelect').innerHTML = '<option value="">— ninguna —</option>'
-  + POSER_BODY_PARTS.map((p) => `<option value="${p.id}">${p.label}</option>`).join('');
+function renderBodyPartOptions() {
+  $('#poserBodyPartSelect').innerHTML = `<option value="">— ${B.esc(B.tr('poser.none'))} —</option>`
+    + POSER_BODY_PARTS.map((p) => `<option value="${p.id}">${B.esc(B.tr(`poser.bodyPart.${p.id}`))}</option>`).join('');
+  document.querySelectorAll('#poserBodyMap [data-part]').forEach((element) => {
+    const title = element.querySelector('title');
+    if (title) title.textContent = B.tr(`poser.bodyPart.${element.dataset.part}`);
+  });
+}
 
 function bodyPartForBone(boneName) {
   const map = P.bodymap[P.model?.id] || {};
@@ -472,7 +478,7 @@ $('#poserBodyMap').addEventListener('click', (e) => {
   const boneName = (P.bodymap[P.model.id] || {})[el.dataset.part];
   if (!boneName) {
     const label = POSER_BODY_PARTS.find((p) => p.id === el.dataset.part)?.label || el.dataset.part;
-    B.toast(`Sin hueso asignado a "${label}". Elegí un hueso y asignalo desde su ventana.`, 'err');
+    B.toast(B.tr('poser.bodyPartUnassigned', { label }), 'err');
     return;
   }
   const idx = P.boneObjs.findIndex((b) => b.name === boneName);
@@ -589,12 +595,12 @@ async function refreshPoser() {
   P.bodymap = data.bodymap || {};
   $('#poserFolderHint').textContent = P.models.length
     ? ''
-    : `Copiá cada modelo (su carpeta con el .xps/.mesh y las texturas) dentro de ${data.folder} y tocá "Releer carpeta".`;
+    : B.tr('poser.folderHint', { folder: data.folder });
   const sel = $('#poserModelSelect');
   const prev = P.model?.id || localStorage.getItem('poserModelId') || '';
   sel.innerHTML = P.models.length
     ? P.models.map((m) => `<option value="${B.esc(m.id)}">${B.esc(m.name)}</option>`).join('')
-    : '<option value="">— sin modelos —</option>';
+    : `<option value="">— ${B.esc(B.tr('poser.noModels'))} —</option>`;
   const pick = P.models.find((m) => m.id === prev) || P.models[0] || null;
   if (pick) sel.value = pick.id;
   if (pick && pick.id !== P.model?.id) await loadModel(pick);
@@ -605,17 +611,17 @@ async function refreshPoser() {
 async function loadModel(model) {
   P.model = model;
   localStorage.setItem('poserModelId', model.id);
-  if (!model.meshFile) { $('#poserStatus').textContent = 'Este modelo no tiene archivo de malla.'; return; }
-  $('#poserStatus').textContent = 'Cargando modelo…';
+  if (!model.meshFile) { $('#poserStatus').textContent = B.tr('poser.meshMissing'); return; }
+  $('#poserStatus').textContent = B.tr('poser.loadingModel');
   try {
     const res = await fetch(B.fileUrl(modelFileKey(model.meshFile)));
-    if (!res.ok) throw new Error('No pude descargar la malla.');
+    if (!res.ok) throw new Error(B.tr('poser.meshDownloadFailed'));
     const parsed = parseXps(await res.arrayBuffer(), model.meshFile);
     buildModel(parsed);
-    $('#poserStatus').textContent = `${parsed.bones.length} huesos · ${parsed.meshes.length} meshes`;
+    $('#poserStatus').textContent = B.tr('poser.modelStats', { bones: B.trn('poser.boneCount', parsed.bones.length), meshes: B.trn('poser.meshCount', parsed.meshes.length) });
   } catch (e) {
     $('#poserStatus').textContent = '';
-    B.toast(`No pude cargar el modelo: ${e.message}`, 'err');
+    B.toast(B.tr('poser.modelLoadFailed', { error: e.message }), 'err');
   }
 }
 
@@ -627,7 +633,7 @@ $('#poserModelSelect').addEventListener('change', (e) => {
 $('#poserRefreshModels').addEventListener('click', async () => {
   P.model = null; // fuerza recargar el modelo seleccionado desde el disco
   await refreshPoser();
-  B.toast('Carpeta de modelos releída');
+  B.toast(B.tr('poser.folderReloaded'));
 });
 
 // ---------------------------------------------------------------------------
@@ -635,11 +641,11 @@ $('#poserRefreshModels').addEventListener('click', async () => {
 // ---------------------------------------------------------------------------
 
 function lensName(fov) {
-  if (fov <= 20) return 'teleobjetivo';
-  if (fov <= 35) return 'retrato';
-  if (fov <= 55) return 'normal';
-  if (fov <= 85) return 'gran angular';
-  return 'ojo de pez';
+  if (fov <= 20) return B.tr('poser.lens.telephoto');
+  if (fov <= 35) return B.tr('poser.lens.portrait');
+  if (fov <= 55) return B.tr('poser.lens.normal');
+  if (fov <= 85) return B.tr('poser.lens.wide');
+  return B.tr('poser.lens.fisheye');
 }
 
 function updateFovLabel() {
@@ -696,7 +702,7 @@ $('#poserPoseInput').addEventListener('change', async (e) => {
   if (!file || !P.boneObjs.length) return;
   const parsed = parsePoseFile(await file.text());
   const applied = applyPoseData(Object.fromEntries(Object.entries(parsed).map(([k, v]) => [k, { rot: v.rot, pos: v.pos }])));
-  B.toast(applied ? `Pose aplicada a ${applied} huesos` : 'Ningún hueso del .pose coincide con este modelo', applied ? 'ok' : 'err');
+  B.toast(applied ? B.tr('poser.poseApplied', { bones: B.trn('poser.boneCount', applied) }) : B.tr('poser.poseNoMatch'), applied ? 'ok' : 'err');
 });
 
 $('#poserExportPose').addEventListener('click', () => {
@@ -727,7 +733,7 @@ $('#poserGray').addEventListener('change', (e) => localStorage.setItem('poserGra
 if (localStorage.getItem('poserGray')) $('#poserGray').checked = true;
 
 $('#poserCapture').addEventListener('click', async () => {
-  if (!P.root) return B.toast('Cargá un modelo primero', 'err');
+  if (!P.root) return B.toast(B.tr('poser.loadModelFirst'), 'err');
   const wasBones = $('#poserShowBones').checked;
   $('#poserShowBones').checked = false;
   const wasGrid = P.grid.visible;
@@ -740,14 +746,14 @@ $('#poserCapture').addEventListener('click', async () => {
     const { key } = await B.api('/api/poser/captures', { method: 'POST', body: { name: P.model.name, dataUrl } });
     B.addRef(key);
     B.goToCreate();
-    B.toast('Captura agregada como referencia');
+    B.toast(B.tr('poser.captureAddedReference'));
   } catch (e) {
     B.toast(e.message, 'err');
   }
 });
 
 async function captureToComfySlot(slot) {
-  if (!P.root) return B.toast('Cargá un modelo primero', 'err');
+  if (!P.root) return B.toast(B.tr('poser.loadModelFirst'), 'err');
   const wasBones = $('#poserShowBones').checked;
   $('#poserShowBones').checked = false;
   const wasGrid = P.grid.visible;
@@ -759,7 +765,7 @@ async function captureToComfySlot(slot) {
   try {
     const { key } = await B.api('/api/poser/captures', { method: 'POST', body: { name: P.model.name, dataUrl } });
     B.setComfyPoseRef(slot, key);
-    B.toast('Captura agregada como pose de ComfyUI');
+    B.toast(B.tr('poser.captureAddedComfy'));
   } catch (e) {
     B.toast(e.message, 'err');
   }
@@ -768,9 +774,9 @@ $('#poserCaptureComfyPose').addEventListener('click', () => captureToComfySlot('
 $('#poserCaptureComfyIp').addEventListener('click', () => captureToComfySlot('poseIpAdapter'));
 
 $('#poserSaveScene').addEventListener('click', async () => {
-  if (!P.root) return B.toast('Cargá un modelo primero', 'err');
-  const name = $('#poserSceneName').value.trim() || `Pose ${new Date().toLocaleString()}`;
-  const category = $('#poserSceneCategory').value.trim() || 'General';
+  if (!P.root) return B.toast(B.tr('poser.loadModelFirst'), 'err');
+  const name = $('#poserSceneName').value.trim() || B.tr('poser.defaultPoseName', { date: new Date().toLocaleString(B.localeTag()) });
+  const category = $('#poserSceneCategory').value.trim() || B.tr('common.general');
   const wasBones = $('#poserShowBones').checked;
   $('#poserShowBones').checked = false;
   const wasGrid = P.grid.visible;
@@ -790,12 +796,12 @@ $('#poserSaveScene').addEventListener('click', async () => {
   P.poses = poses;
   $('#poserSceneName').value = '';
   renderSceneList();
-  B.toast(`Escena "${name}" guardada`);
+  B.toast(B.tr('poser.sceneSaved', { name }));
 });
 
 function renderSceneList() {
   const list = $('#poserSceneList');
-  const cats = [...new Set(P.poses.map((x) => x.category || 'General'))].sort((a, b) => a.localeCompare(b));
+  const cats = [...new Set(P.poses.map((x) => x.category || B.tr('common.general')))].sort((a, b) => a.localeCompare(b, B.localeTag()));
   // chips de categorías existentes (para escribir una nueva, se usa el campo)
   const chips = $('#poserCategoryChips');
   chips.innerHTML = '';
@@ -811,22 +817,22 @@ function renderSceneList() {
     chips.appendChild(b);
   }
   if (!P.poses.length) {
-    list.innerHTML = '<div class="hint" style="padding:8px">Todavía no guardaste escenas.</div>';
+    list.innerHTML = `<div class="hint" style="padding:8px">${B.esc(B.tr('poser.noSavedScenes'))}</div>`;
     return;
   }
   list.innerHTML = cats.map((cat) => `
     <div class="poser-scene-cat">${B.esc(cat)}</div>
-    ${P.poses.filter((x) => (x.category || 'General') === cat).map((x) => `
+    ${P.poses.filter((x) => (x.category || B.tr('common.general')) === cat).map((x) => `
       <div class="poser-scene" data-pose="${x.id}">
         ${x.thumbKey ? `<img src="${B.fileUrl(x.thumbKey)}" loading="lazy" alt="">` : ''}
         <div class="poser-scene-info">
           <div class="poser-scene-name">${B.esc(x.name)}</div>
-          <div class="poser-scene-model hint">${B.esc(P.models.find((m) => m.id === x.modelId)?.name || 'modelo borrado')}</div>
+          <div class="poser-scene-model hint">${B.esc(P.models.find((m) => m.id === x.modelId)?.name || B.tr('poser.deletedModel'))}</div>
         </div>
         <div class="poser-scene-actions">
-          <button class="mini-btn" data-act="load" title="Aplicar pose y cámara">Cargar</button>
-          ${x.thumbKey ? '<button class="mini-btn" data-act="ref" title="Usar como referencia">→ Ref</button>' : ''}
-          <button class="icon-btn" data-act="del" title="Borrar">×</button>
+          <button class="mini-btn" data-act="load" title="${B.esc(B.tr('poser.applyPoseCamera'))}">${B.esc(B.tr('common.load'))}</button>
+          ${x.thumbKey ? `<button class="mini-btn" data-act="ref" title="${B.esc(B.tr('poser.useAsReference'))}">→ Ref</button>` : ''}
+          <button class="icon-btn" data-act="del" title="${B.esc(B.tr('common.delete'))}">×</button>
         </div>
       </div>`).join('')}`).join('');
   list.querySelectorAll('[data-pose]').forEach((row) => row.querySelectorAll('[data-act]').forEach((btn) => btn.addEventListener('click', async () => {
@@ -835,7 +841,7 @@ function renderSceneList() {
     if (btn.dataset.act === 'load') {
       if (pose.modelId !== P.model?.id) {
         const model = P.models.find((m) => m.id === pose.modelId);
-        if (!model) return B.toast('El modelo de esta escena ya no existe', 'err');
+        if (!model) return B.toast(B.tr('poser.sceneModelMissing'), 'err');
         $('#poserModelSelect').value = model.id;
         await loadModel(model);
       }
@@ -853,15 +859,15 @@ function renderSceneList() {
         $('#poserFov').value = Math.round(P.camera.fov);
         updateFovLabel();
       }
-      B.toast(`Escena "${pose.name}" cargada`);
+      B.toast(B.tr('poser.sceneLoaded', { name: pose.name }));
     }
     if (btn.dataset.act === 'ref') {
       B.addRef(pose.thumbKey);
       B.goToCreate();
-      B.toast('Pose agregada como referencia');
+      B.toast(B.tr('poser.poseAddedReference'));
     }
     if (btn.dataset.act === 'del') {
-      if (!confirm(`¿Borrar la escena "${pose.name}"?`)) return;
+      if (!confirm(B.tr('poser.deleteSceneConfirm', { name: pose.name }))) return;
       const { poses } = await B.api(`/api/poser/poses/${pose.id}`, { method: 'DELETE' });
       P.poses = poses;
       renderSceneList();
@@ -896,6 +902,7 @@ document.querySelectorAll('[data-panel-toggle]').forEach((btn) => {
 // ---------------------------------------------------------------------------
 
 window.poserEnter = () => {
+  renderBodyPartOptions();
   initViewer();
   updateFovLabel();
   refreshPoser().catch((e) => B.toast(e.message, 'err'));

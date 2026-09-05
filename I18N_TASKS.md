@@ -25,8 +25,8 @@ La elección se guarda en `config.json`. Español (`es`) es el idioma base y fal
 1. **Núcleo compartido** — completado: navegación, acceso, monitor global, selector de referencias, reproductor, lightbox y tareas largas.
 2. **Crear** — completado: estructura, modelos, referencias, validaciones, resultados, historial y herramientas auxiliares usan los catálogos compartidos.
 3. **Bibliotecas** — completado: Assets, Personajes, Locaciones/Objetos, Prompts, Vocabulario y Snippets.
-4. **Producción** — en curso: Series y guiones completos; Automatizador, Subtitulador y Poser pendientes.
-5. **Administración y cierre** — Consumo, Configuración completa, errores del servidor y QA visual bilingüe.
+4. **Producción** — en curso: Series, guiones, Automatizador y Subtitulador migrados; Poser pendiente.
+5. **Administración y cierre** — Consumo migrado; Configuración completa, errores del servidor y QA visual bilingüe pendientes.
 
 ### 0. Infraestructura
 
@@ -77,26 +77,26 @@ La elección se guarda en `config.json`. Español (`es`) es el idioma base y fal
 
 ### 5. Automatizador
 
-- [ ] Biblioteca y configuración general de proyectos.
-- [ ] Bloques manuales y generadores Imagen, Assets, HeyGen, H3, Seedance y Omni.
-- [ ] Estilos de título, subtítulos dinámicos y resaltados.
-- [ ] Música, transiciones, efectos, máscaras y logos.
-- [ ] Regeneraciones, montajes, limpieza y finalización.
-- [ ] Monitor de tareas recuperables y mensajes después de F5.
-- [ ] Confirmaciones destructivas y resúmenes de resultados.
+- [x] Biblioteca y configuración general de proyectos.
+- [x] Bloques manuales y generadores Imagen, Assets, HeyGen, H3, Seedance y Omni.
+- [x] Estilos de título, subtítulos dinámicos y resaltados.
+- [x] Música, transiciones, efectos, máscaras y logos.
+- [x] Regeneraciones, montajes, limpieza y finalización.
+- [x] Monitor de tareas recuperables y mensajes después de F5.
+- [x] Confirmaciones destructivas y resúmenes de resultados.
 
 ### 6. Subtitulador y Poser
 
-- [ ] Proyectos, transcripción, corrección y exportación TXT/SRT.
-- [ ] Animaciones Remotion, estilos y render final.
-- [ ] Controles del Poser, huesos, cámaras, escenas y archivos `.pose`.
+- [x] Proyectos, transcripción, corrección y exportación TXT/SRT.
+- [x] Animaciones Remotion, estilos y render final.
+- [x] Controles del Poser, huesos, cámaras, escenas y archivos `.pose`.
 
 ### 7. Consumo y Configuración
 
-- [ ] Resumen, meses, unidades, tarifas y estimaciones de Consumo.
-- [ ] Todos los campos, ayudas y pruebas de API en Configuración.
-- [ ] OAuth de HeyGen, Photoshop, FFmpeg, ComfyUI y acceso.
-- [ ] Controles NSFW y mensajes administrativos.
+- [x] Resumen, meses, unidades, tarifas y estimaciones de Consumo.
+- [x] Todos los campos, ayudas y pruebas de API en Configuración.
+- [x] OAuth de HeyGen, Photoshop, FFmpeg, ComfyUI y acceso.
+- [x] Controles NSFW y mensajes administrativos.
 
 ### 8. Servidor y errores
 

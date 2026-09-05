@@ -334,7 +334,7 @@ async function refreshComfySlots() {
 function renderComfyWorkflowsList() {
   const box = $('#comfyWorkflowsList');
   if (!state.comfyuiWorkflows.length) {
-    box.innerHTML = '<div class="empty-note">Todavía no agregaste ningún workflow.</div>';
+    box.innerHTML = `<div class="empty-note">${esc(tr('config.comfy.none'))}</div>`;
     return;
   }
   box.innerHTML = state.comfyuiWorkflows.map((wf) => `<div class="comfy-wf-item" data-id="${esc(wf.id)}">
@@ -345,9 +345,9 @@ function renderComfyWorkflowsList() {
       <span class="hint comfy-wf-slots"></span>
     </div>
     <div class="comfy-wf-actions">
-      <button type="button" class="mini-btn" data-act="scan">Detectar nodos</button>
-      <button type="button" class="mini-btn" data-act="edit">Editar</button>
-      <button type="button" class="mini-btn danger" data-act="delete">Borrar</button>
+      <button type="button" class="mini-btn" data-act="scan">${esc(tr('config.comfy.detectNodes'))}</button>
+      <button type="button" class="mini-btn" data-act="edit">${esc(tr('common.edit'))}</button>
+      <button type="button" class="mini-btn danger" data-act="delete">${esc(tr('common.delete'))}</button>
     </div>
   </div>`).join('');
   box.querySelectorAll('.comfy-wf-item').forEach((row) => {
@@ -355,18 +355,18 @@ function renderComfyWorkflowsList() {
     const wf = state.comfyuiWorkflows.find((w) => w.id === id);
     row.querySelector('[data-act="scan"]').addEventListener('click', async () => {
       const slotsEl = row.querySelector('.comfy-wf-slots');
-      slotsEl.textContent = 'Escaneando…';
+      slotsEl.textContent = tr('config.comfy.scanning');
       try {
         const r = await api(`/api/comfyui/scan?id=${encodeURIComponent(id)}`, { task: false });
         const found = Object.entries(r.slots).filter(([, n]) => n > 0).map(([k]) => comfySlotLabel(k));
-        slotsEl.textContent = found.length ? `Nodos: ${found.join(', ')}` : 'Sin nodos Tuzzi detectados';
+        slotsEl.textContent = found.length ? tr('config.comfy.nodesFound', { nodes: found.join(', ') }) : tr('config.comfy.noTuzziNodes');
       } catch (e) {
         slotsEl.textContent = `Error: ${e.message}`;
       }
     });
     row.querySelector('[data-act="edit"]').addEventListener('click', () => openComfyWorkflowForm(wf));
     row.querySelector('[data-act="delete"]').addEventListener('click', async () => {
-      if (!confirm(`¿Borrar el workflow "${wf.name}"?`)) return;
+      if (!confirm(tr('config.comfy.deleteConfirm', { name: wf.name }))) return;
       await api(`/api/comfyui/workflows/${wf.id}`, { method: 'DELETE' });
       state.comfyuiWorkflows = state.comfyuiWorkflows.filter((x) => x.id !== wf.id);
       renderComfyWorkflowsList();
@@ -383,7 +383,7 @@ function renderComfyWorkflowCvForm(customValues = []) {
     const cv = customValues[i] || {};
     return `<label class="comfy-cv-form-row">
       <input type="checkbox" data-cv-enabled="${i}" ${cv.enabled ? 'checked' : ''}>
-      <input type="text" class="text-input" data-cv-label="${i}" maxlength="60" placeholder="Título (ej: Ip Adapter Weight)" value="${esc(cv.label || '')}" ${cv.enabled ? '' : 'disabled'}>
+      <input type="text" class="text-input" data-cv-label="${i}" maxlength="60" placeholder="${esc(tr('config.comfy.customValuePlaceholder'))}" value="${esc(cv.label || '')}" ${cv.enabled ? '' : 'disabled'}>
     </label>`;
   }).join('');
   box.querySelectorAll('[data-cv-enabled]').forEach((chk) => {
@@ -429,7 +429,7 @@ $('#comfyWorkflowFormSave').addEventListener('click', async () => {
   const name = $('#comfyWorkflowFormName').value.trim();
   const description = $('#comfyWorkflowFormDesc').value.trim();
   const path = $('#comfyWorkflowFormPath').value.trim();
-  if (!path) return toast('Falta la ruta/URL del workflow', 'err');
+  if (!path) return toast(tr('config.comfy.pathMissing'), 'err');
   try {
     const body = {
       name, description, path, customValues: readComfyWorkflowCvForm(),
@@ -448,7 +448,7 @@ $('#comfyWorkflowFormSave').addEventListener('click', async () => {
     closeComfyWorkflowForm();
     renderComfyWorkflowsList();
     renderComfyControls();
-    toast('Workflow guardado');
+    toast(tr('config.comfy.saved'));
   } catch (e) {
     toast(e.message, 'err');
   }
@@ -467,8 +467,8 @@ function highlightReferenceMentions(text, mentions) {
   if (!values.length) return esc(text);
   const pattern = values.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   const matcher = new RegExp(`(${pattern})`, 'giu');
-  const wanted = new Set(values.map((value) => value.toLocaleLowerCase('es')));
-  return text.split(matcher).map((part) => wanted.has(part.toLocaleLowerCase('es'))
+  const wanted = new Set(values.map((value) => value.toLocaleLowerCase(i18n.localeTag())));
+  return text.split(matcher).map((part) => wanted.has(part.toLocaleLowerCase(i18n.localeTag()))
     ? `<span class="tag">${esc(part)}</span>`
     : esc(part)).join('');
 }
@@ -622,8 +622,8 @@ function renderConfigAudioTags() {
   const box = $('#configAudioTags');
   if (!box || !state.config) return;
   const custom = state.config.customAudioTags || [];
-  box.innerHTML = AUDIO_TAGS.map((tag) => `<span class="manager-tag native" title="Expresión nativa">[${esc(tag)}]</span>`).join('')
-    + custom.map((tag) => `<span class="manager-tag custom">[${esc(tag)}]<button type="button" data-config-remove="${esc(tag)}" title="Borrar">×</button></span>`).join('');
+  box.innerHTML = AUDIO_TAGS.map((tag) => `<span class="manager-tag native" title="${esc(tr('config.audioExpressions.native'))}">[${esc(tag)}]</span>`).join('')
+    + custom.map((tag) => `<span class="manager-tag custom">[${esc(tag)}]<button type="button" data-config-remove="${esc(tag)}" title="${esc(tr('common.delete'))}">×</button></span>`).join('');
   box.querySelectorAll('[data-config-remove]').forEach((button) => {
     button.addEventListener('click', () => removeCustomAudioTag(button.dataset.configRemove));
   });
@@ -4715,7 +4715,7 @@ function resetAssociationNewVariant() {
 }
 
 async function associateAsset(key) {
-  if (!state.characters.length && !state.elements.length) return toast('Primero creá un personaje o una locación/objeto', 'err');
+  if (!state.characters.length && !state.elements.length) return toast(tr('assets.associate.createDestinationFirst'), 'err');
   state.pendingAssociationKey = key;
   closeLightbox();
   const existingChar = state.assetLinks.find((link) => link.key === key);
@@ -7105,11 +7105,11 @@ async function registerCustomFonts(fonts) {
 
 function overlayFontOptions(selected, { inherit = false } = {}) {
   const options = [];
-  if (inherit) options.push({ value: '', label: 'Misma fuente que el texto normal' });
+  if (inherit) options.push({ value: '', label: tr('automation.overlay.sameAsNormalFont') });
   for (const font of SYSTEM_OVERLAY_FONTS) options.push({ value: font, label: font });
-  for (const font of state.fonts || []) options.push({ value: font.family, label: `${font.name} · personalizada` });
+  for (const font of state.fonts || []) options.push({ value: font.family, label: tr('automation.overlay.customFont', { name: font.name }) });
   if (selected && !options.some((option) => option.value === selected)) {
-    options.push({ value: selected, label: `${selected} · no disponible` });
+    options.push({ value: selected, label: tr('automation.overlay.unavailableFont', { name: selected }) });
   }
   return options.map((option) =>
     `<option value="${esc(option.value)}"${option.value === selected ? ' selected' : ''}>${esc(option.label)}</option>`
@@ -7130,9 +7130,9 @@ function automationArtPromptOptions() {
   const prompts = (state.prompts || [])
     .filter((prompt) => !['audio', 'video'].includes(prompt.mode) && !isLoraPrompt(prompt))
     .sort((a, b) => Number(isStylePrompt(b)) - Number(isStylePrompt(a)) || String(a.title).localeCompare(String(b.title)));
-  if (!prompts.length) return '<option value="">— no hay prompts guardados —</option>';
-  return '<option value="">— elegí un prompt guardado —</option>' + prompts.map((prompt) =>
-    `<option value="${esc(prompt.id)}"${prompt.id === currentAutomation()?.config?.artStylePromptId ? ' selected' : ''}>${isStylePrompt(prompt) ? 'Estilo con referencia' : 'Imagen'} · ${esc(prompt.category || 'General')} · ${esc(prompt.title)}</option>`
+  if (!prompts.length) return `<option value="">— ${esc(tr('automation.prompts.noneSaved'))} —</option>`;
+  return `<option value="">— ${esc(tr('automation.prompts.chooseSaved'))} —</option>` + prompts.map((prompt) =>
+    `<option value="${esc(prompt.id)}"${prompt.id === currentAutomation()?.config?.artStylePromptId ? ' selected' : ''}>${esc(tr(isStylePrompt(prompt) ? 'automation.prompts.styleReference' : 'common.image'))} · ${esc(prompt.category || tr('common.general'))} · ${esc(prompt.title)}</option>`
   ).join('');
 }
 
@@ -7224,12 +7224,12 @@ function automationBlockAssetSelectionMarkup(keys = []) {
     const item = automationVisualAsset(key);
     const preview = automationAssetPreview(item, key);
     return `<span class="auto-block-asset-chip" title="${esc(item.name || key)}"><b>${index + 1}</b>${preview}</span>`;
-  }).join('') : '<span class="hint">Todavía no elegiste imágenes, videos o audios.</span>';
+  }).join('') : `<span class="hint">${esc(tr('automation.assets.noSequenceItems'))}</span>`;
 }
 
 function overlayPresetOptions() {
   const items = state.overlayPresets || [];
-  return `<option value="">— elegí un estilo guardado —</option>` + items.map((item) =>
+  return `<option value="">— ${esc(tr('automation.textStyles.chooseSaved'))} —</option>` + items.map((item) =>
     `<option value="${esc(item.id)}">${esc(item.name)}</option>`
   ).join('');
 }
@@ -7243,8 +7243,8 @@ function automationStyleReferenceMarkup(pr) {
   const key = pr?.config?.artStyleImageKey || '';
   if (!key) return '';
   return `<div class="auto-style-reference">
-    <div class="prompt-style-image"><img src="${esc(fileUrl(key))}" alt="Referencia de estilo"><span class="prompt-style-label">${ARTISTIC_STYLE_LABEL}</span></div>
-    <p>Esta imagen se enviará como referencia visual en cada ficha y bloque. Manifestador rotula una copia temporal; el archivo original permanece intacto.</p>
+    <div class="prompt-style-image"><img src="${esc(fileUrl(key))}" alt="${esc(tr('automation.styleReference.alt'))}"><span class="prompt-style-label">${ARTISTIC_STYLE_LABEL}</span></div>
+    <p>${esc(tr('automation.styleReference.hint'))}</p>
   </div>`;
 }
 
@@ -7282,7 +7282,7 @@ function automationResourceImageSettings(model, kind) {
 async function assignAutomationCharacterVoice(projectId, role, card) {
   const pr = state.automations.find((item) => item.id === projectId);
   const characterId = pr?.assignments?.characters?.[role];
-  if (!pr || !characterId) return toast('Primero asigná o generá el personaje.', 'err');
+  if (!pr || !characterId) return toast(tr('automation.resources.assignCharacterFirst'), 'err');
   const voiceId = card.querySelector('[data-role-voice]')?.value || '';
   const voiceName = (state.voices || []).find((voice) => voice.id === voiceId)?.name || '';
   const button = card.querySelector('[data-save-role-voice]');
@@ -7300,14 +7300,14 @@ async function assignAutomationCharacterVoice(projectId, role, card) {
         }
       });
       state.automations[state.automations.findIndex((item) => item.id === projectId)] = updatedProject;
-      toast(voiceId ? `Voz ${voiceName} asignada al recurso @${role}` : `Voz quitada del recurso @${role}`);
+      toast(tr(voiceId ? 'automation.resources.voiceAssignedRole' : 'automation.resources.voiceRemovedRole', { voice: voiceName, role }));
       renderAutomationProject();
       return;
     }
     const updated = await api(`/api/characters/${characterId}`, { method: 'PUT', body: { voiceId, voiceName } });
     const index = state.characters.findIndex((item) => item.id === characterId);
     if (index !== -1) state.characters[index] = updated;
-    toast(voiceId ? `Voz ${voiceName} asignada a ${updated.name}` : `Voz quitada de ${updated.name}`);
+    toast(tr(voiceId ? 'automation.resources.voiceAssignedCharacter' : 'automation.resources.voiceRemovedCharacter', { voice: voiceName, character: updated.name }));
     renderAutomationProject();
   } catch (error) {
     toast(error.message, 'err');
@@ -7319,12 +7319,12 @@ async function createAutomationResource({ projectId, kind, role, modelId, prompt
   const pr = state.automations.find((item) => item.id === projectId);
   const requirement = pr && automationRequirement(pr, kind, role);
   const model = state.models.find((item) => item.id === modelId);
-  if (!pr || !requirement || !model) throw new Error('No se encontró el rol o el modelo seleccionado.');
-  if (!prompt) throw new Error('El prompt de la ficha está vacío.');
+  if (!pr || !requirement || !model) throw new Error(tr('automation.resources.roleOrModelMissing'));
+  if (!prompt) throw new Error(tr('automation.resources.emptySheetPrompt'));
 
   let created = null;
   try {
-    setStatus(`Generando con ${model.name}…`);
+    setStatus(tr('automation.pipeline.generatingWith', { model: model.name }));
     const styleRefs = automationStyleRefItems(pr);
     const labeledRefs = await buildLabeledRefs(styleRefs);
     const generated = await api('/api/generate/image', {
@@ -7339,9 +7339,9 @@ async function createAutomationResource({ projectId, kind, role, modelId, prompt
       }
     });
     const assetKey = generated.outputs?.[0];
-    if (!assetKey) throw new Error('El modelo no devolvió una imagen.');
+    if (!assetKey) throw new Error(tr('automation.resources.noImageReturned'));
 
-    setStatus('Guardando la ficha y asignándola al rol…');
+    setStatus(tr('automation.resources.savingAndAssigning'));
     if (kind === 'characters') {
       const voiceName = (state.voices || []).find((voice) => voice.id === voiceId)?.name || '';
       const description = [
@@ -8155,7 +8155,14 @@ function renderAutomationProject() {
             ? esc(tr('automation.finalVideo.ready', { completed: completedVideos, total: pr.blocks.length }))
             : esc(tr('automation.finalVideo.missing', { missing: pr.blocks.length - completedVideos, total: pr.blocks.length }))
         }</span>
-        ${finalOutput ? `<span class="automation-stage-status">Último ensamble · ${finalOutput.blockCount || pr.blocks.length} bloques${finalOutput.width && finalOutput.height ? ` · ${finalOutput.width}×${finalOutput.height}` : ''}${finalOutput.musicKey ? ` · música en bucle${finalOutput.musicFadeOutSeconds ? ` · fade out ${finalOutput.musicFadeOutSeconds}s` : ''}` : ''}${finalOutput.transitionCount ? ` · ${finalOutput.transitionCount} transiciones (${esc(finalOutput.transitionSoundName || 'sonido')})` : ''}${finalOutput.includeLogos ? ` · logo ${finalOutput.logoVariant === 'vertical' ? 'vertical' : 'horizontal'}` : ''} · ${fmtDate(finalOutput.assembledAt)}</span>` : ''}
+        ${finalOutput ? `<span class="automation-stage-status">${esc(tr('automation.finalVideo.latestAssembly', {
+          blocks: trn('automation.blockCount', finalOutput.blockCount || pr.blocks.length),
+          resolution: finalOutput.width && finalOutput.height ? ` · ${finalOutput.width}×${finalOutput.height}` : '',
+          music: finalOutput.musicKey ? tr('automation.finalVideo.loopMusic', { fade: finalOutput.musicFadeOutSeconds ? tr('automation.finalVideo.fadeOut', { seconds: finalOutput.musicFadeOutSeconds }) : '' }) : '',
+          transitions: finalOutput.transitionCount ? tr('automation.finalVideo.transitionsSummary', { transitions: trn('automation.finalVideo.transitionCount', finalOutput.transitionCount), sound: finalOutput.transitionSoundName || tr('automation.finalVideo.sound') }) : '',
+          logo: finalOutput.includeLogos ? tr('automation.finalVideo.logoSummary', { orientation: tr(finalOutput.logoVariant === 'vertical' ? 'automation.finalVideo.vertical' : 'automation.finalVideo.horizontal') }) : '',
+          date: fmtDate(finalOutput.assembledAt)
+        }))}</span>` : ''}
         <button type="button" class="generate-btn" id="autoAssemble"${allVideosReady ? '' : ' disabled'}>
           ${IC('film')} ${esc(tr(finalOutput ? 'automation.finalVideo.reassemble' : 'automation.finalVideo.assemble'))}
         </button>
@@ -8187,7 +8194,14 @@ function renderAutomationProject() {
           <span class="hint">${esc(tr('automation.effects.maskHint'))}</span>
         </div>
         <span class="hint" id="autoEffectStatus">${esc(finalOutput ? tr('automation.effects.cleanPreserved') : tr('automation.effects.assembleFirst'))}</span>
-        ${effectOutput ? `<span class="automation-stage-status">Última versión · ${esc(effectOutput.presetName || effectOutput.preset)} · intensidad ${effectOutput.intensity}%${effectOutput.maskEnabled ? ` · máscara ${esc(effectOutput.maskColor)} al ${effectOutput.maskOpacity}%` : ''}${effectOutput.subtitlesPreserved ? ' · subtítulos nítidos' : ''}${effectOutput.logoPreserved ? ' · logo preservado' : ''} · ${fmtDate(effectOutput.processedAt)}</span>` : ''}
+        ${effectOutput ? `<span class="automation-stage-status">${esc(tr('automation.effects.latestVersion', {
+          preset: effectOutput.presetName || effectOutput.preset,
+          intensity: effectOutput.intensity,
+          mask: effectOutput.maskEnabled ? tr('automation.effects.maskDetail', { color: effectOutput.maskColor, opacity: effectOutput.maskOpacity }) : '',
+          subtitles: effectOutput.subtitlesPreserved ? tr('automation.effects.crispSubtitles') : '',
+          logo: effectOutput.logoPreserved ? tr('automation.effects.logoPreserved') : '',
+          date: fmtDate(effectOutput.processedAt)
+        }))}</span>` : ''}
         <button type="button" class="generate-btn" id="autoApplyEffect"${finalOutput && videoEffect.enabled ? '' : ' disabled'}>${IC('spark')} ${esc(tr(effectOutput ? 'automation.effects.createAnother' : 'automation.effects.apply'))}</button>
       </div>
       ${effectOutput ? `<div class="final-assembly-preview post-effect-preview">
@@ -8211,7 +8225,12 @@ function renderAutomationProject() {
       <div>
         <h3>${esc(tr('automation.finalize.title'))}</h3>
         <p>${esc(tr('automation.finalize.description'))}</p>
-        ${finalization?.finalizedAt ? `<span class="automation-stage-status">Última limpieza · ${finalization.deletedCount || 0} archivo${finalization.deletedCount === 1 ? '' : 's'} · ${formatAutomationBytes(finalization.deletedBytes || 0)} liberados · ${fmtDate(finalization.finalizedAt)}${finalization.failedCount ? ` · ${finalization.failedCount} pendientes` : ''}</span>` : '<span class="hint">Antes de borrar se mostrará la cantidad exacta de archivos y espacio recuperable.</span>'}
+        ${finalization?.finalizedAt ? `<span class="automation-stage-status">${esc(tr('automation.finalize.latestCleanup', {
+          files: trn('automation.finalize.discardedFiles', finalization.deletedCount || 0),
+          bytes: formatAutomationBytes(finalization.deletedBytes || 0),
+          date: fmtDate(finalization.finalizedAt),
+          pending: finalization.failedCount ? tr('automation.finalize.pending', { files: trn('automation.finalize.discardedFiles', finalization.failedCount) }) : ''
+        }))}</span>` : `<span class="hint">${esc(tr('automation.finalize.previewHint'))}</span>`}
       </div>
       <button type="button" class="mini-btn danger automation-finalize-button" id="autoFinalize">${IC('trash')} ${esc(tr('automation.finalize.title'))}</button>
     </div>`;
@@ -8883,27 +8902,27 @@ function renderAutomationProject() {
   $('#automationRoot').querySelectorAll('[data-genblock]').forEach((btn) => btn.addEventListener('click', async () => {
     const block = pr.blocks.find((b) => b.id === btn.dataset.genblock);
     const force = btn.dataset.force === '1';
-    const newMaterials = block?.generator === 'heygen'
-      ? 'audios y videos HeyGen nuevos'
-      : block?.generator === 'h3' ? 'audios y videos MiniMax H3 nuevos'
-      : block?.generator === 'seedance25' ? 'audios y videos Seedance 2.5 nuevos'
-      : block?.generator === 'omni' ? 'audios y videos Gemini Omni nuevos'
-      : block?.generator === 'assets' ? 'audios nuevos y un montaje local de los Assets elegidos' : 'una imagen y audios nuevos';
-    if (force && !confirm(`¿Regenerar “${block?.title || 'este bloque'}” desde cero? Se crearán ${newMaterials}.`)) return;
+    const newMaterials = tr(block?.generator === 'heygen'
+      ? 'automation.regenerate.newHeygen'
+      : block?.generator === 'h3' ? 'automation.regenerate.newH3'
+      : block?.generator === 'seedance25' ? 'automation.regenerate.newSeedance'
+      : block?.generator === 'omni' ? 'automation.regenerate.newOmni'
+      : block?.generator === 'assets' ? 'automation.regenerate.newAssets' : 'automation.regenerate.newImageAudio');
+    if (force && !confirm(tr('automation.regenerate.fromScratchConfirm', { title: block?.title || tr('automation.thisBlock'), materials: newMaterials }))) return;
     if (block) await runAutomationBlock(pr.id, block, btn.closest('.auto-block'), { regenerate: force });
   }));
   $('#automationRoot').querySelectorAll('[data-regen-downstream]').forEach((button) => button.addEventListener('click', async () => {
     const block = pr.blocks.find((item) => item.id === button.dataset.regenDownstream);
     const output = block && pr.outputs?.[block.id];
-    if (!block || (block.generator !== 'assets' && !output?.imageKey)) return toast('Este bloque todavía no tiene visuales limpios para reutilizar.', 'err');
-    if (block.generator === 'assets' && !(block.assetKeys || []).length) return toast('Este bloque ya no tiene Assets seleccionados.', 'err');
+    if (!block || (block.generator !== 'assets' && !output?.imageKey)) return toast(tr('automation.regenerate.noCleanVisuals'), 'err');
+    if (block.generator === 'assets' && !(block.assetKeys || []).length) return toast(tr('automation.regenerate.noSelectedAssets'), 'err');
     const existingAudioKeys = Array.isArray(output.audioKeys) ? output.audioKeys.slice(0, block.items.length) : [];
-    if (existingAudioKeys.length !== block.items.length) return toast('Este bloque no tiene todos sus audios guardados para reensamblar.', 'err');
-    const visualDescription = block.generator === 'assets' ? `los ${(block.assetKeys || []).length} Assets seleccionados`
+    if (existingAudioKeys.length !== block.items.length) return toast(tr('automation.regenerate.missingAudioForAssembly'), 'err');
+    const visualDescription = block.generator === 'assets' ? trn('automation.regenerate.selectedAssets', (block.assetKeys || []).length)
       : ['h3', 'seedance25', 'omni'].includes(block.generator)
-        ? `los ${(output.h3SegmentVideoKeys || []).length} tramos ${block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'H3'} y la imagen base`
-        : 'la imagen limpia';
-    if (!confirm(`¿Rehacer el texto y el video de “${block.title || 'este bloque'}”? Se conservarán exactamente ${visualDescription} y los ${existingAudioKeys.length} audio${existingAudioKeys.length === 1 ? '' : 's'} existentes; no se llamará a ElevenLabs.`)) return;
+        ? tr('automation.regenerate.modelSegmentsAndBase', { segments: trn('automation.outputs.segmentCount', (output.h3SegmentVideoKeys || []).length), model: block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'H3' })
+        : tr('automation.regenerate.cleanImage');
+    if (!confirm(tr('automation.regenerate.textVideoConfirm', { title: block.title || tr('automation.thisBlock'), visuals: visualDescription, audio: trn('automation.regenerate.existingAudio', existingAudioKeys.length) }))) return;
     const preservedOutput = {
       ...(block.generator === 'assets' ? {
         generator: 'assets', assetKeys: [...block.assetKeys], assetMuteOriginal: block.assetMuteOriginal !== false
@@ -8934,16 +8953,16 @@ function renderAutomationProject() {
   }));
   $('#automationRoot').querySelectorAll('[data-regenblock]').forEach((btn) => btn.addEventListener('click', async () => {
     const block = pr.blocks.find((b) => b.id === btn.dataset.regenblock);
-    const materials = block?.generator === 'heygen'
-      ? 'audios y videos HeyGen'
+    const materials = tr(block?.generator === 'heygen'
+      ? 'automation.regenerate.heygen'
       : block?.generator === 'seedance25'
-        ? 'audios y videos Seedance 2.5'
+        ? 'automation.regenerate.seedance'
       : block?.generator === 'h3'
-          ? 'audios y videos MiniMax H3'
+          ? 'automation.regenerate.h3'
           : block?.generator === 'omni'
-            ? 'audios y videos Gemini Omni'
-          : block?.generator === 'assets' ? 'audios y montaje local' : 'imagen y audios';
-    if (!block || !confirm(`¿Descartar los parciales de “${block.title || 'este bloque'}” y regenerar ${materials}?`)) return;
+            ? 'automation.regenerate.omni'
+          : block?.generator === 'assets' ? 'automation.regenerate.assets' : 'automation.regenerate.imageAudio');
+    if (!block || !confirm(tr('automation.regenerate.discardPartialsConfirm', { title: block.title || tr('automation.thisBlock'), materials }))) return;
     await runAutomationBlock(pr.id, block, btn.closest('.auto-block'), { regenerate: true });
   }));
   $('#autoStart').addEventListener('click', () => runAutomationAll(pr.id, $('#autoMode').value));
@@ -8986,10 +9005,11 @@ function pickHighlightWords(text) {
 }
 
 function transformOverlayWord(word, transform = 'none') {
-  if (transform === 'uppercase') return word.toLocaleUpperCase('es');
-  if (transform === 'lowercase') return word.toLocaleLowerCase('es');
+  const locale = i18n?.localeTag() || 'es-AR';
+  if (transform === 'uppercase') return word.toLocaleUpperCase(locale);
+  if (transform === 'lowercase') return word.toLocaleLowerCase(locale);
   if (transform === 'capitalize') {
-    return word.replace(/\p{L}/u, (letter) => letter.toLocaleUpperCase('es'));
+    return word.replace(/\p{L}/u, (letter) => letter.toLocaleUpperCase(locale));
   }
   return word;
 }
@@ -9324,7 +9344,7 @@ function automationImageSettings(model, config) {
 
 async function generateAutomationImage(pr, request, setStatus) {
   const primary = state.models.find((model) => model.id === pr.config.imageModelId) || state.models[0];
-  if (!primary) throw new Error('No hay un modelo de imagen disponible.');
+  if (!primary) throw new Error(tr('automation.pipeline.noImageModel'));
   const attempt = (model) => api('/api/generate/image', {
     method: 'POST',
     body: {
@@ -9344,15 +9364,15 @@ async function generateAutomationImage(pr, request, setStatus) {
     if (!fallback) throw primaryError;
     const referenceCount = Array.isArray(request.refs) ? request.refs.length : 0;
     if (referenceCount < (fallback.minRefs || 0)) {
-      throw new Error(`${primary.name} falló: ${primaryError.message}. ${fallback.name} no puede usarse como respaldo en esta toma porque necesita al menos ${fallback.minRefs} referencia(s).`);
+      throw new Error(tr('automation.pipeline.fallbackNeedsReferences', { primary: primary.name, primaryError: primaryError.message, fallback: fallback.name, count: fallback.minRefs }));
     }
-    setStatus(`${primary.name} falló. Reintentando con ${fallback.name}…`);
+    setStatus(tr('automation.pipeline.retryingFallback', { primary: primary.name, fallback: fallback.name }));
     try {
       const result = await attempt(fallback);
       return { result, model: fallback, fallbackUsed: true };
     } catch (fallbackError) {
       throw new Error(
-        `${primary.name} falló: ${primaryError.message}. ${fallback.name} también falló: ${fallbackError.message}`
+        tr('automation.pipeline.bothModelsFailed', { primary: primary.name, primaryError: primaryError.message, fallback: fallback.name, fallbackError: fallbackError.message })
       );
     }
   }
@@ -9360,7 +9380,7 @@ async function generateAutomationImage(pr, request, setStatus) {
 
 async function persistAutomationBlockOutput(projectId, blockId, patch, { replace = false } = {}) {
   const pr = state.automations.find((item) => item.id === projectId);
-  if (!pr) throw new Error('El proyecto ya no está disponible.');
+  if (!pr) throw new Error(tr('automation.errors.projectUnavailable'));
   const current = pr.outputs?.[blockId] || {};
   const nextOutput = replace
     ? { ...patch, ts: Date.now() }
@@ -9395,7 +9415,7 @@ function automationAudioSpec(pr, item) {
     : null;
   const voiceId = character?.voiceId || pr.config.narratorVoiceId;
   const voiceName = character?.voiceName || pr.config.narratorVoiceName;
-  if (!voiceId) throw new Error('Falta la voz del narrador (o del personaje del diálogo).');
+  if (!voiceId) throw new Error(tr('automation.pipeline.voiceMissing'));
   const audioModel = (state.audioModels || []).find((model) => model.id === pr.config?.audioModelId) || state.audioModels?.[0];
   const tag = audioModel?.supportsAudioTags === false ? '' : emotionTagFor(item.text);
   return {
@@ -9477,10 +9497,10 @@ function recoverHistoryOutput(type, prompt, { voiceId = '', audioModelId = '', u
 
 async function runAutomationAssetBlock(pr, block, output, { regenerate = false, regenerateAudio = false, requireExistingAudio = false, setStatus }) {
   const assetKeys = Array.isArray(block.assetKeys) ? block.assetKeys.filter((key) => /^(generated|uploads|video)\//.test(key)) : [];
-  if (!assetKeys.length) throw new Error('Elegí al menos una imagen o video para este bloque.');
+  if (!assetKeys.length) throw new Error(tr('automation.blockValidation.assetsRequired'));
   const audioKeys = Array.isArray(output.audioKeys) ? output.audioKeys.slice(0, block.items.length) : [];
   if (requireExistingAudio && audioKeys.length !== block.items.length) {
-    throw new Error('Faltan audios guardados; este reensamble no generará reemplazos con ElevenLabs.');
+    throw new Error(tr('automation.pipeline.savedAudioRequired'));
   }
   const usedAudioKeys = new Set(audioKeys);
   let historyLoaded = false;
@@ -9489,7 +9509,7 @@ async function runAutomationAssetBlock(pr, block, output, { regenerate = false, 
     let recovered = null;
     if (!regenerate && !regenerateAudio) {
       if (!historyLoaded) {
-        setStatus('Buscando audios ya generados para este bloque…');
+        setStatus(tr('automation.pipeline.searchingAudio'));
         await refreshAutomationHistory();
         historyLoaded = true;
       }
@@ -9500,12 +9520,12 @@ async function runAutomationAssetBlock(pr, block, output, { regenerate = false, 
     if (recovered) {
       audioKeys.push(recovered.key);
       usedAudioKeys.add(recovered.key);
-      setStatus(`Reutilizando audio ${audioKeys.length}/${block.items.length}…`);
+      setStatus(tr('automation.pipeline.reusingAudio', { current: audioKeys.length, total: block.items.length }));
     } else {
-      setStatus(`Generando audio ${index + 1}/${block.items.length}…`);
+      setStatus(tr('automation.pipeline.generatingAudio', { current: index + 1, total: block.items.length }));
       const generatedAudio = await api('/api/generate/audio', { method: 'POST', body: spec });
       const audioKey = generatedAudio.outputs?.[0];
-      if (!audioKey) throw new Error(`No se generó el audio ${index + 1}.`);
+      if (!audioKey) throw new Error(tr('automation.pipeline.audioNotGenerated', { number: index + 1 }));
       state.history.unshift(generatedAudio);
       audioKeys.push(audioKey);
       usedAudioKeys.add(audioKey);
@@ -9520,7 +9540,7 @@ async function runAutomationAssetBlock(pr, block, output, { regenerate = false, 
   const dynamicTextEnabled = pr.config?.dynamicText?.enabled === true;
   let textLayerKey = dynamicTextEnabled ? '' : output.textLayerKey;
   if (!dynamicTextEnabled && !textLayerKey) {
-    setStatus('Preparando la capa nítida de títulos y subtítulos…');
+    setStatus(tr('automation.pipeline.preparingTitleSubtitleLayer'));
     const caption = block.items.map((item) => item.text).join(' ');
     const title = automationTitleForBlock(pr, block);
     textLayerKey = await burnOverlayText('', caption, pr.config.overlay, {
@@ -9530,9 +9550,7 @@ async function runAutomationAssetBlock(pr, block, output, { regenerate = false, 
     await tagAutomationStage(pr, block, [textLayerKey]);
   }
 
-  setStatus(dynamicTextEnabled
-    ? `Distribuyendo ${assetKeys.length} Assets y animando el texto con Remotion…`
-    : `Distribuyendo ${assetKeys.length} Assets a lo largo del audio…`);
+  setStatus(tr(dynamicTextEnabled ? 'automation.pipeline.distributingAssetsRemotion' : 'automation.pipeline.distributingAssets', { count: assetKeys.length }));
   const result = await api(`/api/automations/${pr.id}/asset-block`, {
     method: 'POST', body: { blockId: block.id, audioKeys, textLayerKey }
   });
@@ -9551,9 +9569,9 @@ async function runAutomationAssetBlock(pr, block, output, { regenerate = false, 
 
 async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false, regenerateAudio = false, requireExistingAudio = false, regenerateSegmentIndex = -1, setStatus }) {
   const character = state.characters.find((item) => item.id === block.heygenCharacterId);
-  if (!heygenCharacterReady(character)) throw new Error('El bloque necesita un personaje con variante HeyGen completa.');
+  if (!heygenCharacterReady(character)) throw new Error(tr('automation.pipeline.heygenCharacterNeeded'));
   if (['close', 'split'].includes(block.heygenFraming) && !character.heygen?.closeAvatarId) {
-    throw new Error('El personaje HeyGen elegido no tiene código de primer plano.');
+    throw new Error(tr('automation.pipeline.heygenNoCloseUp'));
   }
   if (pr.config?.heygenAuthMode === 'oauth' && !state.heygenOAuth.connected) throw new Error(tr('automation.pipeline.connectHeygenOauth'));
   if (pr.config?.heygenAuthMode !== 'oauth' && !state.config?.keys?.heygen) throw new Error(tr('automation.pipeline.saveHeygenKey'));
@@ -9561,7 +9579,7 @@ async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false,
   const plan = automationAudioPlan(block);
   const audioKeys = Array.isArray(output.audioKeys) ? output.audioKeys.slice(0, plan.segments.length) : [];
   if ((requireExistingAudio || regenerateSegmentIndex >= 0) && audioKeys.length !== plan.segments.length) {
-    throw new Error('Faltan audios guardados; regenerar un plano HeyGen no creará reemplazos con ElevenLabs.');
+    throw new Error(tr('automation.pipeline.heygenSavedAudioRequired'));
   }
   const usedAudioKeys = new Set(audioKeys);
   let historyLoaded = false;
@@ -9570,7 +9588,7 @@ async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false,
     let recovered = null;
     if (!regenerate && !regenerateAudio) {
       if (!historyLoaded) {
-        setStatus('Buscando audios ya generados para este bloque…');
+        setStatus(tr('automation.pipeline.searchingAudio'));
         await refreshAutomationHistory();
         historyLoaded = true;
       }
@@ -9579,12 +9597,12 @@ async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false,
     if (recovered) {
       audioKeys.push(recovered.key);
       usedAudioKeys.add(recovered.key);
-      setStatus(`Reutilizando audio ${audioKeys.length}/${plan.segments.length}…`);
+      setStatus(tr('automation.pipeline.reusingAudio', { current: audioKeys.length, total: plan.segments.length }));
     } else {
-      setStatus(`Generando audio ${index + 1}/${plan.segments.length} con ElevenLabs…`);
+      setStatus(tr('automation.pipeline.generatingAudioElevenLabs', { current: index + 1, total: plan.segments.length }));
       const generatedAudio = await api('/api/generate/audio', { method: 'POST', body: spec });
       const audioKey = generatedAudio.outputs?.[0];
-      if (!audioKey) throw new Error(`No se generó el audio ${index + 1}.`);
+      if (!audioKey) throw new Error(tr('automation.pipeline.audioNotGenerated', { number: index + 1 }));
       state.history.unshift(generatedAudio);
       audioKeys.push(audioKey);
       usedAudioKeys.add(audioKey);
@@ -9601,7 +9619,7 @@ async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false,
   const dynamicTextEnabled = pr.config?.dynamicText?.enabled === true;
   let textLayerKey = dynamicTextEnabled ? '' : output.textLayerKey;
   if (!dynamicTextEnabled && !textLayerKey) {
-    setStatus('Preparando título, texto y resaltado para el video HeyGen…');
+    setStatus(tr('automation.pipeline.preparingHeygenText'));
     const caption = block.items.map((item) => item.text).join(' ');
     const title = automationTitleForBlock(pr, block);
     textLayerKey = await burnOverlayText('', caption, pr.config.overlay, {
@@ -9614,15 +9632,15 @@ async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false,
   }
 
   const audioGroups = plan.groups.map((indexes) => indexes.map((index) => audioKeys[index]).filter(Boolean)).filter((group) => group.length);
-  if (block.heygenFraming === 'split' && audioGroups.length !== 2) throw new Error('No pude dividir el texto en dos fragmentos utilizables.');
+  if (block.heygenFraming === 'split' && audioGroups.length !== 2) throw new Error(tr('automation.pipeline.cannotSplitText'));
   if (regenerateSegmentIndex >= 0) {
     output = await persistAutomationBlockOutput(pr.id, block.id, { videoKey: null, completedAt: null });
   }
   setStatus(regenerateSegmentIndex >= 0
-    ? `Regenerando ${regenerateSegmentIndex === 0 ? 'el plano general' : 'el primer plano'} y conservando el otro…`
+    ? tr('automation.pipeline.regeneratingHeygenSegment', { shot: tr(regenerateSegmentIndex === 0 ? 'automation.heygen.wideShot' : 'automation.heygen.closeUp') })
     : block.heygenFraming === 'split'
-      ? 'Enviando dos audios a HeyGen y preparando ambos encuadres…'
-      : 'Enviando el audio de ElevenLabs a HeyGen…');
+      ? tr('automation.pipeline.sendingTwoAudiosHeygen')
+      : tr('automation.pipeline.sendingAudioHeygen'));
   const result = await api(`/api/automations/${pr.id}/heygen-block`, {
     method: 'POST',
     body: {
@@ -9653,8 +9671,8 @@ async function runAutomationBlock(projectId, block, blockEl, {
   if (!pr) return false;
   const ownsMonitorTask = !monitorTaskId;
   const activeMonitorTaskId = monitorTaskId || startUiTask({
-    title: `Generando ${block.title || 'toma'}`,
-    detail: 'Preparando materiales…'
+    title: tr('automation.pipeline.generatingTake', { title: block.title || tr('automation.pipeline.take') }),
+    detail: tr('automation.pipeline.preparingMaterials')
   });
   const outEl = blockEl?.querySelector('[data-out]');
   const setStatus = (msg) => {
@@ -9677,7 +9695,7 @@ async function runAutomationBlock(projectId, block, blockEl, {
       await runAutomationAssetBlock(pr, block, output, {
         regenerate, regenerateAudio, requireExistingAudio, setStatus
       });
-      if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: 'Montaje con Assets terminado.' });
+      if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: tr('automation.pipeline.assetsAssemblyDone') });
       renderAutomationProject();
       return true;
     }
@@ -9690,7 +9708,7 @@ async function runAutomationBlock(projectId, block, blockEl, {
         regenerateSegmentIndex: regenerateHeyGenSegment,
         setStatus
       });
-      if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: 'Toma HeyGen terminada.' });
+      if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: tr('automation.pipeline.heygenTakeDone') });
       renderAutomationProject();
       return true;
     }
@@ -9704,12 +9722,12 @@ async function runAutomationBlock(projectId, block, blockEl, {
     if (!imageKey && isGenerativeVideo && generativeVideoMode === 'frames') {
       imageKey = (generativeReferenceKeys || [])[0] || '';
       if (imageKey) output = await persistAutomationBlockOutput(projectId, block.id, {
-        imageKey, imageModelId: `${block.generator}-frame`, imageModelName: `Fotograma de entrada ${block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'H3'}`,
+        imageKey, imageModelId: `${block.generator}-frame`, imageModelName: tr('automation.pipeline.startFrameModel', { model: block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'H3' }),
         fallbackUsed: false, recoveredImage: true, audioCountExpected: block.items.length
       });
     }
     if (!imageKey && !regenerate) {
-      setStatus('Buscando una imagen ya generada para este bloque…');
+      setStatus(tr('automation.pipeline.searchingImage'));
       await refreshAutomationHistory();
       historyLoaded = true;
       const recovered = recoverHistoryOutput('image', prompt);
@@ -9727,7 +9745,7 @@ async function runAutomationBlock(projectId, block, blockEl, {
       }
     }
     if (!imageKey) {
-      setStatus('Generando imagen…');
+      setStatus(tr('automation.pipeline.generatingImage'));
       const generatedImage = await generateAutomationImage(
         pr,
         { prompt, refs, labeledRefs },
@@ -9745,7 +9763,7 @@ async function runAutomationBlock(projectId, block, blockEl, {
       });
       await tagAutomationStage(pr, block, [imageKey]);
     } else {
-      setStatus('Reutilizando la imagen guardada…');
+      setStatus(tr('automation.pipeline.reusingImage'));
     }
 
     const caption = block.items.map((it) => it.text).join(' ');
@@ -9753,17 +9771,17 @@ async function runAutomationBlock(projectId, block, blockEl, {
     const dynamicTextEnabled = pr.config?.dynamicText?.enabled === true;
     let textImageKey = dynamicTextEnabled ? '' : output.textImageKey;
     if (!dynamicTextEnabled && !textImageKey) {
-      setStatus('Sobreimprimiendo el texto…');
+      setStatus(tr('automation.pipeline.overlayingText'));
       textImageKey = await burnOverlayText(imageKey, caption, pr.config.overlay, { title });
       output = await persistAutomationBlockOutput(projectId, block.id, { textImageKey });
       await tagAutomationStage(pr, block, [textImageKey]);
     } else if (!dynamicTextEnabled) {
-      setStatus('Reutilizando la imagen con texto guardada…');
+      setStatus(tr('automation.pipeline.reusingTextImage'));
     }
 
     let textLayerKey = dynamicTextEnabled ? '' : output.textLayerKey;
     if (!dynamicTextEnabled && !textLayerKey) {
-      setStatus('Preparando la capa nítida de subtítulos…');
+      setStatus(tr('automation.pipeline.preparingSubtitleLayer'));
       textLayerKey = await burnOverlayText(imageKey, caption, pr.config.overlay, { transparent: true, title });
       output = await persistAutomationBlockOutput(projectId, block.id, { textLayerKey });
       await tagAutomationStage(pr, block, [textLayerKey]);
@@ -9773,7 +9791,7 @@ async function runAutomationBlock(projectId, block, blockEl, {
       ? output.audioKeys.slice(0, block.items.length)
       : [];
     if (requireExistingAudio && audioKeys.length !== block.items.length) {
-      throw new Error('Faltan audios guardados; este reensamble no generará reemplazos con ElevenLabs.');
+      throw new Error(tr('automation.pipeline.savedAudioRequired'));
     }
     const usedAudioKeys = new Set(audioKeys);
     for (let index = audioKeys.length; index < block.items.length; index++) {
@@ -9781,7 +9799,7 @@ async function runAutomationBlock(projectId, block, blockEl, {
       let recovered = null;
       if (!regenerate && !regenerateAudio) {
         if (!historyLoaded) {
-          setStatus('Buscando audios ya generados para este bloque…');
+          setStatus(tr('automation.pipeline.searchingAudio'));
           await refreshAutomationHistory();
           historyLoaded = true;
         }
@@ -9790,12 +9808,12 @@ async function runAutomationBlock(projectId, block, blockEl, {
       if (recovered) {
         audioKeys.push(recovered.key);
         usedAudioKeys.add(recovered.key);
-        setStatus(`Reutilizando audio ${audioKeys.length}/${block.items.length}…`);
+        setStatus(tr('automation.pipeline.reusingAudio', { current: audioKeys.length, total: block.items.length }));
       } else {
-        setStatus(`Generando audio ${index + 1}/${block.items.length}…`);
+        setStatus(tr('automation.pipeline.generatingAudio', { current: index + 1, total: block.items.length }));
         const generatedAudio = await api('/api/generate/audio', { method: 'POST', body: spec });
         const audioKey = generatedAudio.outputs?.[0];
-        if (!audioKey) throw new Error(`No se generó el audio ${index + 1}.`);
+        if (!audioKey) throw new Error(tr('automation.pipeline.audioNotGenerated', { number: index + 1 }));
         state.history.unshift(generatedAudio);
         audioKeys.push(audioKey);
         usedAudioKeys.add(audioKey);
@@ -9808,8 +9826,8 @@ async function runAutomationBlock(projectId, block, blockEl, {
     }
 
     setStatus(isGenerativeVideo
-      ? `Generando y ensamblando los tramos ${block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'MiniMax H3'}…`
-      : dynamicTextEnabled ? 'Animando títulos y subtítulos con Remotion…' : 'Armando el video…');
+      ? tr('automation.pipeline.generatingSegments', { model: block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'MiniMax H3' })
+      : dynamicTextEnabled ? tr('automation.pipeline.animatingText') : tr('automation.pipeline.assemblingVideo'));
     const category = `Auto: ${pr.name}`;
     const v = isGenerativeVideo
       ? await api(`/api/automations/${pr.id}/h3-block`, { method: 'POST', body: {
@@ -9830,7 +9848,7 @@ async function runAutomationBlock(projectId, block, blockEl, {
       completedAt: Date.now()
     });
     await tagAutomationStage(pr, block, [imageKey, textImageKey, textLayerKey, v.motionOverlayKey, ...(v.segmentVideoKeys || []), ...audioKeys, v.videoKey]);
-    if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: isGenerativeVideo ? `Toma ${block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'MiniMax H3'} terminada.` : 'Toma terminada.' });
+    if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: isGenerativeVideo ? tr('automation.pipeline.modelTakeDone', { model: block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'MiniMax H3' }) : tr('automation.pipeline.takeDone') });
     renderAutomationProject();
     return true;
   } catch (err) {
@@ -9844,7 +9862,7 @@ async function runAutomationBlock(projectId, block, blockEl, {
     }
     const latest = state.automations.find((item) => item.id === projectId)?.outputs?.[block.id] || output;
     if (outEl) {
-      outEl.innerHTML = `${automationBlockOutHtml(latest, block)}<span class="hint warn">Falló: ${esc(err.message)}. Los parciales guardados se reutilizarán al continuar.</span>`;
+      outEl.innerHTML = `${automationBlockOutHtml(latest, block)}<span class="hint warn">${esc(tr('automation.pipeline.failedReusable', { error: err.message }))}</span>`;
       bindAutomationAssetOpeners(outEl);
       bindAutomationHeyGenSegmentActions(outEl, state.automations.find((item) => item.id === projectId) || pr);
     }
@@ -9858,11 +9876,11 @@ async function runAutomationAll(projectId, mode) {
   const pr = state.automations.find((x) => x.id === projectId);
   if (!pr) return;
   const targets = pr.blocks.filter((b) => mode === 'all' || !(pr.outputs?.[b.id]?.videoKey));
-  if (!targets.length) return toast('No hay bloques para generar con esa opción', 'ok');
-  if (mode === 'all' && !confirm(`¿Regenerar los ${targets.length} bloques? Se crean assets nuevos.`)) return;
+  if (!targets.length) return toast(tr('automation.run.noBlocksForOption'), 'ok');
+  if (mode === 'all' && !confirm(trn('automation.run.regenerateBlocksConfirm', targets.length))) return;
   const monitorTaskId = startUiTask({
-    title: `Automatizando ${pr.name}`,
-    detail: `Preparando el bloque 1 de ${targets.length}…`,
+    title: tr('automation.run.runningProject', { name: pr.name }),
+    detail: tr('automation.run.preparingBlock', { current: 1, total: targets.length }),
     total: targets.length,
     current: 1
   });
@@ -9877,23 +9895,28 @@ async function runAutomationAll(projectId, mode) {
     });
     if (r) {
       ok++;
-      updateUiTask(monitorTaskId, { current: ok, detail: `${ok}/${targets.length} bloques terminados.` });
+      updateUiTask(monitorTaskId, { current: ok, detail: tr('automation.run.blocksDone', { completed: ok, total: targets.length }) });
     } else break; // si uno falla, freno para no encadenar errores
   }
-  if (ok === targets.length) finishUiTask(monitorTaskId, { detail: `${ok}/${targets.length} bloques terminados.` });
-  else finishUiTask(monitorTaskId, { error: `La automatización se detuvo en ${ok}/${targets.length}.` });
-  toast(`Automatización: ${ok}/${targets.length} bloques generados`, ok === targets.length ? 'ok' : 'err');
+  if (ok === targets.length) finishUiTask(monitorTaskId, { detail: tr('automation.run.blocksDone', { completed: ok, total: targets.length }) });
+  else finishUiTask(monitorTaskId, { error: tr('automation.run.stopped', { completed: ok, total: targets.length }) });
+  toast(tr('automation.run.summary', { completed: ok, total: targets.length }), ok === targets.length ? 'ok' : 'err');
 }
 
 async function assembleAutomationProject(projectId) {
   const pr = state.automations.find((item) => item.id === projectId);
   if (!pr) return;
-  if (pr.finalOutput?.videoKey && !confirm('¿Crear un nuevo ensamble final? El video final anterior seguirá disponible en Assets.')) return;
+  if (pr.finalOutput?.videoKey && !confirm(tr('automation.finalVideo.newAssemblyConfirm'))) return;
   const button = $('#autoAssemble');
   const status = $('#autoAssembleStatus');
   if (button) button.disabled = true;
   const hasTransitions = pr.config?.transitionSound?.enabled && pr.blocks.length > 1;
-  if (status) status.textContent = `Uniendo ${pr.blocks.length} videos${hasTransitions ? ` y agregando ${pr.blocks.length - 1} transiciones sonoras` : ''}${pr.config?.music?.enabled ? ' y mezclando la música en bucle' : ''}${pr.config?.includeLogos ? ', fundiendo a negro y agregando el logo' : ''} con FFmpeg…`;
+  if (status) status.textContent = tr('automation.finalVideo.assemblingStatus', {
+    videos: pr.blocks.length,
+    transitions: hasTransitions ? tr('automation.finalVideo.addingTransitions', { count: pr.blocks.length - 1 }) : '',
+    music: pr.config?.music?.enabled ? tr('automation.finalVideo.mixingMusic') : '',
+    logo: pr.config?.includeLogos ? tr('automation.finalVideo.addingLogo') : ''
+  });
   try {
     const result = await api(`/api/automations/${projectId}/assemble`, { method: 'POST' });
     const index = state.automations.findIndex((item) => item.id === projectId);
@@ -9912,14 +9935,14 @@ async function assembleAutomationProject(projectId) {
     }), 'ok');
   } catch (error) {
     if (button) button.disabled = false;
-    if (status) status.textContent = `Falló el ensamble: ${error.message}`;
+    if (status) status.textContent = tr('automation.finalVideo.assemblyFailed', { error: error.message });
     toast(error.message, 'err');
   }
 }
 
 async function ensureAutomationSubtitleLayers(projectId, taskId = '', { force = false } = {}) {
   let pr = state.automations.find((item) => item.id === projectId);
-  if (!pr) throw new Error('El proyecto ya no está disponible.');
+  if (!pr) throw new Error(tr('automation.errors.projectUnavailable'));
   const dynamicTextEnabled = pr.config?.dynamicText?.enabled === true;
   for (let index = 0; index < pr.blocks.length; index++) {
     const block = pr.blocks[index];
@@ -9927,10 +9950,10 @@ async function ensureAutomationSubtitleLayers(projectId, taskId = '', { force = 
     updateUiTask(taskId, {
       current: index + 1,
       detail: force
-        ? `Regenerando textos ${index + 1}/${pr.blocks.length}…`
+        ? tr('automation.textRefresh.regeneratingProgress', { current: index + 1, total: pr.blocks.length })
         : (dynamicTextEnabled ? output.motionOverlayKey : output.textLayerKey)
-        ? `Verificando subtítulos ${index + 1}/${pr.blocks.length}…`
-        : `Creando capa de subtítulos ${index + 1}/${pr.blocks.length}…`
+        ? tr('automation.textRefresh.verifyingProgress', { current: index + 1, total: pr.blocks.length })
+        : tr('automation.textRefresh.creatingLayerProgress', { current: index + 1, total: pr.blocks.length })
     });
     if (dynamicTextEnabled && force) {
       const result = await api(`/api/automations/${projectId}/text-layer`, {
@@ -9942,7 +9965,7 @@ async function ensureAutomationSubtitleLayers(projectId, taskId = '', { force = 
       pr = result.project;
       output = pr.outputs?.[block.id] || output;
     } else if (dynamicTextEnabled && !output.motionOverlayKey) {
-      throw new Error(`Falta la capa animada de “${block.title || block.id}”. Usá “Rehacer texto + video” en esa toma antes de aplicar el efecto.`);
+      throw new Error(tr('automation.textRefresh.missingAnimatedLayer', { title: block.title || block.id }));
     }
     if (!dynamicTextEnabled && (force || !output.textLayerKey)) {
       const caption = (block.items || []).map((item) => item.text).join(' ');
@@ -9963,25 +9986,25 @@ async function ensureAutomationSubtitleLayers(projectId, taskId = '', { force = 
 
 async function refreshAutomationProjectText(projectId) {
   let pr = state.automations.find((item) => item.id === projectId);
-  if (!pr?.finalOutput?.videoKey) return toast('Primero ensamblá el video final.', 'err');
+  if (!pr?.finalOutput?.videoKey) return toast(tr('automation.textRefresh.assembleFirst'), 'err');
   const target = pr.effectOutput?.videoKey ? 'effect' : 'final';
-  const targetLabel = target === 'effect' ? 'la versión con efectos' : 'el video final limpio';
-  if (!confirm(`¿Regenerar todos los títulos, subtítulos y resaltados de ${targetLabel}?\n\nSe reemplazará solamente ese video. Se conservarán exactamente las imágenes, planos HeyGen, Assets, voces, música y duración actuales.`)) return;
+  const targetLabel = tr(target === 'effect' ? 'automation.textRefresh.effectVersion' : 'automation.textRefresh.cleanFinal');
+  if (!confirm(tr('automation.textRefresh.confirm', { target: targetLabel }))) return;
   const button = $('#autoRefreshAllText');
   const status = $('#autoRefreshTextStatus');
   const taskId = startUiTask({
-    title: 'Regenerando todos los textos',
-    detail: `Preparando el bloque 1 de ${pr.blocks.length}…`,
+    title: tr('automation.textRefresh.regeneratingAll'),
+    detail: tr('automation.run.preparingBlock', { current: 1, total: pr.blocks.length }),
     total: pr.blocks.length + 1,
     current: 1
   });
   if (button) button.disabled = true;
-  if (status) status.textContent = `Regenerando capas de texto para ${targetLabel}; el resto del material no se modifica…`;
+  if (status) status.textContent = tr('automation.textRefresh.regeneratingLayers', { target: targetLabel });
   try {
     pr = await ensureAutomationSubtitleLayers(projectId, taskId, { force: true });
     updateUiTask(taskId, {
       current: pr.blocks.length + 1,
-      detail: `Recomponiendo ${targetLabel} con las nuevas capas…`
+      detail: tr('automation.textRefresh.recomposing', { target: targetLabel })
     });
     const result = await api(`/api/automations/${projectId}/effect`, {
       method: 'POST',
@@ -9994,39 +10017,39 @@ async function refreshAutomationProjectText(projectId) {
     } catch {
       // El master actualizado ya quedó persistido aunque Assets no refresque.
     }
-    finishUiTask(taskId, { detail: `Textos actualizados únicamente en ${targetLabel}.` });
+    finishUiTask(taskId, { detail: tr('automation.textRefresh.updatedOnly', { target: targetLabel }) });
     renderAutomationProject();
-    toast(`Todos los textos fueron regenerados en ${targetLabel}. No se regeneraron imágenes, audios ni videos de origen.`, 'ok');
+    toast(tr('automation.textRefresh.completed', { target: targetLabel }), 'ok');
   } catch (error) {
     finishUiTask(taskId, { error: error.message });
     if (button) button.disabled = false;
-    if (status) status.textContent = `Falló la actualización de textos: ${error.message}`;
+    if (status) status.textContent = tr('automation.textRefresh.failed', { error: error.message });
     toast(error.message, 'err');
   }
 }
 
 async function applyAutomationVideoEffect(projectId, requestedEffect) {
   let pr = state.automations.find((item) => item.id === projectId);
-  if (!pr?.finalOutput?.videoKey) return toast('Primero ensamblá el video final limpio.', 'err');
-  if (pr.effectOutput?.videoKey && !confirm('¿Crear otra versión con efecto? La versión anterior seguirá disponible en Assets.')) return;
+  if (!pr?.finalOutput?.videoKey) return toast(tr('automation.effects.assembleFirst'), 'err');
+  if (pr.effectOutput?.videoKey && !confirm(tr('automation.effects.anotherConfirm'))) return;
   const button = $('#autoApplyEffect');
   const status = $('#autoEffectStatus');
   const taskId = startUiTask({
-    title: 'Preparando versión con efecto',
-    detail: 'Verificando las capas de subtítulos…',
+    title: tr('automation.effects.preparingVersion'),
+    detail: tr('automation.effects.verifyingLayers'),
     total: pr.blocks.length + 1,
     current: 1
   });
   if (button) button.disabled = true;
-  if (status) status.textContent = 'Preparando capas de subtítulos nítidas. No se regenerará ninguna imagen ni voz…';
+  if (status) status.textContent = tr('automation.effects.preparingCleanLayers');
   try {
     const refreshPendingText = Boolean(pr.textRefreshRequiredAt);
     pr = await ensureAutomationSubtitleLayers(projectId, taskId, { force: refreshPendingText });
     updateUiTask(taskId, {
       current: pr.blocks.length + 1,
-      detail: 'Aplicando el efecto debajo del texto con FFmpeg…'
+      detail: tr('automation.effects.applyingBelowText')
     });
-    if (status) status.textContent = 'Aplicando el efecto sobre imágenes y tomas HeyGen, luego la máscara y el texto…';
+    if (status) status.textContent = tr('automation.effects.applyingStages');
     const result = await api(`/api/automations/${projectId}/effect`, {
       method: 'POST',
       body: { videoEffect: requestedEffect || pr.config?.videoEffect, textLayersRefreshed: refreshPendingText }
@@ -10038,16 +10061,16 @@ async function applyAutomationVideoEffect(projectId, requestedEffect) {
     } catch {
       // La versión procesada ya está guardada aunque Assets no pueda refrescarse.
     }
-    finishUiTask(taskId, { detail: 'Efecto aplicado; subtítulos preservados.' });
+    finishUiTask(taskId, { detail: tr('automation.effects.appliedPreserved') });
     renderAutomationProject();
     const maskSummary = result.effectOutput.maskEnabled
-      ? ` Máscara ${result.effectOutput.maskColor} al ${result.effectOutput.maskOpacity}%.`
+      ? tr('automation.effects.maskSummary', { color: result.effectOutput.maskColor, opacity: result.effectOutput.maskOpacity })
       : '';
-    toast(`${result.effectOutput.presetName} aplicado al ${result.effectOutput.intensity}%.${maskSummary} El ensamble limpio se conservó.`, 'ok');
+    toast(tr('automation.effects.completed', { preset: result.effectOutput.presetName, intensity: result.effectOutput.intensity, mask: maskSummary }), 'ok');
   } catch (error) {
     finishUiTask(taskId, { error: error.message });
     if (button) button.disabled = false;
-    if (status) status.textContent = `Falló la posproducción: ${error.message}`;
+    if (status) status.textContent = tr('automation.effects.failed', { error: error.message });
     toast(error.message, 'err');
   }
 }
@@ -10071,25 +10094,25 @@ function subtitlerTypeCard(kind, cfg) {
   const stroke = isHighlight ? cfg.highlightStrokeColor : cfg.strokeColor;
   const strokeWidth = isHighlight ? cfg.highlightStrokeWidthPx : cfg.strokeWidthPx;
   return `<div class="overlay-type-card${isHighlight ? ' highlight' : isTitle ? ' title' : ''}">
-    <h5>${isHighlight ? 'Texto resaltado' : isTitle ? 'Título' : 'Texto normal'}</h5>
-    <label><span>Fuente</span><span class="overlay-font-line"><select class="select" id="${id}Font">${overlayFontOptions(font, { inherit: isHighlight })}</select><button type="button" class="mini-btn" data-sub-import-font="${kind}">Importar</button></span></label>
-    <label><span>Tamaño · px @ 1080</span><input type="number" id="${id}Size" min="8" max="300" step="1" value="${size}"></label>
-    <label><span>Peso</span><select class="select" id="${id}Weight">${[400, 500, 600, 700, 800, 900].map((value) => `<option value="${value}"${value === weight ? ' selected' : ''}>${value}</option>`).join('')}</select></label>
-    <label><span>Mayúsculas y minúsculas</span><select class="select" id="${id}Transform">${[['none', 'Como fue escrito'], ['uppercase', 'MAYÚSCULAS'], ['lowercase', 'minúsculas'], ['capitalize', 'Iniciales En Mayúscula']].map(([value, label]) => `<option value="${value}"${value === (transform || 'none') ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
-    <div class="overlay-format-options"><label><input type="checkbox" id="${id}Italic"${italic ? ' checked' : ''}> <em>Cursiva</em></label><label><input type="checkbox" id="${id}Underline"${underline ? ' checked' : ''}> <u>Subrayado</u></label><label><input type="checkbox" id="${id}Strike"${strike ? ' checked' : ''}> <s>Tachado</s></label></div>
-    <label><span>Color</span><input type="color" id="${id}Color" value="${esc(color || '#ffffff')}"></label>
-    <label><span>Color del borde</span><input type="color" id="${id}Stroke" value="${esc(stroke || '#000000')}"></label>
-    <label><span>Borde · px @ 1080</span><input type="number" id="${id}StrokeW" min="0" max="30" step="0.5" value="${strokeWidth || 0}"></label>
+    <h5>${esc(tr(isHighlight ? 'automation.overlay.highlightedText' : isTitle ? 'subtitler.videoTitleLabel' : 'automation.overlay.normalText'))}</h5>
+    <label><span>${esc(tr('automation.overlay.font'))}</span><span class="overlay-font-line"><select class="select" id="${id}Font">${overlayFontOptions(font, { inherit: isHighlight })}</select><button type="button" class="mini-btn" data-sub-import-font="${kind}">${esc(tr('common.import'))}</button></span></label>
+    <label><span>${esc(tr('automation.overlay.size'))}</span><input type="number" id="${id}Size" min="8" max="300" step="1" value="${size}"></label>
+    <label><span>${esc(tr('automation.overlay.weight'))}</span><select class="select" id="${id}Weight">${[400, 500, 600, 700, 800, 900].map((value) => `<option value="${value}"${value === weight ? ' selected' : ''}>${value}</option>`).join('')}</select></label>
+    <label><span>${esc(tr('automation.overlay.letterCase'))}</span><select class="select" id="${id}Transform">${[['none', tr('automation.overlay.asWritten')], ['uppercase', tr('automation.overlay.uppercase')], ['lowercase', tr('automation.overlay.lowercase')], ['capitalize', tr('automation.overlay.capitalize')]].map(([value, label]) => `<option value="${value}"${value === (transform || 'none') ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
+    <div class="overlay-format-options"><label><input type="checkbox" id="${id}Italic"${italic ? ' checked' : ''}> <em>${esc(tr('automation.overlay.italic'))}</em></label><label><input type="checkbox" id="${id}Underline"${underline ? ' checked' : ''}> <u>${esc(tr('automation.overlay.underline'))}</u></label><label><input type="checkbox" id="${id}Strike"${strike ? ' checked' : ''}> <s>${esc(tr('automation.overlay.strike'))}</s></label></div>
+    <label><span>${esc(tr('automation.overlay.color'))}</span><input type="color" id="${id}Color" value="${esc(color || '#ffffff')}"></label>
+    <label><span>${esc(tr('automation.overlay.strokeColor'))}</span><input type="color" id="${id}Stroke" value="${esc(stroke || '#000000')}"></label>
+    <label><span>${esc(tr('automation.overlay.strokeWidth'))}</span><input type="number" id="${id}StrokeW" min="0" max="30" step="0.5" value="${strokeWidth || 0}"></label>
   </div>`;
 }
 
 function subtitlerLineMarkup(line, index) {
   return `<div class="subtitler-line" data-sub-line="${esc(line.id)}">
     <b class="subtitler-line-index">${index + 1}</b>
-    <label><span>Inicio</span><input type="number" data-sub-start min="0" step="0.01" value="${Number(line.start).toFixed(2)}"></label>
-    <label><span>Fin</span><input type="number" data-sub-end min="0" step="0.01" value="${Number(line.end).toFixed(2)}"></label>
-    <label class="subtitler-line-text"><span>${line.speakerId ? `${esc(line.speakerId)} · ` : ''}Texto interpretado</span><textarea data-sub-text rows="2" maxlength="2000">${esc(line.text)}</textarea></label>
-    <button type="button" class="icon-btn" data-sub-remove-line title="Quitar línea">${IC('trash')}</button>
+    <label><span>${esc(tr('subtitler.start'))}</span><input type="number" data-sub-start min="0" step="0.01" value="${Number(line.start).toFixed(2)}"></label>
+    <label><span>${esc(tr('subtitler.end'))}</span><input type="number" data-sub-end min="0" step="0.01" value="${Number(line.end).toFixed(2)}"></label>
+    <label class="subtitler-line-text"><span>${line.speakerId ? `${esc(line.speakerId)} · ` : ''}${esc(tr('subtitler.interpretedText'))}</span><textarea data-sub-text rows="2" maxlength="2000">${esc(line.text)}</textarea></label>
+    <button type="button" class="icon-btn" data-sub-remove-line title="${esc(tr('subtitler.removeLine'))}">${IC('trash')}</button>
   </div>`;
 }
 
@@ -10153,63 +10176,68 @@ function renderSubtitler() {
   const latest = studio.outputs?.[0];
   const projects = studio.projects || [];
   const transcriptStatus = studio.transcript
-    ? `${studio.lines.length} líneas · ${studio.transcript.languageCode || 'idioma detectado'}${studio.transcript.languageProbability ? ` · ${Math.round(studio.transcript.languageProbability * 100)}%` : ''} · Scribe v2 · ${fmtDate(studio.transcript.transcribedAt)}`
-    : 'Todavía no se transcribió este video.';
+    ? tr('subtitler.transcript.status', {
+      lines: trn('subtitler.lineCount', studio.lines.length),
+      language: studio.transcript.languageCode || tr('subtitler.transcript.detectedLanguage'),
+      probability: studio.transcript.languageProbability ? ` · ${Math.round(studio.transcript.languageProbability * 100)}%` : '',
+      date: fmtDate(studio.transcript.transcribedAt)
+    })
+    : tr('subtitler.transcript.notTranscribed');
   root.innerHTML = `<section class="automation-panel subtitler-project-panel">
-    <div class="subtitler-project-copy"><h3>Proyecto de subtitulado</h3><span class="hint">Cada proyecto conserva su video, transcripción corregida, animaciones, estilos y renders.</span></div>
-    <label><span>Proyecto guardado</span><select class="select" id="subProjectSelect">${projects.map((project) => `<option value="${esc(project.id)}"${project.id === studio.activeProjectId ? ' selected' : ''}>${esc(project.name)}${project.lineCount ? ` · ${project.lineCount} líneas` : ''}</option>`).join('')}</select></label>
-    <label><span>Nombre</span><input type="text" id="subProjectName" maxlength="160" value="${esc(studio.name || '')}" placeholder="Nombre del proyecto"></label>
-    <div class="subtitler-project-actions"><button type="button" class="mini-btn" id="subProjectNew">${IC('plus')} Nuevo</button><button type="button" class="mini-btn accent" id="subProjectSave">${IC('save')} Guardar proyecto</button><button type="button" class="mini-btn danger" id="subProjectDelete"${projects.length <= 1 ? ' disabled' : ''}>${IC('trash')} Borrar</button></div>
-    <span class="subtitler-motion-badge${dynamicText.enabled ? ' active' : ''}">${IC('spark')} ${dynamicText.enabled ? 'Animaciones dinámicas activas' : 'Animaciones desactivadas'}</span>
+    <div class="subtitler-project-copy"><h3>${esc(tr('subtitler.project.title'))}</h3><span class="hint">${esc(tr('subtitler.project.hint'))}</span></div>
+    <label><span>${esc(tr('subtitler.project.saved'))}</span><select class="select" id="subProjectSelect">${projects.map((project) => `<option value="${esc(project.id)}"${project.id === studio.activeProjectId ? ' selected' : ''}>${esc(project.name)}${project.lineCount ? ` · ${esc(trn('subtitler.lineCount', project.lineCount))}` : ''}</option>`).join('')}</select></label>
+    <label><span>${esc(tr('common.name'))}</span><input type="text" id="subProjectName" maxlength="160" value="${esc(studio.name || '')}" placeholder="${esc(tr('subtitler.project.namePlaceholder'))}"></label>
+    <div class="subtitler-project-actions"><button type="button" class="mini-btn" id="subProjectNew">${IC('plus')} ${esc(tr('common.new'))}</button><button type="button" class="mini-btn accent" id="subProjectSave">${IC('save')} ${esc(tr('subtitler.project.save'))}</button><button type="button" class="mini-btn danger" id="subProjectDelete"${projects.length <= 1 ? ' disabled' : ''}>${IC('trash')} ${esc(tr('common.delete'))}</button></div>
+    <span class="subtitler-motion-badge${dynamicText.enabled ? ' active' : ''}">${IC('spark')} ${esc(tr(dynamicText.enabled ? 'subtitler.animations.active' : 'subtitler.animations.disabled'))}</span>
   </section>
   <div class="subtitler-source-grid">
     <section class="automation-panel subtitler-source-panel">
-      <div class="automation-panel-heading"><div><h3>1 · Video de origen</h3><span class="hint">Subí un video o elegí uno existente en Assets. El audio extraído será temporal.</span></div></div>
-      <label><span>Video</span><select class="select" id="subSourceVideo"><option value="">— elegí un video —</option>${videos.map((video) => `<option value="${esc(video.key)}"${video.key === studio.sourceVideoKey ? ' selected' : ''}>${esc(video.name)}</option>`).join('')}</select></label>
-      ${source ? `<video src="${fileUrl(source.key)}" controls preload="metadata"></video><span class="hint">${esc(source.name)}</span>` : '<div class="empty-note">Subí o elegí el video que querés subtitular.</div>'}
+      <div class="automation-panel-heading"><div><h3>${esc(tr('subtitler.source.title'))}</h3><span class="hint">${esc(tr('subtitler.source.hint'))}</span></div></div>
+      <label><span>${esc(tr('common.video'))}</span><select class="select" id="subSourceVideo"><option value="">— ${esc(tr('subtitler.source.chooseVideo'))} —</option>${videos.map((video) => `<option value="${esc(video.key)}"${video.key === studio.sourceVideoKey ? ' selected' : ''}>${esc(video.name)}</option>`).join('')}</select></label>
+      ${source ? `<video src="${fileUrl(source.key)}" controls preload="metadata"></video><span class="hint">${esc(source.name)}</span>` : `<div class="empty-note">${esc(tr('subtitler.source.empty'))}</div>`}
     </section>
     <section class="automation-panel subtitler-transcribe-panel">
-      <div class="automation-panel-heading"><div><h3>2 · Interpretar audio</h3><span class="hint">ElevenLabs Scribe v2 detecta texto, idioma, hablantes y tiempos por palabra.</span></div></div>
+      <div class="automation-panel-heading"><div><h3>${esc(tr('subtitler.transcript.title'))}</h3><span class="hint">${esc(tr('subtitler.transcript.hint'))}</span></div></div>
       <div class="subtitler-transcribe-controls">
-        <label><span>Idioma</span><select class="select" id="subLanguage"><option value=""${studio.languageCode ? '' : ' selected'}>Detectar automáticamente</option><option value="spa"${studio.languageCode === 'spa' ? ' selected' : ''}>Español</option><option value="eng"${studio.languageCode === 'eng' ? ' selected' : ''}>Inglés</option><option value="por"${studio.languageCode === 'por' ? ' selected' : ''}>Portugués</option></select></label>
-        <label class="poser-toggle"><input type="checkbox" id="subNoVerbatim"${studio.noVerbatim !== false ? ' checked' : ''}> limpiar muletillas y falsos comienzos</label>
-        <button type="button" class="generate-btn small" id="subTranscribe"${source ? '' : ' disabled'}>${IC('mic')} ${studio.transcript ? 'Volver a transcribir' : 'Extraer audio y transcribir'}</button>
+        <label><span>${esc(tr('subtitler.transcript.language'))}</span><select class="select" id="subLanguage"><option value=""${studio.languageCode ? '' : ' selected'}>${esc(tr('subtitler.transcript.autoDetect'))}</option><option value="spa"${studio.languageCode === 'spa' ? ' selected' : ''}>Español</option><option value="eng"${studio.languageCode === 'eng' ? ' selected' : ''}>English</option><option value="por"${studio.languageCode === 'por' ? ' selected' : ''}>Português</option></select></label>
+        <label class="poser-toggle"><input type="checkbox" id="subNoVerbatim"${studio.noVerbatim !== false ? ' checked' : ''}> ${esc(tr('subtitler.transcript.cleanDisfluencies'))}</label>
+        <button type="button" class="generate-btn small" id="subTranscribe"${source ? '' : ' disabled'}>${IC('mic')} ${esc(tr(studio.transcript ? 'subtitler.transcript.retranscribe' : 'subtitler.transcript.extractAndTranscribe'))}</button>
       </div>
       <span class="automation-stage-status" id="subTranscriptStatus">${esc(transcriptStatus)}</span>
     </section>
   </div>
   <section class="automation-panel subtitler-lines-panel">
-    <div class="automation-panel-heading"><div><h3>3 · Revisar líneas</h3><span class="hint">Corregí palabras, nombres y signos. También podés ajustar los tiempos de cada línea.</span></div><div class="subtitler-line-actions"><button type="button" class="mini-btn" id="subExportTxt"${studio.lines.length ? '' : ' disabled'}>${IC('download')} TXT</button><button type="button" class="mini-btn" id="subExportSrt"${studio.lines.length ? '' : ' disabled'}>${IC('download')} SRT</button><button type="button" class="mini-btn" id="subAddLine">${IC('plus')} Línea</button><button type="button" class="mini-btn accent" id="subSaveLines"${studio.lines.length ? '' : ' disabled'}>${IC('save')} Guardar correcciones</button></div></div>
-    <div class="subtitler-lines">${studio.lines.length ? studio.lines.map(subtitlerLineMarkup).join('') : '<div class="empty-note">La transcripción construirá aquí todas las líneas editables.</div>'}</div>
+    <div class="automation-panel-heading"><div><h3>${esc(tr('subtitler.lines.title'))}</h3><span class="hint">${esc(tr('subtitler.lines.hint'))}</span></div><div class="subtitler-line-actions"><button type="button" class="mini-btn" id="subExportTxt"${studio.lines.length ? '' : ' disabled'}>${IC('download')} TXT</button><button type="button" class="mini-btn" id="subExportSrt"${studio.lines.length ? '' : ' disabled'}>${IC('download')} SRT</button><button type="button" class="mini-btn" id="subAddLine">${IC('plus')} ${esc(tr('subtitler.line'))}</button><button type="button" class="mini-btn accent" id="subSaveLines"${studio.lines.length ? '' : ' disabled'}>${IC('save')} ${esc(tr('subtitler.lines.saveCorrections'))}</button></div></div>
+    <div class="subtitler-lines">${studio.lines.length ? studio.lines.map(subtitlerLineMarkup).join('') : `<div class="empty-note">${esc(tr('subtitler.lines.empty'))}</div>`}</div>
   </section>
   <section class="automation-panel subtitler-style-panel">
-    <div class="overlay-preset-bar"><div><h4>4 · Estilo de títulos y textos</h4><span class="hint">Los mismos presets y propiedades que usa el Automatizador.</span></div><select class="select" id="subPreset">${overlayPresetOptions()}</select><button type="button" class="mini-btn" id="subPresetApply" disabled>${IC('check')} Aplicar</button><button type="button" class="mini-btn accent" id="subPresetSave">${IC('save')} Guardar estilo actual</button><button type="button" class="mini-btn danger" id="subPresetDelete" disabled>${IC('trash')}</button></div>
-    <div class="automation-dynamic-text-panel${dynamicText.enabled ? ' enabled' : ''}" id="subDynamicPanel"><div class="automation-dynamic-text-head"><div><h4>Texto dinámico · Remotion</h4><span class="hint">El mismo motor del Automatizador: título animado, avance palabra por palabra y resaltado sincronizado con el audio.</span></div><label class="poser-toggle"><input type="checkbox" id="subDynamicEnabled"${dynamicText.enabled ? ' checked' : ''}> activar animaciones</label></div><div class="automation-dynamic-text-grid">
-      <label><span>Animación del título</span><select class="select" id="subTitleAnimation"><option value="rise"${dynamicText.titleAnimation === 'rise' ? ' selected' : ''}>Ascenso suave</option><option value="slam"${dynamicText.titleAnimation === 'slam' ? ' selected' : ''}>Impacto</option><option value="typewriter"${dynamicText.titleAnimation === 'typewriter' ? ' selected' : ''}>Máquina de escribir</option></select></label>
-      <label><span>Animación de subtítulos</span><select class="select" id="subCaptionAnimation"><option value="word-pop"${dynamicText.captionAnimation === 'word-pop' ? ' selected' : ''}>Palabra con impacto</option><option value="karaoke"${dynamicText.captionAnimation === 'karaoke' ? ' selected' : ''}>Resaltado karaoke</option><option value="bounce"${dynamicText.captionAnimation === 'bounce' ? ' selected' : ''}>Rebote</option></select></label>
-      <label><span>Palabras visibles por grupo</span><input type="number" id="subWordsPerPage" min="1" max="12" value="${dynamicText.wordsPerPage}"></label>
+    <div class="overlay-preset-bar"><div><h4>${esc(tr('subtitler.style.title'))}</h4><span class="hint">${esc(tr('subtitler.style.hint'))}</span></div><select class="select" id="subPreset">${overlayPresetOptions()}</select><button type="button" class="mini-btn" id="subPresetApply" disabled>${IC('check')} ${esc(tr('common.apply'))}</button><button type="button" class="mini-btn accent" id="subPresetSave">${IC('save')} ${esc(tr('automation.textStyles.saveCurrent'))}</button><button type="button" class="mini-btn danger" id="subPresetDelete" disabled title="${esc(tr('common.delete'))}">${IC('trash')}</button></div>
+    <div class="automation-dynamic-text-panel${dynamicText.enabled ? ' enabled' : ''}" id="subDynamicPanel"><div class="automation-dynamic-text-head"><div><h4>${esc(tr('automation.dynamicText.title'))}</h4><span class="hint">${esc(tr('subtitler.animations.hint'))}</span></div><label class="poser-toggle"><input type="checkbox" id="subDynamicEnabled"${dynamicText.enabled ? ' checked' : ''}> ${esc(tr('subtitler.animations.enable'))}</label></div><div class="automation-dynamic-text-grid">
+      <label><span>${esc(tr('automation.dynamicText.titleAnimation'))}</span><select class="select" id="subTitleAnimation"><option value="rise"${dynamicText.titleAnimation === 'rise' ? ' selected' : ''}>${esc(tr('automation.dynamicText.rise'))}</option><option value="slam"${dynamicText.titleAnimation === 'slam' ? ' selected' : ''}>${esc(tr('automation.dynamicText.slam'))}</option><option value="typewriter"${dynamicText.titleAnimation === 'typewriter' ? ' selected' : ''}>${esc(tr('automation.dynamicText.typewriter'))}</option></select></label>
+      <label><span>${esc(tr('automation.dynamicText.captionAnimation'))}</span><select class="select" id="subCaptionAnimation"><option value="word-pop"${dynamicText.captionAnimation === 'word-pop' ? ' selected' : ''}>${esc(tr('automation.dynamicText.wordPop'))}</option><option value="karaoke"${dynamicText.captionAnimation === 'karaoke' ? ' selected' : ''}>${esc(tr('automation.dynamicText.karaoke'))}</option><option value="bounce"${dynamicText.captionAnimation === 'bounce' ? ' selected' : ''}>${esc(tr('automation.dynamicText.bounce'))}</option></select></label>
+      <label><span>${esc(tr('automation.dynamicText.wordsPerGroup'))}</span><input type="number" id="subWordsPerPage" min="1" max="12" value="${dynamicText.wordsPerPage}"></label>
     </div></div>
-    <h4>Texto sobreimpreso</h4><div class="overlay-typography-grid">${subtitlerTypeCard('normal', ov)}${subtitlerTypeCard('highlight', ov)}</div>
-    <div class="overlay-layout-controls"><label><span>Posición vertical</span><select class="select" id="subOvPos">${[['top', 'Arriba'], ['center', 'Centro'], ['bottom', 'Abajo']].map(([value, label]) => `<option value="${value}"${value === ov.position ? ' selected' : ''}>${label}</option>`).join('')}</select></label><label><span>Alineación</span><select class="select" id="subOvAlign">${[['left', 'Izquierda'], ['center', 'Centro'], ['right', 'Derecha']].map(([value, label]) => `<option value="${value}"${value === ov.align ? ' selected' : ''}>${label}</option>`).join('')}</select></label><label><span>Ancho máximo · %</span><input type="number" id="subOvMaxWidth" min="20" max="100" value="${ov.maxWidthPct || 88}"></label><button type="button" class="mini-btn" id="subOvCenter">Centrar horizontalmente</button><label class="poser-toggle"><input type="checkbox" id="subOvBg"${ov.bg ? ' checked' : ''}> caja de fondo</label></div>
-    <div class="title-overlay-panel${titleOv.enabled ? ' enabled' : ''}" id="subTitlePanel"><div class="title-overlay-heading"><div><h4>Título</h4><span class="hint">Opcional; no altera la transcripción.</span></div><label class="poser-toggle"><input type="checkbox" id="subTitleEnabled"${titleOv.enabled ? ' checked' : ''}> incluir título</label></div><label><span>Texto del título</span><input type="text" id="subTitleText" maxlength="300" value="${esc(titleOv.text || '')}" placeholder="Título del video"></label><div class="overlay-typography-grid single">${subtitlerTypeCard('title', titleOv)}</div><div class="overlay-layout-controls"><label><span>Posición vertical</span><select class="select" id="subTitlePos">${[['top', 'Arriba'], ['center', 'Centro'], ['bottom', 'Abajo']].map(([value, label]) => `<option value="${value}"${value === titleOv.position ? ' selected' : ''}>${label}</option>`).join('')}</select></label><label><span>Alineación</span><select class="select" id="subTitleAlign">${[['left', 'Izquierda'], ['center', 'Centro'], ['right', 'Derecha']].map(([value, label]) => `<option value="${value}"${value === titleOv.align ? ' selected' : ''}>${label}</option>`).join('')}</select></label><label><span>Ancho máximo · %</span><input type="number" id="subTitleMaxWidth" min="20" max="100" value="${titleOv.maxWidthPct || 88}"></label><button type="button" class="mini-btn" id="subTitleCenter">Centrar horizontalmente</button><label class="poser-toggle"><input type="checkbox" id="subTitleBg"${titleOv.bg ? ' checked' : ''}> caja de fondo</label></div></div>
+    <h4>${esc(tr('automation.overlay.title'))}</h4><div class="overlay-typography-grid">${subtitlerTypeCard('normal', ov)}${subtitlerTypeCard('highlight', ov)}</div>
+    <div class="overlay-layout-controls"><label><span>${esc(tr('automation.overlay.verticalPosition'))}</span><select class="select" id="subOvPos">${[['top', tr('automation.overlay.top')], ['center', tr('automation.overlay.center')], ['bottom', tr('automation.overlay.bottom')]].map(([value, label]) => `<option value="${value}"${value === ov.position ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label><label><span>${esc(tr('subtitler.alignment'))}</span><select class="select" id="subOvAlign">${[['left', tr('automation.overlay.left')], ['center', tr('automation.overlay.center')], ['right', tr('automation.overlay.right')]].map(([value, label]) => `<option value="${value}"${value === ov.align ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label><label><span>${esc(tr('automation.overlay.maxWidth'))}</span><input type="number" id="subOvMaxWidth" min="20" max="100" value="${ov.maxWidthPct || 88}"></label><button type="button" class="mini-btn" id="subOvCenter">${esc(tr('automation.overlay.centerHorizontally'))}</button><label class="poser-toggle"><input type="checkbox" id="subOvBg"${ov.bg ? ' checked' : ''}> ${esc(tr('automation.overlay.backgroundBox'))}</label></div>
+    <div class="title-overlay-panel${titleOv.enabled ? ' enabled' : ''}" id="subTitlePanel"><div class="title-overlay-heading"><div><h4>${esc(tr('subtitler.videoTitleLabel'))}</h4><span class="hint">${esc(tr('subtitler.titleHint'))}</span></div><label class="poser-toggle"><input type="checkbox" id="subTitleEnabled"${titleOv.enabled ? ' checked' : ''}> ${esc(tr('automation.overlay.includeTitle'))}</label></div><label><span>${esc(tr('subtitler.titleText'))}</span><input type="text" id="subTitleText" maxlength="300" value="${esc(titleOv.text || '')}" placeholder="${esc(tr('subtitler.videoTitle'))}"></label><div class="overlay-typography-grid single">${subtitlerTypeCard('title', titleOv)}</div><div class="overlay-layout-controls"><label><span>${esc(tr('automation.overlay.verticalPosition'))}</span><select class="select" id="subTitlePos">${[['top', tr('automation.overlay.top')], ['center', tr('automation.overlay.center')], ['bottom', tr('automation.overlay.bottom')]].map(([value, label]) => `<option value="${value}"${value === titleOv.position ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label><label><span>${esc(tr('subtitler.alignment'))}</span><select class="select" id="subTitleAlign">${[['left', tr('automation.overlay.left')], ['center', tr('automation.overlay.center')], ['right', tr('automation.overlay.right')]].map(([value, label]) => `<option value="${value}"${value === titleOv.align ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label><label><span>${esc(tr('automation.overlay.maxWidth'))}</span><input type="number" id="subTitleMaxWidth" min="20" max="100" value="${titleOv.maxWidthPct || 88}"></label><button type="button" class="mini-btn" id="subTitleCenter">${esc(tr('automation.overlay.centerHorizontally'))}</button><label class="poser-toggle"><input type="checkbox" id="subTitleBg"${titleOv.bg ? ' checked' : ''}> ${esc(tr('automation.overlay.backgroundBox'))}</label></div></div>
     <input type="file" id="subFontFile" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" hidden>
-    <div class="ov-preview subtitler-preview" id="subPreview" style="aspect-ratio:${source ? '9/16' : '9/16'}">${source ? `<video class="ov-preview-bg" src="${fileUrl(source.key)}" muted loop autoplay playsinline></video>` : ''}<div class="ov-title" id="subPreviewTitle">${esc(titleOv.text || '')}</div><div class="ov-text" id="subPreviewText"><span class="ov-normal">Un texto de </span><span class="ov-hl">ejemplo</span><span class="ov-normal"> dinámico acá</span></div></div>
+    <div class="ov-preview subtitler-preview" id="subPreview" style="aspect-ratio:${source ? '9/16' : '9/16'}">${source ? `<video class="ov-preview-bg" src="${fileUrl(source.key)}" muted loop autoplay playsinline></video>` : ''}<div class="ov-title" id="subPreviewTitle">${esc(titleOv.text || '')}</div><div class="ov-text" id="subPreviewText"><span class="ov-normal">${esc(tr('automation.overlay.previewBefore'))}</span><span class="ov-hl">${esc(tr('automation.overlay.previewHighlight'))}</span><span class="ov-normal">${esc(tr('subtitler.previewAfter'))}</span></div></div>
   </section>
-  <section class="automation-panel subtitler-render-panel"><div><h3>5 · Generar video subtitulado</h3><p>Conserva el video y su audio; sólo añade la capa de título y subtítulos. Las correcciones actuales se usan en el render.</p><span class="hint" id="subRenderStatus">${latest ? `Último render · ${latest.wordCount} palabras · ${fmtDate(latest.renderedAt)}` : 'Todavía no hay una versión renderizada.'}</span></div><button type="button" class="generate-btn" id="subRender"${source && studio.lines.length ? '' : ' disabled'}>${IC('film')} Renderizar subtítulos</button>${latest ? `<div class="final-assembly-preview"><video src="${fileUrl(latest.videoKey)}" controls preload="metadata"></video><button type="button" class="mini-btn" data-open-asset="${esc(latest.videoKey)}">Abrir resultado</button></div>` : ''}</section>`;
+  <section class="automation-panel subtitler-render-panel"><div><h3>${esc(tr('subtitler.render.title'))}</h3><p>${esc(tr('subtitler.render.hint'))}</p><span class="hint" id="subRenderStatus">${latest ? esc(tr('subtitler.render.latest', { words: trn('subtitler.wordCount', latest.wordCount), date: fmtDate(latest.renderedAt) })) : esc(tr('subtitler.render.none'))}</span></div><button type="button" class="generate-btn" id="subRender"${source && studio.lines.length ? '' : ' disabled'}>${IC('film')} ${esc(tr('subtitler.render.button'))}</button>${latest ? `<div class="final-assembly-preview"><video src="${fileUrl(latest.videoKey)}" controls preload="metadata"></video><button type="button" class="mini-btn" data-open-asset="${esc(latest.videoKey)}">${esc(tr('subtitler.render.openResult'))}</button></div>` : ''}</section>`;
 
   const preview = $('#subPreview'), previewText = $('#subPreviewText'), previewTitle = $('#subPreviewTitle');
   const updatePreview = () => {
-    applySubtitlePreviewStyles({ preview, text: previewText, titleText: previewTitle, overlay: ov, titleOverlay: titleOv, visibleTitle: titleOv.text || 'Título del video' });
+    applySubtitlePreviewStyles({ preview, text: previewText, titleText: previewTitle, overlay: ov, titleOverlay: titleOv, visibleTitle: titleOv.text || tr('subtitler.videoTitle') });
     $('#subDynamicPanel').classList.toggle('enabled', dynamicText.enabled);
     $('#subTitlePanel').classList.toggle('enabled', titleOv.enabled);
     const motionBadge = root.querySelector('.subtitler-motion-badge');
     motionBadge?.classList.toggle('active', dynamicText.enabled);
-    if (motionBadge) motionBadge.innerHTML = `${IC('spark')} ${dynamicText.enabled ? 'Animaciones dinámicas activas' : 'Animaciones desactivadas'}`;
+    if (motionBadge) motionBadge.innerHTML = `${IC('spark')} ${tr(dynamicText.enabled ? 'subtitler.animations.active' : 'subtitler.animations.disabled')}`;
   };
   const config = () => ({ overlay: ov, titleOverlay: titleOv, dynamicText });
   const persistConfig = () => saveSubtitler({ config: config() });
   const projectSnapshot = () => ({
-    name: $('#subProjectName').value.trim() || studio.name || 'Proyecto de subtítulos',
+    name: $('#subProjectName').value.trim() || studio.name || tr('subtitler.project.defaultName'),
     lines: readSubtitlerLines(root, studio.lines),
     config: config()
   });
@@ -10226,25 +10254,25 @@ function renderSubtitler() {
     catch (error) { toast(error.message, 'err'); }
   });
   $('#subProjectSave').addEventListener('click', async () => {
-    try { await saveSubtitler(projectSnapshot()); toast('Proyecto de subtitulado guardado.', 'ok'); }
+    try { await saveSubtitler(projectSnapshot()); toast(tr('subtitler.project.savedToast'), 'ok'); }
     catch (error) { toast(error.message, 'err'); }
   });
   $('#subProjectNew').addEventListener('click', async () => {
-    const name = window.prompt('Nombre del nuevo proyecto de subtitulado:', 'Nuevo proyecto');
+    const name = window.prompt(tr('subtitler.project.newNamePrompt'), tr('automation.defaultProjectName'));
     if (!name?.trim()) return;
     try {
       await saveSubtitler(projectSnapshot());
       state.subtitler = await api('/api/subtitler/projects', { method: 'POST', body: { name: name.trim() }, task: false });
       renderSubtitler();
-      toast('Nuevo proyecto de subtitulado creado.', 'ok');
+      toast(tr('subtitler.project.created'), 'ok');
     } catch (error) { toast(error.message, 'err'); }
   });
   $('#subProjectDelete').addEventListener('click', async () => {
-    if (!confirm(`¿Borrar el proyecto “${studio.name}”? Los videos de Assets no se eliminarán.`)) return;
+    if (!confirm(tr('subtitler.project.deleteConfirm', { name: studio.name }))) return;
     try {
       state.subtitler = await api(`/api/subtitler/projects/${studio.activeProjectId}`, { method: 'DELETE', task: false });
       renderSubtitler();
-      toast('Proyecto de subtitulado eliminado.');
+      toast(tr('subtitler.project.deleted'));
     } catch (error) { toast(error.message, 'err'); }
   });
   const bind = (id, target, prop, transform = (value) => value) => {
@@ -10269,47 +10297,47 @@ function renderSubtitler() {
     const button = event.currentTarget; button.disabled = true;
     try {
       state.subtitler = await api('/api/subtitler/transcribe', { method: 'POST', body: { projectId: studio.activeProjectId, sourceVideoKey: studio.sourceVideoKey, languageCode: $('#subLanguage').value, noVerbatim: $('#subNoVerbatim').checked } });
-      renderSubtitler(); toast('Transcripción terminada. Revisá las líneas antes de renderizar.', 'ok');
+      renderSubtitler(); toast(tr('subtitler.transcript.completed'), 'ok');
     } catch (error) { button.disabled = false; toast(error.message, 'err'); }
   });
-  const saveLines = async () => { studio.lines = readSubtitlerLines(root, studio.lines); await saveSubtitler({ lines: studio.lines }); toast('Correcciones guardadas.'); };
+  const saveLines = async () => { studio.lines = readSubtitlerLines(root, studio.lines); await saveSubtitler({ lines: studio.lines }); toast(tr('subtitler.lines.saved')); };
   $('#subSaveLines').addEventListener('click', saveLines);
   $('#subExportTxt').addEventListener('click', () => {
     const lines = readSubtitlerLines(root, studio.lines);
-    if (!lines.length) return toast('No hay líneas para exportar.', 'err');
+    if (!lines.length) return toast(tr('subtitler.lines.noneToExport'), 'err');
     downloadSubtitleFile({
       name: $('#subProjectName').value.trim() || studio.name,
       extension: 'txt',
       mime: 'text/plain',
       content: lines.map((line) => line.text).join('\r\n')
     });
-    toast('Subtítulos exportados en TXT.', 'ok');
+    toast(tr('subtitler.lines.exportedTxt'), 'ok');
   });
   $('#subExportSrt').addEventListener('click', () => {
     const lines = readSubtitlerLines(root, studio.lines);
-    if (!lines.length) return toast('No hay líneas para exportar.', 'err');
+    if (!lines.length) return toast(tr('subtitler.lines.noneToExport'), 'err');
     downloadSubtitleFile({
       name: $('#subProjectName').value.trim() || studio.name,
       extension: 'srt',
       mime: 'application/x-subrip',
       content: lines.map((line, index) => `${index + 1}\r\n${subtitleSrtTime(line.start)} --> ${subtitleSrtTime(line.end)}\r\n${line.text}`).join('\r\n\r\n') + '\r\n'
     });
-    toast('Subtítulos exportados en SRT.', 'ok');
+    toast(tr('subtitler.lines.exportedSrt'), 'ok');
   });
   root.querySelectorAll('[data-sub-remove-line]').forEach((button) => button.addEventListener('click', async () => { button.closest('[data-sub-line]').remove(); await saveLines(); renderSubtitler(); }));
-  $('#subAddLine').addEventListener('click', async () => { const last = studio.lines.at(-1); studio.lines.push({ id: `line-${Date.now()}`, start: last?.end || 0, end: (last?.end || 0) + 2, text: 'Nueva línea', sourceText: '', sourceWords: [] }); await saveSubtitler({ lines: studio.lines }, { rerender: true }); });
+  $('#subAddLine').addEventListener('click', async () => { const last = studio.lines.at(-1); studio.lines.push({ id: `line-${Date.now()}`, start: last?.end || 0, end: (last?.end || 0) + 2, text: tr('subtitler.lines.newLine'), sourceText: '', sourceWords: [] }); await saveSubtitler({ lines: studio.lines }, { rerender: true }); });
   $('#subRender').addEventListener('click', async (event) => {
     const button = event.currentTarget; button.disabled = true;
     try {
       const lines = readSubtitlerLines(root, studio.lines);
       state.subtitler = await api('/api/subtitler/render', { method: 'POST', body: { projectId: studio.activeProjectId, sourceVideoKey: studio.sourceVideoKey, lines, config: config() } });
-      await refreshAssets(); renderSubtitler(); toast('Video subtitulado terminado.', 'ok');
+      await refreshAssets(); renderSubtitler(); toast(tr('subtitler.render.completed'), 'ok');
     } catch (error) { button.disabled = false; toast(error.message, 'err'); }
   });
   $('#subPreset').addEventListener('change', (event) => { const enabled = Boolean(event.target.value); $('#subPresetApply').disabled = !enabled; $('#subPresetDelete').disabled = !enabled; });
   $('#subPresetApply').addEventListener('click', async () => { const preset = state.overlayPresets.find((item) => item.id === $('#subPreset').value); if (!preset) return; Object.assign(ov, preset.overlay || {}); Object.assign(titleOv, preset.titleOverlay || {}); Object.assign(dynamicText, preset.dynamicText || {}); await saveSubtitler({ config: config() }, { rerender: true }); });
-  $('#subPresetSave').addEventListener('click', async () => { const name = window.prompt('Nombre para este estilo de títulos y textos:'); if (!name?.trim()) return; const item = await api('/api/overlay-presets', { method: 'POST', body: { name: name.trim(), overlay: ov, titleOverlay: titleOv, dynamicText } }); state.overlayPresets.unshift(item); renderSubtitler(); toast(`Estilo “${item.name}” guardado.`); });
-  $('#subPresetDelete').addEventListener('click', async () => { const preset = state.overlayPresets.find((item) => item.id === $('#subPreset').value); if (!preset || !confirm(`¿Borrar el estilo “${preset.name}”?`)) return; await api(`/api/overlay-presets/${preset.id}`, { method: 'DELETE' }); state.overlayPresets = state.overlayPresets.filter((item) => item.id !== preset.id); renderSubtitler(); });
+  $('#subPresetSave').addEventListener('click', async () => { const name = window.prompt(tr('automation.textStyles.namePrompt')); if (!name?.trim()) return; const item = await api('/api/overlay-presets', { method: 'POST', body: { name: name.trim(), overlay: ov, titleOverlay: titleOv, dynamicText } }); state.overlayPresets.unshift(item); renderSubtitler(); toast(tr('automation.textStyles.saved', { name: item.name })); });
+  $('#subPresetDelete').addEventListener('click', async () => { const preset = state.overlayPresets.find((item) => item.id === $('#subPreset').value); if (!preset || !confirm(tr('automation.textStyles.deleteConfirm', { name: preset.name }))) return; await api(`/api/overlay-presets/${preset.id}`, { method: 'DELETE' }); state.overlayPresets = state.overlayPresets.filter((item) => item.id !== preset.id); renderSubtitler(); });
   let fontTarget = 'normal';
   root.querySelectorAll('[data-sub-import-font]').forEach((button) => button.addEventListener('click', () => { fontTarget = button.dataset.subImportFont; $('#subFontFile').value = ''; $('#subFontFile').click(); }));
   $('#subFontFile').addEventListener('change', async (event) => { const file = event.target.files?.[0]; if (!file) return; const font = await api('/api/fonts', { method: 'POST', body: { fileName: file.name, name: file.name.replace(/\.[^.]+$/, ''), dataUrl: await readFileAsDataUrl(file) } }); state.fonts.unshift(font); await registerCustomFont(font); if (fontTarget === 'title') titleOv.font = font.family; else if (fontTarget === 'highlight') ov.highlightFont = font.family; else ov.font = font.family; await saveSubtitler({ config: config() }, { rerender: true }); });
@@ -10331,12 +10359,12 @@ $('#subtitlerUpload').addEventListener('click', () => { $('#subtitlerVideoInput'
 $('#subtitlerVideoInput').addEventListener('change', async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
-  if (file.size > 100 * 1024 * 1024) return toast('El video supera el límite de 100 MB.', 'err');
+  if (file.size > 100 * 1024 * 1024) return toast(tr('subtitler.uploadTooLarge'), 'err');
   try {
     const uploaded = await api('/api/assets/visual', { method: 'POST', body: { name: file.name, dataUrl: await readFileAsDataUrl(file), category: 'Subtitulador', tags: ['subtitulado'] } });
     await refreshAssets();
     await saveSubtitler({ sourceVideoKey: uploaded.key, sourceName: uploaded.name, transcript: null, lines: [] }, { rerender: true });
-    toast('Video cargado. Ya podés extraer el audio y transcribirlo.', 'ok');
+    toast(tr('subtitler.uploaded'), 'ok');
   } catch (error) { toast(error.message, 'err'); }
 });
 
@@ -10393,7 +10421,7 @@ function renderProjectCostEstimate(projects) {
   const root = $('#costProjectEstimate');
   if (!root) return;
   if (!projects?.length) {
-    root.innerHTML = '<h3>Estimación por proyecto</h3><div class="empty-note" style="padding:8px 0">Todavía no hay proyectos del Automatizador.</div>';
+    root.innerHTML = `<h3>${esc(tr('costs.projectEstimate'))}</h3><div class="empty-note" style="padding:8px 0">${esc(tr('costs.noAutomationProjects'))}</div>`;
     return;
   }
   const selected = projects.find((project) => project.id === state.costProjectId) || projects[0];
@@ -10403,70 +10431,77 @@ function renderProjectCostEstimate(projects) {
   root.innerHTML = `
     <div class="cost-project-head">
       <div>
-        <h3>Coste estimado por proyecto</h3>
-        <span class="hint">Se muestra el proyecto más reciente por defecto. Elegí otro para consultar su estimación.</span>
+        <h3>${esc(tr('costs.projectEstimateTitle'))}</h3>
+        <span class="hint">${esc(tr('costs.projectEstimateHint'))}</span>
       </div>
-      <label>Proyecto
+      <label>${esc(tr('costs.project'))}
         <select class="select" id="costProjectSelect">
-          ${projects.map((project, index) => `<option value="${esc(project.id)}"${project.id === selected.id ? ' selected' : ''}>${index === 0 ? 'Último · ' : ''}${esc(project.name)}</option>`).join('')}
+          ${projects.map((project, index) => `<option value="${esc(project.id)}"${project.id === selected.id ? ' selected' : ''}>${index === 0 ? `${esc(tr('costs.latest'))} · ` : ''}${esc(project.name)}</option>`).join('')}
         </select>
       </label>
     </div>
     <div class="project-cost-title">
       <strong>${esc(selected.name)}</strong>
-      <span class="hint">${esc(selected.modelName)} · ${esc(selected.resolution)} · ${esc(selected.aspectRatio || 'proporción automática')} · actualizado ${fmtDate(selected.updatedAt || selected.ts)}</span>
+      <span class="hint">${esc(tr('costs.projectMeta', { model: selected.modelName, resolution: selected.resolution, aspect: selected.aspectRatio || tr('costs.automaticAspect'), date: fmtDate(selected.updatedAt || selected.ts) }))}</span>
     </div>
     <div class="project-cost-summary">
       <div class="project-cost-stat">
-        <span>Producción completa estimada</span>
+        <span>${esc(tr('costs.fullProductionEstimate'))}</span>
         <strong>${fmtUsd(selected.estimatedTotal)}</strong>
       </div>
       <div class="project-cost-stat">
-        <span>Consumo ya vinculado</span>
+        <span>${esc(tr('costs.linkedUsage'))}</span>
         <strong>${fmtUsd(selected.spent)}</strong>
       </div>
       <div class="project-cost-stat">
-        <span>Material previsto</span>
-        <strong>${detail.resourceImages + detail.blockImages} imágenes · ${detail.audioItems} voces${detail.h3Blocks ? ` · ${detail.h3Blocks} toma${detail.h3Blocks === 1 ? '' : 's'} H3` : ''}${detail.seedance25Blocks ? ` · ${detail.seedance25Blocks} toma${detail.seedance25Blocks === 1 ? '' : 's'} Seedance 2.5` : ''}${detail.omniBlocks ? ` · ${detail.omniBlocks} toma${detail.omniBlocks === 1 ? '' : 's'} Omni` : ''}${detail.musicEnabled ? ' · 1 música' : ''}</strong>
+        <span>${esc(tr('costs.expectedMaterial'))}</span>
+        <strong>${esc(tr('costs.materialSummary', {
+          images: trn('costs.imageCount', detail.resourceImages + detail.blockImages),
+          voices: trn('costs.voiceCount', detail.audioItems),
+          h3: detail.h3Blocks ? ` · ${trn('costs.shotCount', detail.h3Blocks)} H3` : '',
+          seedance: detail.seedance25Blocks ? ` · ${trn('costs.shotCount', detail.seedance25Blocks)} Seedance 2.5` : '',
+          omni: detail.omniBlocks ? ` · ${trn('costs.shotCount', detail.omniBlocks)} Omni` : '',
+          music: detail.musicEnabled ? ` · ${tr('costs.oneMusicTrack')}` : ''
+        }))}</strong>
       </div>
     </div>
     <div class="project-cost-breakdown">
       <div class="cost-row">
-        <span class="cr-label">Fichas de personajes, fondos y objetos<span class="cr-sub">${detail.resourceImages} × ${esc(selected.modelName)} ${esc(detail.resourceResolution)}</span></span>
+        <span class="cr-label">${esc(tr('costs.resourceSheets'))}<span class="cr-sub">${detail.resourceImages} × ${esc(selected.modelName)} ${esc(detail.resourceResolution)}</span></span>
         <span class="cr-value">${fmtUsd(detail.resourceImageCost)}</span>
       </div>
       <div class="cost-row">
-        <span class="cr-label">Imágenes de los bloques<span class="cr-sub">${detail.blockImages} × ${esc(selected.modelName)} ${esc(detail.blockResolution)}</span></span>
+        <span class="cr-label">${esc(tr('costs.blockImages'))}<span class="cr-sub">${detail.blockImages} × ${esc(selected.modelName)} ${esc(detail.blockResolution)}</span></span>
         <span class="cr-value">${fmtUsd(detail.blockImageCost)}</span>
       </div>
       <div class="cost-row">
-        <span class="cr-label">Voces de narración y diálogo<span class="cr-sub">${detail.audioItems} audios · ${detail.audioCharacters.toLocaleString('es-AR')} caracteres · ${esc(detail.audioModelName || 'ElevenLabs')}</span></span>
+        <span class="cr-label">${esc(tr('costs.narrationVoices'))}<span class="cr-sub">${esc(tr('costs.audioUsage', { audios: trn('costs.audioCount', detail.audioItems), characters: trn('costs.characterCount', detail.audioCharacters), model: detail.audioModelName || 'ElevenLabs' }))}</span></span>
         <span class="cr-value">${fmtUsd(detail.audioCost)}</span>
       </div>
       ${detail.h3Blocks ? `<div class="cost-row">
-        <span class="cr-label">Video generativo MiniMax H3<span class="cr-sub">${detail.h3Blocks} bloque${detail.h3Blocks === 1 ? '' : 's'} · ~${Math.round(detail.h3EstimatedSeconds || 0)} segundos facturables · resolución según cada bloque</span></span>
+        <span class="cr-label">${esc(tr('costs.generativeVideo', { model: 'MiniMax H3' }))}<span class="cr-sub">${esc(tr('costs.billableVideo', { blocks: trn('automation.blockCount', detail.h3Blocks), seconds: Math.round(detail.h3EstimatedSeconds || 0) }))}</span></span>
         <span class="cr-value">${fmtUsd(detail.h3VideoCost)}</span>
       </div>` : ''}
       ${detail.seedance25Blocks ? `<div class="cost-row">
-        <span class="cr-label">Video generativo Seedance 2.5<span class="cr-sub">${detail.seedance25Blocks} bloque${detail.seedance25Blocks === 1 ? '' : 's'} · ~${Math.round(detail.seedance25EstimatedSeconds || 0)} segundos facturables · resolución según cada bloque</span></span>
+        <span class="cr-label">${esc(tr('costs.generativeVideo', { model: 'Seedance 2.5' }))}<span class="cr-sub">${esc(tr('costs.billableVideo', { blocks: trn('automation.blockCount', detail.seedance25Blocks), seconds: Math.round(detail.seedance25EstimatedSeconds || 0) }))}</span></span>
         <span class="cr-value">${fmtUsd(detail.seedance25VideoCost)}</span>
       </div>` : ''}
       ${detail.omniBlocks ? `<div class="cost-row">
-        <span class="cr-label">Video generativo Gemini Omni<span class="cr-sub">${detail.omniBlocks} bloque${detail.omniBlocks === 1 ? '' : 's'} · ~${Math.round(detail.omniEstimatedSeconds || 0)} segundos facturables · resolución según cada bloque</span></span>
+        <span class="cr-label">${esc(tr('costs.generativeVideo', { model: 'Gemini Omni' }))}<span class="cr-sub">${esc(tr('costs.billableVideo', { blocks: trn('automation.blockCount', detail.omniBlocks), seconds: Math.round(detail.omniEstimatedSeconds || 0) }))}</span></span>
         <span class="cr-value">${fmtUsd(detail.omniVideoCost)}</span>
       </div>` : ''}
       ${detail.musicEnabled ? `<div class="cost-row">
-        <span class="cr-label">Música de fondo<span class="cr-sub">${detail.musicSource === 'suno' ? `${detail.generatedMusicTracks} variantes generadas con Suno` : detail.musicSource === 'auto' ? 'Selección automática desde Assets' : 'Pista existente de Assets'}</span></span>
+        <span class="cr-label">${esc(tr('costs.backgroundMusic'))}<span class="cr-sub">${esc(detail.musicSource === 'suno' ? trn('costs.sunoVariantCount', detail.generatedMusicTracks) : detail.musicSource === 'auto' ? tr('costs.automaticAssetSelection') : tr('costs.existingAssetTrack'))}</span></span>
         <span class="cr-value">${fmtUsd(detail.musicCost)}</span>
       </div>` : ''}
       <div class="cost-row">
-        <span class="cr-label">Ensamble, subtítulos y posproducción<span class="cr-sub">Procesamiento local con FFmpeg y Remotion</span></span>
+        <span class="cr-label">${esc(tr('costs.localPostProduction'))}<span class="cr-sub">${esc(tr('costs.localProcessing'))}</span></span>
         <span class="cr-value">${fmtUsd(detail.localVideoCost)}</span>
       </div>
     </div>
     <p class="hint project-cost-note">${extraSpent
-      ? 'El consumo vinculado supera la estimación base porque incluye regeneraciones, reintentos o modelos alternativos.'
-      : 'Estimación calculada con el modelo principal y las tarifas vigentes. Regeneraciones, reintentos y el modelo de respaldo pueden aumentarla.'}</p>`;
+      ? esc(tr('costs.extraSpentNote'))
+      : esc(tr('costs.estimateNote'))}</p>`;
   $('#costProjectSelect')?.addEventListener('change', (event) => {
     state.costProjectId = event.target.value;
     renderProjectCostEstimate(projects);
@@ -10484,22 +10519,22 @@ async function loadCosts() {
   updateEstimate();
 
   const [y, m] = data.currentMonth.split('-');
-  const monthName = new Date(Number(y), Number(m) - 1).toLocaleString('es-AR', { month: 'long', year: 'numeric' });
+  const monthName = new Date(Number(y), Number(m) - 1).toLocaleString(i18n.localeTag(), { month: 'long', year: 'numeric' });
   $('#costsSummary').innerHTML = `
     <div class="cost-tile">
-      <div class="ct-label">Este mes</div>
+      <div class="ct-label">${esc(tr('costs.thisMonth'))}</div>
       <div class="ct-value">${fmtUsd(data.currentMonthTotal)}</div>
       <div class="ct-sub">${esc(monthName)}</div>
     </div>
     <div class="cost-tile">
-      <div class="ct-label">Total histórico</div>
+      <div class="ct-label">${esc(tr('costs.historicalTotal'))}</div>
       <div class="ct-value">${fmtUsd(data.total)}</div>
-      <div class="ct-sub">desde que empezaste a manifestar</div>
+      <div class="ct-sub">${esc(tr('costs.sinceStarted'))}</div>
     </div>
     <div class="cost-tile">
-      <div class="ct-label">Operaciones registradas</div>
+      <div class="ct-label">${esc(tr('costs.registeredOperations'))}</div>
       <div class="ct-value">${data.recent.length >= 100 ? '100+' : data.recent.length}</div>
-      <div class="ct-sub">estimaciones, no factura oficial</div>
+      <div class="ct-sub">${esc(tr('costs.estimatesDisclaimer'))}</div>
     </div>`;
 
   renderProjectCostEstimate(data.projects || []);
@@ -10509,16 +10544,16 @@ async function loadCosts() {
     ? byModel.map(([k, v]) => `<div class="cost-row">
         <span class="cr-label">${esc(k)}<span class="cr-sub">×${v.count}</span></span>
         <span class="cr-value">${fmtUsd(v.cost)}</span></div>`).join('')
-    : '<div class="empty-note" style="padding:8px 0">Sin consumo este mes.</div>';
+    : `<div class="empty-note" style="padding:8px 0">${esc(tr('costs.noUsageThisMonth'))}</div>`;
 
   const byMonth = Object.entries(data.byMonth).sort((a, b) => b[0].localeCompare(a[0]));
   $('#costsByMonth').innerHTML = byMonth.length
     ? byMonth.map(([k, v]) => `<div class="cost-row"><span class="cr-label">${esc(k)}</span><span class="cr-value">${fmtUsd(v)}</span></div>`).join('')
-    : '<div class="empty-note" style="padding:8px 0">Todavía no hay registros.</div>';
+    : `<div class="empty-note" style="padding:8px 0">${esc(tr('costs.noRecords'))}</div>`;
 
   $('#pricingUpdated').textContent = data.pricing.updatedAt
     ? `· ${esc(data.pricing.note || '')} · ${fmtDate(data.pricing.updatedAt)}`
-    : '· valores iniciales estimados';
+    : `· ${esc(tr('costs.initialEstimatedValues'))}`;
 
   let rows = '';
   for (const [modelId, table] of Object.entries(data.pricing.image)) {
@@ -10526,20 +10561,20 @@ async function loadCosts() {
     rows += `<div class="pricing-row"><span class="pr-name">${esc(name)}</span>` +
       Object.entries(table).map(([res, val]) =>
         `<label class="pr-unit">${res} <input type="number" step="0.001" min="0" data-model="${esc(modelId)}" data-res="${esc(res)}" value="${val}"></label>`
-      ).join('') + `<span class="pr-unit">USD/imagen</span></div>`;
+      ).join('') + `<span class="pr-unit">${esc(tr('costs.usdPerImage'))}</span></div>`;
   }
   for (const [modelId, table] of Object.entries(data.pricing.video || {})) {
     const name = state.videoModels.find((x) => x.id === modelId)?.name || modelId;
     rows += `<div class="pricing-row"><span class="pr-name">${esc(name)}</span>` +
       Object.entries(table).map(([res, val]) =>
         `<label class="pr-unit">${res} <input type="number" step="0.001" min="0" data-vmodel="${esc(modelId)}" data-res="${esc(res)}" value="${val}"></label>`
-      ).join('') + `<span class="pr-unit">USD/segundo</span></div>`;
+      ).join('') + `<span class="pr-unit">${esc(tr('costs.usdPerSecond'))}</span></div>`;
   }
   for (const [modelId, table] of Object.entries(data.pricing.audio || {})) {
     const name = (state.audioModels || []).find((model) => model.id === modelId)?.name || modelId;
     rows += `<div class="pricing-row"><span class="pr-name">${esc(name)}</span>
-      <label class="pr-unit">1k car. <input type="number" step="0.001" min="0" data-audio-model="${esc(modelId)}" value="${table.per1kChars}"></label>
-      <span class="pr-unit">USD/1000 caracteres</span></div>`;
+      <label class="pr-unit">${esc(tr('costs.thousandCharactersShort'))} <input type="number" step="0.001" min="0" data-audio-model="${esc(modelId)}" value="${table.per1kChars}"></label>
+      <span class="pr-unit">${esc(tr('costs.usdPerThousandCharacters'))}</span></div>`;
   }
   $('#pricingTable').innerHTML = `<div class="pricing-table">${rows}</div>`;
 
@@ -10548,19 +10583,19 @@ async function loadCosts() {
         <span class="cr-label">${e.type === 'image' ? IC('image') : e.type === 'video' ? IC('film') : e.type === 'audio' ? IC('mic') : IC('globe')} ${esc(e.label || e.modelId)}
           <span class="cr-sub">${e.units} ${esc(e.unitLabel || '')} · ${fmtDate(e.ts)}</span></span>
         <span class="cr-value">${fmtUsd(e.cost)}</span></div>`).join('')
-    : '<div class="empty-note" style="padding:8px 0">Todavía no generaste nada.</div>';
+    : `<div class="empty-note" style="padding:8px 0">${esc(tr('costs.noGenerations'))}</div>`;
 }
 
 $('#btnRefreshPricing').addEventListener('click', async () => {
   const btn = $('#btnRefreshPricing');
   btn.disabled = true;
   const prev = btn.innerHTML;
-  btn.innerHTML = 'Rastreando la web…';
+  btn.innerHTML = esc(tr('costs.checkingWeb'));
   try {
     const { changes } = await api('/api/pricing/refresh', { method: 'POST' });
     await loadCosts();
-    if (changes?.length) toast(`Precios actualizados: ${changes.join(' · ')}`);
-    else toast('Precios verificados — sin cambios detectados');
+    if (changes?.length) toast(tr('costs.pricesUpdated', { changes: changes.join(' · ') }));
+    else toast(tr('costs.pricesUnchanged'));
   } catch (e) {
     toast(e.message, 'err');
   } finally {
@@ -10592,7 +10627,7 @@ $('#btnSavePricing').addEventListener('click', async () => {
       body: { image, video, audio }
     });
     updateEstimate();
-    toast('Tarifas guardadas');
+    toast(tr('costs.ratesSaved'));
     loadCosts();
   } catch (e) {
     toast(e.message, 'err');
@@ -10643,8 +10678,8 @@ function fillConfigForm() {
   renderComfyWorkflowsList();
   renderConfigAudioTags();
   $('#accessStatus').textContent = c.accessProtected
-    ? 'La aplicación está protegida. Escribí una nueva clave solo si querés cambiarla.'
-    : 'Todavía no hay clave: establecé una de al menos 6 caracteres.';
+    ? tr('config.access.protected')
+    : tr('config.access.unprotected');
 }
 
 async function loadHeyGenOAuthStatus(showError = false) {
@@ -10656,11 +10691,11 @@ async function loadHeyGenOAuthStatus(showError = false) {
   }
   const title = $('#heygenOauthTitle');
   const status = $('#heygenOauthStatus');
-  if (title) title.textContent = state.heygenOAuth.connected ? 'HeyGen conectado' : 'HeyGen sin conectar';
+  if (title) title.textContent = tr(state.heygenOAuth.connected ? 'config.heygenOAuth.connected' : 'config.heygenOAuth.disconnected');
   if (status) status.textContent = state.heygenOAuth.connected
-    ? [state.heygenOAuth.account?.email || state.heygenOAuth.account?.name, state.heygenOAuth.account?.billingType].filter(Boolean).join(' · ') || 'Sesión OAuth activa'
-    : state.heygenOAuth.error || 'Usa tu plan web de HeyGen. El retorno OAuth funciona en localhost.';
-  if ($('#heygenOauthConnect')) $('#heygenOauthConnect').textContent = state.heygenOAuth.connected ? 'Reconectar' : 'Conectar HeyGen';
+    ? [state.heygenOAuth.account?.email || state.heygenOAuth.account?.name, state.heygenOAuth.account?.billingType].filter(Boolean).join(' · ') || tr('config.heygenOAuth.activeSession')
+    : state.heygenOAuth.error || tr('config.heygenOAuth.hint');
+  if ($('#heygenOauthConnect')) $('#heygenOauthConnect').textContent = tr(state.heygenOAuth.connected ? 'config.heygenOAuth.reconnect' : 'config.heygenOAuth.connect');
   if ($('#heygenOauthDisconnect')) $('#heygenOauthDisconnect').hidden = !state.heygenOAuth.connected;
   if (state.mode === 'video' && currentVideoModel()?.provider === 'heygen') renderVideoControls();
 }
@@ -10669,7 +10704,7 @@ $('#heygenOauthConnect').addEventListener('click', async () => {
   const popup = window.open('about:blank', 'manifestador-heygen-oauth', 'width=720,height=780');
   try {
     const result = await api('/api/heygen/oauth/start', { method: 'POST' });
-    if (!popup) throw new Error('El navegador bloqueó la ventana OAuth. Habilitá popups para localhost.');
+    if (!popup) throw new Error(tr('config.heygenOAuth.popupBlocked'));
     popup.location = result.url;
   } catch (error) {
     popup?.close(); toast(error.message, 'err');
@@ -10681,8 +10716,8 @@ $('#heygenOauthDisconnect').addEventListener('click', async () => {
 });
 window.addEventListener('message', async (event) => {
   if (event.origin !== location.origin || event.data?.type !== 'manifestador-heygen-oauth') return;
-  if (event.data.ok) { await loadHeyGenOAuthStatus(); toast('HeyGen conectado con OAuth'); }
-  else toast(event.data.detail || 'No se pudo conectar HeyGen', 'err');
+  if (event.data.ok) { await loadHeyGenOAuthStatus(); toast(tr('config.heygenOAuth.connectedToast')); }
+  else toast(event.data.detail || tr('config.heygenOAuth.failed'), 'err');
 });
 
 // Probar conexión: usa lo que haya en el formulario (aunque no esté guardado);
@@ -10694,7 +10729,7 @@ $$('.test-btn').forEach((btn) => {
     const out = $(`.test-result[data-result="${service}"]`);
     btn.disabled = true;
     out.className = 'test-result busy';
-    out.textContent = 'Probando…';
+    out.textContent = tr('config.testing');
     try {
       const body = service === 'comfyui'
         ? { service, comfyui: { host: f.comfyui_host.value.trim(), port: Number(f.comfyui_port.value) || undefined } }
@@ -10721,17 +10756,17 @@ $$('.test-btn').forEach((btn) => {
 $('#psDetectBtn').addEventListener('click', async () => {
   const btn = $('#psDetectBtn');
   btn.disabled = true;
-  btn.textContent = 'Buscando…';
+  btn.textContent = tr('config.photoshop.detecting');
   try {
     const r = await api('/api/photoshop/detect', { method: 'POST' });
     $('#configForm').photoshopPath.value = r.path;
     if (state.config) state.config.photoshopPath = r.path;
-    toast('Photoshop detectado y vinculado');
+    toast(tr('config.photoshop.detected'));
   } catch (e) {
     toast(e.message, 'err');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Detectar automáticamente';
+    btn.textContent = tr('config.photoshop.detect');
   }
 });
 
@@ -10743,13 +10778,13 @@ $('#configForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = e.target;
   if (f.accessPassword.value && f.accessPassword.value !== f.accessPasswordConfirm.value) {
-    return toast('Las claves de acceso no coinciden', 'err');
+    return toast(tr('config.access.passwordMismatch'), 'err');
   }
   try {
     const previousNsfwEnabled = Boolean(state.config?.nsfwEnabled);
     const previousLanguage = state.config?.language === 'en' ? 'en' : 'es';
     if (previousNsfwEnabled !== f.nsfwEnabled.checked && !f.nsfwAdminPassword.value) {
-      return toast('Ingresá la contraseña administrativa para cambiar el acceso NSFW.', 'err');
+      return toast(tr('config.content.adminPasswordRequired'), 'err');
     }
     state.config = await api('/api/config', {
       method: 'PUT',
@@ -10892,7 +10927,8 @@ init();
 // ---------------------------------------------------------------------------
 
 window.manifestadorBridge = {
-  api, toast, esc, fileUrl, addRef, IC, readFileAsDataUrl, goToCreate,
+  api, toast, esc, fileUrl, addRef, IC, readFileAsDataUrl, goToCreate, tr, trn,
+  localeTag: () => i18n.localeTag(),
   getState: () => state,
   setComfyPoseRef: (slot, key) => {
     state.comfyui.refs[slot] = key;

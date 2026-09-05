@@ -349,15 +349,15 @@
       <div class="poser-top">
         <div class="poser-models">
           <select id="poserModelSelect" class="select"></select>
-          <button id="poserRefreshModels" class="tool-btn" title="Volver a leer la carpeta de modelos"><svg class="ic"><use href="#i-refresh"/></svg> Releer carpeta</button>
+          <button id="poserRefreshModels" class="tool-btn" title="Volver a leer la carpeta de modelos" data-i18n-title="poser.refreshTitle"><svg class="ic"><use href="#i-refresh"/></svg> <span data-i18n="poser.refresh">Releer carpeta</span></button>
           <span id="poserStatus" class="hint"></span>
           <span id="poserFolderHint" class="hint"></span>
         </div>
         <div class="poser-capture-group">
-          <label class="poser-toggle" title="Guarda la captura en blanco y negro para que la IA la tome solo como referencia de pose, sin copiar colores ni ropa"><input type="checkbox" id="poserGray"> en grises</label>
-          <button id="poserCapture" class="generate-btn"><svg class="ic"><use href="#i-camera"/></svg> Capturar → Referencia</button>
-          <button id="poserCaptureComfyPose" class="mini-btn" title="Usa la captura como pose de ControlNet en la pestaña ComfyUI"><svg class="ic"><use href="#i-camera"/></svg> → Pose ControlNet (ComfyUI)</button>
-          <button id="poserCaptureComfyIp" class="mini-btn" title="Usa la captura como face de IP-Adapter en la pestaña ComfyUI"><svg class="ic"><use href="#i-camera"/></svg> → Face IP-Adapter (ComfyUI)</button>
+          <label class="poser-toggle" title="Guarda la captura en blanco y negro para que la IA la tome solo como referencia de pose, sin copiar colores ni ropa" data-i18n-title="poser.grayscaleHint"><input type="checkbox" id="poserGray"> <span data-i18n="poser.grayscale">en grises</span></label>
+          <button id="poserCapture" class="generate-btn"><svg class="ic"><use href="#i-camera"/></svg> <span data-i18n="poser.captureReference">Capturar → Referencia</span></button>
+          <button id="poserCaptureComfyPose" class="mini-btn" title="Usa la captura como pose de ControlNet en la pestaña ComfyUI" data-i18n-title="poser.captureControlNetHint"><svg class="ic"><use href="#i-camera"/></svg> → Pose ControlNet (ComfyUI)</button>
+          <button id="poserCaptureComfyIp" class="mini-btn" title="Usa la captura como face de IP-Adapter en la pestaña ComfyUI" data-i18n-title="poser.captureIpAdapterHint"><svg class="ic"><use href="#i-camera"/></svg> → Face IP-Adapter (ComfyUI)</button>
         </div>
       </div>
 
@@ -367,27 +367,27 @@
           <div id="poserBoneCtl" class="poser-bone-win" hidden>
             <div class="poser-bone-win-head" id="poserBoneWinHead">
               <span id="poserBoneName"></span>
-              <button id="poserBoneWinClose" class="icon-btn" title="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button>
+              <button id="poserBoneWinClose" class="icon-btn" title="Cerrar" data-i18n-title="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
             </div>
             <div class="poser-slider"><label>X</label><input type="range" id="poserRotX" min="-180" max="180" step="1" value="0"><span class="poser-deg">0°</span></div>
             <div class="poser-slider"><label>Y</label><input type="range" id="poserRotY" min="-180" max="180" step="1" value="0"><span class="poser-deg">0°</span></div>
             <div class="poser-slider"><label>Z</label><input type="range" id="poserRotZ" min="-180" max="180" step="1" value="0"><span class="poser-deg">0°</span></div>
             <div class="poser-row">
-              <input type="text" id="poserAliasInput" class="text-input" placeholder="Etiqueta (ej: Control Cuello)">
-              <button id="poserAliasSave" class="mini-btn" title="Guardar etiqueta para selección rápida"><svg class="ic"><use href="#i-save"/></svg></button>
+              <input type="text" id="poserAliasInput" class="text-input" placeholder="Etiqueta (ej: Control Cuello)" data-i18n-placeholder="poser.aliasPlaceholder">
+              <button id="poserAliasSave" class="mini-btn" title="Guardar etiqueta para selección rápida" data-i18n-title="poser.saveAlias"><svg class="ic"><use href="#i-save"/></svg></button>
             </div>
             <div class="poser-row">
               <select id="poserBodyPartSelect" class="select"></select>
-              <button id="poserBodyPartSave" class="mini-btn" title="Asignar este hueso a la parte del cuerpo elegida">Asignar</button>
+              <button id="poserBodyPartSave" class="mini-btn" title="Asignar este hueso a la parte del cuerpo elegida" data-i18n-title="poser.assignBoneHint" data-i18n="common.assign">Asignar</button>
             </div>
-            <button id="poserBoneReset" class="mini-btn">Resetear hueso</button>
+            <button id="poserBoneReset" class="mini-btn" data-i18n="poser.resetBone">Resetear hueso</button>
           </div>
         </div>
 
         <aside class="poser-side">
           <div class="poser-panel" data-panel="bodymap">
-            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> Mapa corporal</button></div>
-            <svg id="poserBodyMap" class="poser-bodymap" viewBox="0 0 100 155" aria-label="Mapa corporal">
+            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> <span data-i18n="poser.bodyMap">Mapa corporal</span></button></div>
+            <svg id="poserBodyMap" class="poser-bodymap" viewBox="0 0 100 155" aria-label="Mapa corporal" data-i18n-aria-label="poser.bodyMap">
               <rect class="poser-bodypart" data-part="abdomen" x="33" y="31" width="34" height="24" rx="9"><title>Abdomen</title></rect>
               <rect class="poser-bodypart" data-part="cintura" x="35" y="57" width="30" height="14" rx="6"><title>Cintura</title></rect>
               <rect class="poser-bodypart" data-part="brazo-derecho" x="17" y="41" width="9" height="28" rx="4"><title>Brazo derecho</title></rect>
@@ -405,49 +405,49 @@
               <rect class="poser-bodypart" data-part="pie-derecha" x="33" y="141" width="16" height="8" rx="4"><title>Pie derecha</title></rect>
               <rect class="poser-bodypart" data-part="pie-izquierda" x="51" y="141" width="16" height="8" rx="4"><title>Pie izquierda</title></rect>
             </svg>
-            <p class="hint">Vista frontal — la derecha/izquierda es la del personaje (queda invertida en pantalla). Seleccioná un hueso y asignalo desde su ventana; después con un clic acá lo volvés a seleccionar.</p>
+            <p class="hint" data-i18n="poser.bodyMapHint">Vista frontal — la derecha/izquierda es la del personaje. Seleccioná un hueso y asignalo desde su ventana; después podés volver a seleccionarlo acá.</p>
           </div>
 
           <div class="poser-panel" data-panel="camera">
-            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> Cámara</button></div>
-            <label class="poser-label">Lente <span id="poserFovLabel" class="hint"></span></label>
+            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> <span data-i18n="poser.camera">Cámara</span></button></div>
+            <label class="poser-label"><span data-i18n="poser.lens">Lente</span> <span id="poserFovLabel" class="hint"></span></label>
             <input type="range" id="poserFov" min="10" max="120" step="1" value="45">
             <div class="poser-row">
-              <button id="poserResetCam" class="mini-btn">Centrar cámara</button>
+              <button id="poserResetCam" class="mini-btn" data-i18n="poser.centerCamera">Centrar cámara</button>
               <select id="poserBg" class="select">
-                <option value="#17101f">Fondo oscuro</option>
-                <option value="#f2ecf7">Fondo claro</option>
-                <option value="#777777">Gris neutro</option>
-                <option value="#00b140">Chroma verde</option>
+                <option value="#17101f" data-i18n="poser.background.dark">Fondo oscuro</option>
+                <option value="#f2ecf7" data-i18n="poser.background.light">Fondo claro</option>
+                <option value="#777777" data-i18n="poser.background.gray">Gris neutro</option>
+                <option value="#00b140" data-i18n="poser.background.green">Chroma verde</option>
               </select>
             </div>
           </div>
 
           <div class="poser-panel" data-panel="parts">
-            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> Partes y ropa</button></div>
+            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> <span data-i18n="poser.partsAndClothes">Partes y ropa</span></button></div>
             <div id="poserPartsList" class="poser-parts"></div>
           </div>
 
           <div class="poser-panel" data-panel="bones">
-            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> Huesos</button> <label class="poser-toggle"><input type="checkbox" id="poserShowBones" checked> ver puntos</label></div>
+            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> <span data-i18n="poser.bones">Huesos</span></button> <label class="poser-toggle"><input type="checkbox" id="poserShowBones" checked> <span data-i18n="poser.showPoints">ver puntos</span></label></div>
             <div id="poserAliasChips" class="poser-chips" hidden></div>
-            <input type="text" id="poserBoneSearch" class="text-input" placeholder="Buscar hueso…">
-            <label class="poser-toggle"><input type="checkbox" id="poserOnlyTouched"> <span class="poser-touched">●</span> solo huesos modificados</label>
+            <input type="text" id="poserBoneSearch" class="text-input" placeholder="Buscar hueso…" data-i18n-placeholder="poser.searchBone">
+            <label class="poser-toggle"><input type="checkbox" id="poserOnlyTouched"> <span class="poser-touched">●</span> <span data-i18n="poser.modifiedOnly">solo huesos modificados</span></label>
             <div id="poserBoneList" class="poser-bone-list"></div>
             <div class="poser-row">
-              <button id="poserResetPose" class="mini-btn">Resetear pose</button>
-              <button id="poserImportPose" class="mini-btn">Importar .pose</button>
-              <button id="poserExportPose" class="mini-btn">Exportar .pose</button>
+              <button id="poserResetPose" class="mini-btn" data-i18n="poser.resetPose">Resetear pose</button>
+              <button id="poserImportPose" class="mini-btn" data-i18n="poser.importPose">Importar .pose</button>
+              <button id="poserExportPose" class="mini-btn" data-i18n="poser.exportPose">Exportar .pose</button>
             </div>
           </div>
 
           <div class="poser-panel" data-panel="scenes">
-            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> Escenas guardadas</button></div>
+            <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> <span data-i18n="poser.savedScenes">Escenas guardadas</span></button></div>
             <div class="poser-row">
-              <input id="poserSceneName" class="text-input" placeholder="Nombre">
-              <input id="poserSceneCategory" class="text-input" placeholder="Categoría">
+              <input id="poserSceneName" class="text-input" placeholder="Nombre" data-i18n-placeholder="common.name">
+              <input id="poserSceneCategory" class="text-input" placeholder="Categoría" data-i18n-placeholder="categories.category">
               <div id="poserCategoryChips" class="chips"></div>
-              <button id="poserSaveScene" class="mini-btn"><svg class="ic"><use href="#i-save"/></svg> Guardar</button>
+              <button id="poserSaveScene" class="mini-btn"><svg class="ic"><use href="#i-save"/></svg> <span data-i18n="common.save">Guardar</span></button>
             </div>
             <div id="poserSceneList" class="poser-scene-list"></div>
           </div>
@@ -645,8 +645,8 @@
     <!-- ==================== SUBTITULADOR ==================== -->
     <section id="view-subtitler" class="view">
       <div class="chars-head">
-        <div><h2>Subtitulador</h2><span class="hint">ElevenLabs Scribe v2 + Remotion · transcripción editable y subtítulos dinámicos</span></div>
-        <button type="button" id="subtitlerUpload" class="generate-btn small"><svg class="ic"><use href="#i-upload"/></svg> Subir video</button>
+        <div><h2 data-i18n="subtitler.title">Subtitulador</h2><span class="hint" data-i18n="subtitler.lead">ElevenLabs Scribe v2 + Remotion · transcripción editable y subtítulos dinámicos</span></div>
+        <button type="button" id="subtitlerUpload" class="generate-btn small"><svg class="ic"><use href="#i-upload"/></svg> <span data-i18n="subtitler.uploadVideo">Subir video</span></button>
       </div>
       <div id="subtitlerRoot"></div>
       <input type="file" id="subtitlerVideoInput" accept=".mp4,.mov,.m4v,.webm,video/mp4,video/quicktime,video/webm" hidden>
@@ -701,28 +701,28 @@
     <!-- ==================== CONSUMO ==================== -->
     <section id="view-costs" class="view">
       <div class="chars-head">
-        <h2>Consumo</h2>
-        <button id="btnRefreshPricing" class="generate-btn small"><svg class="ic"><use href="#i-search"/></svg> Actualizar precios con OpenAI</button>
+        <h2 data-i18n="costs.title">Consumo</h2>
+        <button id="btnRefreshPricing" class="generate-btn small"><svg class="ic"><use href="#i-search"/></svg> <span data-i18n="costs.refreshPrices">Actualizar precios con OpenAI</span></button>
       </div>
       <div id="costsSummary" class="costs-summary"></div>
       <div id="costProjectEstimate" class="costs-panel"></div>
       <div class="costs-grid">
         <div class="costs-panel">
-          <h3>Este mes por herramienta</h3>
+          <h3 data-i18n="costs.byTool">Este mes por herramienta</h3>
           <div id="costsByModel"></div>
         </div>
         <div class="costs-panel">
-          <h3>Histórico mensual</h3>
+          <h3 data-i18n="costs.monthlyHistory">Histórico mensual</h3>
           <div id="costsByMonth"></div>
         </div>
       </div>
       <div class="costs-panel">
-        <h3>Tarifas vigentes <span id="pricingUpdated" class="hint"></span></h3>
+        <h3><span data-i18n="costs.currentRates">Tarifas vigentes</span> <span id="pricingUpdated" class="hint"></span></h3>
         <div id="pricingTable"></div>
-        <button id="btnSavePricing" class="tool-btn" style="margin-top:10px"><svg class="ic"><use href="#i-save"/></svg> Guardar tarifas editadas</button>
+        <button id="btnSavePricing" class="tool-btn" style="margin-top:10px"><svg class="ic"><use href="#i-save"/></svg> <span data-i18n="costs.saveRates">Guardar tarifas editadas</span></button>
       </div>
       <div class="costs-panel">
-        <h3>Últimas operaciones</h3>
+        <h3 data-i18n="costs.latestOperations">Últimas operaciones</h3>
         <div id="costsLedger"></div>
       </div>
     </section>
@@ -741,150 +741,150 @@
           </label>
           <p class="hint" data-i18n="config.language.hint">El cambio se aplica al guardar y recarga la interfaz de forma segura. El contenido creado por vos no se traduce.</p>
         </section>
-        <h3>Contenido</h3>
-        <label class="check-row nsfw-setting"><input type="checkbox" name="nsfwEnabled"> Habilitar Contenido NSFW</label>
-        <label class="config-dark-field">Contraseña administrativa para cambiar esta opción
-          <span class="key-row"><input type="password" name="nsfwAdminPassword" autocomplete="current-password" placeholder="Obligatoria al activar o desactivar"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button></span>
+        <h3 data-i18n="config.content.title">Contenido</h3>
+        <label class="check-row nsfw-setting"><input type="checkbox" name="nsfwEnabled"> <span data-i18n="config.content.enableNsfw">Habilitar Contenido NSFW</span></label>
+        <label class="config-dark-field"><span data-i18n="config.content.adminPassword">Contraseña administrativa para cambiar esta opción</span>
+          <span class="key-row"><input type="password" name="nsfwAdminPassword" autocomplete="current-password" placeholder="Obligatoria al activar o desactivar" data-i18n-placeholder="config.content.adminPasswordPlaceholder"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button></span>
         </label>
-        <p class="hint">Cuando está desactivado, los assets, personajes, locaciones, objetos, prompts y LoRA marcados como NSFW no aparecen en bibliotecas ni selectores.</p>
-        <label class="check-row"><input type="checkbox" name="nsfwUploadDefault"> Marcar como NSFW por defecto lo nuevo</label>
-        <p class="hint">Se aplica a todo lo nuevo: lo que subís (precarga el casillero "Contenido NSFW" ya tildado, podés destildarlo por archivo) y también a lo que generás — imagen, video, audio, música y ComfyUI quedan marcados NSFW automáticamente al crearse.</p>
-        <h3>API Keys</h3>
+        <p class="hint" data-i18n="config.content.nsfwHiddenHint">Cuando está desactivado, los assets, personajes, locaciones, objetos, prompts y LoRA marcados como NSFW no aparecen en bibliotecas ni selectores.</p>
+        <label class="check-row"><input type="checkbox" name="nsfwUploadDefault"> <span data-i18n="config.content.nsfwDefault">Marcar como NSFW por defecto lo nuevo</span></label>
+        <p class="hint" data-i18n="config.content.nsfwDefaultHint">Se aplica a todo lo nuevo: lo que subís y también a lo que generás.</p>
+        <h3 data-i18n="config.apiKeys">API Keys</h3>
         <div class="cfg-grid">
           <label>Gemini (Google AI Studio)
-            <span class="key-row"><input type="password" name="key_gemini" placeholder="AIza…"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="gemini">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_gemini" placeholder="AIza…"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="gemini" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="gemini"></span>
           </label>
           <label>Google Cloud Translation
-            <span class="key-row"><input type="password" name="key_googleTranslate" placeholder="API key de Google Cloud"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="googleTranslate">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_googleTranslate" placeholder="API key de Google Cloud"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="googleTranslate" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="googleTranslate"></span>
           </label>
           <label>BytePlus ModelArk (Seedream)
-            <span class="key-row"><input type="password" name="key_ark" placeholder="key de Ark"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="ark">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_ark" placeholder="key de Ark"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="ark" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="ark"></span>
           </label>
           <label>WaveSpeed (FireRed)
-            <span class="key-row"><input type="password" name="key_wavespeed" placeholder="key de WaveSpeed"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="wavespeed">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_wavespeed" placeholder="key de WaveSpeed"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="wavespeed" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="wavespeed"></span>
           </label>
           <label>MiniMax H3
-            <span class="key-row"><input type="password" name="key_minimax" placeholder="API key de MiniMax"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="minimax">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_minimax" placeholder="API key de MiniMax"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="minimax" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="minimax"></span>
           </label>
           <label>ElevenLabs
-            <span class="key-row"><input type="password" name="key_elevenlabs" placeholder="xi-…"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="elevenlabs">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_elevenlabs" placeholder="xi-…"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="elevenlabs" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="elevenlabs"></span>
           </label>
-          <label>OpenAI (actualiza precios)
-            <span class="key-row"><input type="password" name="key_openai" placeholder="sk-…"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="openai">Probar</button></span>
+          <label><span data-i18n="config.openaiPricing">OpenAI (actualiza precios)</span>
+            <span class="key-row"><input type="password" name="key_openai" placeholder="sk-…"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="openai" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="openai"></span>
           </label>
-          <label>Suno (música)
-            <span class="key-row"><input type="password" name="key_suno" placeholder="key del proveedor de Suno"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="suno">Probar</button></span>
+          <label><span data-i18n="config.sunoMusic">Suno (música)</span>
+            <span class="key-row"><input type="password" name="key_suno" placeholder="key del proveedor de Suno"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="suno" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="suno"></span>
           </label>
           <label>HeyGen API
-            <span class="key-row"><input type="password" name="key_heygen" placeholder="API key de HeyGen"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="heygen">Probar</button></span>
+            <span class="key-row"><input type="password" name="key_heygen" placeholder="API key de HeyGen"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="heygen" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="heygen"></span>
           </label>
         </div>
-        <h3>HeyGen OAuth</h3>
+        <h3 data-i18n="config.heygenOAuth.title">HeyGen OAuth</h3>
         <div class="oauth-card">
-          <div><strong id="heygenOauthTitle">Sin conectar</strong><p id="heygenOauthStatus" class="hint">Usa tu plan web de HeyGen. El retorno OAuth funciona en localhost.</p></div>
-          <button type="button" id="heygenOauthConnect" class="tool-btn">Conectar HeyGen</button>
-          <button type="button" id="heygenOauthDisconnect" class="mini-btn danger" hidden>Desconectar</button>
+          <div><strong id="heygenOauthTitle" data-i18n="config.heygenOAuth.disconnected">Sin conectar</strong><p id="heygenOauthStatus" class="hint" data-i18n="config.heygenOAuth.hint">Usa tu plan web de HeyGen. El retorno OAuth funciona en localhost.</p></div>
+          <button type="button" id="heygenOauthConnect" class="tool-btn" data-i18n="config.heygenOAuth.connect">Conectar HeyGen</button>
+          <button type="button" id="heygenOauthDisconnect" class="mini-btn danger" hidden data-i18n="config.heygenOAuth.disconnect">Desconectar</button>
         </div>
-        <h3>Carpetas</h3>
+        <h3 data-i18n="config.folders.title">Carpetas</h3>
         <div class="cfg-grid">
-          <label>Imágenes generadas <input type="text" name="path_generated"></label>
-          <label>Imágenes subidas <input type="text" name="path_uploads"></label>
-          <label>Audio generado <input type="text" name="path_audio"></label>
-          <label>Videos generados <input type="text" name="path_video"></label>
+          <label><span data-i18n="config.folders.generatedImages">Imágenes generadas</span> <input type="text" name="path_generated"></label>
+          <label><span data-i18n="config.folders.uploadedImages">Imágenes subidas</span> <input type="text" name="path_uploads"></label>
+          <label><span data-i18n="config.folders.generatedAudio">Audio generado</span> <input type="text" name="path_audio"></label>
+          <label><span data-i18n="config.folders.generatedVideos">Videos generados</span> <input type="text" name="path_video"></label>
         </div>
-        <p class="hint">Rutas relativas a la carpeta de la app o absolutas (ej: <code>D:\fotos\manifestador</code>).</p>
+        <p class="hint"><span data-i18n="config.folders.hint">Rutas relativas a la carpeta de la app o absolutas</span> (<span data-i18n="common.exampleShort">ej</span>: <code>D:\fotos\manifestador</code>).</p>
         <h3>Photoshop</h3>
         <div class="cfg-grid">
-          <label>Ruta de Photoshop.exe <input type="text" name="photoshopPath" placeholder="C:\Program Files\Adobe\Adobe Photoshop 2025\Photoshop.exe"></label>
+          <label><span data-i18n="config.photoshop.path">Ruta de Photoshop.exe</span> <input type="text" name="photoshopPath" placeholder="C:\Program Files\Adobe\Adobe Photoshop 2025\Photoshop.exe"></label>
         </div>
-        <p class="hint"><button type="button" id="psDetectBtn" class="mini-btn">Detectar automáticamente</button> Busca tu instalación (registro de Windows y carpetas de Adobe) y la vincula. Si no la encuentra, pegá la ruta a mano.</p>
+        <p class="hint"><button type="button" id="psDetectBtn" class="mini-btn" data-i18n="config.photoshop.detect">Detectar automáticamente</button> <span data-i18n="config.photoshop.hint">Busca tu instalación (registro de Windows y carpetas de Adobe) y la vincula. Si no la encuentra, pegá la ruta a mano.</span></p>
 
         <h3>ffmpeg</h3>
         <div class="cfg-grid">
-          <label>Ruta de FFmpeg <input type="text" name="ffmpegPath" placeholder="C:\ffmpeg\bin o C:\ffmpeg\bin\ffmpeg.exe"></label>
+          <label><span data-i18n="config.ffmpeg.path">Ruta de FFmpeg</span> <input type="text" name="ffmpegPath" placeholder="C:\ffmpeg\bin o C:\ffmpeg\bin\ffmpeg.exe"></label>
         </div>
-        <p class="hint">El Automatizador lo usa para armar el video mp4 de cada bloque (imagen + audio). Podés pegar la carpeta bin o la ruta completa a ffmpeg.exe.</p>
+        <p class="hint" data-i18n="config.ffmpeg.hint">El Automatizador lo usa para armar el video mp4 de cada bloque (imagen + audio). Podés pegar la carpeta bin o la ruta completa a ffmpeg.exe.</p>
 
         <h3>ComfyUI</h3>
         <div class="cfg-grid">
           <label>Host <input type="text" name="comfyui_host" placeholder="127.0.0.1"></label>
-          <label>Puerto <input type="number" name="comfyui_port" placeholder="8188"></label>
+          <label><span data-i18n="config.comfy.port">Puerto</span> <input type="number" name="comfyui_port" placeholder="8188"></label>
         </div>
         <p class="hint">
-          <button type="button" class="tool-btn test-btn" data-service="comfyui">Probar</button>
+          <button type="button" class="tool-btn test-btn" data-service="comfyui" data-i18n="config.test">Probar</button>
           <span class="test-result" data-result="comfyui"></span>
         </p>
 
-        <h4>Workflows</h4>
-        <p class="hint">Exportá cada workflow desde ComfyUI con "Save (API Format)" y armalo con los nodos Tuzzi (Prompt, Referencia, Pose ControlNet/IP-Adapter, Resolución, Salida). Necesitás al menos un nodo Tuzzi de salida; los demás son opcionales — si el grafo los necesita y faltan, la corrida falla del lado de ComfyUI.</p>
+        <h4 data-i18n="config.comfy.workflows">Workflows</h4>
+        <p class="hint" data-i18n="config.comfy.workflowHint">Exportá cada workflow desde ComfyUI con "Save (API Format)" y armalo con los nodos Tuzzi. Necesitás al menos un nodo Tuzzi de salida.</p>
         <div id="comfyWorkflowsList" class="comfy-workflows-list"></div>
-        <button type="button" id="btnAddComfyWorkflow" class="mini-btn"><svg class="ic"><use href="#i-plus"/></svg> Agregar workflow</button>
+        <button type="button" id="btnAddComfyWorkflow" class="mini-btn"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="config.comfy.addWorkflow">Agregar workflow</span></button>
         <div id="comfyWorkflowFormRow" class="cfg-grid" hidden>
-          <label>Nombre <input type="text" id="comfyWorkflowFormName" maxlength="100" placeholder="ej: SDXL retratos"></label>
-          <label>Descripción <input type="text" id="comfyWorkflowFormDesc" maxlength="500" placeholder="para qué sirve este workflow"></label>
-          <label>Ruta / URL del archivo <input type="text" id="comfyWorkflowFormPath" placeholder="C:\ComfyUI\workflows\mi-flujo-api.json"></label>
+          <label><span data-i18n="common.name">Nombre</span> <input type="text" id="comfyWorkflowFormName" maxlength="100" placeholder="ej: SDXL retratos" data-i18n-placeholder="config.comfy.namePlaceholder"></label>
+          <label><span data-i18n="common.description">Descripción</span> <input type="text" id="comfyWorkflowFormDesc" maxlength="500" placeholder="para qué sirve este workflow" data-i18n-placeholder="config.comfy.descriptionPlaceholder"></label>
+          <label><span data-i18n="config.comfy.filePath">Ruta / URL del archivo</span> <input type="text" id="comfyWorkflowFormPath" placeholder="C:\ComfyUI\workflows\mi-flujo-api.json"></label>
         </div>
         <div id="comfyWorkflowCvFormRow" class="comfy-cv-form" hidden>
-          <p class="hint">Valores personalizados (nodo "Valores Personalizados" del workflow): activá los que uses y ponéles un título — van a aparecer como campo numérico en la pestaña ComfyUI.</p>
+          <p class="hint" data-i18n="config.comfy.customValuesHint">Valores personalizados: activá los que uses y ponéles un título; van a aparecer como campo numérico en la pestaña ComfyUI.</p>
           <div class="comfy-cv-form-rows" id="comfyWorkflowCvRows"></div>
         </div>
         <div id="comfyWorkflowReqRefsRow" class="comfy-cv-form" hidden>
-          <p class="hint">Referencias obligatorias: si las activás, Manifestador no deja generar con este workflow hasta que elijas esa referencia.</p>
-          <label class="poser-toggle"><input type="checkbox" id="comfyWorkflowReqReference"> Referencia obligatoria</label>
-          <label class="poser-toggle"><input type="checkbox" id="comfyWorkflowReqPoseControlNet"> Pose (ControlNet) obligatoria</label>
-          <label class="poser-toggle"><input type="checkbox" id="comfyWorkflowReqPoseIpAdapter"> Face (IP-Adapter) obligatoria</label>
+          <p class="hint" data-i18n="config.comfy.requiredReferencesHint">Referencias obligatorias: si las activás, Manifestador no deja generar con este workflow hasta que elijas esa referencia.</p>
+          <label class="poser-toggle"><input type="checkbox" id="comfyWorkflowReqReference"> <span data-i18n="config.comfy.referenceRequired">Referencia obligatoria</span></label>
+          <label class="poser-toggle"><input type="checkbox" id="comfyWorkflowReqPoseControlNet"> <span data-i18n="config.comfy.controlNetRequired">Pose (ControlNet) obligatoria</span></label>
+          <label class="poser-toggle"><input type="checkbox" id="comfyWorkflowReqPoseIpAdapter"> <span data-i18n="config.comfy.ipAdapterRequired">Face (IP-Adapter) obligatoria</span></label>
         </div>
         <p id="comfyWorkflowFormActions" class="hint" hidden>
-          <button type="button" id="comfyWorkflowFormSave" class="mini-btn accent">Guardar</button>
-          <button type="button" id="comfyWorkflowFormCancel" class="mini-btn">Cancelar</button>
+          <button type="button" id="comfyWorkflowFormSave" class="mini-btn accent" data-i18n="common.save">Guardar</button>
+          <button type="button" id="comfyWorkflowFormCancel" class="mini-btn" data-i18n="common.cancel">Cancelar</button>
         </p>
 
-        <h3>Prompt de pose (Poser)</h3>
+        <h3 data-i18n="config.poserPrompt.title">Prompt de pose (Poser)</h3>
         <textarea name="poserPrompt" class="cfg-textarea" rows="4" spellcheck="false"></textarea>
-        <p class="hint">Se envía junto a tu prompt (sin mostrarse en la caja) cada vez que una referencia viene del Poser, para que la IA copie solo la pose y el encuadre. Dejalo vacío para desactivarlo. <button type="button" id="poserPromptDefaultBtn" class="mini-btn">Restaurar texto por defecto</button></p>
+        <p class="hint"><span data-i18n="config.poserPrompt.hint">Se envía junto a tu prompt cada vez que una referencia viene del Poser, para que la IA copie solo la pose y el encuadre. Dejalo vacío para desactivarlo.</span> <button type="button" id="poserPromptDefaultBtn" class="mini-btn" data-i18n="config.poserPrompt.restore">Restaurar texto por defecto</button></p>
 
-        <h3>Emociones y expresiones de audio</h3>
+        <h3 data-i18n="config.audioExpressions.title">Emociones y expresiones de audio</h3>
         <div class="audio-tags-manager">
-          <p class="hint">Las expresiones nativas vienen con ElevenLabs. Las tuyas aparecen después y podés borrarlas con ×.</p>
+          <p class="hint" data-i18n="config.audioExpressions.hint">Las expresiones nativas vienen con ElevenLabs. Las tuyas aparecen después y podés borrarlas con ×.</p>
           <div id="configAudioTags" class="config-audio-tags"></div>
           <div class="audio-tag-add">
-            <input id="newAudioTag" type="text" maxlength="60" placeholder="ej: con ternura">
-            <button id="btnAddAudioTag" type="button" class="tool-btn">Añadir expresión</button>
+            <input id="newAudioTag" type="text" maxlength="60" placeholder="ej: con ternura" data-i18n-placeholder="config.audioExpressions.placeholder">
+            <button id="btnAddAudioTag" type="button" class="tool-btn" data-i18n="config.audioExpressions.add">Añadir expresión</button>
           </div>
         </div>
-        <h3>Acceso</h3>
+        <h3 data-i18n="config.access.title">Acceso</h3>
         <div class="cfg-grid">
-          <label>Nueva clave de acceso
-            <span class="key-row"><input type="password" name="accessPassword" minlength="6" autocomplete="new-password" placeholder="Dejar vacío para conservar la actual"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button></span>
+          <label><span data-i18n="config.access.newPassword">Nueva clave de acceso</span>
+            <span class="key-row"><input type="password" name="accessPassword" minlength="6" autocomplete="new-password" placeholder="Dejar vacío para conservar la actual" data-i18n-placeholder="config.access.keepCurrent"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button></span>
           </label>
-          <label>Repetir nueva clave
-            <span class="key-row"><input type="password" name="accessPasswordConfirm" minlength="6" autocomplete="new-password"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button></span>
+          <label><span data-i18n="config.access.repeatPassword">Repetir nueva clave</span>
+            <span class="key-row"><input type="password" name="accessPasswordConfirm" minlength="6" autocomplete="new-password"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button></span>
           </label>
         </div>
         <p id="accessStatus" class="hint"></p>
-        <h3>Avanzado</h3>
+        <h3 data-i18n="config.advanced.title">Avanzado</h3>
         <div class="cfg-grid">
-          <label>ID de Seedream 5.0 Pro <input type="text" name="seedreamProModelId" placeholder="dola-seedream-5-0-pro-260628"></label>
-          <label>ID de Seedream 5.0 Lite <input type="text" name="seedreamModelId"></label>
-          <label>ID de FireRed <input type="text" name="fireRedModelId" placeholder="wavespeed-ai/firered-image-v1.1/edit"></label>
-          <label>ID de modelo Seedance 2.5 <input type="text" name="seedance25ModelId" placeholder="dreamina-seedance-2-5-260628"></label>
-          <label>ID de modelo Seedance 2.0 <input type="text" name="seedanceModelId" placeholder="dreamina-seedance-2-0"></label>
-          <label>ID de modelo Seedance 2.0 Mini <input type="text" name="seedanceMiniModelId" placeholder="dreamina-seedance-2-0-mini-260615"></label>
+          <label><span data-i18n="config.advanced.seedreamProId">ID de Seedream 5.0 Pro</span> <input type="text" name="seedreamProModelId" placeholder="dola-seedream-5-0-pro-260628"></label>
+          <label><span data-i18n="config.advanced.seedreamLiteId">ID de Seedream 5.0 Lite</span> <input type="text" name="seedreamModelId"></label>
+          <label><span data-i18n="config.advanced.fireRedId">ID de FireRed</span> <input type="text" name="fireRedModelId" placeholder="wavespeed-ai/firered-image-v1.1/edit"></label>
+          <label><span data-i18n="config.advanced.seedance25Id">ID de modelo Seedance 2.5</span> <input type="text" name="seedance25ModelId" placeholder="dreamina-seedance-2-5-260628"></label>
+          <label><span data-i18n="config.advanced.seedance20Id">ID de modelo Seedance 2.0</span> <input type="text" name="seedanceModelId" placeholder="dreamina-seedance-2-0"></label>
+          <label><span data-i18n="config.advanced.seedanceMiniId">ID de modelo Seedance 2.0 Mini</span> <input type="text" name="seedanceMiniModelId" placeholder="dreamina-seedance-2-0-mini-260615"></label>
           <label>Endpoint Ark <input type="text" name="endpoint_ark"></label>
           <label>Endpoint WaveSpeed <input type="text" name="endpoint_wavespeed" placeholder="https://api.wavespeed.ai/api/v3"></label>
           <label>Endpoint MiniMax <input type="text" name="endpoint_minimax" placeholder="https://api.minimax.io"></label>
           <label>Endpoint Suno <input type="text" name="endpoint_suno" placeholder="https://api.sunoapi.org"></label>
-          <label>Modelo Suno por defecto <input type="text" name="sunoModelId" placeholder="V5_5"></label>
-          <label>Modelo de OpenAI (precios) <input type="text" name="openaiModel" placeholder="gpt-5-mini"></label>
+          <label><span data-i18n="config.advanced.defaultSunoModel">Modelo Suno por defecto</span> <input type="text" name="sunoModelId" placeholder="V5_5"></label>
+          <label><span data-i18n="config.advanced.openaiPricingModel">Modelo de OpenAI (precios)</span> <input type="text" name="openaiModel" placeholder="gpt-5-mini"></label>
         </div>
         <button type="submit" class="generate-btn" data-i18n="config.save">Guardar configuración</button>
       </form>

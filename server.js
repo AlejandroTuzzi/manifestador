@@ -1923,6 +1923,10 @@ function send(res, status, body, headers = {}) {
   res.end(data);
 }
 
+function sendError(res, status, code, error, details = {}) {
+  return send(res, status, { code, details, error });
+}
+
 function readBody(req, limit = 150 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -4341,7 +4345,7 @@ const server = http.createServer(async (req, res) => {
     if (subtitlerOpenMatch && req.method === 'POST') {
       const store = normalizeSubtitlerStore(await readJson('subtitler.json', DEFAULT_SUBTITLER_STORE));
       const id = subtitlerOpenMatch[1];
-      if (!store.projects.some((project) => project.id === id)) return send(res, 404, { error: 'Proyecto de subtítulos no encontrado.' });
+      if (!store.projects.some((project) => project.id === id)) return sendError(res, 404, 'subtitlerProjectNotFound', 'Proyecto de subtítulos no encontrado.');
       const nextStore = { ...store, activeProjectId: id };
       await writeJson('subtitler.json', nextStore);
       return send(res, 200, subtitlerForClient(nextStore));
@@ -4350,7 +4354,7 @@ const server = http.createServer(async (req, res) => {
     if (subtitlerDeleteMatch && req.method === 'DELETE') {
       const store = normalizeSubtitlerStore(await readJson('subtitler.json', DEFAULT_SUBTITLER_STORE));
       const id = subtitlerDeleteMatch[1];
-      if (!store.projects.some((project) => project.id === id)) return send(res, 404, { error: 'Proyecto de subtítulos no encontrado.' });
+      if (!store.projects.some((project) => project.id === id)) return sendError(res, 404, 'subtitlerProjectNotFound', 'Proyecto de subtítulos no encontrado.');
       let projects = store.projects.filter((project) => project.id !== id);
       if (!projects.length) {
         const now = Date.now();
@@ -4387,14 +4391,14 @@ const server = http.createServer(async (req, res) => {
       const previous = activeSubtitlerProject(store, body.projectId);
       const sourceVideoKey = String(body.sourceVideoKey || previous.sourceVideoKey || '');
       if (!/^video\//.test(sourceVideoKey) || sourceVideoKey.includes('..')) {
-        return send(res, 400, { error: 'Elegí o subí un video antes de transcribir.' });
+        return sendError(res, 400, 'subtitlerSourceRequiredForTranscription', 'Elegí o subí un video antes de transcribir.');
       }
       const cfg = await getConfig();
-      if (!cfg.keys.elevenlabs) return send(res, 400, { error: 'Falta la API key de ElevenLabs en Configuración.' });
+      if (!cfg.keys.elevenlabs) return sendError(res, 400, 'elevenLabsKeyMissing', 'Falta la API key de ElevenLabs en Configuración.');
       const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
       const sourcePath = await resolveAssetKey(sourceVideoKey);
       if (!(await probeHasAudioStream(ffmpegExecutable, sourcePath))) {
-        return send(res, 400, { error: 'El video no contiene una pista de audio para transcribir.' });
+        return sendError(res, 400, 'subtitlerAudioTrackMissing', 'El video no contiene una pista de audio para transcribir.');
       }
       const duration = await probeMediaDuration(ffmpegExecutable, sourcePath);
       const outDir = resolveDir(cfg.paths.video);
@@ -4415,7 +4419,7 @@ const server = http.createServer(async (req, res) => {
         await fs.unlink(tempAudioPath).catch(() => {});
       }
       const lines = subtitleLinesFromScribe(transcription?.words || []);
-      if (!lines.length) return send(res, 422, { error: 'ElevenLabs no detectó palabras con marcas temporales en este video.' });
+      if (!lines.length) return sendError(res, 422, 'subtitlerTimedWordsMissing', 'ElevenLabs no detectó palabras con marcas temporales en este video.');
       const sourceName = path.basename(sourceVideoKey);
       const next = normalizeSubtitlerProject({
         ...previous,
@@ -4448,16 +4452,16 @@ const server = http.createServer(async (req, res) => {
         config: { ...previous.config, ...(body.config || {}) },
         outputs: previous.outputs
       });
-      if (!draft.sourceVideoKey) return send(res, 400, { error: 'Elegí o subí un video.' });
-      if (!draft.lines.length) return send(res, 400, { error: 'Primero transcribí el video y revisá sus líneas.' });
+      if (!draft.sourceVideoKey) return sendError(res, 400, 'subtitlerSourceRequired', 'Elegí o subí un video.');
+      if (!draft.lines.length) return sendError(res, 400, 'subtitlerTranscriptRequired', 'Primero transcribí el video y revisá sus líneas.');
       const words = subtitleWordsFromLines(draft.lines);
-      if (!words.length) return send(res, 400, { error: 'No quedaron palabras para subtitular.' });
+      if (!words.length) return sendError(res, 400, 'subtitlerWordsMissing', 'No quedaron palabras para subtitular.');
       const cfg = await getConfig();
       const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
       const sourcePath = await resolveAssetKey(draft.sourceVideoKey);
       const dimensions = await probeVideoDimensions(ffmpegExecutable, sourcePath);
       const duration = await probeMediaDuration(ffmpegExecutable, sourcePath);
-      if (!dimensions || !duration) return send(res, 400, { error: 'No pude leer las dimensiones o duración del video.' });
+      if (!dimensions || !duration) return sendError(res, 400, 'subtitlerVideoMetadataUnreadable', 'No pude leer las dimensiones o duración del video.');
       const width = Math.max(2, Math.floor(dimensions.width / 2) * 2);
       const height = Math.max(2, Math.floor(dimensions.height / 2) * 2);
       const outDir = resolveDir(cfg.paths.video);
@@ -4501,16 +4505,16 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/config' && req.method === 'PUT') {
       const body = await readJsonBody(req);
       if (body.accessPassword && String(body.accessPassword).length < 6) {
-        return send(res, 400, { error: 'La clave debe tener al menos 6 caracteres.' });
+        return sendError(res, 400, 'accessPasswordTooShort', 'La clave debe tener al menos 6 caracteres.');
       }
       const cfg = await getConfig();
       const nsfwChanging = body.nsfwEnabled !== undefined && Boolean(body.nsfwEnabled) !== Boolean(cfg.nsfwEnabled);
       if (nsfwChanging) {
         if (!cfg.accessPasswordHash) {
-          return send(res, 400, { error: 'Primero configurá una contraseña administrativa en Acceso.' });
+          return sendError(res, 400, 'adminPasswordNotConfigured', 'Primero configurá una contraseña administrativa en Acceso.');
         }
         if (!verifyPassword(String(body.nsfwAdminPassword || ''), cfg.accessPasswordHash)) {
-          return send(res, 403, { error: 'Contraseña administrativa incorrecta.' });
+          return sendError(res, 403, 'adminPasswordIncorrect', 'Contraseña administrativa incorrecta.');
         }
       }
       const next = {
@@ -5102,10 +5106,10 @@ const server = http.createServer(async (req, res) => {
     if (automationFinalizeMatch && ['GET', 'POST'].includes(req.method)) {
       const projectId = automationFinalizeMatch[1];
       if (automationAssemblyJobs.has(projectId)) {
-        return send(res, 409, { error: 'El proyecto todavía se está ensamblando. Esperá a que termine antes de finalizarlo.' });
+        return sendError(res, 409, 'automationAssemblyInProgress', 'El proyecto todavía se está ensamblando. Esperá a que termine antes de finalizarlo.');
       }
       const plan = await automationCleanupPlan(projectId);
-      if (!plan) return send(res, 404, { error: 'Proyecto no encontrado.' });
+      if (!plan) return sendError(res, 404, 'automationProjectNotFound', 'Proyecto no encontrado.');
       const summary = {
         generatedCount: plan.candidates.length,
         deleteCount: plan.deletable.length,
@@ -5197,7 +5201,7 @@ const server = http.createServer(async (req, res) => {
       const [projectId, action] = [automationMusicMatch[1], automationMusicMatch[2]];
       const projects = await readJson('automations.json', []);
       const project = projects.find((item) => item.id === projectId);
-      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
+      if (!project) return sendError(res, 404, 'automationProjectNotFound', 'Proyecto no encontrado.');
       const requested = await readJsonBody(req);
       const music = normalizeAutomationMusic({ ...project.config?.music, ...requested }, project.requirements?.music);
 
@@ -5205,7 +5209,7 @@ const server = http.createServer(async (req, res) => {
       let entry = null;
       if (action === 'auto-select') {
         selected = await findAutomaticMusicTrack(music);
-        if (!selected) return send(res, 400, { error: 'No hay músicas clasificadas en Assets. Subí o generá una primero.' });
+        if (!selected) return sendError(res, 400, 'automationNoMusicAssets', 'No hay músicas clasificadas en Assets. Subí o generá una primero.');
       } else {
         const styleParts = [
           'Instrumental background score designed to support spoken narration without overpowering voices',
@@ -5263,38 +5267,38 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const projects = await readJson('automations.json', []);
       const project = projects.find((item) => item.id === projectId);
-      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
+      if (!project) return sendError(res, 404, 'automationProjectNotFound', 'Proyecto no encontrado.');
       const block = project.blocks?.find((item) => item.id === String(body.blockId || ''));
-      if (!block) return send(res, 404, { error: 'Bloque no encontrado.' });
-      if (block.generator !== 'heygen') return send(res, 400, { error: 'Este bloque no está configurado para HeyGen.' });
+      if (!block) return sendError(res, 404, 'automationBlockNotFound', 'Bloque no encontrado.');
+      if (block.generator !== 'heygen') return sendError(res, 400, 'automationBlockNotHeygen', 'Este bloque no está configurado para HeyGen.');
       const characters = await readJson('characters.json', []);
       const requestedCharacterId = String(body.characterId || '');
       if (requestedCharacterId && requestedCharacterId !== block.heygenCharacterId) {
-        return send(res, 400, { error: 'El personaje no coincide con la variante HeyGen guardada en el bloque.' });
+        return sendError(res, 400, 'heygenCharacterMismatch', 'El personaje no coincide con la variante HeyGen guardada en el bloque.');
       }
       const character = characters.find((item) => item.id === String(block.heygenCharacterId || ''));
-      if (!character) return send(res, 404, { error: 'Personaje HeyGen no encontrado.' });
+      if (!character) return sendError(res, 404, 'heygenCharacterNotFound', 'Personaje HeyGen no encontrado.');
       const wideAvatarId = String(character.heygen?.wideAvatarId || character.heygen?.avatarId || '').trim();
       const closeAvatarId = String(character.heygen?.closeAvatarId || '').trim();
-      if (!wideAvatarId) return send(res, 400, { error: 'La variante HeyGen necesita el código de plano general.' });
+      if (!wideAvatarId) return sendError(res, 400, 'heygenWideAvatarMissing', 'La variante HeyGen necesita el código de plano general.');
 
       const framing = ['wide', 'close', 'split'].includes(body.framing) ? body.framing : 'wide';
-      if (['close', 'split'].includes(framing) && !closeAvatarId) return send(res, 400, { error: 'Falta el código HeyGen de primer plano.' });
+      if (['close', 'split'].includes(framing) && !closeAvatarId) return sendError(res, 400, 'heygenCloseAvatarMissing', 'Falta el código HeyGen de primer plano.');
       const rawGroups = Array.isArray(body.audioGroups) ? body.audioGroups : [];
       const audioGroups = rawGroups.map((group) => (Array.isArray(group) ? group : []).map(String).filter((key) => /^audio\//.test(key))).filter((group) => group.length);
       const expectedGroups = framing === 'split' ? 2 : 1;
-      if (audioGroups.length !== expectedGroups) return send(res, 400, { error: `HeyGen necesita ${expectedGroups} grupo(s) de audio para este encuadre.` });
+      if (audioGroups.length !== expectedGroups) return sendError(res, 400, 'heygenAudioGroupCount', `HeyGen necesita ${expectedGroups} grupo(s) de audio para este encuadre.`, { count: expectedGroups });
       const requestedSegmentIndex = body.regenerateSegmentIndex === undefined ? -1 : Number(body.regenerateSegmentIndex);
       const regenerateSegmentIndex = framing === 'split' && [0, 1].includes(requestedSegmentIndex) ? requestedSegmentIndex : -1;
       if (body.regenerateSegmentIndex !== undefined && regenerateSegmentIndex < 0) {
-        return send(res, 400, { error: 'Sólo se puede regenerar un plano individual en una toma HeyGen de dos planos.' });
+        return sendError(res, 400, 'heygenSinglePlaneOnly', 'Sólo se puede regenerar un plano individual en una toma HeyGen de dos planos.');
       }
 
       const cfg = await getConfig();
       const authMode = project.config?.heygenAuthMode === 'oauth' ? 'oauth' : 'key';
       const apiKey = String(cfg.keys.heygen || '').trim();
       const oauth = authMode === 'oauth' ? await getHeyGenOAuth() : null;
-      if (authMode === 'key' && !apiKey) return send(res, 400, { error: 'Falta la API key de HeyGen en Configuración.' });
+      if (authMode === 'key' && !apiKey) return sendError(res, 400, 'heygenApiKeyMissing', 'Falta la API key de HeyGen en Configuración.');
       const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
       const outDir = resolveDir(cfg.paths.video);
       await fs.mkdir(outDir, { recursive: true });
@@ -5374,7 +5378,7 @@ const server = http.createServer(async (req, res) => {
           clipResults[index] = { key, videoId: '', duration: 0, cost: 0, reused: true };
         }
         if (regenerateSegmentIndex >= 0 && !clipResults[regenerateSegmentIndex === 0 ? 1 : 0]) {
-          return send(res, 400, { error: 'No encuentro el otro plano guardado. Usá Continuar para reconstruir la toma completa.' });
+          return sendError(res, 400, 'heygenOtherPlaneMissing', 'No encuentro el otro plano guardado. Usá Continuar para reconstruir la toma completa.');
         }
         for (let index = 0; index < preparedAudioPaths.length; index++) {
           if (clipResults[index]) continue;
