@@ -1912,9 +1912,101 @@ function badRequest(message) {
   return new HttpError(400, message);
 }
 
+// LOCALIZED_SERVER_ERRORS_START
+// Compatibilidad para validaciones anteriores a sendError(): send() adjunta un
+// código estable sin perder el mensaje original que sigue sirviendo de fallback.
+const SERVER_ERROR_CODE_BY_MESSAGE = new Map([
+  ['Abrí Manifestador con localhost o 127.0.0.1 para conectar HeyGen OAuth.', 'heygenOAuthUseLocalhost'],
+  ['Acceso bloqueado', 'accessBlocked'],
+  ['Bloque no encontrado.', 'automationBlockNotFound'],
+  ['Clave incorrecta', 'accessPasswordIncorrect'],
+  ['Configurá la ruta de Photoshop en Configuración (o usá "Detectar").', 'photoshopPathRequired'],
+  ['El archivo no parece contener una fuente válida.', 'fontFileInvalid'],
+  ['El ensamble final no es un video válido.', 'automationFinalVideoInvalid'],
+  ['El orden no coincide con las fotos', 'photoOrderMismatch'],
+  ['El proyecto fue eliminado durante el ensamble.', 'automationDeletedDuringAssembly'],
+  ['El proyecto fue eliminado durante la posproducción.', 'automationDeletedDuringPostProduction'],
+  ['El proyecto no tiene bloques para ensamblar.', 'automationNoBlocksToAssemble'],
+  ['El proyecto no tiene tomas para procesar.', 'automationNoShotsToProcess'],
+  ['El proyecto todavía no tiene una versión con efectos para actualizar.', 'automationEffectsVersionMissing'],
+  ['El sonido de transición elegido ya no está disponible. Elegí otro en el panel Automatizar.', 'automationTransitionSoundUnavailable'],
+  ['Elegí al menos una imagen o video para este bloque.', 'automationAssetsRequired'],
+  ['Elegí un workflow guardado.', 'comfyWorkflowRequired'],
+  ['Elegí una imagen válida para analizar.', 'analysisImageRequired'],
+  ['Elegí, subí o generá una música antes del ensamble.', 'automationMusicRequired'],
+  ['Este bloque no está configurado para usar Assets.', 'automationBlockNotAssets'],
+  ['Este bloque no está configurado para video generativo.', 'automationBlockNotGenerativeVideo'],
+  ['Este proyecto no tiene texto dinámico activo.', 'automationDynamicTextDisabled'],
+  ['Este proyecto ya tiene un ensamble en curso. Esperá a que termine antes de iniciarlo otra vez.', 'automationAssemblyAlreadyRunning'],
+  ['Este proyecto ya tiene una posproducción en curso. Esperá a que termine.', 'automationPostProductionAlreadyRunning'],
+  ['Estilo no encontrado.', 'overlayStyleNotFound'],
+  ['Falta el audio del bloque.', 'automationBlockAudioMissing'],
+  ['Falta el audio narrado del bloque.', 'automationNarratedAudioMissing'],
+  ['Falta la API key de BytePlus ModelArk en Configuración.', 'arkApiKeyMissing'],
+  ['Falta la API key de Gemini en Configuración.', 'geminiApiKeyMissing'],
+  ['Falta la API key de MiniMax en Configuración.', 'minimaxApiKeyMissing'],
+  ['Falta la capa estática de títulos y subtítulos.', 'automationTextLayerMissing'],
+  ['Falta la imagen del bloque.', 'automationBlockImageMissing'],
+  ['Falta la narración del bloque.', 'automationNarrationMissing'],
+  ['Falta la ruta (URL) del workflow.', 'comfyWorkflowPathMissing'],
+  ['Ficha de vocabulario no encontrada.', 'vocabularyEntryNotFound'],
+  ['Formato no admitido. Usá TTF, OTF, WOFF o WOFF2.', 'fontFormatUnsupported'],
+  ['Fuente no encontrada.', 'fontNotFound'],
+  ['Guion no encontrado', 'scriptNotFound'],
+  ['La fuente está vacía o supera el límite de 25 MB.', 'fontSizeInvalid'],
+  ['La integración con Controversy Tracker sólo admite conexiones locales.', 'controversyTrackerLocalOnly'],
+  ['Locación u objeto no encontrado', 'elementNotFound'],
+  ['Locación u objeto no encontrado.', 'elementNotFound'],
+  ['La música está en automático, pero no hay pistas clasificadas como Música en Assets.', 'automationAutomaticMusicMissing'],
+  ['La narración no contiene audio utilizable.', 'automationNarrationUnusable'],
+  ['Los estilos necesitan una imagen de referencia.', 'styleReferenceRequired'],
+  ['Los LoRA necesitan al menos una trigger word o un caso de uso.', 'loraTriggerOrUseCaseRequired'],
+  ['Los LoRA necesitan el nombre del archivo.', 'loraFileNameRequired'],
+  ['No encontré Photoshop instalado. Cargá la ruta a mano.', 'photoshopNotDetected'],
+  ['Variante no encontrada', 'variantNotFound'],
+  ['Variante no encontrada.', 'variantNotFound'],
+  ['Solo se pueden usar imágenes como foto.', 'photoImageOnly'],
+  ['Solo se pueden asociar imágenes.', 'associationImageOnly'],
+  ['Formato de imagen no admitido.', 'imageFormatUnsupported'],
+  ['El archivo debe ser un MP3 o WAV válido.', 'audioFormatUnsupported'],
+  ['Cuerpo demasiado grande', 'requestBodyTooLarge'],
+  ['JSON inválido', 'invalidJson'],
+  ['No encontrado', 'notFound'],
+  ['No encuentro el ensamble final. Volvé a ensamblarlo.', 'automationFinalAssemblyMissing'],
+  ['No encuentro el sonido de transición elegido.', 'automationTransitionSoundMissing'],
+  ['No encuentro la música elegida. Seleccioná otra pista.', 'automationSelectedMusicMissing'],
+  ['No encuentro Photoshop en la ruta configurada. Revisala en Configuración.', 'photoshopConfiguredPathMissing'],
+  ['No encuentro uno o más Assets seleccionados.', 'automationSelectedAssetsMissing'],
+  ['No pude calcular la duración de los bloques para preparar el ensamble. Verificá que ffprobe esté junto a ffmpeg.', 'automationBlockDurationsUnreadable'],
+  ['No pude calcular la duración de todas las tomas. Verificá que ffprobe esté junto a ffmpeg.', 'automationShotDurationsUnreadable'],
+  ['No pude calcular la duración de todos los audios del bloque.', 'automationBlockAudioDurationUnreadable'],
+  ['No pude calcular la duración de todos los audios.', 'automationAudioDurationUnreadable'],
+  ['No pude leer la duración del ensamble. Verificá que ffprobe esté junto a ffmpeg.', 'automationAssemblyDurationUnreadable'],
+  ['No pude leer la duración del sonido de transición. Verificá el archivo de audio.', 'automationTransitionDurationUnreadable'],
+  ['Nombre de fuente inválido.', 'fontNameInvalid'],
+  ['Personaje no encontrado', 'characterNotFound'],
+  ['Personaje no encontrado.', 'characterNotFound'],
+  ['Por seguridad, HeyGen OAuth sólo se inicia desde localhost.', 'heygenOAuthLocalOnly'],
+  ['Pose no encontrada', 'poseNotFound'],
+  ['Primero ensamblá el video final limpio.', 'automationCleanAssemblyRequired'],
+  ['Prompt no encontrado', 'promptNotFound'],
+  ['Proyecto no encontrado', 'automationProjectNotFound'],
+  ['Proyecto no encontrado.', 'automationProjectNotFound'],
+  ['Remotion no devolvió la nueva capa de texto.', 'remotionTextLayerMissing'],
+  ['Ruta de fuente inválida.', 'fontPathInvalid'],
+  ['Ruta no encontrada', 'routeNotFound'],
+  ['Serie no encontrada', 'seriesNotFound'],
+  ['Snippet no encontrado.', 'snippetNotFound'],
+  ['Workflow no encontrado.', 'comfyWorkflowNotFound'],
+  ['Ya existe una versión con efectos; la actualización de textos debe aplicarse solamente sobre esa versión.', 'automationTextRefreshEffectsOnly']
+]);
+// LOCALIZED_SERVER_ERRORS_END
+
 function send(res, status, body, headers = {}) {
   const isBuf = Buffer.isBuffer(body);
-  const data = isBuf ? body : JSON.stringify(body);
+  const code = !isBuf && body?.error && !body.code ? SERVER_ERROR_CODE_BY_MESSAGE.get(body.error) : '';
+  const payload = code ? { ...body, code } : body;
+  const data = isBuf ? body : JSON.stringify(payload);
   res.writeHead(status, {
     'Content-Type': isBuf ? (headers.mime || 'application/octet-stream') : 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
@@ -1925,6 +2017,13 @@ function send(res, status, body, headers = {}) {
 
 function sendError(res, status, code, error, details = {}) {
   return send(res, status, { code, details, error });
+}
+
+function localizedServerError(code, message, details = {}) {
+  const error = new Error(message);
+  error.localizationCode = code;
+  error.localizationDetails = details;
+  return error;
 }
 
 function readBody(req, limit = 150 * 1024 * 1024) {
@@ -3712,16 +3811,34 @@ const server = http.createServer(async (req, res) => {
     // HeyGen vuelve desde otro sitio y puede no traer la cookie local; el
     // state de un solo uso + PKCE autentican este callback.
     if (p === '/api/heygen/oauth/callback' && req.method === 'GET') {
+      const interfaceLanguage = (await getConfig()).language === 'en' ? 'en' : 'es';
+      const oauthCopy = interfaceLanguage === 'en'
+        ? {
+          expired: 'The OAuth request expired. Start it again from Manifestador.',
+          missingCode: 'HeyGen did not return the OAuth code.',
+          connected: 'HeyGen is now connected through OAuth.',
+          failed: 'HeyGen could not be connected.',
+          successTitle: 'HeyGen connected',
+          failedTitle: 'HeyGen could not be connected'
+        }
+        : {
+          expired: 'La solicitud OAuth venció. Volvé a iniciarla desde Manifestador.',
+          missingCode: 'HeyGen no devolvió el código OAuth.',
+          connected: 'HeyGen quedó conectado con OAuth.',
+          failed: 'No se pudo conectar HeyGen.',
+          successTitle: 'HeyGen conectado',
+          failedTitle: 'No se pudo conectar HeyGen'
+        };
       const state = String(url.searchParams.get('state') || '');
       const pending = heygenOAuthStates.get(state);
       heygenOAuthStates.delete(state);
       let ok = false; let detail = '';
       try {
-        if (!pending || pending.expiresAt < Date.now()) throw new Error('La solicitud OAuth venció. Volvé a iniciarla desde Manifestador.');
+        if (!pending || pending.expiresAt < Date.now()) throw new Error(oauthCopy.expired);
         const oauthError = url.searchParams.get('error_description') || url.searchParams.get('error');
         if (oauthError) throw new Error(oauthError);
         const code = String(url.searchParams.get('code') || '');
-        if (!code) throw new Error('HeyGen no devolvió el código OAuth.');
+        if (!code) throw new Error(oauthCopy.missingCode);
         const token = await exchangeHeyGenOAuthCode({
           clientId: pending.clientId, redirectUri: pending.redirectUri, code, codeVerifier: pending.codeVerifier
         });
@@ -3730,10 +3847,10 @@ const server = http.createServer(async (req, res) => {
           accessToken: token.access_token, refreshToken: token.refresh_token || '',
           expiresAt: oauthExpiry(token), scope: token.scope || '', updatedAt: Date.now()
         });
-        ok = true; detail = 'HeyGen quedó conectado con OAuth.';
-      } catch (error) { detail = error.message || 'No se pudo conectar HeyGen.'; }
+        ok = true; detail = oauthCopy.connected;
+      } catch (error) { detail = error.message || oauthCopy.failed; }
       const safeDetail = JSON.stringify(detail).replace(/</g, '\\u003c');
-      const html = `<!doctype html><html><meta charset="utf-8"><title>HeyGen · Manifestador</title><body style="font:16px system-ui;padding:40px;background:#17101f;color:#fff"><h2>${ok ? 'HeyGen conectado' : 'No se pudo conectar HeyGen'}</h2><p>${detail.replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</p><script>window.opener?.postMessage({type:'manifestador-heygen-oauth',ok:${ok},detail:${safeDetail}},location.origin);setTimeout(()=>window.close(),900)</script></body></html>`;
+      const html = `<!doctype html><html lang="${interfaceLanguage}"><meta charset="utf-8"><title>HeyGen · Manifestador</title><body style="font:16px system-ui;padding:40px;background:#17101f;color:#fff"><h2>${ok ? oauthCopy.successTitle : oauthCopy.failedTitle}</h2><p>${detail.replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</p><script>window.opener?.postMessage({type:'manifestador-heygen-oauth',ok:${ok},detail:${safeDetail}},location.origin);setTimeout(()=>window.close(),900)</script></body></html>`;
       res.writeHead(ok ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       return res.end(html);
     }
@@ -3760,10 +3877,10 @@ const server = http.createServer(async (req, res) => {
       try {
         source = validateAutomationSource(await readJsonBody(req));
       } catch (error) {
-        return send(res, 400, { error: error.message || 'Guion para Manifestador no válido.' });
+        return sendError(res, 400, 'automationImportInvalid', error.message || 'Guion para Manifestador no válido.');
       }
       if (source.schema !== AUTOMATION_CONTRACT) {
-        return send(res, 400, { error: `La conexión directa requiere el contrato ${AUTOMATION_CONTRACT}.` });
+        return sendError(res, 400, 'automationContractMismatch', `La conexión directa requiere el contrato ${AUTOMATION_CONTRACT}.`, { contract: AUTOMATION_CONTRACT });
       }
       const externalProjectId = String(source.project.id);
       let out = null;
@@ -4880,7 +4997,7 @@ const server = http.createServer(async (req, res) => {
         try {
           source = validateAutomationSource(body.data);
         } catch (error) {
-          return send(res, 400, { error: error.message || 'Guion JSON no válido.' });
+          return sendError(res, 400, 'scriptImportInvalid', error.message || 'Guion JSON no válido.');
         }
       }
       const item = sanitizeAutomation(source);
@@ -5524,15 +5641,15 @@ const server = http.createServer(async (req, res) => {
       if (mode === 'frames') {
         referenceKeys = configuredKeys;
         if (referenceKeys.length !== 2 || referenceKeys.some((key) => /^(video|audio)\//.test(key))) {
-          return send(res, 400, { error: `Inicio → Fin de ${serviceName} necesita exactamente dos imágenes: entrada y salida.` });
+          return sendError(res, 400, 'automationStartEndImagesRequired', `Inicio → Fin de ${serviceName} necesita exactamente dos imágenes: entrada y salida.`, { model: serviceName });
         }
       } else {
-        if (!/^(generated|uploads)\//.test(imageKey)) return send(res, 400, { error: `Falta la imagen base del bloque ${serviceName}.` });
+        if (!/^(generated|uploads)\//.test(imageKey)) return sendError(res, 400, 'automationBaseImageMissing', `Falta la imagen base del bloque ${serviceName}.`, { model: serviceName });
         referenceKeys = [...new Set([imageKey, ...configuredKeys])];
       }
       const referencePaths = await Promise.all(referenceKeys.map((key) => resolveAssetKey(key)));
       const allStats = await Promise.all([...referencePaths, ...audioPaths].map((filePath) => fs.stat(filePath).catch(() => null)));
-      if (allStats.some((stat) => !stat?.isFile())) return send(res, 400, { error: `No encuentro una o más referencias de ${serviceName}.` });
+      if (allStats.some((stat) => !stat?.isFile())) return sendError(res, 400, 'automationReferencesMissing', `No encuentro una o más referencias de ${serviceName}.`, { model: serviceName });
 
       const chunks = [];
       const maxChunkDuration = isOmni ? 10 : isSeedance25 ? 30 : 15;
@@ -5597,7 +5714,9 @@ const server = http.createServer(async (req, res) => {
           const limits = model.mediaLimits || {};
           if (refs.length > (limits.total || model.maxRefs) || counts.image > (limits.image || model.maxRefs)
             || counts.video > (limits.video || model.maxRefs) || counts.audio > (limits.audio || model.maxRefs)) {
-            throw new Error(`Las referencias del bloque superan los límites de ${serviceName}: ${limits.image} imágenes, ${limits.video} videos, ${limits.audio} audios y ${limits.total} archivos en total.`);
+            throw localizedServerError('automationReferenceLimitsExceeded', `Las referencias del bloque superan los límites de ${serviceName}: ${limits.image} imágenes, ${limits.video} videos, ${limits.audio} audios y ${limits.total} archivos en total.`, {
+              model: serviceName, images: limits.image, videos: limits.video, audios: limits.audio, total: limits.total
+            });
           }
           const mediaDurations = isOmni
             ? (await validateGeminiOmniMedia(refs, ffmpegExecutable, mode, false), { video: 0, audio: 0 })
@@ -6009,16 +6128,17 @@ const server = http.createServer(async (req, res) => {
       if (missingBlocks.length) {
         const names = missingBlocks.slice(0, 8).map((block) => block.title || block.id).join(', ');
         const extra = missingBlocks.length > 8 ? ` y ${missingBlocks.length - 8} más` : '';
-        return send(res, 400, { error: `Faltan videos terminados: ${names}${extra}.` });
+        const extraCount = Math.max(0, missingBlocks.length - 8);
+        return sendError(res, 400, extraCount ? 'automationFinishedVideosMissingMore' : 'automationFinishedVideosMissing', `Faltan videos terminados: ${names}${extra}.`, { names, count: extraCount });
       }
 
       const videoPaths = [];
       for (const block of project.blocks) {
         const key = String(project.outputs[block.id].videoKey || '');
-        if (!/^video\//.test(key)) return send(res, 400, { error: `El video de “${block.title || block.id}” no es válido.` });
+        if (!/^video\//.test(key)) return sendError(res, 400, 'automationBlockVideoInvalid', `El video de “${block.title || block.id}” no es válido.`, { title: block.title || block.id });
         const filePath = await resolveAssetKey(key);
         const stat = await fs.stat(filePath).catch(() => null);
-        if (!stat?.isFile()) return send(res, 400, { error: `No encuentro el video de “${block.title || block.id}”. Regenerá ese bloque.` });
+        if (!stat?.isFile()) return sendError(res, 400, 'automationBlockVideoMissing', `No encuentro el video de “${block.title || block.id}”. Regenerá ese bloque.`, { title: block.title || block.id });
         videoPaths.push(filePath);
       }
 
@@ -6039,7 +6159,7 @@ const server = http.createServer(async (req, res) => {
       if (logo) {
         const logoStat = await fs.stat(logo.filePath).catch(() => null);
         if (!logoStat?.isFile()) {
-          return send(res, 500, { error: `No encuentro el logo ${logo.variant} incluido con Manifestador.` });
+          return sendError(res, 500, 'automationBundledLogoMissing', `No encuentro el logo ${logo.variant} incluido con Manifestador.`, { variant: logo.variant });
         }
         logoDuration = await probeMediaDuration(ffmpegExecutable, logo.filePath) || 0;
       }
@@ -6296,7 +6416,7 @@ const server = http.createServer(async (req, res) => {
       const output = project.outputs?.[block.id] || {};
       const audioKeys = (Array.isArray(output.audioKeys) ? output.audioKeys : [])
         .map(String).filter((key) => /^audio\//.test(key));
-      if (!audioKeys.length) return send(res, 400, { error: `Faltan los audios existentes de “${block.title || block.id}”.` });
+      if (!audioKeys.length) return sendError(res, 400, 'automationExistingAudiosMissing', `Faltan los audios existentes de “${block.title || block.id}”.`, { title: block.title || block.id });
       const cfg = await getConfig();
       const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
       const audioPaths = await Promise.all(audioKeys.map((key) => resolveAssetKey(key)));
@@ -6418,26 +6538,26 @@ const server = http.createServer(async (req, res) => {
           .map(Number)
           .filter((duration) => Number.isFinite(duration) && duration > 0);
         if (!isHeyGen && !isH3 && !isAssetBlock && !/^(generated|uploads)\//.test(imageKey)) {
-          return send(res, 400, { error: `Falta la imagen limpia de “${block.title || block.id}”.` });
+          return sendError(res, 400, 'automationCleanImageMissing', `Falta la imagen limpia de “${block.title || block.id}”.`, { title: block.title || block.id });
         }
         if (isHeyGen && !heygenSegmentKeys.length) {
-          return send(res, 400, { error: `Faltan los planos originales de HeyGen de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.` });
+          return sendError(res, 400, 'automationHeygenOriginalShotsMissing', `Faltan los planos originales de HeyGen de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.`, { title: block.title || block.id });
         }
         if (isH3 && !h3SegmentKeys.length) {
           const modelName = block.generator === 'seedance25' || output.generator === 'seedance25' ? 'Seedance 2.5'
             : block.generator === 'omni' || output.generator === 'omni' ? 'Gemini Omni' : 'MiniMax H3';
-          return send(res, 400, { error: `Faltan los tramos originales de ${modelName} de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.` });
+          return sendError(res, 400, 'automationGenerativeSegmentsMissing', `Faltan los tramos originales de ${modelName} de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.`, { model: modelName, title: block.title || block.id });
         }
         if (isAssetBlock && !selectedAssetKeys.length) {
-          return send(res, 400, { error: `Faltan los Assets seleccionados de “${block.title || block.id}”.` });
+          return sendError(res, 400, 'automationSelectedBlockAssetsMissing', `Faltan los Assets seleccionados de “${block.title || block.id}”.`, { title: block.title || block.id });
         }
         const layerKey = dynamicTextEnabled ? motionOverlayKey : textLayerKey;
         const layerIsVideo = dynamicTextEnabled;
         if (layerIsVideo ? !/^video\//.test(layerKey) : !/^(generated|uploads)\//.test(layerKey)) {
-          return send(res, 400, { error: `Falta la capa ${layerIsVideo ? 'animada' : 'de subtítulos'} de “${block.title || block.id}”. Volvé a generar esa toma para prepararla.` });
+          return sendError(res, 400, layerIsVideo ? 'automationAnimatedLayerMissing' : 'automationSubtitleLayerMissing', `Falta la capa ${layerIsVideo ? 'animada' : 'de subtítulos'} de “${block.title || block.id}”. Volvé a generar esa toma para prepararla.`, { title: block.title || block.id });
         }
         if (!/^video\//.test(blockVideoKey)) {
-          return send(res, 400, { error: `Falta el video terminado de “${block.title || block.id}”.` });
+          return sendError(res, 400, 'automationFinishedVideoMissing', `Falta el video terminado de “${block.title || block.id}”.`, { title: block.title || block.id });
         }
         const visualKeys = isHeyGen ? heygenSegmentKeys : isH3 ? h3SegmentKeys : isAssetBlock ? selectedAssetKeys : [imageKey];
         const visualKinds = visualKeys.map((key) => key.startsWith('video/') ? 'video' : 'image');
@@ -6452,7 +6572,7 @@ const server = http.createServer(async (req, res) => {
           fs.stat(blockVideoPath).catch(() => null)
         ]);
         if (stats.some((stat) => !stat?.isFile())) {
-          return send(res, 400, { error: `No encuentro todos los materiales locales de “${block.title || block.id}”.` });
+          return sendError(res, 400, 'automationLocalMaterialsMissing', `No encuentro todos los materiales locales de “${block.title || block.id}”.`, { title: block.title || block.id });
         }
         blockSources.push({
           block,
@@ -6918,12 +7038,22 @@ const server = http.createServer(async (req, res) => {
       if (service === 'heygen') {
         const account = safeHeyGenAccount(await getHeyGenApiUser(body.key || cfg.keys.heygen || ''));
         const label = account.email || account.name || account.id || 'cuenta válida';
-        return send(res, 200, { ok: true, detail: `Conectado a ${label}${account.billingType ? ` · ${account.billingType}` : ''}`, account });
+        return send(res, 200, {
+          ok: true,
+          detailCode: 'config.connection.heygenConnected',
+          detailParams: { account: label, billing: account.billingType ? ` · ${account.billingType}` : '' },
+          detail: `Conectado a ${label}${account.billingType ? ` · ${account.billingType}` : ''}`,
+          account
+        });
       }
       if (service === 'comfyui') {
         const testCfg = { comfyui: { ...cfg.comfyui, ...(body.comfyui || {}) } };
         await checkComfyHealth(testCfg);
-        return send(res, 200, { ok: true, detail: 'ComfyUI responde. Agregá tus workflows abajo y usá "Detectar nodos" en cada uno.' });
+        return send(res, 200, {
+          ok: true,
+          detailCode: 'config.connection.comfyOk',
+          detail: 'ComfyUI responde. Agregá tus workflows abajo y usá "Detectar nodos" en cada uno.'
+        });
       }
       const endpoint = body.endpoint || (service === 'ark' ? cfg.endpoints.ark
         : service === 'wavespeed' ? cfg.endpoints.wavespeed
@@ -7617,7 +7747,10 @@ const server = http.createServer(async (req, res) => {
 
     return send(res, 404, { error: 'Ruta no encontrada' });
   } catch (err) {
-    return send(res, err.status || 500, { error: err.message || String(err) });
+    return send(res, err.status || 500, {
+      ...(err.localizationCode ? { code: err.localizationCode, details: err.localizationDetails || {} } : {}),
+      error: err.message || String(err)
+    });
   }
 });
 

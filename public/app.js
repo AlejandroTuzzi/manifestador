@@ -477,7 +477,7 @@ function updateCharCount() {
   const el = $('#promptCharCount');
   if (!el) return;
   const n = promptBox.value.length;
-  const count = i18n?.formatNumber(n) ?? n.toLocaleString('es-AR');
+  const count = i18n?.formatNumber(n) ?? n.toLocaleString(document.documentElement.lang || 'es-AR');
   el.textContent = tr(n === 1 ? 'create.characters.one' : 'create.characters.many', { count }, `${count} ${n === 1 ? 'carácter' : 'caracteres'}`);
 }
 
@@ -580,7 +580,10 @@ $('#loginForm').addEventListener('submit', async (e) => {
       body: JSON.stringify({ password: $('#loginPassword').value })
     });
     const body = await res.json();
-    if (!res.ok) throw new Error(body.error || tr('login.failed', {}, 'No se pudo acceder'));
+    const localizedError = body.code && i18n?.has(`errors.${body.code}`)
+      ? tr(`errors.${body.code}`, body.details || {})
+      : body.error;
+    if (!res.ok) throw new Error(localizedError || tr('login.failed', {}, 'No se pudo acceder'));
     $('#loginModal').hidden = true;
     $('#loginPassword').value = '';
     await init();
@@ -2994,7 +2997,7 @@ function promptCategories(mode = null) {
 }
 
 function sameCategoryName(left, right) {
-  return String(left || '').trim().toLocaleLowerCase('es') === String(right || '').trim().toLocaleLowerCase('es');
+  return String(left || '').trim().toLocaleLowerCase(i18n.localeTag()) === String(right || '').trim().toLocaleLowerCase(i18n.localeTag());
 }
 
 function isManagedPromptCategory(name) {
@@ -3416,7 +3419,7 @@ function normalizeVocabularyWordsClient(value) {
   const source = Array.isArray(value) ? value : String(value || '').split(/[,;\n]/);
   const seen = new Set();
   return source.map((word) => String(word || '').trim().replace(/\s+/g, ' ').slice(0, 120)).filter((word) => {
-    const key = word.toLocaleLowerCase('es');
+    const key = word.toLocaleLowerCase(i18n.localeTag());
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -3439,11 +3442,11 @@ function updateVocabularyCategoryActions() {
 }
 
 function vocabularySearchText(item) {
-  return `${item.title || ''} ${item.category || ''} ${(item.words || []).join(' ')}`.toLocaleLowerCase('es');
+  return `${item.title || ''} ${item.category || ''} ${(item.words || []).join(' ')}`.toLocaleLowerCase(i18n.localeTag());
 }
 
 function filteredVocabulary(query = '', category = '') {
-  const needle = String(query || '').trim().toLocaleLowerCase('es');
+  const needle = String(query || '').trim().toLocaleLowerCase(i18n.localeTag());
   return state.vocabulary.filter((item) => contentIsVisible(item)
     && (!category || sameCategoryName(item.category, category))
     && (!needle || vocabularySearchText(item).includes(needle)));
@@ -4129,7 +4132,7 @@ function assetMatchesSeries(a, seriesId) {
 }
 
 function normalizedAssetFilterText(value) {
-  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es').trim();
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase(i18n.localeTag()).trim();
 }
 
 function visibleAssets() {
@@ -7129,7 +7132,7 @@ async function ensureOverlayFonts(...overlays) {
 function automationArtPromptOptions() {
   const prompts = (state.prompts || [])
     .filter((prompt) => !['audio', 'video'].includes(prompt.mode) && !isLoraPrompt(prompt))
-    .sort((a, b) => Number(isStylePrompt(b)) - Number(isStylePrompt(a)) || String(a.title).localeCompare(String(b.title)));
+    .sort((a, b) => Number(isStylePrompt(b)) - Number(isStylePrompt(a)) || String(a.title).localeCompare(String(b.title), i18n.localeTag()));
   if (!prompts.length) return `<option value="">— ${esc(tr('automation.prompts.noneSaved'))} —</option>`;
   return `<option value="">— ${esc(tr('automation.prompts.chooseSaved'))} —</option>` + prompts.map((prompt) =>
     `<option value="${esc(prompt.id)}"${prompt.id === currentAutomation()?.config?.artStylePromptId ? ' selected' : ''}>${esc(tr(isStylePrompt(prompt) ? 'automation.prompts.styleReference' : 'common.image'))} · ${esc(prompt.category || tr('common.general'))} · ${esc(prompt.title)}</option>`
@@ -10546,13 +10549,20 @@ async function loadCosts() {
         <span class="cr-value">${fmtUsd(v.cost)}</span></div>`).join('')
     : `<div class="empty-note" style="padding:8px 0">${esc(tr('costs.noUsageThisMonth'))}</div>`;
 
-  const byMonth = Object.entries(data.byMonth).sort((a, b) => b[0].localeCompare(a[0]));
+  const byMonth = Object.entries(data.byMonth).sort((a, b) => b[0].localeCompare(a[0], i18n.localeTag()));
   $('#costsByMonth').innerHTML = byMonth.length
     ? byMonth.map(([k, v]) => `<div class="cost-row"><span class="cr-label">${esc(k)}</span><span class="cr-value">${fmtUsd(v)}</span></div>`).join('')
     : `<div class="empty-note" style="padding:8px 0">${esc(tr('costs.noRecords'))}</div>`;
 
+  const pricingNote = data.pricing.note === 'Editado a mano'
+    ? tr('costs.manuallyEdited')
+    : data.pricing.note === 'Actualizado por OpenAI (búsqueda web)'
+      ? tr('costs.updatedByOpenAI')
+      : data.pricing.note === 'Valores iniciales estimados — actualizalos con el botón de OpenAI o a mano.'
+        ? tr('costs.initialValuesNote')
+        : data.pricing.note || '';
   $('#pricingUpdated').textContent = data.pricing.updatedAt
-    ? `· ${esc(data.pricing.note || '')} · ${fmtDate(data.pricing.updatedAt)}`
+    ? `· ${esc(pricingNote)} · ${fmtDate(data.pricing.updatedAt)}`
     : `· ${esc(tr('costs.initialEstimatedValues'))}`;
 
   let rows = '';
@@ -10578,10 +10588,29 @@ async function loadCosts() {
   }
   $('#pricingTable').innerHTML = `<div class="pricing-table">${rows}</div>`;
 
+  const costUnit = (entry) => {
+    const raw = String(entry.unitLabel || '').toLowerCase();
+    const key = entry.type === 'image' || raw.includes('imagen') ? 'image'
+      : entry.type === 'music' || raw.includes('pista') ? 'track'
+        : entry.type === 'script' || raw.includes('token') ? 'token'
+          : raw.includes('caracter') ? 'character'
+            : raw === 'video' ? 'video'
+              : entry.type === 'video' || raw.includes('segundo') ? 'second'
+                : '';
+    return key ? trn(`costs.unit.${key}`, Number(entry.units) || 0) : entry.unitLabel || '';
+  };
+  const costLabel = (entry) => {
+    if (entry.type === 'script') return tr('costs.aiScreenwriter');
+    return String(entry.label || entry.modelId || '')
+      .replace(/\s·\sAutomatizador$/u, ` · ${tr('nav.automation')}`)
+      .replace(/\s\(plan web\)$/u, ` (${tr('costs.webPlan')})`)
+      .replace(/\s\(plan HeyGen\)$/u, ` (${tr('costs.heygenPlan')})`)
+      .replace(/\s\(voz\)$/u, ` (${tr('costs.voice')})`);
+  };
   $('#costsLedger').innerHTML = data.recent.length
     ? data.recent.slice(0, 40).map((e) => `<div class="cost-row">
-        <span class="cr-label">${e.type === 'image' ? IC('image') : e.type === 'video' ? IC('film') : e.type === 'audio' ? IC('mic') : IC('globe')} ${esc(e.label || e.modelId)}
-          <span class="cr-sub">${e.units} ${esc(e.unitLabel || '')} · ${fmtDate(e.ts)}</span></span>
+        <span class="cr-label">${e.type === 'image' ? IC('image') : e.type === 'video' ? IC('film') : e.type === 'audio' ? IC('mic') : IC('globe')} ${esc(costLabel(e))}
+          <span class="cr-sub">${e.units} ${esc(costUnit(e))} · ${fmtDate(e.ts)}</span></span>
         <span class="cr-value">${fmtUsd(e.cost)}</span></div>`).join('')
     : `<div class="empty-note" style="padding:8px 0">${esc(tr('costs.noGenerations'))}</div>`;
 }
@@ -10743,7 +10772,10 @@ $$('.test-btn').forEach((btn) => {
       if (service === 'minimax') body.endpoint = f.endpoint_minimax.value.trim();
       const r = await api('/api/test', { method: 'POST', body });
       out.className = `test-result ${r.ok ? 'ok' : 'err'}`;
-      out.textContent = `${r.ok ? '✓' : '✗'} ${r.detail}`;
+      const detail = r.detailCode && i18n?.has(r.detailCode)
+        ? tr(r.detailCode, r.detailParams || {})
+        : r.detail;
+      out.textContent = `${r.ok ? '✓' : '✗'} ${detail}`;
     } catch (e) {
       out.className = 'test-result err';
       out.textContent = `✗ ${e.message}`;

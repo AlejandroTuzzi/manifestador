@@ -296,7 +296,7 @@ async function api(path, opts = {}) {
 
 function fmtDate(ts) {
   return i18n?.formatDate(ts, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-    || new Date(ts).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    || new Date(ts).toLocaleString(document.documentElement.lang || 'es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 function fmtDuration(ms) {
@@ -363,9 +363,9 @@ function buildCoverPositioner(entity, onSave) {
   wrap.innerHTML = `
     <div class="cover-square"><img src="${fileUrl(entity.photos[0])}" draggable="false" alt=""></div>
     <div class="cover-tools">
-      <span class="hint">Arrastrá para mover · rueda o slider para acercar</span>
-      <label class="cover-zoom">Zoom <input type="range" min="1" max="4" step="0.05" value="${pos.zoom}"></label>
-      <button type="button" class="mini-btn" data-cover="center">Restablecer</button>
+      <span class="hint">${esc(tr('coverPositioner.hint'))}</span>
+      <label class="cover-zoom">${esc(tr('coverPositioner.zoom'))} <input type="range" min="1" max="4" step="0.05" value="${pos.zoom}"></label>
+      <button type="button" class="mini-btn" data-cover="center">${esc(tr('common.reset'))}</button>
     </div>`;
   const img = wrap.querySelector('img');
   const zoomInput = wrap.querySelector('input[type="range"]');

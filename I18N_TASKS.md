@@ -25,8 +25,8 @@ La elección se guarda en `config.json`. Español (`es`) es el idioma base y fal
 1. **Núcleo compartido** — completado: navegación, acceso, monitor global, selector de referencias, reproductor, lightbox y tareas largas.
 2. **Crear** — completado: estructura, modelos, referencias, validaciones, resultados, historial y herramientas auxiliares usan los catálogos compartidos.
 3. **Bibliotecas** — completado: Assets, Personajes, Locaciones/Objetos, Prompts, Vocabulario y Snippets.
-4. **Producción** — en curso: Series, guiones, Automatizador y Subtitulador migrados; Poser pendiente.
-5. **Administración y cierre** — Consumo migrado; Configuración completa, errores del servidor y QA visual bilingüe pendientes.
+4. **Producción** — completado: Series, guiones, Automatizador, Subtitulador y Poser migrados.
+5. **Administración y cierre** — completado en código y pruebas automáticas; queda el recorrido visual bilingüe en un navegador disponible.
 
 ### 0. Infraestructura
 
@@ -40,12 +40,12 @@ La elección se guarda en `config.json`. Español (`es`) es el idioma base y fal
 
 ### 1. Núcleo y componentes compartidos
 
-- [ ] Toasts y confirmaciones comunes.
-- [ ] Estados vacíos, cargando, listo, error y progreso.
-- [ ] Botones comunes: guardar, cancelar, borrar, editar, descargar, cerrar, volver.
+- [x] Toasts y confirmaciones comunes.
+- [x] Estados vacíos, cargando, listo, error y progreso.
+- [x] Botones comunes: guardar, cancelar, borrar, editar, descargar, cerrar, volver.
 - [x] Lightbox, selector global de referencias y reproductor de Assets.
 - [x] Plurales reutilizables para archivos, imágenes, videos, audios, palabras y proyectos.
-- [ ] Sustituir comparaciones y formatos fijados a `es-AR` por el locale activo.
+- [x] Sustituir comparaciones y formatos fijados a `es-AR` por el locale activo.
 
 ### 2. Crear
 
@@ -100,23 +100,23 @@ La elección se guarda en `config.json`. Español (`es`) es el idioma base y fal
 
 ### 8. Servidor y errores
 
-- [ ] Asignar códigos estables a validaciones y errores esperables.
-- [ ] Traducir códigos en el cliente; conservar el mensaje original como fallback y diagnóstico.
-- [ ] Separar errores mostrables de logs técnicos de proveedores.
-- [ ] Localizar nombres de unidades y estados devueltos por la API.
-- [ ] Revisar mensajes de trabajos en segundo plano y recuperación de automatizaciones.
+- [x] Asignar códigos estables a validaciones y errores esperables.
+- [x] Traducir códigos en el cliente; conservar el mensaje original como fallback y diagnóstico.
+- [x] Separar errores mostrables de logs técnicos de proveedores.
+- [x] Localizar nombres de unidades y estados devueltos por la API.
+- [x] Revisar mensajes de trabajos en segundo plano y recuperación de automatizaciones.
 
 ### 9. Calidad y cierre
 
 - [x] Prueba automática que detecte claves faltantes en ambos catálogos y en sus usos literales actuales.
-- [ ] Prueba que busque textos visibles sin migrar en HTML y renderizadores JS.
-- [ ] Prueba de UTF-8/mojibake para HTML, JS, JSON y Markdown.
+- [x] Prueba que busque textos visibles sin migrar en HTML y renderizadores JS.
+- [x] Prueba de UTF-8/mojibake para HTML, JS, JSON y Markdown.
 - [ ] Recorrido manual completo en español.
 - [ ] Recorrido manual completo en inglés.
 - [ ] Revisar desbordes a 1920, 1366, 1024 y móvil.
 - [ ] Revisar `title`, `placeholder`, `aria-label`, foco, hover, disabled y errores.
-- [ ] Validar que los datos guardados sean idénticos al cambiar de idioma.
-- [ ] Validar integración completa con Controversy Tracker en ambos idiomas.
+- [x] Validar que los datos guardados sean idénticos al cambiar de idioma.
+- [x] Validar integración completa con Controversy Tracker en ambos idiomas.
 
 ## Definición de terminado por módulo
 

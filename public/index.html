@@ -252,7 +252,7 @@
           <div class="control-row"><label data-i18n="create.heygen.connection">Conexión</label><select id="heygenAuthMode" class="select"><option value="oauth" data-i18n="create.heygen.webPlan">OAuth · plan web</option><option value="key" data-i18n="create.heygen.apiBalance">API key · saldo API</option></select><span id="heygenVideoAuthStatus" class="hint"></span></div>
           <div class="control-row" id="heygenCharacterRow"><label data-i18n="create.heygen.character">Personaje HeyGen</label><select id="heygenCharacterSelect" class="select"></select><span id="heygenCharacterHint" class="hint"></span></div>
           <div class="control-row" id="heygenVoiceRow"><label data-i18n="create.heygen.voice">Voz HeyGen</label><input id="heygenVoiceId" class="text-input" type="text" data-i18n-placeholder="create.heygen.voicePlaceholder" placeholder="Código de voz de HeyGen"><span class="hint" data-i18n="create.heygen.voiceHint">Obligatoria para Imagen libre; opcional si el avatar ya tiene voz.</span></div>
-          <div class="control-row" id="heygenMotionRow"><label data-i18n="create.heygen.motion">Movimiento</label><input id="heygenMotionPrompt" class="text-input" type="text" placeholder="Natural hand gestures, subtle head movement…"><select id="heygenExpressiveness" class="select"><option value="low" data-i18n="create.heygen.low">Baja</option><option value="medium" data-i18n="create.heygen.medium">Media</option><option value="high" data-i18n="create.heygen.high">Alta</option></select></div>
+          <div class="control-row" id="heygenMotionRow"><label data-i18n="create.heygen.motion">Movimiento</label><input id="heygenMotionPrompt" class="text-input" type="text" placeholder="Gestos naturales con las manos, movimiento sutil de cabeza…" data-i18n-placeholder="create.heygen.motionPlaceholder"><select id="heygenExpressiveness" class="select"><option value="low" data-i18n="create.heygen.low">Baja</option><option value="medium" data-i18n="create.heygen.medium">Media</option><option value="high" data-i18n="create.heygen.high">Alta</option></select></div>
         </div>
         <div id="videoModelNote" class="model-note"></div>
       </div>
@@ -388,22 +388,22 @@
           <div class="poser-panel" data-panel="bodymap">
             <div class="panel-title"><button type="button" class="panel-collapse" data-panel-toggle><svg class="ic"><use href="#i-right"/></svg> <span data-i18n="poser.bodyMap">Mapa corporal</span></button></div>
             <svg id="poserBodyMap" class="poser-bodymap" viewBox="0 0 100 155" aria-label="Mapa corporal" data-i18n-aria-label="poser.bodyMap">
-              <rect class="poser-bodypart" data-part="abdomen" x="33" y="31" width="34" height="24" rx="9"><title>Abdomen</title></rect>
-              <rect class="poser-bodypart" data-part="cintura" x="35" y="57" width="30" height="14" rx="6"><title>Cintura</title></rect>
-              <rect class="poser-bodypart" data-part="brazo-derecho" x="17" y="41" width="9" height="28" rx="4"><title>Brazo derecho</title></rect>
-              <rect class="poser-bodypart" data-part="brazo-izquierdo" x="74" y="41" width="9" height="28" rx="4"><title>Brazo izquierdo</title></rect>
-              <rect class="poser-bodypart" data-part="muslo-derecha" x="36" y="73" width="13" height="34" rx="5"><title>Muslo derecha</title></rect>
-              <rect class="poser-bodypart" data-part="muslo-izquierda" x="51" y="73" width="13" height="34" rx="5"><title>Muslo izquierda</title></rect>
-              <rect class="poser-bodypart" data-part="pierna-derecha" x="36.5" y="109" width="12" height="30" rx="5"><title>Pierna derecha</title></rect>
-              <rect class="poser-bodypart" data-part="pierna-izquierda" x="51.5" y="109" width="12" height="30" rx="5"><title>Pierna izquierda</title></rect>
-              <rect class="poser-bodypart" data-part="cuello" x="46" y="23" width="8" height="6"><title>Cuello</title></rect>
-              <circle class="poser-bodypart" data-part="hombro-derecho" cx="25" cy="33" r="6"><title>Hombro derecho</title></circle>
-              <circle class="poser-bodypart" data-part="hombro-izquierdo" cx="75" cy="33" r="6"><title>Hombro izquierdo</title></circle>
-              <circle class="poser-bodypart" data-part="cabeza" cx="50" cy="12" r="9"><title>Cabeza</title></circle>
-              <circle class="poser-bodypart" data-part="mano-derecha" cx="21" cy="78" r="7"><title>Mano derecha</title></circle>
-              <circle class="poser-bodypart" data-part="mano-izquierda" cx="79" cy="78" r="7"><title>Mano izquierda</title></circle>
-              <rect class="poser-bodypart" data-part="pie-derecha" x="33" y="141" width="16" height="8" rx="4"><title>Pie derecha</title></rect>
-              <rect class="poser-bodypart" data-part="pie-izquierda" x="51" y="141" width="16" height="8" rx="4"><title>Pie izquierda</title></rect>
+              <rect class="poser-bodypart" data-part="abdomen" x="33" y="31" width="34" height="24" rx="9"><title data-i18n="poser.bodyPart.abdomen">Abdomen</title></rect>
+              <rect class="poser-bodypart" data-part="cintura" x="35" y="57" width="30" height="14" rx="6"><title data-i18n="poser.bodyPart.waist">Cintura</title></rect>
+              <rect class="poser-bodypart" data-part="brazo-derecho" x="17" y="41" width="9" height="28" rx="4"><title data-i18n="poser.bodyPart.rightArm">Brazo derecho</title></rect>
+              <rect class="poser-bodypart" data-part="brazo-izquierdo" x="74" y="41" width="9" height="28" rx="4"><title data-i18n="poser.bodyPart.leftArm">Brazo izquierdo</title></rect>
+              <rect class="poser-bodypart" data-part="muslo-derecha" x="36" y="73" width="13" height="34" rx="5"><title data-i18n="poser.bodyPart.rightThigh">Muslo derecho</title></rect>
+              <rect class="poser-bodypart" data-part="muslo-izquierda" x="51" y="73" width="13" height="34" rx="5"><title data-i18n="poser.bodyPart.leftThigh">Muslo izquierdo</title></rect>
+              <rect class="poser-bodypart" data-part="pierna-derecha" x="36.5" y="109" width="12" height="30" rx="5"><title data-i18n="poser.bodyPart.rightLeg">Pierna derecha</title></rect>
+              <rect class="poser-bodypart" data-part="pierna-izquierda" x="51.5" y="109" width="12" height="30" rx="5"><title data-i18n="poser.bodyPart.leftLeg">Pierna izquierda</title></rect>
+              <rect class="poser-bodypart" data-part="cuello" x="46" y="23" width="8" height="6"><title data-i18n="poser.bodyPart.neck">Cuello</title></rect>
+              <circle class="poser-bodypart" data-part="hombro-derecho" cx="25" cy="33" r="6"><title data-i18n="poser.bodyPart.rightShoulder">Hombro derecho</title></circle>
+              <circle class="poser-bodypart" data-part="hombro-izquierdo" cx="75" cy="33" r="6"><title data-i18n="poser.bodyPart.leftShoulder">Hombro izquierdo</title></circle>
+              <circle class="poser-bodypart" data-part="cabeza" cx="50" cy="12" r="9"><title data-i18n="poser.bodyPart.head">Cabeza</title></circle>
+              <circle class="poser-bodypart" data-part="mano-derecha" cx="21" cy="78" r="7"><title data-i18n="poser.bodyPart.rightHand">Mano derecha</title></circle>
+              <circle class="poser-bodypart" data-part="mano-izquierda" cx="79" cy="78" r="7"><title data-i18n="poser.bodyPart.leftHand">Mano izquierda</title></circle>
+              <rect class="poser-bodypart" data-part="pie-derecha" x="33" y="141" width="16" height="8" rx="4"><title data-i18n="poser.bodyPart.rightFoot">Pie derecho</title></rect>
+              <rect class="poser-bodypart" data-part="pie-izquierda" x="51" y="141" width="16" height="8" rx="4"><title data-i18n="poser.bodyPart.leftFoot">Pie izquierdo</title></rect>
             </svg>
             <p class="hint" data-i18n="poser.bodyMapHint">Vista frontal — la derecha/izquierda es la del personaje. Seleccioná un hueso y asignalo desde su ventana; después podés volver a seleccionarlo acá.</p>
           </div>
@@ -756,15 +756,15 @@
             <span class="test-result" data-result="gemini"></span>
           </label>
           <label>Google Cloud Translation
-            <span class="key-row"><input type="password" name="key_googleTranslate" placeholder="API key de Google Cloud"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="googleTranslate" data-i18n="config.test">Probar</button></span>
+          <span class="key-row"><input type="password" name="key_googleTranslate" placeholder="API key de Google Cloud" data-i18n-placeholder="config.placeholders.googleCloudKey"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="googleTranslate" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="googleTranslate"></span>
           </label>
           <label>BytePlus ModelArk (Seedream)
-            <span class="key-row"><input type="password" name="key_ark" placeholder="key de Ark"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="ark" data-i18n="config.test">Probar</button></span>
+          <span class="key-row"><input type="password" name="key_ark" placeholder="Key de Ark" data-i18n-placeholder="config.placeholders.arkKey"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="ark" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="ark"></span>
           </label>
           <label>WaveSpeed (FireRed)
-            <span class="key-row"><input type="password" name="key_wavespeed" placeholder="key de WaveSpeed"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="wavespeed" data-i18n="config.test">Probar</button></span>
+          <span class="key-row"><input type="password" name="key_wavespeed" placeholder="Key de WaveSpeed" data-i18n-placeholder="config.placeholders.wavespeedKey"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="wavespeed" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="wavespeed"></span>
           </label>
           <label>MiniMax H3
@@ -780,7 +780,7 @@
             <span class="test-result" data-result="openai"></span>
           </label>
           <label><span data-i18n="config.sunoMusic">Suno (música)</span>
-            <span class="key-row"><input type="password" name="key_suno" placeholder="key del proveedor de Suno"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="suno" data-i18n="config.test">Probar</button></span>
+          <span class="key-row"><input type="password" name="key_suno" placeholder="Key del proveedor de Suno" data-i18n-placeholder="config.placeholders.sunoKey"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="suno" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="suno"></span>
           </label>
           <label>HeyGen API
@@ -810,7 +810,7 @@
 
         <h3>ffmpeg</h3>
         <div class="cfg-grid">
-          <label><span data-i18n="config.ffmpeg.path">Ruta de FFmpeg</span> <input type="text" name="ffmpegPath" placeholder="C:\ffmpeg\bin o C:\ffmpeg\bin\ffmpeg.exe"></label>
+        <label><span data-i18n="config.ffmpeg.path">Ruta de FFmpeg</span> <input type="text" name="ffmpegPath" placeholder="C:\ffmpeg\bin · C:\ffmpeg\bin\ffmpeg.exe"></label>
         </div>
         <p class="hint" data-i18n="config.ffmpeg.hint">El Automatizador lo usa para armar el video mp4 de cada bloque (imagen + audio). Podés pegar la carpeta bin o la ruta completa a ffmpeg.exe.</p>
 
@@ -831,7 +831,7 @@
         <div id="comfyWorkflowFormRow" class="cfg-grid" hidden>
           <label><span data-i18n="common.name">Nombre</span> <input type="text" id="comfyWorkflowFormName" maxlength="100" placeholder="ej: SDXL retratos" data-i18n-placeholder="config.comfy.namePlaceholder"></label>
           <label><span data-i18n="common.description">Descripción</span> <input type="text" id="comfyWorkflowFormDesc" maxlength="500" placeholder="para qué sirve este workflow" data-i18n-placeholder="config.comfy.descriptionPlaceholder"></label>
-          <label><span data-i18n="config.comfy.filePath">Ruta / URL del archivo</span> <input type="text" id="comfyWorkflowFormPath" placeholder="C:\ComfyUI\workflows\mi-flujo-api.json"></label>
+          <label><span data-i18n="config.comfy.filePath">Ruta / URL del archivo</span> <input type="text" id="comfyWorkflowFormPath" placeholder="C:\ComfyUI\workflows\workflow-api.json"></label>
         </div>
         <div id="comfyWorkflowCvFormRow" class="comfy-cv-form" hidden>
           <p class="hint" data-i18n="config.comfy.customValuesHint">Valores personalizados: activá los que uses y ponéles un título; van a aparecer como campo numérico en la pestaña ComfyUI.</p>
@@ -921,7 +921,7 @@
 <!-- Subir imágenes o videos con clasificación -->
 <div id="visualUploadModal" class="modal" hidden>
   <form id="visualUploadForm" class="modal-box form-modal-box visual-metadata-box">
-    <div class="modal-head"><div><h3 id="visualUploadTitle">Subir imágenes</h3><p class="hint" id="visualUploadHint">Clasificá el grupo para encontrarlo rápidamente después.</p></div><button type="button" class="icon-btn" id="visualUploadClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div class="modal-head"><div><h3 id="visualUploadTitle" data-i18n="assets.uploadImages">Subir imágenes</h3><p class="hint" id="visualUploadHint" data-i18n="assets.uploadImageHint">PNG, JPG o WebP · hasta 100 MB por archivo.</p></div><button type="button" class="icon-btn" id="visualUploadClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
     <label><span data-i18n="assets.files">Archivos</span><input id="visualUploadFiles" type="file" accept="image/png,image/jpeg,image/webp" multiple required></label>
     <label><span data-i18n="categories.category">Categoría</span><input id="visualUploadCategory" type="text" maxlength="80" list="visualCategoryList" placeholder="Ej: Archivo histórico" data-i18n-placeholder="assets.categoryExample"></label>
     <label><span data-i18n="assets.filters.tags">Etiquetas</span><input id="visualUploadTags" type="text" maxlength="500" placeholder="noir, ciudad, noche" data-i18n-placeholder="assets.tagsExample"></label>
@@ -988,7 +988,7 @@
         <option value="element" data-i18n="assets.associate.element">Locación u objeto</option>
       </select>
     </label>
-    <label><span id="associateOwnerLabelText">Personaje</span><select id="associateCharacter" class="select" required></select></label>
+    <label><span id="associateOwnerLabelText" data-i18n="assets.filters.character">Personaje</span><select id="associateCharacter" class="select" required></select></label>
     <label><span data-i18n="assets.associate.originalOrVariant">Original o variante</span><select id="associateVariant" class="select"></select></label>
     <div id="associateNewVariantFields" class="associate-new-variant" hidden>
       <div class="associate-new-variant-head"><strong data-i18n="assets.associate.newVariant">Nueva variante</strong><span data-i18n="assets.associate.newVariantHint">Se creará antes de asociar el asset</span></div>
@@ -1122,11 +1122,11 @@
     </section>
     <section id="promptLoraFields" class="prompt-lora-fields" hidden>
       <label><span data-i18n="common.description">Descripción</span><textarea id="promptLoraDescription" maxlength="2000" placeholder="Qué representa o consigue este LoRA" data-i18n-placeholder="prompts.lora.descriptionPlaceholder"></textarea></label>
-      <label><span data-i18n="assets.info.fileName">Nombre del archivo</span><input id="promptLoraFileName" type="text" maxlength="260" placeholder="Ej: cinematic_style_v2.safetensors"></label>
+      <label><span data-i18n="assets.info.fileName">Nombre del archivo</span><input id="promptLoraFileName" type="text" maxlength="260" placeholder="Ej: cinematic_style_v2.safetensors" data-i18n-placeholder="prompts.lora.fileNamePlaceholder"></label>
       <div class="prompt-lora-group">
         <div class="prompt-lora-group-head"><div><strong>Trigger words</strong><span data-i18n="prompts.lora.triggerHint">Se guardan como etiquetas invocables</span></div></div>
         <div id="promptLoraTriggerChips" class="prompt-lora-trigger-chips"></div>
-        <div class="prompt-lora-add-row"><input id="promptLoraTriggerInput" type="text" maxlength="120" placeholder="Ej: cinematic lighting"><button type="button" class="mini-btn" id="promptLoraAddTrigger"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="common.add">Añadir</span></button></div>
+        <div class="prompt-lora-add-row"><input id="promptLoraTriggerInput" type="text" maxlength="120" placeholder="Ej: cinematic lighting" data-i18n-placeholder="prompts.lora.triggerPlaceholder"><button type="button" class="mini-btn" id="promptLoraAddTrigger"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="common.add">Añadir</span></button></div>
       </div>
       <div class="prompt-lora-group">
         <div class="prompt-lora-group-head"><div><strong data-i18n="prompts.lora.useCases">Casos de uso</strong><span data-i18n="prompts.lora.useCasesHint">Cada caso tiene un nombre y su prompt completo</span></div><button type="button" class="mini-btn" id="promptLoraAddUseCase"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="prompts.lora.useCase">Caso de uso</span></button></div>

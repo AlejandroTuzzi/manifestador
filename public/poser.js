@@ -309,7 +309,7 @@ function renderParts() {
   const entries = [...groups.entries()].sort((a, b) => {
     const optA = a[1][0].optional, optB = b[1][0].optional;
     if (optA !== optB) return optA ? -1 : 1; // las opcionales (ropa) primero
-    return a[0].localeCompare(b[0]);
+    return a[0].localeCompare(b[0], B.localeTag());
   });
   box.innerHTML = entries.map(([group, items], i) =>
     `<label class="poser-part"><input type="checkbox" data-part="${i}" ${items.some((x) => x.mesh.visible) ? 'checked' : ''}> ${B.esc(group)}${items.length > 1 ? ` <span class="hint">(${items.length})</span>` : ''}</label>`
@@ -436,7 +436,7 @@ function renderAliasChips() {
   box.hidden = !entries.length;
   if (box.hidden) { box.innerHTML = ''; return; }
   box.innerHTML = entries
-    .sort((a, b) => a[1].localeCompare(b[1]))
+    .sort((a, b) => a[1].localeCompare(b[1], B.localeTag()))
     .map(([bone, label]) => `<button class="poser-chip${byName.get(bone) === P.selectedBone ? ' active' : ''}" data-alias-bone="${B.esc(bone)}" title="${B.esc(bone)}">${B.esc(label)}</button>`)
     .join('');
   box.querySelectorAll('[data-alias-bone]').forEach((chip) => chip.addEventListener('click', () => {

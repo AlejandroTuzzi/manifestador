@@ -43,6 +43,20 @@ describe('infraestructura multilenguaje', () => {
     }
   });
 
+  test('los textos estáticos españoles del HTML están conectados al catálogo', () => {
+    const html = read('public/index.html').replace(/<!--[\s\S]*?-->/g, '');
+    const spanishMarker = /[áéíóúñÁÉÍÓÚÑ¿¡]/u;
+    for (const match of html.matchAll(/<([a-z][a-z0-9-]*)([^>]*)>([^<>]+)<\/[a-z][a-z0-9-]*>/gi)) {
+      const [, tag, attributes, text] = match;
+      if (!spanishMarker.test(text) || tag.toLowerCase() === 'script' || text.trim() === 'Español') continue;
+      assert.match(attributes, /\bdata-i18n=/, `Texto sin data-i18n: ${text.trim()}`);
+    }
+    for (const match of html.matchAll(/<[^>]+\bplaceholder="([^"]*)"[^>]*>/g)) {
+      if (!spanishMarker.test(match[1])) continue;
+      assert.match(match[0], /\bdata-i18n-placeholder=/, `Placeholder sin i18n: ${match[1]}`);
+    }
+  });
+
   test('todas las claves literales usadas desde JavaScript existen en ambos catálogos', () => {
     const source = `${read('public/app-core.js')}\n${read('public/app.js')}\n${read('public/poser.js')}`;
     const used = [...source.matchAll(/\btr\(\s*['"]([^'"]+)['"]/g)].map((match) => match[1]);
@@ -62,12 +76,64 @@ describe('infraestructura multilenguaje', () => {
 
   test('cada código de error localizado del servidor existe en ambos catálogos', () => {
     const server = read('server.js');
-    const codes = [...server.matchAll(/\bsendError\(\s*res\s*,\s*\d+\s*,\s*['"]([^'"]+)['"]/g)]
-      .map((match) => `errors.${match[1]}`);
+    const sendErrorCodes = [...server.matchAll(/\bsendError\(\s*res\s*,\s*\d+\s*,\s*['"]([^'"]+)['"]/g)]
+      .map((match) => match[1]);
+    const thrownErrorCodes = [...server.matchAll(/\blocalizedServerError\(\s*['"]([^'"]+)['"]/g)]
+      .map((match) => match[1]);
+    const registryStart = server.indexOf('// LOCALIZED_SERVER_ERRORS_START');
+    const registryEnd = server.indexOf('// LOCALIZED_SERVER_ERRORS_END');
+    assert.ok(registryStart >= 0 && registryEnd > registryStart, 'Falta el registro de errores localizados');
+    const registry = server.slice(registryStart, registryEnd);
+    const registryCodes = [...registry.matchAll(/\[\s*'[^']*'\s*,\s*'([^']+)'\s*\]/g)]
+      .map((match) => match[1]);
+    const codes = [...new Set([...sendErrorCodes, ...thrownErrorCodes, ...registryCodes])].map((code) => `errors.${code}`);
     assert.ok(codes.length > 0);
     for (const key of codes) {
       assert.ok(key in es.messages, `Falta ${key} en español`);
       assert.ok(key in en.messages, `Falta ${key} en inglés`);
+    }
+  });
+
+  test('cada error literal enviado por rutas antiguas tiene un código estable', () => {
+    const server = read('server.js');
+    const registryStart = server.indexOf('// LOCALIZED_SERVER_ERRORS_START');
+    const registryEnd = server.indexOf('// LOCALIZED_SERVER_ERRORS_END');
+    const registry = server.slice(registryStart, registryEnd);
+    const registeredMessages = new Set(
+      [...registry.matchAll(/\[\s*'([^']*)'\s*,\s*'[^']+'\s*\]/g)].map((match) => match[1])
+    );
+    const literals = [...server.matchAll(/\bsend\(\s*res\s*,\s*\d+\s*,\s*\{\s*error:\s*'([^']+)'/g)]
+      .map((match) => match[1]);
+    for (const message of literals) {
+      assert.ok(registeredMessages.has(message), `Error del servidor sin código estable: ${message}`);
+    }
+  });
+
+  test('cada resultado localizado de pruebas de conexión existe en ambos catálogos', () => {
+    const source = `${read('lib/providers.js')}\n${read('server.js')}`;
+    const keys = [...source.matchAll(/detailCode:\s*['"]([^'"]+)['"]|result\(\s*(?:true|false)\s*,\s*['"]([^'"]+)['"]/g)]
+      .map((match) => match[1] || match[2]);
+    assert.ok(keys.length > 0);
+    for (const key of keys) {
+      assert.ok(key in es.messages, `Falta ${key} en español`);
+      assert.ok(key in en.messages, `Falta ${key} en inglés`);
+    }
+  });
+
+  test('los archivos visibles permanecen en UTF-8 sin mojibake', () => {
+    const files = [
+      'public/index.html', 'public/app-core.js', 'public/app.js', 'public/poser.js',
+      'public/locales/es.js', 'public/locales/en.js', 'I18N_TASKS.md'
+    ];
+    const mojibake = /(?:Ã[\x80-\xBF]|Â[\x80-\xBF]|â(?:€|†|€¦)|ï¿½|\uFFFD)/u;
+    for (const file of files) assert.doesNotMatch(read(file), mojibake, `Mojibake detectado en ${file}`);
+  });
+
+  test('los formatos del cliente no fijan el locale español', () => {
+    const source = `${read('public/app-core.js')}\n${read('public/app.js')}\n${read('public/poser.js')}`;
+    assert.doesNotMatch(source, /toLocale(?:String|LowerCase|UpperCase)\(\s*['"]es(?:-AR)?['"]/);
+    for (const line of source.split(/\r?\n/).filter((item) => item.includes('.localeCompare('))) {
+      assert.match(line, /(?:localeTag|getLocale)/, `localeCompare sin locale activo: ${line.trim()}`);
     }
   });
 
