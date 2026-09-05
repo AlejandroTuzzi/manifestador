@@ -73,7 +73,12 @@ const DEFAULT_POSER_PROMPT = 'The attached 3D figure render is ONLY a reference 
 // en vez de como una prohibición sobre algo descripto.
 const LABELED_REFS_PROMPT = 'The reference images are annotated working proofs. A name tag identifies the subject to preserve; a tag reading ARTISTIC STYLE identifies a style-only reference, from which you must use only its medium, technique, lighting, palette, texture and overall visual treatment, never its people, objects, setting, action or composition. The tags are instructions, not part of any scene. Read them, then ignore their graphic appearance. Produce a clean, unannotated image with no overlay, tag, strip, banner, caption or lettering added on top. Text that physically exists inside the requested scene is rendered as usual.';
 
+function normalizeInterfaceLanguage(value) {
+  return String(value || '').trim().toLowerCase().split(/[-_]/)[0] === 'en' ? 'en' : 'es';
+}
+
 const DEFAULT_CONFIG = {
+  language: 'es',
   poserPrompt: DEFAULT_POSER_PROMPT,
   photoshopPath: '',
   ffmpegPath: '',
@@ -208,6 +213,7 @@ async function getConfig() {
     endpoints: Object.fromEntries(Object.keys(DEFAULT_CONFIG.endpoints).map((key) => [key, savedEndpoints[key] || DEFAULT_CONFIG.endpoints[key]])),
     comfyui: { ...DEFAULT_CONFIG.comfyui, ...(cfg.comfyui || {}) }
   };
+  merged.language = normalizeInterfaceLanguage(merged.language);
   return merged;
 }
 
@@ -4509,6 +4515,7 @@ const server = http.createServer(async (req, res) => {
       }
       const next = {
         ...cfg,
+        language: body.language !== undefined ? normalizeInterfaceLanguage(body.language) : normalizeInterfaceLanguage(cfg.language),
         keys: { ...cfg.keys, ...(body.keys || {}) },
         paths: { ...cfg.paths, ...(body.paths || {}) },
         endpoints: { ...cfg.endpoints, ...(body.endpoints || {}) },

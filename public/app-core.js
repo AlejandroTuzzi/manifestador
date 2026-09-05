@@ -5,6 +5,15 @@
 const $ = (s) => document.querySelector(s);
 const IC = (n, cls = 'ic') => `<svg class="${cls}"><use href="#i-${n}"/></svg>`;
 const $$ = (s) => [...document.querySelectorAll(s)];
+const i18n = window.ManifestadorI18n;
+const tr = (key, variables = {}, fallback) => i18n?.translate(key, variables, fallback) ?? fallback ?? key;
+const trn = (key, count, variables = {}, fallback) => i18n?.plural(key, count, variables, fallback) ?? fallback ?? key;
+
+function setAppLanguage(locale, { persist = true } = {}) {
+  return i18n?.setLocale(locale, { persist, applyNow: true }) || 'es';
+}
+
+setAppLanguage(localStorage.getItem('manifestadorLanguage') || 'es', { persist: false });
 
 const state = {
   config: null,
@@ -170,24 +179,28 @@ function renderTaskMonitor() {
   if (!visible.length) {
     panel.classList.remove('has-running');
     const summary = $('#taskMonitorSummary');
-    if (summary) summary.textContent = 'Sin tareas activas';
-    list.innerHTML = '<span class="task-monitor-empty">La actividad aparecerá aquí.</span>';
+    if (summary) summary.textContent = tr('tasks.none', {}, 'Sin tareas activas');
+    list.innerHTML = `<span class="task-monitor-empty">${esc(tr('tasks.empty', {}, 'La actividad aparecerá aquí.'))}</span>`;
     return;
   }
   const running = state.uiTasks.filter((task) => task.status === 'running');
   panel.classList.toggle('has-running', running.length > 0);
   const summary = $('#taskMonitorSummary');
   if (summary) summary.textContent = running.length
-    ? `${running.length} en ejecución`
-    : 'Actividad reciente';
+    ? tr('tasks.running', { count: i18n?.formatNumber(running.length) ?? running.length }, `${running.length} en ejecución`)
+    : tr('tasks.recent', {}, 'Actividad reciente');
   list.innerHTML = visible.map((task) => {
     const hasTotal = Number(task.total) > 0;
     const counter = hasTotal
       ? `${Math.min(Number(task.current) || 0, Number(task.total))}/${Number(task.total)}`
-      : task.status === 'done' ? 'Listo' : task.status === 'error' ? 'Error' : 'En curso';
+      : task.status === 'done'
+        ? tr('tasks.done', {}, 'Listo')
+        : task.status === 'error'
+          ? tr('tasks.error', {}, 'Error')
+          : tr('tasks.progress', {}, 'En curso');
     return `<div class="task-monitor-item ${task.status}">
       <span class="task-dot"></span>
-      <span class="task-item-copy"><strong>${esc(task.title)}</strong><small>${esc(task.detail || (task.status === 'done' ? 'Completado' : 'Esperando respuesta…'))}</small></span>
+      <span class="task-item-copy"><strong>${esc(task.title)}</strong><small>${esc(task.detail || (task.status === 'done' ? tr('tasks.completed', {}, 'Completado') : tr('tasks.waiting', {}, 'Esperando respuesta…')))}</small></span>
       <span class="task-counter">${esc(counter)}</span>
     </div>`;
   }).join('');
@@ -196,7 +209,7 @@ function renderTaskMonitor() {
 function startUiTask(spec = {}) {
   const task = {
     id: `task-${Date.now()}-${++uiTaskSequence}`,
-    title: String(spec.title || 'Procesando').slice(0, 100),
+    title: String(spec.title || tr('tasks.processing', {}, 'Procesando')).slice(0, 100),
     detail: String(spec.detail || '').slice(0, 240),
     current: Math.max(0, Number(spec.current) || 0),
     total: Math.max(0, Number(spec.total) || 0),
@@ -222,7 +235,7 @@ function finishUiTask(taskId, { error = '', detail = '' } = {}) {
   const task = state.uiTasks.find((item) => item.id === taskId);
   if (!task) return;
   task.status = error ? 'error' : 'done';
-  task.detail = String(error || detail || (error ? 'La tarea falló.' : 'Completado')).slice(0, 240);
+  task.detail = String(error || detail || (error ? tr('tasks.failed', {}, 'La tarea falló.') : tr('tasks.completed', {}, 'Completado'))).slice(0, 240);
   if (!error && task.total > 0) task.current = task.total;
   task.finishedAt = Date.now();
   renderTaskMonitor();
@@ -234,23 +247,23 @@ function finishUiTask(taskId, { error = '', detail = '' } = {}) {
 
 function inferredApiTask(path, method, body) {
   if (method === 'GET') return null;
-  if (path === '/api/generate/image') return { title: 'Generando imagen', detail: 'Esperando al modelo de imagen…', total: Math.max(1, Number(body?.batch) || 1), current: 1 };
-  if (path === '/api/generate/video') return { title: 'Generando video', detail: 'Esperando al modelo de video…' };
-  if (path === '/api/generate/video/h3-regenerate-2k') return { title: 'Promoviendo video a 2K', detail: 'Esperando la regeneración de MiniMax H3…' };
-  if (path === '/api/generate/audio') return { title: 'Generando voz', detail: 'Esperando a ElevenLabs…' };
-  if (path === '/api/generate/music' || /\/music\/generate$/.test(path)) return { title: 'Generando música', detail: 'Esperando a Suno…', total: 2, current: 1 };
-  if (path === '/api/translate') return { title: 'Traduciendo texto', detail: 'Esperando la traducción…' };
-  if (path === '/api/vocabulary/analyze-image') return { title: 'Leyendo vocabulario visual', detail: 'Separando etiquetas, títulos y texto explicativo con Gemini…' };
-  if (/\/automations\/[a-z0-9]+\/assemble$/.test(path)) return { title: 'Ensamblando video final', detail: 'Uniendo tomas, audio y música con FFmpeg…' };
-  if (/\/automations\/[a-z0-9]+\/text-layer$/.test(path)) return { title: 'Renderizando textos', detail: 'Creando una nueva capa animada con Remotion…' };
-  if (path === '/api/subtitler/transcribe') return { title: 'Transcribiendo video', detail: 'Extrayendo el audio y esperando a ElevenLabs Scribe v2…' };
-  if (path === '/api/subtitler/render') return { title: 'Renderizando subtítulos', detail: 'Animando el texto con Remotion y componiendo el video…' };
-  if (/\/automations\/[a-z0-9]+\/effect$/.test(path) && body?.textRefreshTarget) return { title: 'Actualizando textos del master', detail: 'Recomponiendo el video sin regenerar imágenes ni audio…' };
-  if (/\/automations\/[a-z0-9]+\/effect$/.test(path)) return { title: 'Aplicando efecto final', detail: 'Procesando imagen y conservando subtítulos nítidos…' };
-  if (/\/automations\/[a-z0-9]+\/video$/.test(path)) return { title: 'Armando toma', detail: 'Sincronizando imagen y audio con FFmpeg…' };
-  if (/\/scripts\/[a-z0-9]+\/generate$/.test(path)) return { title: 'Generando guion', detail: 'Esperando la respuesta del modelo…' };
-  if (path === '/api/upload' || path === '/api/assets/audio') return { title: 'Guardando asset', detail: 'Subiendo el archivo a Manifestador…' };
-  if (path === '/api/assets/zip') return { title: 'Preparando descarga', detail: 'Empaquetando los assets seleccionados…' };
+  if (path === '/api/generate/image') return { title: tr('tasks.image.title'), detail: tr('tasks.image.detail'), total: Math.max(1, Number(body?.batch) || 1), current: 1 };
+  if (path === '/api/generate/video') return { title: tr('tasks.video.title'), detail: tr('tasks.video.detail') };
+  if (path === '/api/generate/video/h3-regenerate-2k') return { title: tr('tasks.promote2k.title'), detail: tr('tasks.promote2k.detail') };
+  if (path === '/api/generate/audio') return { title: tr('tasks.voice.title'), detail: tr('tasks.voice.detail') };
+  if (path === '/api/generate/music' || /\/music\/generate$/.test(path)) return { title: tr('tasks.music.title'), detail: tr('tasks.music.detail'), total: 2, current: 1 };
+  if (path === '/api/translate') return { title: tr('tasks.translate.title'), detail: tr('tasks.translate.detail') };
+  if (path === '/api/vocabulary/analyze-image') return { title: tr('tasks.vocabulary.title'), detail: tr('tasks.vocabulary.detail') };
+  if (/\/automations\/[a-z0-9]+\/assemble$/.test(path)) return { title: tr('tasks.assemble.title'), detail: tr('tasks.assemble.detail') };
+  if (/\/automations\/[a-z0-9]+\/text-layer$/.test(path)) return { title: tr('tasks.textLayer.title'), detail: tr('tasks.textLayer.detail') };
+  if (path === '/api/subtitler/transcribe') return { title: tr('tasks.transcribe.title'), detail: tr('tasks.transcribe.detail') };
+  if (path === '/api/subtitler/render') return { title: tr('tasks.subtitles.title'), detail: tr('tasks.subtitles.detail') };
+  if (/\/automations\/[a-z0-9]+\/effect$/.test(path) && body?.textRefreshTarget) return { title: tr('tasks.masterText.title'), detail: tr('tasks.masterText.detail') };
+  if (/\/automations\/[a-z0-9]+\/effect$/.test(path)) return { title: tr('tasks.finalEffect.title'), detail: tr('tasks.finalEffect.detail') };
+  if (/\/automations\/[a-z0-9]+\/video$/.test(path)) return { title: tr('tasks.shot.title'), detail: tr('tasks.shot.detail') };
+  if (/\/scripts\/[a-z0-9]+\/generate$/.test(path)) return { title: tr('tasks.script.title'), detail: tr('tasks.script.detail') };
+  if (path === '/api/upload' || path === '/api/assets/audio') return { title: tr('tasks.asset.title'), detail: tr('tasks.asset.detail') };
+  if (path === '/api/assets/zip') return { title: tr('tasks.download.title'), detail: tr('tasks.download.detail') };
   return null;
 }
 
@@ -269,7 +282,10 @@ async function api(path, opts = {}) {
     });
     const json = await res.json().catch(() => ({}));
     if (res.status === 401 && json.loginRequired) showLogin();
-    if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+    const translatedError = json.code && i18n?.has(`errors.${json.code}`)
+      ? tr(`errors.${json.code}`, json.details || {})
+      : json.error;
+    if (!res.ok) throw new Error(translatedError || `HTTP ${res.status}`);
     if (taskId) finishUiTask(taskId);
     return json;
   } catch (error) {
@@ -279,7 +295,8 @@ async function api(path, opts = {}) {
 }
 
 function fmtDate(ts) {
-  return new Date(ts).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return i18n?.formatDate(ts, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    || new Date(ts).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 function fmtDuration(ms) {
@@ -314,7 +331,7 @@ function activeRefLimit() {
 // Personajes, locaciones/objetos y series se listan siempre alfabéticamente:
 // es más fácil de navegar que por fecha de creación. Se llama al inicio de cada
 // render que arma una lista, así vale para cualquier mutación previa.
-const byName = (a, b) => String(a).localeCompare(String(b), 'es', { numeric: true, sensitivity: 'base' });
+const byName = (a, b) => String(a).localeCompare(String(b), i18n?.getLocale() || 'es', { numeric: true, sensitivity: 'base' });
 
 function sortEntities() {
   state.characters.sort((a, b) => byName(a.name, b.name));

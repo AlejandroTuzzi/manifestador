@@ -59,16 +59,27 @@ function setMode(mode) {
   $('.editor-wrap').classList.toggle('tags-on', mode === 'image' || (mode === 'audio' && audioModel?.supportsAudioTags !== false) || mode === 'video');
   $('#promptBox').placeholder = mode === 'audio'
     ? (audioModel?.supportsAudioTags === false
-      ? 'Escribí el texto a locutar… Multilingual v2 prioriza una narración estable'
-      : 'Escribí el texto a locutar… usá [risas] o [whispers] para expresiones')
+      ? tr('create.placeholder.audioStable', {}, 'Escribí el texto a locutar… Multilingual v2 prioriza una narración estable')
+      : tr('create.placeholder.audio', {}, 'Escribí el texto a locutar… usá [risas] o [whispers] para expresiones'))
     : mode === 'video'
-    ? 'Describí la escena en movimiento: acción, cámara, ambiente…'
+    ? tr('create.placeholder.video', {}, 'Describí la escena en movimiento: acción, cámara, ambiente…')
     : mode === 'music'
-    ? (state.music.customMode ? 'Escribí la LETRA de la canción (versos, estribillo)…' : 'Describí la canción: género, ánimo, instrumentos, tema…')
+    ? (state.music.customMode
+      ? tr('create.placeholder.musicLyrics', {}, 'Escribí la LETRA de la canción (versos, estribillo)…')
+      : tr('create.placeholder.musicSimple', {}, 'Describí la canción: género, ánimo, instrumentos, tema…'))
     : mode === 'comfyui'
-    ? 'Escribí el prompt que va a recibir tu workflow de ComfyUI…'
-    : 'Escribí lo que querés manifestar…';
-  $('#btnGenerate').innerHTML = mode === 'audio' ? `${IC('mic')} Dar voz` : mode === 'video' ? `${IC('film')} Manifestar video` : mode === 'music' ? `${IC('music')} Componer` : mode === 'comfyui' ? `${IC('layers')} Manifestar (ComfyUI)` : `${IC('spark')} Manifestar`;
+    ? tr('create.placeholder.comfyui', {}, 'Escribí el prompt que va a recibir tu workflow de ComfyUI…')
+    : tr('create.placeholder.image', {}, 'Escribí lo que querés manifestar…');
+  const generateAction = mode === 'audio'
+    ? [IC('mic'), tr('create.generate.audio', {}, 'Dar voz')]
+    : mode === 'video'
+      ? [IC('film'), tr('create.generate.video', {}, 'Manifestar video')]
+      : mode === 'music'
+        ? [IC('music'), tr('create.generate.music', {}, 'Componer')]
+        : mode === 'comfyui'
+          ? [IC('layers'), tr('create.generate.comfyui', {}, 'Manifestar (ComfyUI)')]
+          : [IC('spark'), tr('create.generate.image', {}, 'Manifestar')];
+  $('#btnGenerate').innerHTML = `${generateAction[0]} ${esc(generateAction[1])}`;
   if (mode === 'audio' && state.voices === null) loadVoices(false);
   if (mode === 'audio') renderAudioModelSelect();
   if (mode === 'video') renderVideoControls();
@@ -102,11 +113,11 @@ function renderMusicControls() {
   $('#musicStyleRow').hidden = !state.music.customMode;
   $('#musicTitleRow').hidden = !state.music.customMode;
   $('#musicHint').textContent = state.music.customMode
-    ? (state.music.instrumental ? 'Instrumental: la caja de arriba se ignora; definí estilo y título.' : 'La caja de arriba es la LETRA. Estilo y título son obligatorios.')
-    : 'Modo simple: la caja de arriba es una descripción; Suno inventa letra y estilo.';
+    ? (state.music.instrumental ? tr('create.music.hintInstrumental') : tr('create.music.hintCustom'))
+    : tr('create.music.hintSimple');
   $('#promptBox').placeholder = state.music.customMode
-    ? 'Escribí la LETRA de la canción (versos, estribillo)…'
-    : 'Describí la canción: género, ánimo, instrumentos, tema…';
+    ? tr('create.placeholder.musicLyrics')
+    : tr('create.placeholder.musicSimple');
 }
 
 $('#musicCustom').addEventListener('change', (e) => { state.music.customMode = e.target.checked; renderMusicControls(); updateEstimate(); });
@@ -121,15 +132,16 @@ $('#musicTitle').addEventListener('input', (e) => { state.music.title = e.target
 const COMFY_ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
 const COMFY_RESOLUTIONS = ['1K', '2K', '4K'];
 const COMFY_REF_SLOTS = {
-  reference: { strip: '#comfyRefReference', title: 'Elegir imagen de referencia' },
-  poseControlNet: { strip: '#comfyRefPoseControlNet', title: 'Elegir pose (ControlNet)' },
-  poseIpAdapter: { strip: '#comfyRefPoseIpAdapter', title: 'Elegir face (IP-Adapter)' }
+  reference: { strip: '#comfyRefReference', titleKey: 'create.comfy.chooseReference' },
+  poseControlNet: { strip: '#comfyRefPoseControlNet', titleKey: 'create.comfy.choosePose' },
+  poseIpAdapter: { strip: '#comfyRefPoseIpAdapter', titleKey: 'create.comfy.chooseFace' }
 };
-const COMFY_SLOT_LABELS = {
-  prompt: 'Prompt', reference: 'Referencia', poseControlNet: 'Pose ControlNet', poseIpAdapter: 'Face IP-Adapter',
-  resolution: 'Resolución', outputImage: 'Salida imagen', outputVideo: 'Salida video', outputAudio: 'Salida audio',
-  customValues: 'Valores Personalizados'
+const COMFY_SLOT_LABEL_KEYS = {
+  prompt: 'create.comfy.slot.prompt', reference: 'create.comfy.slot.reference', poseControlNet: 'create.comfy.slot.pose', poseIpAdapter: 'create.comfy.slot.face',
+  resolution: 'create.comfy.slot.resolution', outputImage: 'create.comfy.slot.imageOutput', outputVideo: 'create.comfy.slot.videoOutput', outputAudio: 'create.comfy.slot.audioOutput',
+  customValues: 'create.comfy.slot.customValues'
 };
+const comfySlotLabel = (slot) => COMFY_SLOT_LABEL_KEYS[slot] ? tr(COMFY_SLOT_LABEL_KEYS[slot]) : slot;
 
 function renderComfyControls() {
   if (state.comfyuiWorkflows.length && !state.comfyuiWorkflows.some((w) => w.id === state.comfyui.workflowId)) {
@@ -156,13 +168,12 @@ function renderComfyControls() {
 
 function missingComfyRequiredRefs() {
   const wf = state.comfyuiWorkflows.find((w) => w.id === state.comfyui.workflowId);
-  const labels = { reference: 'Referencia', poseControlNet: 'Pose (ControlNet)', poseIpAdapter: 'Face (IP-Adapter)' };
   return Object.entries(wf?.requiredRefs || {})
     .filter(([slot, required]) => required && !state.comfyui.refs[slot])
-    .map(([slot]) => labels[slot] || slot);
+    .map(([slot]) => comfySlotLabel(slot));
 }
 
-const COMFY_CV_MODES = [['fixed', 'Fijo'], ['increment', 'Auto +1'], ['random', 'Random']];
+const COMFY_CV_MODES = [['fixed', 'create.comfy.mode.fixed'], ['increment', 'create.comfy.mode.increment'], ['random', 'create.comfy.mode.random']];
 
 function renderComfyCustomValues() {
   const box = $('#comfyCustomValuesRow');
@@ -173,10 +184,10 @@ function renderComfyCustomValues() {
   box.innerHTML = enabled.map((cv) => {
     const st = state.comfyui.customValues[cv.i] || (state.comfyui.customValues[cv.i] = { mode: 'fixed', value: '' });
     return `<div class="comfy-cv-item">
-      <label>${esc(cv.label || `Valor ${cv.i + 1}`)}</label>
+      <label>${esc(cv.label || tr('create.comfy.value', { number: cv.i + 1 }))}</label>
       <input type="number" class="text-input" step="any" data-cv-value="${cv.i}" value="${esc(st.value)}" placeholder="0">
       <div class="chips comfy-cv-mode" data-cv-mode-group="${cv.i}">
-        ${COMFY_CV_MODES.map(([mode, label]) => `<button type="button" class="chip${st.mode === mode ? ' active' : ''}" data-mode="${mode}">${label}</button>`).join('')}
+        ${COMFY_CV_MODES.map(([mode, labelKey]) => `<button type="button" class="chip${st.mode === mode ? ' active' : ''}" data-mode="${mode}">${esc(tr(labelKey))}</button>`).join('')}
       </div>
     </div>`;
   }).join('');
@@ -266,7 +277,7 @@ function queueComfyLoopJob(prompt) {
 
 $('#comfyLoopToggle').addEventListener('change', (e) => {
   state.comfyui.loop = e.target.checked;
-  if (!state.comfyui.loop) toast('Generación ininterrumpida desactivada — se corta después de la que esté corriendo');
+  if (!state.comfyui.loop) toast(tr('create.comfy.disabled'));
 });
 
 function renderComfyRefSlot(slot) {
@@ -286,7 +297,7 @@ function renderComfyRefSlot(slot) {
     const add = document.createElement('button');
     add.className = 'ref-add';
     add.textContent = '+';
-    add.title = 'Agregar imagen';
+    add.title = tr('create.comfy.addImage');
     add.addEventListener('click', () => openComfyPicker(slot));
     el.appendChild(add);
   }
@@ -295,16 +306,16 @@ function renderComfyRefSlot(slot) {
 function openComfyPicker(slot) {
   state.comfyPickerSlot = slot;
   openPicker(null);
-  $('#pickerTitle').textContent = COMFY_REF_SLOTS[slot].title;
+  $('#pickerTitle').textContent = tr(COMFY_REF_SLOTS[slot].titleKey);
 }
 
 function renderComfySlotsHint() {
   const hint = $('#comfySlotsHint');
-  if (!state.comfyui.workflowId) { hint.textContent = 'Agregá y elegí un workflow arriba (o creá uno nuevo en Configuración → ComfyUI).'; return; }
+  if (!state.comfyui.workflowId) { hint.textContent = tr('create.comfy.chooseWorkflow'); return; }
   const slots = state.comfyui.slots;
-  if (!slots) { hint.textContent = 'No pude leer este workflow — revisá la ruta en Configuración → ComfyUI.'; return; }
-  const found = Object.entries(slots).filter(([, n]) => n > 0).map(([k]) => COMFY_SLOT_LABELS[k] || k);
-  hint.textContent = found.length ? `Nodos detectados: ${found.join(', ')}.` : 'Este workflow no tiene ningún nodo Tuzzi.';
+  if (!slots) { hint.textContent = tr('create.comfy.readFailed'); return; }
+  const found = Object.entries(slots).filter(([, n]) => n > 0).map(([k]) => comfySlotLabel(k));
+  hint.textContent = found.length ? tr('create.comfy.nodes', { nodes: found.join(', ') }) : tr('create.comfy.noNodes');
 }
 
 async function refreshComfySlots() {
@@ -347,7 +358,7 @@ function renderComfyWorkflowsList() {
       slotsEl.textContent = 'Escaneando…';
       try {
         const r = await api(`/api/comfyui/scan?id=${encodeURIComponent(id)}`, { task: false });
-        const found = Object.entries(r.slots).filter(([, n]) => n > 0).map(([k]) => COMFY_SLOT_LABELS[k] || k);
+        const found = Object.entries(r.slots).filter(([, n]) => n > 0).map(([k]) => comfySlotLabel(k));
         slotsEl.textContent = found.length ? `Nodos: ${found.join(', ')}` : 'Sin nodos Tuzzi detectados';
       } catch (e) {
         slotsEl.textContent = `Error: ${e.message}`;
@@ -466,7 +477,8 @@ function updateCharCount() {
   const el = $('#promptCharCount');
   if (!el) return;
   const n = promptBox.value.length;
-  el.textContent = `${n.toLocaleString('es-AR')} ${n === 1 ? 'carácter' : 'caracteres'}`;
+  const count = i18n?.formatNumber(n) ?? n.toLocaleString('es-AR');
+  el.textContent = tr(n === 1 ? 'create.characters.one' : 'create.characters.many', { count }, `${count} ${n === 1 ? 'carácter' : 'caracteres'}`);
 }
 
 function renderHighlight() {
@@ -511,14 +523,14 @@ function renderTagPalette() {
   const tags = [...AUDIO_TAGS, ...custom.filter((tag) => !AUDIO_TAGS.some((base) => base.toLowerCase() === tag.toLowerCase()))];
   $('#tagPalette').innerHTML = tags
     .map((t) => custom.includes(t)
-      ? `<span class="tag-chip custom"><button data-tag="${esc(t)}" title="Insertar expresión">[${esc(t)}]</button><button class="tag-remove" data-remove-tag="${esc(t)}" title="Borrar expresión">×</button></span>`
-      : `<button class="tag-chip" data-tag="${esc(t)}" title="Expresión nativa">[${esc(t)}]</button>`)
-    .join('') + `<button class="tag-chip" data-tag="__custom">[ + propia ]</button>`;
+      ? `<span class="tag-chip custom"><button data-tag="${esc(t)}" title="${esc(tr('create.audio.insertExpression'))}">[${esc(t)}]</button><button class="tag-remove" data-remove-tag="${esc(t)}" title="${esc(tr('create.audio.deleteExpression'))}">×</button></span>`
+      : `<button class="tag-chip" data-tag="${esc(t)}" title="${esc(tr('create.audio.nativeExpression'))}">[${esc(t)}]</button>`)
+    .join('') + `<button class="tag-chip" data-tag="__custom">${esc(tr('create.audio.custom'))}</button>`;
   $$('#tagPalette [data-tag]').forEach((b) => {
     b.addEventListener('click', async () => {
       let tag = b.dataset.tag;
       if (tag === '__custom') {
-        tag = window.prompt('Expresión (sin corchetes):', '');
+        tag = window.prompt(tr('create.audio.customPrompt'), '');
         if (!tag) return;
         tag = cleanAudioTag(tag);
         if (!tag) return;
@@ -533,7 +545,7 @@ function renderTagPalette() {
 }
 
 async function copyPrompt(text) {
-  if (!text) return toast('Este asset no tiene un prompt guardado', 'err');
+  if (!text) return toast(tr('clipboard.promptMissing', {}, 'Este asset no tiene un prompt guardado'), 'err');
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -541,7 +553,7 @@ async function copyPrompt(text) {
     area.value = text; area.style.position = 'fixed'; area.style.opacity = '0';
     document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove();
   }
-  toast('Prompt copiado');
+  toast(tr('clipboard.promptCopied', {}, 'Prompt copiado'));
 }
 
 function assetInfo(key) {
@@ -568,7 +580,7 @@ $('#loginForm').addEventListener('submit', async (e) => {
       body: JSON.stringify({ password: $('#loginPassword').value })
     });
     const body = await res.json();
-    if (!res.ok) throw new Error(body.error || 'No se pudo acceder');
+    if (!res.ok) throw new Error(body.error || tr('login.failed', {}, 'No se pudo acceder'));
     $('#loginModal').hidden = true;
     $('#loginPassword').value = '';
     await init();
@@ -588,9 +600,9 @@ async function saveCustomAudioTag(tag) {
     state.config = await api('/api/config', { method: 'PUT', body: { customAudioTags } });
     renderTagPalette();
     renderConfigAudioTags();
-    toast(`[${tag}] añadida a tus expresiones`);
+    toast(tr('create.audio.added', { tag }));
   } catch (e) {
-    toast(`Se insertará, pero no se pudo guardar: ${e.message}`, 'err');
+    toast(tr('create.audio.saveFailed', { error: e.message }), 'err');
   }
 }
 
@@ -600,7 +612,7 @@ async function removeCustomAudioTag(tag) {
     state.config = await api('/api/config', { method: 'PUT', body: { customAudioTags } });
     renderTagPalette();
     renderConfigAudioTags();
-    toast(`[${tag}] eliminada`);
+    toast(tr('create.audio.removed', { tag }));
   } catch (e) {
     toast(e.message, 'err');
   }
@@ -637,7 +649,7 @@ $('#newAudioTag').addEventListener('keydown', (e) => {
 
 async function translate(target) {
   const text = promptBox.value.trim();
-  if (!text) return toast('La caja está vacía', 'err');
+  if (!text) return toast(tr('create.translate.empty'), 'err');
   const btn = target === 'en' ? $('#btnToEn') : $('#btnToEs');
   btn.disabled = true;
   const prev = btn.textContent;
@@ -646,7 +658,7 @@ async function translate(target) {
     const { text: out } = await api('/api/translate', { method: 'POST', body: { text, target } });
     promptBox.value = out;
     renderHighlight();
-    toast(target === 'en' ? 'Traducido al inglés' : 'Traducido al castellano');
+    toast(tr(target === 'en' ? 'create.translate.englishDone' : 'create.translate.spanishDone'));
   } catch (e) {
     toast(e.message, 'err');
   } finally {
@@ -675,6 +687,10 @@ function chipRow(container, values, active, onPick, labelFn = (v) => v) {
   }
 }
 
+function localizedModelNote(model) {
+  return model ? tr(`models.${model.id}.notes`, {}, model.notes || '') : '';
+}
+
 function renderImageControls() {
   const m = currentModel();
   if (!m) return;
@@ -694,7 +710,7 @@ function renderImageControls() {
     (v) => { state.batch = v; renderImageControls(); },
     (v) => `×${v}`);
 
-  $('#modelNote').textContent = m.notes || '';
+  $('#modelNote').textContent = localizedModelNote(m);
   renderRefs();
   renderCharacterVariantControl();
   updateEstimate();
@@ -771,23 +787,23 @@ function renderVideoControls() {
       }
       renderVideoControls();
     },
-    (v) => ({ reference: 'Referencias (@)', frames: 'Inicio → Fin', edit: 'Editar video', extend: 'Extender video' }[v]));
+    (v) => tr(`create.video.mode.${v}`));
   $('#videoRefsHint').textContent = isHeyGen
-    ? 'Usá una imagen JPG o PNG: puede venir de cualquier asset o personaje.'
+    ? tr('create.video.refsHeygen')
     : isH3 && state.video.mode === 'reference'
-    ? 'Citá las referencias como Image 1, Video 1 o Audio 1. Podés combinar estética, personaje, movimiento, cámara, voz y ritmo.'
+    ? tr('create.video.refsH3')
     : isSeedance25 && state.video.mode === 'reference'
-    ? 'Citá las referencias como @Image1, @Video1 o @Audio1. Podés combinar hasta 50 archivos entre imagen, video y audio.'
+    ? tr('create.video.refsSeedance25')
     : isOmni && state.video.mode === 'reference'
-    ? 'Citá imágenes como <IMAGE_REF_0> y videos como <VIDEO_REF_0>. Hasta 6 imágenes y 3 clips de 3 segundos; el audio de esos clips se ignora.'
+    ? tr('create.video.refsOmni')
     : isOmni && state.video.mode === 'edit'
-    ? (state.video.omniPreviousInteractionId ? 'Esta edición continúa el resultado Omni elegido. Podés sumar imágenes de referencia.' : 'Elegí un video de hasta 10 segundos. Pedí un cambio simple; Omni conservará lo demás.')
+    ? (state.video.omniPreviousInteractionId ? tr('create.video.editLinked') : tr('create.video.editNew'))
     : isOmni && state.video.mode === 'extend'
-    ? (state.video.omniPreviousInteractionId ? 'Continúa la conversación elegida y agrega una toma al final, hasta 40 segundos acumulados.' : 'Elegí un video de hasta 10 segundos para generar una continuación al final.')
+    ? (state.video.omniPreviousInteractionId ? tr('create.video.extendLinked') : tr('create.video.extendNew'))
     : state.video.mode === 'reference'
-    ? 'mencionalas en el prompt con @image1, @image2… (botón @ en cada miniatura)'
-    : '1ª imagen = fotograma inicial · 2ª = final';
-  $('#videoRefsLabel').textContent = multimediaRefs ? 'Referencias' : 'Imágenes';
+    ? tr('create.video.refsDefault')
+    : tr('create.video.framesHint');
+  $('#videoRefsLabel').textContent = multimediaRefs ? tr('create.controls.references') : tr('create.controls.images');
   chipRow($('#videoArChips'), m.aspectRatios, state.video.aspectRatio,
     (v) => { state.video.aspectRatio = v; renderVideoControls(); });
   chipRow($('#videoResChips'), m.resolutions, state.video.resolution,
@@ -815,8 +831,11 @@ function renderVideoControls() {
   if (isOmni) {
     const linked = ['edit', 'extend'].includes(state.video.mode) && Boolean(state.video.omniPreviousInteractionId);
     $('#omniChainHint').textContent = linked
-      ? `Continuando una generación Omni · turno ${state.video.omniChainDepth + 1}${state.video.omniCumulativeDuration ? ` · ${state.video.omniCumulativeDuration}s actuales` : ''}.`
-      : 'Nueva generación independiente; para continuidad elegí Editar o Extender desde un resultado del historial.';
+      ? tr('create.video.omniLinked', {
+        turn: state.video.omniChainDepth + 1,
+        duration: state.video.omniCumulativeDuration ? tr('create.video.omniDuration', { seconds: state.video.omniCumulativeDuration }) : ''
+      })
+      : tr('create.video.omniNew');
     $('#omniClearConversation').hidden = !linked;
   }
   $('#h3ContextIr').checked = isH3 && state.video.h3ContextIr;
@@ -830,12 +849,12 @@ function renderVideoControls() {
     }
     $('#heygenCharacterRow').hidden = !m.requiresRegisteredCharacter;
     $('#heygenCharacterSelect').innerHTML = eligible.length
-      ? eligible.map((character) => `<option value="${character.id}">${esc(character.name)} · HeyGen${character.heygen?.closeAvatarId ? ' · 2 planos' : ' · 1 plano'}</option>`).join('')
-      : '<option value="">— no hay personajes HeyGen completos —</option>';
+      ? eligible.map((character) => `<option value="${character.id}">${esc(character.name)} · HeyGen · ${esc(tr(character.heygen?.closeAvatarId ? 'create.video.shots.two' : 'create.video.shots.one'))}</option>`).join('')
+      : `<option value="">${esc(tr('create.video.noHeygenCharacters'))}</option>`;
     $('#heygenCharacterSelect').value = state.video.heygenCharacterId;
     $('#heygenCharacterHint').textContent = eligible.length
-      ? 'Sólo aparecen personajes con código de avatar. La imagen espejo es una referencia local opcional.'
-      : 'Creá la variante HeyGen en Personajes para habilitar este modelo.';
+      ? tr('create.video.heygenCharactersHint')
+      : tr('create.video.heygenCharactersEmpty');
     $('#heygenVoiceRow').hidden = false;
     $('#heygenMotionRow').hidden = !m.supportsMotion;
     $('#heygenAuthMode').value = state.video.heygenAuthMode;
@@ -843,13 +862,13 @@ function renderVideoControls() {
     $('#heygenMotionPrompt').value = state.video.heygenMotionPrompt;
     $('#heygenExpressiveness').value = state.video.heygenExpressiveness;
     $('#heygenVideoAuthStatus').textContent = state.video.heygenAuthMode === 'oauth'
-      ? (state.heygenOAuth.connected ? 'OAuth conectado' : 'OAuth sin conectar; hacelo desde Configuración')
-      : (state.config?.keys?.heygen ? 'API key configurada' : 'Falta guardar la API key');
-    $('#promptBox').placeholder = 'Escribí el texto que dirá el avatar…';
+      ? (state.heygenOAuth.connected ? tr('create.video.oauthConnected') : tr('create.video.oauthMissing'))
+      : (state.config?.keys?.heygen ? tr('create.video.apiConfigured') : tr('create.video.apiMissing'));
+    $('#promptBox').placeholder = tr('create.video.avatarPlaceholder');
   } else if (state.mode === 'video') {
-    $('#promptBox').placeholder = 'Describí el video que querés manifestar…';
+    $('#promptBox').placeholder = tr('create.video.promptPlaceholder');
   }
-  $('#videoModelNote').textContent = m.notes || '';
+  $('#videoModelNote').textContent = localizedModelNote(m);
   renderRefs();
   updateEstimate();
 }
@@ -895,16 +914,16 @@ function renderRefs() {
     // en imagen se cita por su etiqueta (si tiene) para decirle quién es quién
     const typedMention = typedVideoReferenceMention(videoModel, kind, typeNumber);
     const mention = typedMultimedia && refMode === 'reference' ? typedMention : refMode === 'reference' || !r.label ? `@image${i + 1}` : `@${r.label}`;
-    const badge = typedMultimedia && refMode === 'reference' ? `<button class="ref-at" title="Insertar ${typedMention} en el prompt">${kind === 'image' ? 'IMG' : kind === 'video' ? 'VID' : 'AUD'} ${typeNumber}</button>`
-      : refMode === 'reference' ? `<button class="ref-at" title="Insertar @image${i + 1} en el prompt">@${i + 1}</button>`
-      : refMode === 'frames' ? `<span class="ref-badge">${i === 0 ? 'inicio' : 'fin'}</span>`
-      : !isVideo && !isAsset ? `<button class="ref-at" title="Insertar ${esc(mention)} en el prompt">${esc(mention)}</button>`
+    const badge = typedMultimedia && refMode === 'reference' ? `<button class="ref-at" title="${esc(tr('create.refs.insert', { mention: typedMention }))}">${kind === 'image' ? 'IMG' : kind === 'video' ? 'VID' : 'AUD'} ${typeNumber}</button>`
+      : refMode === 'reference' ? `<button class="ref-at" title="${esc(tr('create.refs.insert', { mention: `@image${i + 1}` }))}">@${i + 1}</button>`
+      : refMode === 'frames' ? `<span class="ref-badge">${esc(tr(i === 0 ? 'create.refs.start' : 'create.refs.end'))}</span>`
+      : !isVideo && !isAsset ? `<button class="ref-at" title="${esc(tr('create.refs.insert', { mention }))}">${esc(mention)}</button>`
       : '';
     d.innerHTML = isAsset
-      ? `<div class="asset-face" title="${esc(r.key)}">${IC('user', 'ic ic-lg')}<span>verificado</span></div>${badge}<button class="rm" title="Quitar">×</button>`
+      ? `<div class="asset-face" title="${esc(r.key)}">${IC('user', 'ic ic-lg')}<span>${esc(tr('create.refs.verified'))}</span></div>${badge}<button class="rm" title="${esc(tr('create.refs.remove'))}">×</button>`
       : `${kind === 'video' ? `<video src="${fileUrl(r.key)}" muted preload="metadata"></video>`
-        : kind === 'audio' ? `<div class="asset-face" title="${esc(r.key)}">${IC('mic', 'ic ic-lg')}<span>audio</span></div>`
-          : `<img src="${fileUrl(r.key)}" alt="">`}${kind === 'image' && r.label ? `<span class="ref-label-tag" title="La IA verá este texto sobre la imagen">${esc(r.label)}</span>` : ''}${badge}<button class="rm" title="Quitar">×</button>${kind === 'image' ? `<button class="ref-replace" title="Reemplazar imagen (conserva su posición y cita)">${IC('refresh')}</button><button class="ref-label-btn${r.label ? ' on' : ''}" title="${r.label ? `Etiqueta: ${esc(r.label)}` : 'Etiquetar para la IA (quién es quién)'}">T</button>` : ''}`;
+        : kind === 'audio' ? `<div class="asset-face" title="${esc(r.key)}">${IC('mic', 'ic ic-lg')}<span>${esc(tr('create.refs.audio'))}</span></div>`
+          : `<img src="${fileUrl(r.key)}" alt="">`}${kind === 'image' && r.label ? `<span class="ref-label-tag" title="${esc(tr('create.refs.labelVisible'))}">${esc(r.label)}</span>` : ''}${badge}<button class="rm" title="${esc(tr('create.refs.remove'))}">×</button>${kind === 'image' ? `<button class="ref-replace" title="${esc(tr('create.refs.replace'))}">${IC('refresh')}</button><button class="ref-label-btn${r.label ? ' on' : ''}" title="${esc(r.label ? tr('create.refs.label', { label: r.label }) : tr('create.refs.addLabel'))}">T</button>` : ''}`;
     d.querySelector('.rm').addEventListener('click', () => {
       state.refs.splice(i, 1);
       renderRefs();
@@ -913,7 +932,7 @@ function renderRefs() {
     d.querySelector('.ref-replace')?.addEventListener('click', () => openPicker(i));
     d.querySelector('.ref-label-btn')?.addEventListener('click', () => {
       const value = window.prompt(
-        'Texto que la IA verá sobreimpreso en esta referencia (solo en la petición, la imagen no se modifica). Vacío = sin etiqueta:',
+        tr('create.refs.labelPrompt'),
         r.label || refLabelSuggestion(r.key)
       );
       if (value === null) return;
@@ -938,9 +957,12 @@ function renderRefs() {
     const add = document.createElement('button');
     add.className = 'ref-add';
     add.textContent = '+';
+    const allowsVideo = (currentVideoModel()?.mediaLimits?.video || 0) > 0;
+    const allowsAudio = (currentVideoModel()?.mediaLimits?.audio || 0) > 0;
+    const mediaKey = allowsAudio ? 'create.refs.mediaImageVideoAudio' : allowsVideo ? 'create.refs.mediaImageVideo' : 'create.refs.mediaImage';
     add.title = isVideo && videoModeAllowsMultimedia()
-      ? `Agregar imagen${(currentVideoModel()?.mediaLimits?.video || 0) > 0 ? ', video' : ''}${(currentVideoModel()?.mediaLimits?.audio || 0) > 0 ? ' o audio' : ''} de referencia para ${currentVideoModel().name}`
-      : 'Agregar imagen de referencia';
+      ? tr('create.refs.addForModel', { media: tr(mediaKey), model: currentVideoModel().name })
+      : tr('create.refs.addImage');
     add.addEventListener('click', () => openPicker());
     strip.appendChild(add);
   }
@@ -953,19 +975,19 @@ function addRef(key, fromChar = false, kind = 'image') {
   const isMultimediaReference = state.mode === 'video' && videoModeAllowsMultimedia();
   if (state.refs.some((r) => r.key === key)) return false;
   if (normalizedKind !== 'image' && !isMultimediaReference) {
-    toast('Este modo sólo admite imágenes como referencia.', 'err');
+    toast(tr('create.refs.onlyImages'), 'err');
     return false;
   }
   if (state.refs.length >= maxRefs) {
-    toast(`${m.name} admite hasta ${maxRefs} referencia(s) en este modo`, 'err');
+    toast(tr('create.refs.modelLimit', { model: m.name, count: maxRefs }), 'err');
     return false;
   }
   if (isMultimediaReference) {
     const mediaLimit = m.mediaLimits?.[normalizedKind];
     const kindCount = state.refs.filter((ref) => referenceKind(ref) === normalizedKind).length;
     if (mediaLimit != null && kindCount >= mediaLimit) {
-      const label = normalizedKind === 'image' ? 'imágenes' : normalizedKind === 'video' ? 'videos' : 'audios';
-      toast(`${m.name} admite hasta ${mediaLimit} ${label} de referencia.`, 'err');
+      const label = tr(normalizedKind === 'image' ? 'create.refs.images' : normalizedKind === 'video' ? 'create.refs.videos' : 'create.refs.audios');
+      toast(tr('create.refs.mediaLimit', { model: m.name, count: mediaLimit, media: label }), 'err');
       return false;
     }
   }
@@ -1038,7 +1060,7 @@ async function buildLabeledRefs(refItems) {
     try {
       out[r.key] = await stampLabel(r.key, label);
     } catch {
-      toast(`No pude etiquetar una referencia; va sin etiqueta`, 'err');
+      toast(tr('create.refs.labelReadFailed'), 'err');
     }
   }
   return out;
@@ -1055,7 +1077,7 @@ async function loadVoices(showErrors = true) {
     state.voices = (voices || []).sort((a, b) => byName(a.name, b.name));
   } catch (e) {
     state.voices = [];
-    $('#voiceHint').textContent = 'No pude cargar voces — revisá la key de ElevenLabs en Configuración';
+    $('#voiceHint').textContent = tr('create.voice.loadFailed');
     if (showErrors) toast(e.message, 'err');
   }
   renderVoiceSelect();
@@ -1065,14 +1087,14 @@ async function loadVoices(showErrors = true) {
 function renderVoiceSelect() {
   const sel = $('#voiceSelect');
   const voices = state.voices || [];
-  sel.innerHTML = '<option value="">— elegir voz —</option>' + voices
+  sel.innerHTML = `<option value="">${esc(tr('create.voice.choose'))}</option>` + voices
     .map((v) => `<option value="${v.id}">${esc(v.name)}${v.category ? ` · ${esc(v.category)}` : ''}</option>`)
     .join('');
   const pc = pinnedChar();
   if (pc?.voiceId && voices.some((v) => v.id === pc.voiceId)) {
     sel.value = pc.voiceId;
     state.voiceId = pc.voiceId;
-    $('#voiceHint').textContent = `voz de ${pc.name} (personaje anclado)`;
+    $('#voiceHint').textContent = tr('create.voice.pinned', { name: pc.name });
   } else if (state.voiceId && voices.some((v) => v.id === state.voiceId)) {
     sel.value = state.voiceId;
   }
@@ -1087,7 +1109,7 @@ function renderAudioModelSelect() {
   select.innerHTML = models.map((model) =>
     `<option value="${esc(model.id)}"${model.id === state.audioModelId ? ' selected' : ''}>${esc(model.name)}</option>`
   ).join('');
-  $('#audioModelHint').textContent = selected?.notes || '';
+  $('#audioModelHint').textContent = localizedModelNote(selected);
 }
 
 $('#voiceSelect').addEventListener('change', (e) => { state.voiceId = e.target.value; });
@@ -1121,7 +1143,7 @@ function setPinned(id) {
   if (pc) {
     applyPinnedCharacterPhotos();
     if (pc.voiceId) state.voiceId = pc.voiceId;
-    toast(`${pc.name} anclado`);
+    toast(tr('create.character.pinned', { name: pc.name }));
   }
   renderPinned();
   renderPinnedHint();
@@ -1184,8 +1206,8 @@ function renderCharacterVariantControl() {
   row.hidden = !pc || !(pc.variants || []).length;
   if (row.hidden) return;
   const select = $('#characterVariantSelect');
-  select.innerHTML = `<option value="">Original (${pc.photos.length} fotos)</option>`
-    + (pc.variants || []).map((v) => `<option value="${v.id}">${esc(v.name)} (${v.photos.length} fotos)</option>`).join('');
+  select.innerHTML = `<option value="">${esc(tr('create.character.originalPhotos', { count: pc.photos.length }))}</option>`
+    + (pc.variants || []).map((v) => `<option value="${v.id}">${esc(tr('create.character.variantPhotos', { name: v.name, count: v.photos.length }))}</option>`).join('');
   select.value = state.characterVariantId;
 }
 
@@ -1207,7 +1229,7 @@ function renderPinned() {
     : `<div class="char-avatar ph" style="width:40px;height:40px">${IC('user')}</div>`;
   $('#pinnedInfo').innerHTML = `${avatar}<div>
     <div class="pi-name">${esc(pc.name)}</div>
-    <div class="pi-voice">${pc.voiceName ? IC('mic') + ' ' + esc(pc.voiceName) : 'sin voz asignada'}</div>
+    <div class="pi-voice">${pc.voiceName ? IC('mic') + ' ' + esc(pc.voiceName) : esc(tr('create.character.noVoice'))}</div>
   </div>`;
 }
 
@@ -1218,14 +1240,14 @@ function renderPinnedHint() {
   if (!pc) return;
   const variant = (pc.variants || []).find((v) => v.id === state.characterVariantId);
   hint.textContent = state.mode === 'image'
-    ? `${pc.name}${variant ? ` · ${variant.name}` : ' · Original'}: sus fotos van como referencia`
+    ? tr('create.character.imageRefs', { name: pc.name, variant: ` · ${variant ? variant.name : tr('create.character.original')}` })
     : state.mode === 'video' && currentVideoModel()?.provider === 'seedance' && pc.arkAssetId
-    ? `${pc.name}: va como rostro real verificado (asset de ModelArk)`
+    ? tr('create.character.verified', { name: pc.name })
     : state.mode === 'video' && supportsMultimediaVideoRefs()
-    ? `${pc.name}: sus fotos locales van como referencias de ${currentVideoModel().name}`
+    ? tr('create.character.localRefs', { name: pc.name, model: currentVideoModel().name })
     : state.mode === 'video' && pc.arkAssetId
-    ? `${pc.name}: va como rostro real verificado (asset de ModelArk)`
-    : `${pc.name}: ${pc.voiceName ? 'habla con su voz (' + pc.voiceName + ')' : 'no tiene voz asignada'}`;
+    ? tr('create.character.verified', { name: pc.name })
+    : pc.voiceName ? tr('create.character.speaks', { name: pc.name, voice: pc.voiceName }) : tr('create.character.missingVoice', { name: pc.name });
 }
 
 $('#unpinBtn').addEventListener('click', () => setPinned(''));
@@ -1256,10 +1278,10 @@ function shotListEven(count = state.shotList.length) {
 function renderShotList() {
   const total = videoMaxDuration();
   const used = Math.round(state.shotList.reduce((sum, d) => sum + d, 0) * 10) / 10;
-  $('#shotListTotal').textContent = `${state.shotList.length} toma${state.shotList.length === 1 ? '' : 's'} · ${fmtSec(used)} asignados · clip de ${fmtSec(total)}`;
+  $('#shotListTotal').textContent = tr('create.shotList.summary', { count: state.shotList.length, used: fmtSec(used), total: fmtSec(total) });
   const warn = $('#shotListWarn');
-  warn.textContent = used > total ? `Se pasa ${fmtSec(Math.round((used - total) * 10) / 10)} del clip: acortá tomas o usá “Repartir parejo”`
-    : used < total ? `Quedan ${fmtSec(Math.round((total - used) * 10) / 10)} sin asignar` : '';
+  warn.textContent = used > total ? tr('create.shotList.over', { duration: fmtSec(Math.round((used - total) * 10) / 10) })
+    : used < total ? tr('create.shotList.remaining', { duration: fmtSec(Math.round((total - used) * 10) / 10) }) : '';
   warn.className = 'hint' + (used > total ? ' warn' : '');
 
   let at = 0;
@@ -1271,15 +1293,15 @@ function renderShotList() {
     const over = at > total;
     return `<div class="shot-list-row${over ? ' over' : ''}">
       <span class="shot-list-n">Shot ${i + 1}</span>
-      <span class="shot-list-range">${fmtSec(start)} → ${fmtSec(at)}${start >= total ? ' · fuera del clip' : over ? ' · se corta' : ''}</span>
+      <span class="shot-list-range">${fmtSec(start)} → ${fmtSec(at)}${start >= total ? ` · ${esc(tr('create.shotList.outside'))}` : over ? ` · ${esc(tr('create.shotList.cut'))}` : ''}</span>
       <span class="num-field">
         <input type="number" min="0.5" max="${total}" step="0.5" value="${dur}" data-shotdur="${i}">
         <span class="num-steps">
-          <button type="button" class="num-step" data-shotstep="${i}:1" title="Más">${IC('right')}</button>
-          <button type="button" class="num-step" data-shotstep="${i}:-1" title="Menos">${IC('right')}</button>
+          <button type="button" class="num-step" data-shotstep="${i}:1" title="${esc(tr('create.shotList.more'))}">${IC('right')}</button>
+          <button type="button" class="num-step" data-shotstep="${i}:-1" title="${esc(tr('create.shotList.less'))}">${IC('right')}</button>
         </span>
       </span> s
-      <button class="mini-btn danger" data-shotdel="${i}" title="Quitar">×</button>
+      <button class="mini-btn danger" data-shotdel="${i}" title="${esc(tr('create.refs.remove'))}">×</button>
     </div>`;
   }).join('');
   $('#shotListRows').querySelectorAll('[data-shotdur]').forEach((input) => input.addEventListener('change', () => {
@@ -1332,7 +1354,7 @@ $('#shotListAdd').addEventListener('click', () => {
   if (free < 0.5) {
     // ya no entra: se reparte todo de nuevo entre una toma más
     state.shotList = shotListEven(state.shotList.length + 1);
-    toast('No quedaba lugar: repartí el clip entre todas las tomas');
+    toast(tr('create.shotList.redistributed'));
   } else {
     state.shotList.push(Math.min(free, 2));
   }
@@ -1353,7 +1375,7 @@ $('#shotListInsert').addEventListener('click', () => {
   const pos = firstEnd === -1 ? promptBox.value.length : firstEnd;
   promptBox.focus();
   promptBox.setSelectionRange(pos, pos);
-  toast(`${state.shotList.length} tomas insertadas — completá cada una en inglés`);
+  toast(tr('create.shotList.inserted', { count: state.shotList.length }));
 });
 
 // ---------------------------------------------------------------------------
@@ -1410,7 +1432,7 @@ function renderShotPanelShots() {
   const sc = state.scripts.find((x) => x.id === $('#shotPanelScript').value);
   const options = [];
   (sc?.scenes || []).forEach((scene, si) => scene.shots.forEach((shot, hi) => {
-    options.push(`<option value="${si}:${hi}">Plano ${si + 1}.${hi + 1} — ${esc((scene.location || 'Sin locación').slice(0, 40))}</option>`);
+    options.push(`<option value="${si}:${hi}">${esc(tr('create.shotPanel.option', { scene: si + 1, shot: hi + 1, location: (scene.location || tr('create.shotPanel.noLocation')).slice(0, 40) }))}</option>`);
   }));
   $('#shotPanelShot').innerHTML = options.join('');
   restoreSelect($('#shotPanelShot'), loadShotPanel().shot);
@@ -1421,7 +1443,7 @@ function renderShotPanelBody() {
   const body = $('#shotPanelBody');
   const current = shotPanelCurrent();
   if (!current) {
-    body.innerHTML = '<div class="hint">Elegí una serie con guiones para ver sus tomas. Los guiones se crean o importan desde Series.</div>';
+    body.innerHTML = `<div class="hint">${esc(tr('create.shotPanel.empty'))}</div>`;
     return;
   }
   const { script, scene, shot, si, hi } = current;
@@ -1429,7 +1451,7 @@ function renderShotPanelBody() {
   const serie = state.series.find((s) => s.id === script.seriesId);
   body.innerHTML = `
     <div class="shot-panel-head">
-      <strong>Plano ${si + 1}.${hi + 1}</strong>
+      <strong>${esc(tr('create.shotPanel.heading', { scene: si + 1, shot: hi + 1 }))}</strong>
       <span class="sb-slug">${esc(`${scene.intExt}. ${(scene.location || '').toUpperCase()} — ${scene.timeOfDay}`)}</span>
       <span class="sb-shot-specs">${esc(shot.size)} · ${esc(shot.lens)}${serie ? ` · ${esc(serie.format)}` : ''}</span>
     </div>
@@ -1439,8 +1461,8 @@ function renderShotPanelBody() {
     ${(shot.assetKeys || []).length ? `<div class="sb-assets" data-shotpanelstrip="1">${shot.assetKeys.map((k) =>
       `<button class="script-asset-thumb" data-k="${esc(k)}" title="${esc(k)}">${seriesAssetThumb(k)}</button>`).join('')}</div>` : ''}
     <div class="shot-panel-actions">
-      ${shot.prompt ? `<button class="mini-btn" id="shotPanelUsePrompt">${IC('copy')} Usar su prompt en la caja</button>` : ''}
-      <button class="mini-btn" id="shotPanelCopyDesc">${IC('copy')} Copiar la descripción</button>
+      ${shot.prompt ? `<button class="mini-btn" id="shotPanelUsePrompt">${IC('copy')} ${esc(tr('create.shotPanel.usePrompt'))}</button>` : ''}
+      <button class="mini-btn" id="shotPanelCopyDesc">${IC('copy')} ${esc(tr('create.shotPanel.copyDescription'))}</button>
     </div>`;
   body.querySelectorAll('.script-asset-thumb').forEach((b) => b.addEventListener('click', () => {
     const key = b.dataset.k;
@@ -1450,7 +1472,7 @@ function renderShotPanelBody() {
     promptBox.value = shot.prompt;
     renderHighlight();
     promptBox.focus();
-    toast('Prompt del plano cargado en la caja');
+    toast(tr('create.shotPanel.loaded'));
   });
   $('#shotPanelCopyDesc')?.addEventListener('click', () => {
     const text = [
@@ -1496,17 +1518,17 @@ async function generate() {
   // validación del prompt según el modo (en música instrumental no hay letra)
   if (isMusic) {
     const mm = state.music;
-    if (mm.customMode && !mm.style.trim()) return toast('Poné un estilo/género para la canción', 'err');
-    if (mm.customMode && !mm.title.trim()) return toast('Poné un título para la canción', 'err');
-    if (mm.customMode && !mm.instrumental && !prompt) return toast('Escribí la letra (o activá instrumental)', 'err');
-    if (!mm.customMode && !prompt) return toast('Describí la canción', 'err');
+    if (mm.customMode && !mm.style.trim()) return toast(tr('create.validation.musicStyle'), 'err');
+    if (mm.customMode && !mm.title.trim()) return toast(tr('create.validation.musicTitle'), 'err');
+    if (mm.customMode && !mm.instrumental && !prompt) return toast(tr('create.validation.musicLyrics'), 'err');
+    if (!mm.customMode && !prompt) return toast(tr('create.validation.musicDescription'), 'err');
   } else if (!prompt) {
-    return toast('Escribí un prompt primero', 'err');
+    return toast(tr('create.validation.prompt'), 'err');
   }
-  if (isComfy && !state.comfyui.workflowId) return toast('Elegí un workflow de ComfyUI primero', 'err');
+  if (isComfy && !state.comfyui.workflowId) return toast(tr('create.validation.workflow'), 'err');
   if (isComfy) {
     const missing = missingComfyRequiredRefs();
-    if (missing.length) return toast(`Este workflow requiere: ${missing.join(', ')}`, 'err');
+    if (missing.length) return toast(tr('create.validation.workflowRefs', { refs: missing.join(', ') }), 'err');
   }
   const pc = pinnedChar();
   const voiceId = state.voiceId || pc?.voiceId;
@@ -1518,58 +1540,58 @@ async function generate() {
   const isOmni = isVideo && model?.provider === 'omni';
   const isSeedance25 = isVideo && model?.id === 'seedance-2-5';
   if (isImage && state.refs.length < (model?.minRefs || 0)) {
-    return toast(`${model.name} necesita al menos ${model.minRefs} imagen(es) de referencia`, 'err');
+    return toast(tr('create.validation.minImages', { model: model.name, count: model.minRefs }), 'err');
   }
   if (isHeyGen && model.requiresRegisteredCharacter) {
     const character = state.characters.find((item) => item.id === state.video.heygenCharacterId);
     if (!heygenCharacterReady(character)) {
-      return toast('Este modelo necesita un personaje con variante HeyGen completa', 'err');
+      return toast(tr('create.validation.heygenCharacter'), 'err');
     }
   }
   if (isHeyGen && !model.requiresRegisteredCharacter) {
-    if (state.refs.length !== 1 || state.refs[0].key.startsWith('asset://')) return toast('Elegí exactamente una imagen', 'err');
-    if (!state.video.heygenVoiceId.trim()) return toast('Pegá el código de una voz de HeyGen', 'err');
+    if (state.refs.length !== 1 || state.refs[0].key.startsWith('asset://')) return toast(tr('create.validation.oneImage'), 'err');
+    if (!state.video.heygenVoiceId.trim()) return toast(tr('create.validation.heygenVoice'), 'err');
   }
-  if (isHeyGen && state.video.heygenAuthMode === 'oauth' && !state.heygenOAuth.connected) return toast('Conectá HeyGen OAuth desde Configuración', 'err');
-  if (isHeyGen && state.video.heygenAuthMode === 'key' && !state.config?.keys?.heygen) return toast('Guardá la API key de HeyGen en Configuración', 'err');
-  if (isH3 && !state.config?.keys?.minimax) return toast('Guardá la API key de MiniMax en Configuración', 'err');
-  if (isOmni && !state.config?.keys?.gemini) return toast('Guardá la API key de Gemini en Configuración', 'err');
-  if (isSeedance25 && !state.config?.keys?.ark) return toast('Guardá la API key de BytePlus ModelArk en Configuración', 'err');
+  if (isHeyGen && state.video.heygenAuthMode === 'oauth' && !state.heygenOAuth.connected) return toast(tr('create.validation.heygenOauth'), 'err');
+  if (isHeyGen && state.video.heygenAuthMode === 'key' && !state.config?.keys?.heygen) return toast(tr('create.validation.heygenKey'), 'err');
+  if (isH3 && !state.config?.keys?.minimax) return toast(tr('create.validation.minimaxKey'), 'err');
+  if (isOmni && !state.config?.keys?.gemini) return toast(tr('create.validation.geminiKey'), 'err');
+  if (isSeedance25 && !state.config?.keys?.ark) return toast(tr('create.validation.arkKey'), 'err');
   if (isH3) {
     const counts = state.refs.reduce((out, ref) => {
       out[referenceKind(ref)] += 1;
       return out;
     }, { image: 0, video: 0, audio: 0 });
-    if (state.video.mode === 'frames' && (counts.video || counts.audio)) return toast('Inicio → Fin sólo admite imágenes.', 'err');
-    if (counts.image > 9 || counts.video > 3 || counts.audio > 3 || state.refs.length > 12) return toast('H3 admite 9 imágenes, 3 videos y 3 audios; máximo 12 referencias.', 'err');
-    if (state.video.mode === 'reference' && counts.audio && !counts.image && !counts.video) return toast('El audio H3 necesita al menos una imagen o video de referencia.', 'err');
+    if (state.video.mode === 'frames' && (counts.video || counts.audio)) return toast(tr('create.validation.framesImages'), 'err');
+    if (counts.image > 9 || counts.video > 3 || counts.audio > 3 || state.refs.length > 12) return toast(tr('create.validation.h3Limits'), 'err');
+    if (state.video.mode === 'reference' && counts.audio && !counts.image && !counts.video) return toast(tr('create.validation.h3Audio'), 'err');
   }
   if (isSeedance25) {
     const counts = state.refs.reduce((out, ref) => {
       out[referenceKind(ref)] += 1;
       return out;
     }, { image: 0, video: 0, audio: 0 });
-    if (state.video.mode === 'frames' && (counts.video || counts.audio)) return toast('Inicio → Fin sólo admite imágenes.', 'err');
-    if (counts.image > 30 || counts.video > 10 || counts.audio > 10 || state.refs.length > 50) return toast('Seedance 2.5 admite 30 imágenes, 10 videos y 10 audios; máximo 50 referencias.', 'err');
+    if (state.video.mode === 'frames' && (counts.video || counts.audio)) return toast(tr('create.validation.framesImages'), 'err');
+    if (counts.image > 30 || counts.video > 10 || counts.audio > 10 || state.refs.length > 50) return toast(tr('create.validation.seedanceLimits'), 'err');
   }
   if (isOmni) {
     const counts = state.refs.reduce((out, ref) => {
       out[referenceKind(ref)] += 1;
       return out;
     }, { image: 0, video: 0, audio: 0 });
-    if (counts.audio) return toast('Gemini Omni todavía no admite audio subido como referencia.', 'err');
-    if (counts.image > 6 || counts.video > 3 || state.refs.length > 9) return toast('Gemini Omni admite hasta 6 imágenes y 3 clips de referencia.', 'err');
-    if (state.video.mode === 'frames' && (counts.image !== 2 || counts.video)) return toast('Inicio → Fin de Omni necesita exactamente dos imágenes.', 'err');
+    if (counts.audio) return toast(tr('create.validation.omniAudio'), 'err');
+    if (counts.image > 6 || counts.video > 3 || state.refs.length > 9) return toast(tr('create.validation.omniLimits'), 'err');
+    if (state.video.mode === 'frames' && (counts.image !== 2 || counts.video)) return toast(tr('create.validation.omniFrames'), 'err');
     if (['edit', 'extend'].includes(state.video.mode) && !state.video.omniPreviousInteractionId && counts.video !== 1) {
-      return toast(`${state.video.mode === 'edit' ? 'Editar' : 'Extender'} necesita un video de origen o un resultado Omni elegido desde el historial.`, 'err');
+      return toast(tr('create.validation.omniSource', { action: tr(state.video.mode === 'edit' ? 'create.validation.edit' : 'create.validation.extend') }), 'err');
     }
     if (state.video.mode === 'extend' && state.video.omniPreviousInteractionId
       && state.video.omniCumulativeDuration + state.video.duration > 40) {
-      return toast('Esta extensión superaría el máximo acumulado de 40 segundos de Omni.', 'err');
+      return toast(tr('create.validation.omniDuration'), 'err');
     }
   }
   if (isVideo && !isHeyGen && state.video.mode === 'frames' && state.refs.length !== 2) {
-    return toast('Inicio → Fin necesita exactamente dos imágenes: la primera es entrada y la segunda es salida.', 'err');
+    return toast(tr('create.validation.framesExact'), 'err');
   }
   // las etiquetas se estampan acá, sobre copias: el asset guardado queda limpio
   const refsUsed = isImage ? state.refs : isVideo ? state.refs.slice(0, activeRefLimit()) : [];
@@ -1581,9 +1603,9 @@ async function generate() {
     status: 'queued', prompt, createdAt: Date.now(),
     label: isImage ? `${model.name} · ${state.resolution} · ×${state.batch}`
       : isVideo ? `${model.name} · ${state.video.resolution}${isHeyGen ? '' : ` · ${state.video.duration}s`}`
-      : isMusic ? `Suno ${state.music.version}${state.music.instrumental ? ' · instrumental' : ''}`
+      : isMusic ? `Suno ${state.music.version}${state.music.instrumental ? ` · ${tr('create.queue.instrumental')}` : ''}`
       : isComfy ? comfyJobLabel()
-      : `${audioModel?.name || 'ElevenLabs'} · ${voice?.name || pc?.voiceName || 'voz'}`,
+      : `${audioModel?.name || 'ElevenLabs'} · ${voice?.name || pc?.voiceName || tr('create.history.voiceFallback')}`,
     path: isImage ? '/api/generate/image' : isVideo ? '/api/generate/video' : isMusic ? '/api/generate/music' : isComfy ? '/api/generate/comfyui' : '/api/generate/audio',
     body: isImage ? {
       modelId: state.modelId, prompt, aspectRatio: state.aspectRatio,
@@ -1623,7 +1645,7 @@ async function generate() {
   renderGenerationQueue();
   pumpGenerationQueue();
   if (isComfy) applyComfyPostIncrement(comfyBuild.postIncrement);
-  toast('Generación añadida a la cola');
+  toast(tr('create.queue.added'));
 }
 
 function pumpGenerationQueue() {
@@ -1663,9 +1685,9 @@ async function runGenerationJob(job) {
     showEntry(entry);
     renderHistory();
     const costTxt = entry.cost ? ` — $${entry.cost.toFixed(3)}` : '';
-    if (entry.errors?.length) toast(`Listo, pero ${entry.errors.length} del lote fallaron: ${entry.errors[0]}`, 'err');
-    else if (job.kind === 'h3-promotion') toast(`Versión MiniMax H3 2K terminada${costTxt}`);
-    else toast(`Manifestado${costTxt}`);
+    if (entry.errors?.length) toast(tr('create.queue.partial', { count: entry.errors.length, error: entry.errors[0] }), 'err');
+    else if (job.kind === 'h3-promotion') toast(tr('create.queue.promoted', { cost: costTxt }));
+    else toast(tr('create.queue.generated', { cost: costTxt }));
   } catch (e) {
     job.status = 'error'; job.error = e.message; job.finishedAt = Date.now();
     if (job.kind === 'h3-promotion' && state.currentEntry?.id === job.body?.historyId) {
@@ -1675,7 +1697,7 @@ async function runGenerationJob(job) {
     if (job.comfyLoop && state.comfyui.loop) {
       state.comfyui.loop = false;
       $('#comfyLoopToggle').checked = false;
-      toast('Generación ininterrumpida detenida por un error', 'err');
+      toast(tr('create.queue.loopStopped'), 'err');
     }
   } finally {
     if (progressTimer) clearInterval(progressTimer);
@@ -1693,15 +1715,15 @@ function renderGenerationQueue() {
   if (box.hidden) return;
   const active = state.generationJobs.filter((j) => j.status === 'running').length;
   const queued = state.generationJobs.filter((j) => j.status === 'queued').length;
-  box.innerHTML = `<div class="generation-queue-head"><span>Cola de generación</span><span>${active} activas · ${queued} esperando</span></div>`
+  box.innerHTML = `<div class="generation-queue-head"><span>${esc(tr('create.queue.title'))}</span><span>${esc(tr('create.queue.summary', { active, queued }))}</span></div>`
     + state.generationJobs.slice(0, 12).map((job) => `<div class="generation-job ${job.status}" data-job="${job.id}">
       <div class="job-status">${job.status === 'queued' ? 'Ⅱ' : job.status === 'running' ? '●' : job.status === 'done' ? '✓' : '!'}</div>
       <div class="job-main">
-        <div class="job-title">${esc(job.label)}${job.progress?.total ? ` · paso ${job.progress.current}/${job.progress.total}` : ''}</div>
+        <div class="job-title">${esc(job.label)}${job.progress?.total ? ` · ${esc(tr('create.queue.step', { current: job.progress.current, total: job.progress.total }))}` : ''}</div>
         ${job.progress?.total ? `<div class="job-progress-bar"><div style="width:${Math.min(100, Math.round(job.progress.current / job.progress.total * 100))}%"></div></div>` : ''}
         <div class="job-prompt ${job.status === 'error' ? 'job-error' : ''}">${esc(job.error || job.prompt)}</div>
       </div>
-      <div class="job-actions">${job.entry ? '<button class="mini-btn" data-job-act="view">Ver</button>' : ''}${['done','error'].includes(job.status) ? '<button class="icon-btn" data-job-act="dismiss">×</button>' : ''}</div>
+      <div class="job-actions">${job.entry ? `<button class="mini-btn" data-job-act="view">${esc(tr('create.queue.view'))}</button>` : ''}${['done','error'].includes(job.status) ? '<button class="icon-btn" data-job-act="dismiss">×</button>' : ''}</div>
     </div>`).join('');
   box.querySelectorAll('[data-job]').forEach((row) => row.querySelectorAll('[data-job-act]').forEach((button) => button.addEventListener('click', () => {
     const job = state.generationJobs.find((item) => item.id === row.dataset.job);
@@ -1738,12 +1760,12 @@ function activeH3PromotionJob(sourceId) {
 function h3PromotionAction(entry) {
   if (entry.modelId !== 'minimax-h3' || entry.resolution !== '768P') return '';
   if (existingH3Promotion(entry.id)) {
-    return `<button class="mini-btn accent" data-act="h3-2k-view">${IC('spark')} Ver versión 2K</button>`;
+    return `<button class="mini-btn accent" data-act="h3-2k-view">${IC('spark')} ${esc(tr('create.history.h3View'))}</button>`;
   }
   if (activeH3PromotionJob(entry.id)) {
-    return `<button class="mini-btn accent" disabled>${IC('spark')} Promoción a 2K en curso…</button>`;
+    return `<button class="mini-btn accent" disabled>${IC('spark')} ${esc(tr('create.history.h3Running'))}</button>`;
   }
-  return `<button class="mini-btn accent" data-act="h3-2k">${IC('spark')} Promover a 2K</button>`;
+  return `<button class="mini-btn accent" data-act="h3-2k">${IC('spark')} ${esc(tr('create.history.h3Promote'))}</button>`;
 }
 
 function omniHistoryActions(entry) {
@@ -1752,14 +1774,14 @@ function omniHistoryActions(entry) {
   const canContinue = entry.modelId === 'gemini-omni-1-1-flash' && Boolean(entry.omniInteractionId);
   if (!canUseUploaded && !canContinue) return '';
   const cumulative = Number(entry.omniCumulativeDuration) || Number(entry.duration) || 0;
-  return `<button class="mini-btn accent" data-act="omni-edit">${IC('edit')} Editar con Omni</button>
-    ${canContinue && cumulative >= 40 ? '' : `<button class="mini-btn accent" data-act="omni-extend">${IC('right')} Extender con Omni</button>`}`;
+  return `<button class="mini-btn accent" data-act="omni-edit">${IC('edit')} ${esc(tr('create.history.omniEdit'))}</button>
+    ${canContinue && cumulative >= 40 ? '' : `<button class="mini-btn accent" data-act="omni-extend">${IC('right')} ${esc(tr('create.history.omniExtend'))}</button>`}`;
 }
 
 function loadVideoIntoOmni(entry, mode) {
   const canContinue = entry.modelId === 'gemini-omni-1-1-flash' && Boolean(entry.omniInteractionId);
   if (!canContinue && Number(entry.duration) > 10.01) {
-    toast('Para subirlo a Omni, el video de origen debe durar como máximo 10 segundos.', 'err');
+    toast(tr('create.history.omniSourceTooLong'), 'err');
     return;
   }
   setMode('video');
@@ -1779,25 +1801,25 @@ function loadVideoIntoOmni(entry, mode) {
   renderHighlight();
   goToCreate();
   promptBox.focus();
-  toast(mode === 'edit' ? 'Video preparado para una edición conversacional con Omni' : 'Video preparado para extender con Omni');
+  toast(tr(mode === 'edit' ? 'create.history.omniEditReady' : 'create.history.omniExtendReady'));
 }
 
 function queueH3Promotion(entry) {
   const existing = existingH3Promotion(entry.id);
   if (existing) {
     showEntry(existing);
-    toast('La versión MiniMax H3 2K ya existe');
+    toast(tr('create.history.h3Exists'));
     return;
   }
   if (activeH3PromotionJob(entry.id)) {
-    toast('La promoción a 2K ya está en la cola');
+    toast(tr('create.history.h3Queued'));
     return;
   }
-  if (!confirm('¿Crear la versión 2K aprobada de este video H3? La regeneración cuesta USD 0,05 por segundo, más las referencias facturables.')) return;
+  if (!confirm(tr('create.history.h3Confirm'))) return;
   // La confirmación puede dejar pasar tiempo suficiente para que otra vista o
   // acción haya encolado la misma promoción; comprobamos una vez más.
   if (existingH3Promotion(entry.id) || activeH3PromotionJob(entry.id)) {
-    toast('La promoción a 2K ya está en la cola');
+    toast(tr('create.history.h3Queued'));
     return;
   }
 
@@ -1815,7 +1837,7 @@ function queueH3Promotion(entry) {
   renderGenerationQueue();
   pumpGenerationQueue();
   showEntry(entry);
-  toast('Promoción a 2K añadida a la cola');
+  toast(tr('create.history.h3Added'));
 }
 
 function showEntry(entry, outputIdx = 0) {
@@ -1823,31 +1845,32 @@ function showEntry(entry, outputIdx = 0) {
   state.currentOutput = outputIdx;
   const bv = $('#bigView');
   bv.hidden = false;
+  const tookMeta = entry.durationMs ? ` · ${tr('create.history.took', { duration: fmtDuration(entry.durationMs) })}` : '';
 
   if (entry.type === 'audio') {
     bv.innerHTML = `
       <div class="bv-media"><div style="padding:8px;color:var(--pink)">${IC('mic', 'ic ic-lg')}</div>
         <audio controls autoplay src="${fileUrl(entry.outputs[0])}"></audio>
       </div>
-      <div class="bv-meta">${esc(entry.voiceName || 'voz')} · ${esc(entry.modelName || 'ElevenLabs')} · ${fmtDate(entry.ts)}${entry.durationMs ? ` · tardó ${fmtDuration(entry.durationMs)}` : ''}</div>
+      <div class="bv-meta">${esc(entry.voiceName || tr('create.history.voiceFallback'))} · ${esc(entry.modelName || 'ElevenLabs')} · ${fmtDate(entry.ts)}${esc(tookMeta)}</div>
       <div class="bv-actions">
-        <button class="mini-btn" data-act="copy">${IC('copy')} Copiar prompt</button>
-        <button class="mini-btn" data-act="regen">${IC('refresh')} Regenerar</button>
-        <button class="mini-btn" data-act="edit">${IC('edit')} Editar envío</button>
-        <a class="mini-btn" href="${fileUrl(entry.outputs[0])}" download>${IC('download')} Descargar</a>
+        <button class="mini-btn" data-act="copy">${IC('copy')} ${esc(tr('create.history.copy'))}</button>
+        <button class="mini-btn" data-act="regen">${IC('refresh')} ${esc(tr('create.history.regenerate'))}</button>
+        <button class="mini-btn" data-act="edit">${IC('edit')} ${esc(tr('create.history.edit'))}</button>
+        <a class="mini-btn" href="${fileUrl(entry.outputs[0])}" download>${IC('download')} ${esc(tr('create.history.download'))}</a>
       </div>`;
   } else if (entry.type === 'video') {
     const key = entry.outputs[0];
     bv.innerHTML = `
       <div class="bv-media"><video controls autoplay loop src="${fileUrl(key)}"></video></div>
-      <div class="bv-meta">${esc(entry.modelName)} · ${entry.aspectRatio} · ${entry.resolution} · ${entry.duration}s${entry.audio ? ' · con audio' : ''} · ${fmtDate(entry.ts)}${entry.durationMs ? ` · tardó ${fmtDuration(entry.durationMs)}` : ''}</div>
+      <div class="bv-meta">${esc(entry.modelName)} · ${entry.aspectRatio} · ${entry.resolution} · ${entry.duration}s${entry.audio ? ` · ${esc(tr('create.history.withAudio'))}` : ''} · ${fmtDate(entry.ts)}${esc(tookMeta)}</div>
       <div class="bv-actions">
-        <button class="mini-btn" data-act="copy">${IC('copy')} Copiar prompt</button>
-        <button class="mini-btn" data-act="regen">${IC('refresh')} Regenerar</button>
+        <button class="mini-btn" data-act="copy">${IC('copy')} ${esc(tr('create.history.copy'))}</button>
+        <button class="mini-btn" data-act="regen">${IC('refresh')} ${esc(tr('create.history.regenerate'))}</button>
         ${h3PromotionAction(entry)}
         ${omniHistoryActions(entry)}
-        <button class="mini-btn" data-act="edit">${IC('edit')} Editar envío</button>
-        <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} Descargar</a>
+        <button class="mini-btn" data-act="edit">${IC('edit')} ${esc(tr('create.history.edit'))}</button>
+        <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} ${esc(tr('create.history.download'))}</a>
       </div>`;
   } else {
     const key = entry.outputs[outputIdx] || entry.outputs[0];
@@ -1857,20 +1880,20 @@ function showEntry(entry, outputIdx = 0) {
       : '';
     bv.innerHTML = `
       <div class="bv-media bv-media-nav">
-        ${entry.outputs.length > 1 ? `<button class="bv-nav bv-prev" data-output-nav="-1" title="Anterior">${IC('left', 'ic ic-lg')}</button>` : ''}
+        ${entry.outputs.length > 1 ? `<button class="bv-nav bv-prev" data-output-nav="-1" title="${esc(tr('common.previous'))}">${IC('left', 'ic ic-lg')}</button>` : ''}
         <img id="bvMain" src="${fileUrl(key)}" alt="">
-        ${entry.outputs.length > 1 ? `<button class="bv-nav bv-next" data-output-nav="1" title="Siguiente">${IC('right', 'ic ic-lg')}</button>` : ''}
+        ${entry.outputs.length > 1 ? `<button class="bv-nav bv-next" data-output-nav="1" title="${esc(tr('common.next'))}">${IC('right', 'ic ic-lg')}</button>` : ''}
       </div>
       ${entry.outputs.length > 1 ? `<div class="bv-counter">${outputIdx + 1} / ${entry.outputs.length}</div>` : ''}
       ${thumbs}
-      <div class="bv-meta">${esc(entry.modelName)} · ${entry.aspectRatio} · ${entry.resolution}${entry.batch > 1 ? ` · lote ×${entry.batch}` : ''} · ${fmtDate(entry.ts)}${entry.durationMs ? ` · tardó ${fmtDuration(entry.durationMs)}` : ''}</div>
+      <div class="bv-meta">${esc(entry.modelName)} · ${entry.aspectRatio} · ${entry.resolution}${entry.batch > 1 ? ` · ${esc(tr('create.history.batch', { count: entry.batch }))}` : ''} · ${fmtDate(entry.ts)}${esc(tookMeta)}</div>
       <div class="bv-actions">
-        <button class="mini-btn" data-act="copy">${IC('copy')} Copiar prompt</button>
-        <button class="mini-btn" data-act="ref">${IC('link')} Usar como referencia</button>
-        <button class="mini-btn" data-act="character">${IC('user')} Convertir en personaje</button>
-        <button class="mini-btn" data-act="regen">${IC('refresh')} Regenerar</button>
-        <button class="mini-btn" data-act="edit">${IC('edit')} Editar envío</button>
-        <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} Descargar</a>
+        <button class="mini-btn" data-act="copy">${IC('copy')} ${esc(tr('create.history.copy'))}</button>
+        <button class="mini-btn" data-act="ref">${IC('link')} ${esc(tr('common.useAsReference'))}</button>
+        <button class="mini-btn" data-act="character">${IC('user')} ${esc(tr('common.convertCharacter'))}</button>
+        <button class="mini-btn" data-act="regen">${IC('refresh')} ${esc(tr('create.history.regenerate'))}</button>
+        <button class="mini-btn" data-act="edit">${IC('edit')} ${esc(tr('create.history.edit'))}</button>
+        <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} ${esc(tr('create.history.download'))}</a>
       </div>`;
     $('#bvMain').addEventListener('click', () => openLightbox(key, entry.outputs));
     $$('#bigView .bv-thumbs img').forEach((im) => {
@@ -1887,7 +1910,7 @@ function showEntry(entry, outputIdx = 0) {
       if (act === 'regen') regenerate(entry);
       if (act === 'copy') copyPrompt(entry.prompt);
       if (act === 'edit') editEntry(entry);
-      if (act === 'ref') { addRef(entry.outputs[state.currentOutput]); toast('Agregada como referencia'); }
+      if (act === 'ref') { addRef(entry.outputs[state.currentOutput]); toast(tr('lightbox.referenceAdded')); }
       if (act === 'character') openCharModal(null, entry.outputs[state.currentOutput]);
       if (act === 'h3-2k') queueH3Promotion(entry);
       if (act === 'omni-edit') loadVideoIntoOmni(entry, 'edit');
@@ -1978,13 +2001,13 @@ function editEntry(entry) {
   renderHighlight();
   goToCreate();
   promptBox.focus();
-  toast('Envío cargado en la caja — editalo y manifestá');
+  toast(tr('create.history.loaded'));
 }
 
 function renderHistory() {
   const list = $('#historyList');
   if (!state.history.length) {
-    list.innerHTML = '<div class="empty-note">Todavía no manifestaste nada. Todo llega.</div>';
+    list.innerHTML = `<div class="empty-note">${esc(tr('create.history.empty'))}</div>`;
     return;
   }
   list.innerHTML = '';
@@ -2000,14 +2023,14 @@ function renderHistory() {
       <div class="hist-thumbs">${thumbs}</div>
       <div class="hist-body">
         <div class="hist-prompt">${esc(entry.prompt)}</div>
-        <div class="hist-meta">${esc(entry.modelName)}${entry.type === 'audio' ? ` · ${esc(entry.voiceName || '')}` : entry.type === 'video' ? ` · ${entry.aspectRatio} · ${entry.resolution} · ${entry.duration}s` : ` · ${entry.aspectRatio} · ${entry.resolution}${entry.batch > 1 ? ' · ×' + entry.batch : ''}`} · ${fmtDate(entry.ts)}${entry.durationMs ? ` · tardó ${fmtDuration(entry.durationMs)}` : ''}${entry.errors?.length ? ` · <span class="err">${entry.errors.length} error(es) en el lote</span>` : ''}</div>
+        <div class="hist-meta">${esc(entry.modelName)}${entry.type === 'audio' ? ` · ${esc(entry.voiceName || '')}` : entry.type === 'video' ? ` · ${entry.aspectRatio} · ${entry.resolution} · ${entry.duration}s` : ` · ${entry.aspectRatio} · ${entry.resolution}${entry.batch > 1 ? ' · ×' + entry.batch : ''}`} · ${fmtDate(entry.ts)}${entry.durationMs ? ` · ${esc(tr('create.history.took', { duration: fmtDuration(entry.durationMs) }))}` : ''}${entry.errors?.length ? ` · <span class="err">${esc(tr('create.history.batchErrors', { count: entry.errors.length }))}</span>` : ''}</div>
       </div>
       <div class="hist-actions">
-        <button class="mini-btn" data-act="view">${IC('eye')} Ver</button>
-        <button class="mini-btn" data-act="regen" title="Regenerar">${IC('refresh')}</button>
-        <button class="mini-btn" data-act="edit" title="Editar envío">${IC('edit')}</button>
-        ${entry.type === 'image' ? `<button class="mini-btn" data-act="ref" title="Usar como referencia">${IC('link')}</button>` : ''}
-        <button class="mini-btn danger" data-act="del" title="Borrar">${IC('trash')}</button>
+        <button class="mini-btn" data-act="view">${IC('eye')} ${esc(tr('create.history.view'))}</button>
+        <button class="mini-btn" data-act="regen" title="${esc(tr('create.history.regenerate'))}">${IC('refresh')}</button>
+        <button class="mini-btn" data-act="edit" title="${esc(tr('create.history.edit'))}">${IC('edit')}</button>
+        ${entry.type === 'image' ? `<button class="mini-btn" data-act="ref" title="${esc(tr('common.useAsReference'))}">${IC('link')}</button>` : ''}
+        <button class="mini-btn danger" data-act="del" title="${esc(tr('create.history.delete'))}">${IC('trash')}</button>
       </div>`;
     item.querySelectorAll('.hist-thumbs img, .hist-thumbs video').forEach((im) => {
       im.addEventListener('click', () => showEntry(entry, Number(im.dataset.i)));
@@ -2019,12 +2042,12 @@ function renderHistory() {
         if (act === 'view') { showEntry(entry); $('#bigView').scrollIntoView({ behavior: 'smooth' }); }
         if (act === 'regen') regenerate(entry);
         if (act === 'edit') editEntry(entry);
-        if (act === 'ref') { addRef(entry.outputs[0]); toast('Agregada como referencia'); }
+        if (act === 'ref') { addRef(entry.outputs[0]); toast(tr('lightbox.referenceAdded')); }
         if (act === 'del') {
           await api(`/api/history/${entry.id}`, { method: 'DELETE' });
           state.history = state.history.filter((x) => x.id !== entry.id);
           renderHistory();
-          toast('Borrado del historial (los archivos quedan en tu carpeta)');
+          toast(tr('create.history.deleted'));
         }
       });
     });
@@ -2033,13 +2056,13 @@ function renderHistory() {
 }
 
 $('#btnClearHistory').addEventListener('click', async () => {
-  if (!state.history.length) return toast('El historial ya está vacío');
-  if (!confirm(`¿Borrar las ${state.history.length} operaciones del historial?\n\nLos archivos de Assets no se borrarán.`)) return;
+  if (!state.history.length) return toast(tr('create.history.alreadyEmpty'));
+  if (!confirm(tr('create.history.clearConfirm', { count: state.history.length }))) return;
   const result = await api('/api/history', { method: 'DELETE' });
   state.history = [];
   $('#bigView').hidden = true;
   renderHistory();
-  toast(`${result.deleted} operaciones borradas del historial`);
+  toast(tr('create.history.cleared', { count: result.deleted }));
 });
 
 // ---------------------------------------------------------------------------
@@ -2048,7 +2071,7 @@ $('#btnClearHistory').addEventListener('click', async () => {
 
 $('#btnSavePrompt').addEventListener('click', async () => {
   const text = promptBox.value.trim();
-  if (!text) return toast('La caja está vacía', 'err');
+  if (!text) return toast(tr('create.prompts.emptyEditor'), 'err');
   openPromptEditor({ initialText: text, initialMode: state.mode, source: 'quick' });
 });
 
@@ -2062,7 +2085,7 @@ $('#btnPrompts').addEventListener('click', () => {
 function renderPromptsPanel() {
   const panel = $('#promptsPanel');
   if (!state.prompts.length) {
-    panel.innerHTML = '<div class="empty-note" style="padding:10px 0">No hay prompts archivados. Guardá los que uses seguido con el botón Guardar.</div>';
+    panel.innerHTML = `<div class="empty-note" style="padding:10px 0">${esc(tr('create.prompts.empty'))}</div>`;
     return;
   }
   panel.innerHTML = '';
@@ -2070,8 +2093,8 @@ function renderPromptsPanel() {
   const toolbar = document.createElement('div');
   toolbar.className = 'prompts-quick-tools';
   toolbar.innerHTML = `
-    <select class="select" id="quickPromptCategory"><option value="">Todas las categorías</option>${categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>
-    <input id="quickPromptSearch" type="search" placeholder="Buscar por título o contenido…" value="${esc(state.promptQuickSearch)}">
+    <select class="select" id="quickPromptCategory"><option value="">${esc(tr('create.prompts.allCategories'))}</option>${categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>
+    <input id="quickPromptSearch" type="search" placeholder="${esc(tr('create.prompts.search'))}" value="${esc(state.promptQuickSearch)}">
     <span class="hint" id="quickPromptCount"></span>`;
   panel.appendChild(toolbar);
   const categorySelect = toolbar.querySelector('#quickPromptCategory');
@@ -2089,7 +2112,7 @@ function renderPromptsPanel() {
     && (!query || (isLoraPrompt(pr) ? loraSearchText(pr) : `${pr.title} ${pr.text} ${pr.category || ''}`).toLowerCase().includes(query)));
   toolbar.querySelector('#quickPromptCount').textContent = `${filtered.length} de ${visiblePromptTotal}`;
   if (!filtered.length) {
-    panel.insertAdjacentHTML('beforeend', '<div class="empty-note" style="padding:14px 0">No hay prompts que coincidan con el filtro.</div>');
+    panel.insertAdjacentHTML('beforeend', `<div class="empty-note" style="padding:14px 0">${esc(tr('create.prompts.noMatch'))}</div>`);
     return;
   }
   for (const pr of filtered) {
@@ -2100,7 +2123,7 @@ function renderPromptsPanel() {
       <span class="p-title">${esc(pr.category || 'General')} · ${esc(pr.title)}${nsfwBadgeHtml(pr, 'compact')}</span>
       <span class="p-text">${esc(isLoraPrompt(pr) ? (pr.lora?.description || pr.lora?.fileName || '') : pr.text)}</span>
       ${isLoraPrompt(pr) ? loraInvocationHtml(pr, 'quick-') : ''}
-      <button class="icon-btn" title="Eliminar">${IC('x')}</button>`;
+      <button class="icon-btn" title="${esc(tr('create.prompts.delete'))}">${IC('x')}</button>`;
     d.addEventListener('click', (e) => {
       if (e.target.closest('.icon-btn') || isLoraPrompt(pr)) return;
       usePrompt(pr);
@@ -2139,8 +2162,12 @@ function openPicker(replaceIndex = null) {
   const loraMedia = isPromptLoraMediaPicker();
   const multimediaAudio = multimedia && (currentVideoModel()?.mediaLimits?.audio || 0) > 0;
   $('#pickerTitle').textContent = replaceIndex != null
-    ? 'Reemplazar imagen de referencia'
-    : loraMedia ? 'Elegir imagen o video ilustrativo del LoRA' : multimedia ? `Elegir referencia para ${currentVideoModel().name}` : 'Elegir imagen de referencia';
+    ? tr('picker.replaceImage', {}, 'Reemplazar imagen de referencia')
+    : loraMedia
+      ? tr('picker.loraMedia', {}, 'Elegir imagen o video ilustrativo del LoRA')
+      : multimedia
+        ? tr('picker.forModel', { model: currentVideoModel().name }, `Elegir referencia para ${currentVideoModel().name}`)
+        : tr('picker.referenceImage', {}, 'Elegir imagen de referencia');
   $('#pickerVideoTab').hidden = !(multimedia || loraMedia);
   $('#pickerAudioTab').hidden = !multimediaAudio;
   if (!(multimedia || loraMedia) && ['video', 'audio'].includes(state.pickerTab)) state.pickerTab = 'upload';
@@ -2175,8 +2202,8 @@ function pickRef(key, kind = 'image') {
       renderPromptStylePreview();
       renderPromptLoraUseCases();
       $('#promptStyleStatus').textContent = promptEditorIsLora()
-        ? 'Imagen ilustrativa lista. No se enviará como referencia al generar.'
-        : 'Imagen de estilo lista y obligatoria.';
+        ? tr('prompts.lora.mediaReady')
+        : tr('prompts.style.requiredImageReady');
     }
     return;
   }
@@ -2193,14 +2220,14 @@ function pickRef(key, kind = 'image') {
 
 function replaceRef(i, key) {
   if (i < 0 || i >= state.refs.length) { state.replaceRefIndex = null; return; }
-  if (state.refs.some((r, j) => j !== i && r.key === key)) return toast('Esa imagen ya está en las referencias', 'err');
+  if (state.refs.some((r, j) => j !== i && r.key === key)) return toast(tr('picker.duplicateReference'), 'err');
   const prev = state.refs[i];
   // conserva la etiqueta (y por lo tanto la cita @Etiqueta); si no tenía, sugiere una
   state.refs[i] = { key, fromChar: false, label: prev.label || refLabelSuggestion(key) };
   state.replaceRefIndex = null;
   renderRefs();
   renderHighlight();
-  toast('Referencia reemplazada — el orden y la cita se mantienen');
+  toast(tr('picker.replaced'));
 }
 
 $('#pickerClose').addEventListener('click', () => { $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.overlayBgPick = false; state.promptStyleImagePick = false; state.promptLoraMediaTarget = null; state.comfyPickerSlot = null; });
@@ -2223,9 +2250,9 @@ async function setPickerTab(src) {
       ? '.jpg,.jpeg,.png,.webp,.mp4,.mov,.mp3,.wav,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,audio/mpeg,audio/wav'
       : loraMedia ? '.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm' : 'image/*';
     body.innerHTML = `<div class="drop-zone" id="dropZone">${multimedia
-      ? `Arrastrá imágenes, videos o audios acá<br><small>${esc(currentVideoModel()?.name || 'Video multimodal')}: JPG, PNG, WebP, MP4, MOV, MP3 o WAV</small>`
-      : loraMedia ? 'Arrastrá una imagen o video ilustrativo acá'
-      : 'Arrastrá imágenes acá'}<br>o hacé clic para elegir archivos</div>`;
+      ? `${esc(tr('picker.dropMultimedia'))}<br><small>${esc(currentVideoModel()?.name || tr('picker.multimediaFallback'))}: JPG, PNG, WebP, MP4, MOV, MP3 o WAV</small>`
+      : loraMedia ? esc(tr('picker.dropLora'))
+      : esc(tr('picker.dropImages'))}<br>${esc(tr('picker.clickFiles'))}</div>`;
     const dz = $('#dropZone');
     dz.addEventListener('click', () => {
       input.onchange = async (e) => { await uploadFiles([...e.target.files], true); e.target.value = ''; };
@@ -2252,7 +2279,7 @@ async function setPickerTab(src) {
       ? `<div class="picker-grid">${withThumb.map((x) =>
           `<div class="pick" data-key="${esc(x.thumbKey)}"><img src="${fileUrl(x.thumbKey)}" loading="lazy" alt=""><div class="p-label">${esc(x.category || 'General')} · ${esc(x.name)}</div></div>`
         ).join('')}</div>`
-      : '<div class="empty-note">Todavía no guardaste escenas en el Poser.</div>';
+      : `<div class="empty-note">${esc(tr('picker.noPoses'))}</div>`;
   } else if (src === 'characters') {
     renderPickerCharacters();
     return;
@@ -2270,10 +2297,10 @@ async function setPickerTab(src) {
       ? `<div class="picker-grid">${items.map((a) =>
           `<div class="pick pick-${kind}" data-key="${esc(a.key)}" data-kind="${kind}">${nsfwBadgeHtml(a, 'overlay')}${kind === 'video'
             ? `<video src="${fileUrl(a.key)}" muted preload="metadata"></video>`
-            : kind === 'audio' ? `<span class="picker-audio">${IC('mic', 'ic ic-lg')}<small>Audio</small></span>`
+            : kind === 'audio' ? `<span class="picker-audio">${IC('mic', 'ic ic-lg')}<small>${esc(tr('common.audio'))}</small></span>`
               : `<img src="${fileUrl(a.key)}" loading="lazy" alt="">`}<div class="p-label">${esc(a.name)}</div></div>`
         ).join('')}</div>`
-      : '<div class="empty-note">Nada por acá todavía.</div>';
+      : `<div class="empty-note">${esc(tr('picker.empty', {}, 'Nada por acá todavía.'))}</div>`;
   }
 
   $$('#pickerBody .pick').forEach((p) => {
@@ -2323,7 +2350,7 @@ function renderEntityPicker(cfg) {
       <strong>${esc(cfg.title(chosen))}</strong>
       ${groups.length > 1
         ? `<div class="chips">${groups.map((g) => `<button class="chip${g.id === group.id ? ' active' : ''}" data-vg="${esc(g.id)}">${esc(g.name)} (${g.photos.length})</button>`).join('')}</div>`
-        : `<span class="hint">${group.photos.length} imagen${group.photos.length === 1 ? '' : 'es'}</span>`}
+        : `<span class="hint">${esc(tr('picker.imageCount', { count: group.photos.length }))}</span>`}
     </div>
     ${group.photos.length
       ? `<div class="picker-grid">${group.photos.map((ph) =>
@@ -2340,7 +2367,7 @@ function renderEntityPicker(cfg) {
 }
 
 const entityVariantGroups = (e) => [
-  { id: '', name: 'Original', photos: e.photos || [] },
+  { id: '', name: tr('picker.original'), photos: e.photos || [] },
   ...(e.variants || []).map((v) => ({ id: v.id, name: v.name, photos: v.photos || [] }))
 ];
 const firstPhoto = (e) => e.photos[0] || (e.variants || []).find((v) => (v.photos || []).length)?.photos[0];
@@ -2350,10 +2377,10 @@ function renderPickerCharacters() {
   renderEntityPicker({
     idKey: 'pickerCharacterId', variantKey: 'pickerVariantId', icon: 'user',
     items: () => state.characters, cover: firstPhoto, groups: entityVariantGroups,
-    label: (c) => `${c.name}${(c.variants || []).length ? ` · ${1 + c.variants.length} versiones` : ''}`,
+    label: (c) => `${c.name}${(c.variants || []).length ? ` · ${tr('picker.versions', { count: 1 + c.variants.length })}` : ''}`,
     title: (c) => c.name, photoLabel: (c, g) => `${c.name} · ${g.name}`,
-    backLabel: 'Personajes', empty: 'Todavía no hay personajes.',
-    emptyPhotos: 'Esta versión todavía no tiene fotos.', render: renderPickerCharacters
+    backLabel: tr('picker.characters'), empty: tr('picker.noCharacters'),
+    emptyPhotos: tr('picker.noVersionPhotos'), render: renderPickerCharacters
   });
 }
 
@@ -2361,10 +2388,10 @@ function renderPickerElements() {
   renderEntityPicker({
     idKey: 'pickerElementId', variantKey: 'pickerElementVariantId', icon: 'globe',
     items: () => state.elements, cover: firstPhoto, groups: entityVariantGroups,
-    label: (el) => `${el.name} · ${ELEMENT_KIND_LABEL[el.kind] || ''}${(el.variants || []).length ? ` · ${1 + el.variants.length} versiones` : ''}`,
+    label: (el) => `${el.name} · ${ELEMENT_KIND_LABEL[el.kind] || ''}${(el.variants || []).length ? ` · ${tr('picker.versions', { count: 1 + el.variants.length })}` : ''}`,
     title: (el) => el.name, photoLabel: (el, g) => `${el.name} · ${g.name}`,
-    backLabel: 'Locaciones y objetos', empty: 'Todavía no hay locaciones ni objetos.',
-    emptyPhotos: 'Esta versión todavía no tiene fotos.', render: renderPickerElements
+    backLabel: tr('picker.elements'), empty: tr('picker.noElements'),
+    emptyPhotos: tr('picker.noVersionPhotos'), render: renderPickerElements
   });
 }
 
@@ -2373,10 +2400,10 @@ function renderPickerSeries() {
     idKey: 'pickerSeriesId', variantKey: null, icon: 'layers',
     items: () => state.series, cover: (s) => seriesImages(s)[0],
     groups: (s) => [{ id: '', name: s.title, photos: seriesImages(s) }],
-    label: (s) => `${s.title} · ${seriesImages(s).length} img`,
+    label: (s) => `${s.title} · ${tr('picker.imageCount', { count: seriesImages(s).length })}`,
     title: (s) => s.title, photoLabel: (s) => s.title,
-    backLabel: 'Series', empty: 'Todavía no hay series.',
-    emptyPhotos: 'Esta serie no tiene imágenes asociadas todavía.', render: renderPickerSeries
+    backLabel: tr('picker.series'), empty: tr('picker.noSeries'),
+    emptyPhotos: tr('picker.noSeriesImages'), render: renderPickerSeries
   });
 }
 
@@ -2407,25 +2434,25 @@ async function uploadFiles(files, asRefs) {
     try {
       const kind = referenceFileKind(f);
       if (!kind || (!multimedia && !loraMedia && kind !== 'image') || (loraMedia && !['image', 'video'].includes(kind))) {
-        toast(`${f.name}: formato no admitido como referencia`, 'err');
+        toast(tr('picker.unsupported', { file: f.name }), 'err');
         continue;
       }
       if (multimedia) {
         const totalLimit = activeRefLimit();
         if (initialRefTotal + addedCounts.image + addedCounts.video + addedCounts.audio >= totalLimit) {
-          toast(`${f.name}: ${currentVideoModel()?.name || 'el modelo'} admite hasta ${totalLimit} referencias en total`, 'err');
+          toast(tr('picker.totalLimit', { file: f.name, model: currentVideoModel()?.name || tr('picker.modelFallback'), count: totalLimit }), 'err');
           continue;
         }
         const mediaLimit = currentVideoModel()?.mediaLimits?.[kind];
         if (mediaLimit != null && initialRefCounts[kind] + addedCounts[kind] >= mediaLimit) {
-          const label = kind === 'image' ? 'imágenes' : kind === 'video' ? 'videos' : 'audios';
-          toast(`${f.name}: ${currentVideoModel()?.name || 'el modelo'} admite hasta ${mediaLimit} ${label} de referencia`, 'err');
+          const label = tr(kind === 'image' ? 'create.refs.images' : kind === 'video' ? 'create.refs.videos' : 'create.refs.audios');
+          toast(tr('picker.kindLimit', { file: f.name, model: currentVideoModel()?.name || tr('picker.modelFallback'), count: mediaLimit, media: label }), 'err');
           continue;
         }
       }
       // el cuerpo de la petición admite 150 MB y el base64 infla ~33%
       if (f.size > 100 * 1024 * 1024) {
-        toast(`${f.name}: pesa más de 100 MB, achicalo antes de subirlo`, 'err');
+        toast(tr('picker.tooLarge', { file: f.name }), 'err');
         continue;
       }
       if (multimedia) {
@@ -2435,7 +2462,7 @@ async function uploadFiles(files, asRefs) {
           ? { image: 30, video: 45, audio: 15 }[kind]
           : { image: 30, video: 50, audio: 15 }[kind];
         if (f.size > sizeLimitMb * 1024 * 1024) {
-          toast(`${f.name}: supera el máximo de ${sizeLimitMb} MB para referencias ${kind === 'image' ? 'de imagen' : kind === 'video' ? 'de video' : 'de audio'} en Manifestador`, 'err');
+          toast(tr('picker.providerLimit', { file: f.name, size: sizeLimitMb, kind: tr(kind === 'image' ? 'picker.kindImage' : kind === 'video' ? 'picker.kindVideo' : 'picker.kindAudio') }), 'err');
           continue;
         }
       }
@@ -2456,9 +2483,9 @@ async function uploadFiles(files, asRefs) {
   }
   if (asRefs) {
     $('#pickerModal').hidden = true;
-    if (!replacing && uploaded) toast(`${uploaded} archivo${uploaded === 1 ? '' : 's'} subido${uploaded === 1 ? '' : 's'} y agregado${uploaded === 1 ? '' : 's'} como referencia`);
+    if (!replacing && uploaded) toast(tr('picker.uploadedRefs', { count: uploaded }));
   } else {
-    toast(`${files.length} imagen(es) subida(s)`);
+    toast(tr('picker.uploadedImages', { count: files.length }));
   }
   refreshAssets();
 }
@@ -2483,7 +2510,7 @@ document.addEventListener('paste', async (e) => {
   e.preventDefault();
   try {
     await uploadFiles(files, true);
-    toast(`${files.length} imagen${files.length === 1 ? '' : 'es'} pegada${files.length === 1 ? '' : 's'} como referencia`);
+    toast(tr('picker.pastedImages', { count: files.length }));
   } catch (err) {
     toast(err.message, 'err');
   }
@@ -2493,7 +2520,11 @@ document.addEventListener('paste', async (e) => {
 // assets
 // ---------------------------------------------------------------------------
 
-const AUDIO_KIND_LABELS = { voice: 'Voz', music: 'Música', sound: 'Sonido' };
+const AUDIO_KIND_LABELS = {
+  voice: tr('assets.audio.voice'),
+  music: tr('assets.audio.music'),
+  sound: tr('assets.audio.sound')
+};
 const splitMusicTags = (value) => [...new Set(String(value || '').split(',').map((tag) => tag.trim()).filter(Boolean))].slice(0, 30);
 const musicTagSummary = (tags = {}) => [...(tags.genres || []), ...(tags.instruments || []), ...(tags.moods || [])];
 const splitVisualTags = (value) => [...new Set(String(value || '').split(',').map((tag) => tag.trim()).filter(Boolean))].slice(0, 40);
@@ -2505,9 +2536,9 @@ function visualAssetItems() {
 function updateVisualTaxonomyOptions() {
   const items = visualAssetItems();
   const categories = [...new Set(items.map((item) => String(item.category || '').trim()).filter(Boolean))]
-    .sort((left, right) => left.localeCompare(right, 'es'));
+    .sort((left, right) => left.localeCompare(right, i18n.localeTag()));
   const tags = [...new Set(items.flatMap((item) => item.tags || []).map((tag) => String(tag).trim()).filter(Boolean))]
-    .sort((left, right) => left.localeCompare(right, 'es'));
+    .sort((left, right) => left.localeCompare(right, i18n.localeTag()));
   $('#visualCategoryList').innerHTML = categories.map((category) => `<option value="${esc(category)}"></option>`).join('');
   $('#assetTagsList').innerHTML = tags.map((tag) => `<option value="${esc(tag)}"></option>`).join('');
 }
@@ -2516,10 +2547,10 @@ function openVisualUpload(kind = 'image') {
   state.visualUploadKind = kind === 'video' ? 'video' : 'image';
   $('#visualUploadForm').reset();
   $('#visualUploadNsfw').checked = Boolean(state.config?.nsfwUploadDefault);
-  $('#visualUploadTitle').textContent = state.visualUploadKind === 'video' ? 'Subir videos' : 'Subir imágenes';
+  $('#visualUploadTitle').textContent = state.visualUploadKind === 'video' ? tr('assets.uploadVideos') : tr('assets.uploadImages');
   $('#visualUploadHint').textContent = state.visualUploadKind === 'video'
-    ? 'MP4, MOV o WebM · hasta 100 MB por archivo.'
-    : 'PNG, JPG o WebP · hasta 100 MB por archivo.';
+    ? tr('assets.uploadVideoHint')
+    : tr('assets.uploadImageHint');
   $('#visualUploadFiles').accept = state.visualUploadKind === 'video'
     ? '.mp4,.mov,.m4v,.webm,video/mp4,video/quicktime,video/webm'
     : '.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp';
@@ -2543,9 +2574,9 @@ $('#visualUploadForm').addEventListener('submit', async (event) => {
   const invalidType = files.find((file) => state.visualUploadKind === 'video'
     ? !file.type.startsWith('video/') && !/\.(mp4|mov|m4v|webm)$/i.test(file.name)
     : !file.type.startsWith('image/') && !/\.(png|jpe?g|webp)$/i.test(file.name));
-  if (invalidType) return toast(`${invalidType.name}: el tipo de archivo no coincide con esta carga.`, 'err');
+  if (invalidType) return toast(tr('assets.uploadInvalidType', { file: invalidType.name }), 'err');
   const oversized = files.find((file) => file.size > 100 * 1024 * 1024);
-  if (oversized) return toast(`${oversized.name}: supera el límite de 100 MB.`, 'err');
+  if (oversized) return toast(tr('assets.uploadTooLarge', { file: oversized.name }), 'err');
   const submit = $('#visualUploadSubmit');
   submit.disabled = true;
   const category = $('#visualUploadCategory').value.trim();
@@ -2553,7 +2584,7 @@ $('#visualUploadForm').addEventListener('submit', async (event) => {
   let uploaded = 0;
   const failures = [];
   for (const [index, file] of files.entries()) {
-    $('#visualUploadStatus').textContent = `Subiendo ${index + 1}/${files.length} · ${file.name}…`;
+    $('#visualUploadStatus').textContent = tr('assets.uploadProgress', { current: index + 1, total: files.length, file: file.name });
     try {
       await api('/api/assets/visual', {
         method: 'POST',
@@ -2572,19 +2603,14 @@ $('#visualUploadForm').addEventListener('submit', async (event) => {
     $('#audioKindTabs').hidden = true;
     await refreshAssets();
   }
-  if (failures.length) toast(`${uploaded}/${files.length} archivos subidos. ${failures[0]}`, 'err');
-  else {
-    const isVideo = state.visualUploadKind === 'video';
-    const noun = isVideo ? `video${uploaded === 1 ? '' : 's'}` : `imagen${uploaded === 1 ? '' : 'es'}`;
-    const adjective = isVideo
-      ? `subido${uploaded === 1 ? '' : 's'} y clasificado${uploaded === 1 ? '' : 's'}`
-      : `subida${uploaded === 1 ? '' : 's'} y clasificada${uploaded === 1 ? '' : 's'}`;
-    toast(`${uploaded} ${noun} ${adjective}.`);
-  }
+  if (failures.length) toast(trn('assets.uploadPartial', files.length, { uploaded, total: files.length, error: failures[0] }), 'err');
+  else toast(trn(state.visualUploadKind === 'video' ? 'assets.uploadedVideos' : 'assets.uploadedImages', uploaded));
 });
 
 $$('[data-password-toggle]').forEach((button) => {
   button.setAttribute('aria-pressed', 'false');
+  button.setAttribute('aria-label', tr('common.showPassword', {}, 'Mostrar clave'));
+  button.title = tr('common.showPassword', {}, 'Mostrar clave');
   button.addEventListener('click', () => {
     const input = button.closest('.key-row')?.querySelector('input');
     if (!input) return;
@@ -2592,19 +2618,19 @@ $$('[data-password-toggle]').forEach((button) => {
     input.type = visible ? 'text' : 'password';
     button.classList.toggle('active', visible);
     button.setAttribute('aria-pressed', String(visible));
-    button.setAttribute('aria-label', visible ? 'Ocultar clave' : 'Mostrar clave');
-    button.title = visible ? 'Ocultar clave' : 'Mostrar clave';
+    button.setAttribute('aria-label', visible ? tr('common.hidePassword', {}, 'Ocultar clave') : tr('common.showPassword', {}, 'Mostrar clave'));
+    button.title = visible ? tr('common.hidePassword', {}, 'Ocultar clave') : tr('common.showPassword', {}, 'Mostrar clave');
   });
 });
 
 function openVisualClassify(keys, { category = '', tags = [], nsfw = false } = {}) {
   state.visualClassifyKeys = [...new Set(keys)].filter((key) => /^(generated|uploads|video)\//.test(key));
-  if (!state.visualClassifyKeys.length) return toast('Seleccioná imágenes o videos para categorizar.', 'err');
+  if (!state.visualClassifyKeys.length) return toast(tr('assets.classify.selectFirst'), 'err');
   $('#visualClassifyForm').reset();
   $('#visualClassifyCategory').value = category || '';
   $('#visualClassifyTags').value = (tags || []).join(', ');
   $('#visualClassifyNsfw').checked = Boolean(nsfw);
-  $('#visualClassifyHint').textContent = `La clasificación se aplicará a ${state.visualClassifyKeys.length} asset${state.visualClassifyKeys.length === 1 ? '' : 's'}.`;
+  $('#visualClassifyHint').textContent = trn('assets.classify.count', state.visualClassifyKeys.length);
   updateVisualTaxonomyOptions();
   $('#visualClassifyModal').hidden = false;
 }
@@ -2635,7 +2661,7 @@ $('#visualClassifyForm').addEventListener('submit', async (event) => {
     closeVisualClassify();
     state.selectedAssets.clear();
     await refreshAssets();
-    toast(`${count} asset${count === 1 ? '' : 's'} clasificado${count === 1 ? '' : 's'}.`);
+    toast(trn('assets.classified', count));
   } catch (error) {
     if (submit) submit.disabled = false;
     toast(error.message, 'err');
@@ -2671,7 +2697,7 @@ $('#audioUploadForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const file = $('#audioUploadFile').files?.[0];
   if (!file) return;
-  if (file.size > 100 * 1024 * 1024) return toast('El audio supera el límite de 100 MB.', 'err');
+  if (file.size > 100 * 1024 * 1024) return toast(tr('assets.audio.tooLarge'), 'err');
   const submit = event.submitter;
   if (submit) submit.disabled = true;
   try {
@@ -2700,7 +2726,7 @@ $('#audioUploadForm').addEventListener('submit', async (event) => {
         renderAutomationProject();
       }
     }
-    toast(`${AUDIO_KIND_LABELS[audioKind]} subida y clasificada.`, 'ok');
+    toast(tr('assets.audio.uploaded', { type: AUDIO_KIND_LABELS[audioKind] }), 'ok');
   } catch (error) {
     toast(error.message, 'err');
   } finally {
@@ -2719,16 +2745,16 @@ async function refreshAssets() {
 function renderAssetFilterOptions() {
   const charSel = $('#assetFilterCharacter');
   const seriesSel = $('#assetFilterSeries');
-  charSel.innerHTML = '<option value="">Todos</option>' + state.characters.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
-  seriesSel.innerHTML = '<option value="">Todas</option>' + state.series.map((s) => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
+  charSel.innerHTML = `<option value="">${esc(tr('common.allMasculine'))}</option>` + state.characters.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  seriesSel.innerHTML = `<option value="">${esc(tr('common.allFeminine'))}</option>` + state.series.map((s) => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
   charSel.value = state.characters.some((c) => c.id === state.assetFilterCharacterId) ? state.assetFilterCharacterId : '';
   seriesSel.value = state.series.some((s) => s.id === state.assetFilterSeriesId) ? state.assetFilterSeriesId : '';
   state.assetFilterCharacterId = charSel.value;
   state.assetFilterSeriesId = seriesSel.value;
   const visualItems = state.assetsZone === 'audio' ? [] : (state.assets[state.assetsZone] || []);
   const categories = [...new Set(visualItems.map((item) => String(item.category || '').trim()).filter(Boolean))]
-    .sort((left, right) => left.localeCompare(right, 'es'));
-  $('#assetFilterCategory').innerHTML = '<option value="">Todas</option>' + categories.map((category) =>
+    .sort((left, right) => left.localeCompare(right, i18n.localeTag()));
+  $('#assetFilterCategory').innerHTML = `<option value="">${esc(tr('common.allFeminine'))}</option>` + categories.map((category) =>
     `<option value="${esc(category)}">${esc(category)}</option>`).join('');
   $('#assetFilterCategory').value = categories.includes(state.assetFilterCategory) ? state.assetFilterCategory : '';
   state.assetFilterCategory = $('#assetFilterCategory').value;
@@ -2766,8 +2792,8 @@ $$('#view-assets .tabs .tab').forEach((t) => {
     $$('#view-assets .tabs .tab').forEach((x) => x.classList.toggle('active', x === t));
     $('#audioKindTabs').hidden = state.assetsZone !== 'audio';
     $('#btnUploadAsset').innerHTML = state.assetsZone === 'audio'
-      ? `${IC('upload')} Subir audio`
-      : state.assetsZone === 'video' ? `${IC('upload')} Subir videos` : `${IC('upload')} Subir imágenes`;
+      ? `${IC('upload')} ${esc(tr('assets.audio.upload'))}`
+      : state.assetsZone === 'video' ? `${IC('upload')} ${esc(tr('assets.uploadVideos'))}` : `${IC('upload')} ${esc(tr('assets.uploadImages'))}`;
     renderAssetFilterOptions();
     renderAssetsGrid();
   });
@@ -2791,17 +2817,17 @@ $('#btnUploadAsset').addEventListener('click', () => {
 function automationAssetProjectLabel(asset) {
   if (!asset?.automationId) return '';
   const project = state.automations.find((item) => item.id === asset.automationId);
-  return project?.name || asset.automationName || String(asset.category || '').replace(/^Auto:\s*/i, '') || 'Proyecto';
+  return project?.name || asset.automationName || String(asset.category || '').replace(/^Auto:\s*/i, '') || tr('assets.projectFallback');
 }
 
 function renderAssetsGrid() {
   const grid = $('#assetsGrid');
   const allItems = state.assets[state.assetsZone] || [];
   const items = visibleAssets();
-  $('#assetsSummary').textContent = `${items.length} de ${allItems.length} assets`;
+  $('#assetsSummary').textContent = tr('assets.summary', { visible: items.length, total: allItems.length });
   updateAssetSelection();
   if (!items.length) {
-    grid.innerHTML = '<div class="empty-note">No hay assets en este rango.</div>';
+    grid.innerHTML = `<div class="empty-note">${esc(tr('assets.emptyRange'))}</div>`;
     return;
   }
   grid.innerHTML = '';
@@ -2810,9 +2836,9 @@ function renderAssetsGrid() {
     section.className = 'asset-session';
     const start = new Date(group[group.length - 1].mtime);
     const end = new Date(group[0].mtime);
-    const title = start.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
-    const time = (date) => date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-    section.innerHTML = `<div class="asset-session-head"><div><h3>${esc(title)}</h3><span>${time(start)}–${time(end)} · ${group.length} archivo${group.length === 1 ? '' : 's'}</span></div><button class="mini-btn session-select">Seleccionar grupo</button></div><div class="asset-session-grid"></div>`;
+    const title = i18n.formatDate(start, { weekday: 'long', day: 'numeric', month: 'long' });
+    const time = (date) => i18n.formatDate(date, { hour: '2-digit', minute: '2-digit' });
+    section.innerHTML = `<div class="asset-session-head"><div><h3>${esc(title)}</h3><span>${time(start)}–${time(end)} · ${esc(trn('assets.fileCount', group.length))}</span></div><button class="mini-btn session-select">${esc(tr('assets.selectGroup'))}</button></div><div class="asset-session-grid"></div>`;
     const sessionGrid = section.querySelector('.asset-session-grid');
     section.querySelector('.session-select').addEventListener('click', () => {
       const every = group.every((a) => state.selectedAssets.has(a.key));
@@ -2822,14 +2848,14 @@ function renderAssetsGrid() {
     for (const a of group) {
       const card = document.createElement('div');
       card.className = `asset-card${state.selectedAssets.has(a.key) ? ' selected' : ''}`;
-      card.innerHTML = `<button class="asset-check" title="Seleccionar">${state.selectedAssets.has(a.key) ? '✓' : ''}</button><button class="asset-series" title="Asociar a serie">${IC('layers')}</button><a class="asset-download" href="${fileUrl(a.key)}" download="${esc(a.name)}" title="Descargar">${IC('download')}</a><button class="asset-info" title="Información">${IC('info')}</button>${a.prompt ? `<button class="asset-copy" title="Copiar prompt">${IC('copy')}</button>` : ''}<button class="asset-delete" title="Borrar">${IC('trash')}</button>`;
+      card.innerHTML = `<button class="asset-check" title="${esc(tr('assets.select'))}">${state.selectedAssets.has(a.key) ? '✓' : ''}</button><button class="asset-series" title="${esc(tr('common.associateSeries'))}">${IC('layers')}</button><a class="asset-download" href="${fileUrl(a.key)}" download="${esc(a.name)}" title="${esc(tr('common.download'))}">${IC('download')}</a><button class="asset-info" title="${esc(tr('common.information'))}">${IC('info')}</button>${a.prompt ? `<button class="asset-copy" title="${esc(tr('common.copyPrompt'))}">${IC('copy')}</button>` : ''}<button class="asset-delete" title="${esc(tr('common.delete'))}">${IC('trash')}</button>`;
       const automationProjectLabel = automationAssetProjectLabel(a);
       if (a.nsfw) card.insertAdjacentHTML('beforeend', nsfwBadgeHtml(a, 'overlay'));
-      if (automationProjectLabel) card.insertAdjacentHTML('beforeend', `<span class="asset-project-badge" title="Generado por el Automatizador · ${esc(automationProjectLabel)}">${IC('spark')} ${esc(automationProjectLabel)}</span>`);
+      if (automationProjectLabel) card.insertAdjacentHTML('beforeend', `<span class="asset-project-badge" title="${esc(tr('assets.generatedByAutomation', { project: automationProjectLabel }))}">${IC('spark')} ${esc(automationProjectLabel)}</span>`);
       if (state.assetsZone === 'audio') {
         const kind = a.audioKind || 'voice';
         const tags = kind === 'music' ? musicTagSummary(a.musicTags).slice(0, 4) : [];
-        card.insertAdjacentHTML('beforeend', `<div class="audio-tile" data-audiokey="${esc(a.key)}" title="Abrir en el reproductor"><span class="audio-kind-badge ${kind}">${esc(AUDIO_KIND_LABELS[kind] || 'Audio')}</span><span class="audio-tile-icon">${IC('play', 'ic ic-lg')}</span><span class="audio-dur audio-tile-dur" data-durkey="${esc(a.key)}"></span></div><div class="a-name">${esc(a.name)}</div>${tags.length ? `<div class="audio-card-tags">${tags.map((tag) => `<span>${esc(tag)}</span>`).join('')}</div>` : ''}`);
+        card.insertAdjacentHTML('beforeend', `<div class="audio-tile" data-audiokey="${esc(a.key)}" title="${esc(tr('assets.audio.openPlayer'))}"><span class="audio-kind-badge ${kind}">${esc(AUDIO_KIND_LABELS[kind] || tr('common.audio'))}</span><span class="audio-tile-icon">${IC('play', 'ic ic-lg')}</span><span class="audio-dur audio-tile-dur" data-durkey="${esc(a.key)}"></span></div><div class="a-name">${esc(a.name)}</div>${tags.length ? `<div class="audio-card-tags">${tags.map((tag) => `<span>${esc(tag)}</span>`).join('')}</div>` : ''}`);
         card.querySelector('.audio-tile').addEventListener('click', () => toggleAudioPlay(card, a.key));
       } else if (state.assetsZone === 'video') {
         card.insertAdjacentHTML('beforeend', `<video src="${fileUrl(a.key)}" preload="metadata" muted></video><div class="a-name">${esc(a.name)}</div>`);
@@ -2873,7 +2899,7 @@ function contentIsVisible(item) {
 
 function nsfwBadgeHtml(item, extraClass = '') {
   return item?.nsfw
-    ? `<span class="nsfw-badge${extraClass ? ` ${extraClass}` : ''}" title="Contenido NSFW" aria-label="Contenido NSFW">${IC('alert')}<span>NSFW</span></span>`
+    ? `<span class="nsfw-badge${extraClass ? ` ${extraClass}` : ''}" title="${esc(tr('common.nsfwContent'))}" aria-label="${esc(tr('common.nsfwContent'))}">${IC('alert')}<span>NSFW</span></span>`
     : '';
 }
 
@@ -2897,7 +2923,7 @@ function insertLoraTrigger(trigger) {
   promptBox.value = current ? `${current.replace(/[\s,]+$/, '')}, ${word}` : word;
   renderHighlight();
   promptBox.setSelectionRange(promptBox.value.length, promptBox.value.length);
-  toast(`Trigger “${word}” añadido`);
+  toast(tr('prompts.lora.triggerAdded', { trigger: word }));
 }
 
 function insertLoraUseCase(useCase) {
@@ -2907,12 +2933,12 @@ function insertLoraUseCase(useCase) {
   promptBox.value = text;
   renderHighlight();
   promptBox.setSelectionRange(promptBox.value.length, promptBox.value.length);
-  toast(`Caso de uso “${useCase.name || 'sin nombre'}” aplicado`);
+  toast(tr('prompts.lora.useCaseApplied', { name: useCase.name || tr('prompts.lora.unnamed') }));
 }
 
 function loraInvocationHtml(pr, prefix = '') {
   const lora = pr?.lora || {};
-  return `${(lora.triggerWords || []).length ? `<div class="prompt-lora-triggers">${lora.triggerWords.map((trigger, index) => `<button type="button" class="prompt-lora-trigger" data-${prefix}lora-trigger="${index}" title="Añadir al prompt con coma">${esc(trigger)}</button>`).join('')}</div>` : ''}
+  return `${(lora.triggerWords || []).length ? `<div class="prompt-lora-triggers">${lora.triggerWords.map((trigger, index) => `<button type="button" class="prompt-lora-trigger" data-${prefix}lora-trigger="${index}" title="${esc(tr('prompts.lora.addWithComma'))}">${esc(trigger)}</button>`).join('')}</div>` : ''}
     ${(lora.useCases || []).length ? `<div class="prompt-lora-cases">${lora.useCases.map((item, index) => `<button type="button" class="prompt-lora-case${item.mediaKey ? ' has-media' : ''}" data-${prefix}lora-case="${index}" title="${esc(item.prompt)}">${item.mediaKey ? IC(isVideoMediaKey(item.mediaKey) ? 'film' : 'image') : ''}${esc(item.name)}</button>`).join('')}</div>` : ''}`;
 }
 
@@ -2938,7 +2964,7 @@ function addStyleReference(key) {
   const model = activeRefModel();
   const maxRefs = activeRefLimit();
   if (state.refs.length >= maxRefs) {
-    toast(`${model.name} admite hasta ${maxRefs} referencia(s); liberá una para aplicar el estilo.`, 'err');
+    toast(trn('prompts.style.referenceLimit', maxRefs, { model: model.name }), 'err');
     return false;
   }
   state.refs.unshift({ key, fromChar: false, label: ARTISTIC_STYLE_LABEL });
@@ -2964,7 +2990,7 @@ function promptCategories(mode = null) {
     ? (state.promptCategoriesExtra[mode] || [])
     : Object.values(state.promptCategoriesExtra).flat();
   const builtIn = !mode || mode === 'image' ? [STYLE_CATEGORY, LORA_CATEGORY] : [];
-  return [...new Set([...builtIn, ...fromPrompts, ...extra])].sort((a, b) => a.localeCompare(b));
+  return [...new Set([...builtIn, ...fromPrompts, ...extra])].sort((a, b) => a.localeCompare(b, i18n.localeTag()));
 }
 
 function sameCategoryName(left, right) {
@@ -2997,15 +3023,15 @@ function promptMediaPreviewHtml(key, alt = '') {
 function renderPromptStylePreview() {
   const key = state.promptEditor?.styleImageKey || '';
   $('#promptStylePreview').innerHTML = key
-    ? `${promptMediaPreviewHtml(key, promptEditorIsLora() ? 'Archivo ilustrativo del LoRA' : 'Referencia de estilo')}${promptEditorIsLora() ? '' : `<span class="prompt-style-label">${ARTISTIC_STYLE_LABEL}</span>`}`
-    : `<div class="prompt-style-placeholder">${promptEditorIsLora() ? 'Imagen ilustrativa opcional del LoRA' : 'Elegí la imagen que define la estética'}</div>`;
+    ? `${promptMediaPreviewHtml(key, promptEditorIsLora() ? tr('prompts.lora.illustrativeFile') : tr('prompts.style.reference'))}${promptEditorIsLora() ? '' : `<span class="prompt-style-label">${ARTISTIC_STYLE_LABEL}</span>`}`
+    : `<div class="prompt-style-placeholder">${esc(promptEditorIsLora() ? tr('prompts.lora.optionalImage') : tr('prompts.style.chooseImage'))}</div>`;
 }
 
 function renderPromptLoraTriggers() {
   const words = state.promptEditor?.loraTriggerWords || [];
   $('#promptLoraTriggerChips').innerHTML = words.length
-    ? words.map((word, index) => `<span class="prompt-lora-editor-trigger">${esc(word)}<button type="button" data-lora-remove-trigger="${index}" title="Quitar">×</button></span>`).join('')
-    : '<span class="hint">Todavía no hay trigger words.</span>';
+    ? words.map((word, index) => `<span class="prompt-lora-editor-trigger">${esc(word)}<button type="button" data-lora-remove-trigger="${index}" title="${esc(tr('common.remove'))}">×</button></span>`).join('')
+    : `<span class="hint">${esc(tr('prompts.lora.noTriggers'))}</span>`;
   $('#promptLoraTriggerChips').querySelectorAll('[data-lora-remove-trigger]').forEach((button) => button.addEventListener('click', () => {
     state.promptEditor.loraTriggerWords.splice(Number(button.dataset.loraRemoveTrigger), 1);
     renderPromptLoraTriggers();
@@ -3032,15 +3058,15 @@ function renderPromptLoraUseCases() {
   const useCases = state.promptEditor?.loraUseCases || [];
   $('#promptLoraUseCases').innerHTML = useCases.length ? useCases.map((item, index) => `
     <div class="prompt-lora-use-case" data-lora-use-case="${index}">
-      <input type="text" maxlength="100" value="${esc(item.name || '')}" placeholder="Nombre del caso">
-      <textarea maxlength="4000" placeholder="Prompt completo para este caso">${esc(item.prompt || '')}</textarea>
-      <div class="prompt-lora-case-media">${item.mediaKey ? `<div class="prompt-lora-case-preview">${promptMediaPreviewHtml(item.mediaKey, `Referencia de ${item.name || 'caso de uso'}`)}</div>` : '<span class="hint">Sin imagen o video propio.</span>'}
-        <button type="button" class="mini-btn" data-lora-case-upload="${index}">${IC('upload')} Subir</button>
+      <input type="text" maxlength="100" value="${esc(item.name || '')}" placeholder="${esc(tr('prompts.lora.caseName'))}">
+      <textarea maxlength="4000" placeholder="${esc(tr('prompts.lora.casePrompt'))}">${esc(item.prompt || '')}</textarea>
+      <div class="prompt-lora-case-media">${item.mediaKey ? `<div class="prompt-lora-case-preview">${promptMediaPreviewHtml(item.mediaKey, tr('prompts.lora.caseReference', { name: item.name || tr('prompts.lora.useCase').toLocaleLowerCase() }))}</div>` : `<span class="hint">${esc(tr('prompts.lora.noCaseMedia'))}</span>`}
+        <button type="button" class="mini-btn" data-lora-case-upload="${index}">${IC('upload')} ${esc(tr('common.upload'))}</button>
         <button type="button" class="mini-btn" data-lora-case-assets="${index}">${IC('image')} Assets</button>
-        ${item.mediaKey ? `<button type="button" class="mini-btn danger" data-lora-case-clear="${index}">Quitar</button>` : ''}
+        ${item.mediaKey ? `<button type="button" class="mini-btn danger" data-lora-case-clear="${index}">${esc(tr('common.remove'))}</button>` : ''}
       </div>
-      <button type="button" class="icon-btn" data-lora-remove-case="${index}" title="Quitar caso">${IC('trash')}</button>
-    </div>`).join('') : '<span class="hint">Añadí casos de uso para invocar prompts completos.</span>';
+      <button type="button" class="icon-btn" data-lora-remove-case="${index}" title="${esc(tr('prompts.lora.removeCase'))}">${IC('trash')}</button>
+    </div>`).join('') : `<span class="hint">${esc(tr('prompts.lora.addCasesHint'))}</span>`;
   $('#promptLoraUseCases').querySelectorAll('[data-lora-use-case]').forEach((row) => {
     const index = Number(row.dataset.loraUseCase);
     row.querySelector('input').addEventListener('input', (event) => { state.promptEditor.loraUseCases[index].name = event.target.value; });
@@ -3081,10 +3107,10 @@ function syncPromptEditorStyleFields() {
   $('#promptLoraFields').hidden = !isLora;
   $('#promptStyleAnalyzeBtn').hidden = isLora;
   $('#promptStyleStatus').textContent = isLora
-    ? 'La imagen es opcional e ilustrativa; no se enviará como referencia al generar.'
-    : 'La imagen es obligatoria. La IA describirá solo la estética, técnica, soporte, luz, color y textura.';
+    ? tr('prompts.lora.optionalNotReference')
+    : tr('prompts.style.requiredAnalysis');
   $('#promptEditorTextField').hidden = isLora;
-  $('#promptEditorTextLabel').textContent = isStyle ? 'Prompt de estilo (en inglés)' : 'Prompt';
+  $('#promptEditorTextLabel').textContent = isStyle ? tr('prompts.style.promptEnglish') : 'Prompt';
   $('#promptEditorMode').disabled = isStyle || isLora;
   $('#promptEditorText').required = !isLora;
   if (isStyle || isLora) $('#promptEditorMode').value = 'image';
@@ -3111,7 +3137,7 @@ function openPromptEditor({ prompt = null, initialText = '', initialMode = state
     loraUseCases: (prompt?.lora?.useCases || []).map((item) => ({ ...item })),
     loraFieldsFilled: false
   };
-  $('#promptEditorTitle').textContent = prompt ? 'Editar prompt' : 'Nuevo prompt';
+  $('#promptEditorTitle').textContent = prompt ? tr('prompts.editor.editTitle') : tr('prompts.editor.newTitle');
   $('#promptEditorName').value = prompt?.title || (initialText ? initialText.slice(0, 60) : '');
   $('#promptEditorCategory').value = prompt?.category || 'General';
   $('#promptEditorMode').value = prompt?.mode || (['audio', 'video'].includes(initialMode) ? initialMode : 'image');
@@ -3139,10 +3165,10 @@ $('#promptStyleUpload').addEventListener('change', async (e) => {
   e.target.value = '';
   if (!file || !state.promptEditor) return;
   try {
-    $('#promptStyleStatus').textContent = 'Subiendo imagen…';
+    $('#promptStyleStatus').textContent = tr('prompts.style.uploading');
     const kind = referenceFileKind(file);
-    if (promptEditorIsStyle() && kind !== 'image') throw new Error('Los estilos necesitan una imagen.');
-    if (promptEditorIsLora() && !['image', 'video'].includes(kind)) throw new Error('El LoRA admite una imagen o video ilustrativo.');
+    if (promptEditorIsStyle() && kind !== 'image') throw new Error(tr('prompts.style.imageOnly'));
+    if (promptEditorIsLora() && !['image', 'video'].includes(kind)) throw new Error(tr('prompts.lora.mediaOnly'));
     const dataUrl = await readFileAsDataUrl(file);
     const { key } = promptEditorIsLora()
       ? await api('/api/assets/visual', { method: 'POST', body: { name: file.name, dataUrl, category: 'LORAS', tags: [], nsfw: $('#promptEditorNsfw').checked } })
@@ -3157,8 +3183,8 @@ $('#promptStyleUpload').addEventListener('change', async (e) => {
     state.promptLoraMediaTarget = null;
     renderPromptStylePreview();
     $('#promptStyleStatus').textContent = promptEditorIsLora()
-      ? 'Imagen ilustrativa lista. No se enviará como referencia al generar.'
-      : 'Imagen lista. Podés escribir el estilo o pedir el análisis con IA.';
+      ? tr('prompts.lora.mediaReady')
+      : tr('prompts.style.imageReady');
   } catch (err) {
     $('#promptStyleStatus').textContent = err.message;
     toast(err.message, 'err');
@@ -3168,19 +3194,19 @@ $('#promptStyleAssetsBtn').addEventListener('click', () => {
   state.promptLoraMediaTarget = null;
   state.promptStyleImagePick = true;
   openPicker();
-  $('#pickerTitle').textContent = promptEditorIsLora() ? 'Elegir imagen ilustrativa del LoRA' : 'Elegir imagen para el estilo artístico';
+  $('#pickerTitle').textContent = promptEditorIsLora() ? tr('prompts.lora.chooseMedia') : tr('prompts.style.chooseImageTitle');
 });
 $('#promptStyleAnalyzeBtn').addEventListener('click', async () => {
   const key = state.promptEditor?.styleImageKey;
-  if (!key) return toast('Primero elegí una imagen para analizar.', 'err');
+  if (!key) return toast(tr('prompts.style.chooseBeforeAnalyze'), 'err');
   const button = $('#promptStyleAnalyzeBtn');
   button.disabled = true;
-  $('#promptStyleStatus').textContent = 'Analizando estética, técnica, luz, color y textura…';
+  $('#promptStyleStatus').textContent = tr('prompts.style.analyzing');
   try {
     const result = await api('/api/prompts/analyze-style', { method: 'POST', body: { imageKey: key } });
     $('#promptEditorText').value = result.text || '';
-    $('#promptStyleStatus').textContent = `Estilo escrito con ${result.model || 'IA'}. Revisalo y guardalo cuando esté listo.`;
-    if (!$('#promptEditorName').value.trim()) $('#promptEditorName').value = 'Estilo artístico';
+    $('#promptStyleStatus').textContent = tr('prompts.style.written', { model: result.model || tr('prompts.aiFallback') });
+    if (!$('#promptEditorName').value.trim()) $('#promptEditorName').value = tr('prompts.style.defaultName');
   } catch (err) {
     $('#promptStyleStatus').textContent = err.message;
     toast(err.message, 'err');
@@ -3207,7 +3233,7 @@ $('#promptEditorForm').addEventListener('submit', async (e) => {
     name: String(item.name || '').trim(), prompt: String(item.prompt || '').trim(), mediaKey: item.mediaKey || ''
   }));
   if (isLora && rawLoraUseCases.some((item) => (item.name || item.prompt) && !(item.name && item.prompt))) {
-    return toast('Cada caso de uso debe tener nombre y prompt completos.', 'err');
+    return toast(tr('prompts.lora.incompleteCase'), 'err');
   }
   const loraUseCases = rawLoraUseCases.filter((item) => item.name && item.prompt);
   const body = {
@@ -3228,22 +3254,22 @@ $('#promptEditorForm').addEventListener('submit', async (e) => {
     } : null
   };
   if (!body.title || (!isLora && !body.text)) return;
-  if (body.kind === 'style' && !body.styleImageKey) return toast('Elegí una imagen para este estilo.', 'err');
-  if (body.kind === 'lora' && !body.lora.fileName) return toast('Escribí el nombre del archivo LoRA.', 'err');
+  if (body.kind === 'style' && !body.styleImageKey) return toast(tr('prompts.style.imageRequired'), 'err');
+  if (body.kind === 'lora' && !body.lora.fileName) return toast(tr('prompts.lora.fileNameRequired'), 'err');
   if (body.kind === 'lora' && !body.lora.triggerWords.length && !body.lora.useCases.length) {
-    return toast('Añadí al menos una trigger word o un caso de uso.', 'err');
+    return toast(tr('prompts.lora.invocationRequired'), 'err');
   }
   try {
     if (editor.id) {
       const updated = await api(`/api/prompts/${editor.id}`, { method: 'PUT', body });
       if (!contentIsVisible(updated)) state.prompts = state.prompts.filter((p) => p.id !== editor.id);
       else state.prompts[state.prompts.findIndex((p) => p.id === editor.id)] = updated;
-      toast('Prompt actualizado');
+      toast(tr('prompts.updated'));
     } else {
       const item = await api('/api/prompts', { method: 'POST', body });
       if (!item.nsfw || state.config?.nsfwEnabled) state.prompts.unshift(item);
       if (editor.source === 'quick') $('#promptsPanel').hidden = false;
-      toast('Prompt archivado');
+      toast(tr('prompts.archived'));
     }
     closePromptEditor();
     renderPromptLibrary();
@@ -3259,7 +3285,7 @@ function renderPromptLibrary() {
   const categories = promptCategories();
   const filter = $('#promptCategoryFilter');
   const selected = filter.value;
-  filter.innerHTML = '<option value="">Todas las categorías</option>' + categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  filter.innerHTML = `<option value="">${esc(tr('categories.all'))}</option>` + categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
   filter.value = selected;
   updatePromptCategoryActions();
   const query = $('#promptSearch').value.trim().toLowerCase();
@@ -3268,18 +3294,18 @@ function renderPromptLibrary() {
   library.innerHTML = items.length ? items.map((pr) => `
     <article class="prompt-library-card" data-prompt="${pr.id}">
       <div class="prompt-library-head"><div><span class="prompt-category">${esc(pr.category || 'General')}</span>${nsfwBadgeHtml(pr)}<h3>${esc(pr.title)}</h3></div><span>${pr.mode === 'audio' ? IC('mic') : pr.mode === 'video' ? IC('film') : IC('image')}</span></div>
-      ${isStylePrompt(pr) && pr.styleImageKey ? `<div class="prompt-style-image"><img src="${esc(fileUrl(pr.styleImageKey))}" alt="Referencia de ${esc(pr.title)}"><span class="prompt-style-label">${ARTISTIC_STYLE_LABEL}</span></div>` : ''}
-      ${isLoraPrompt(pr) && (pr.lora?.mediaKey || pr.styleImageKey) ? `<div class="prompt-lora-image">${promptMediaPreviewHtml(pr.lora?.mediaKey || pr.styleImageKey, `Archivo ilustrativo de ${pr.title}`)}</div>` : ''}
-      ${isLoraPrompt(pr) ? `${pr.lora?.fileName ? `<div class="prompt-lora-file">${esc(pr.lora.fileName)}</div>` : ''}<div class="prompt-lora-description">${esc(pr.lora?.description || '')}</div>${loraInvocationHtml(pr)}${pr.lora?.usageInfo ? `<div class="prompt-lora-usage"><strong>Uso correcto:</strong> ${esc(pr.lora.usageInfo)}</div>` : ''}` : `<div class="prompt-library-text">${esc(pr.text)}</div>`}
-      <div class="prompt-library-actions">${isLoraPrompt(pr) ? '' : '<button class="mini-btn" data-pact="use">Usar</button>'}<button class="mini-btn" data-pact="edit">${IC('edit')} Editar</button><button class="mini-btn danger" data-pact="delete">${IC('trash')}</button></div>
-    </article>`).join('') : '<div class="empty-note">No hay prompts que coincidan.</div>';
+      ${isStylePrompt(pr) && pr.styleImageKey ? `<div class="prompt-style-image"><img src="${esc(fileUrl(pr.styleImageKey))}" alt="${esc(tr('prompts.style.referenceOf', { title: pr.title }))}"><span class="prompt-style-label">${ARTISTIC_STYLE_LABEL}</span></div>` : ''}
+      ${isLoraPrompt(pr) && (pr.lora?.mediaKey || pr.styleImageKey) ? `<div class="prompt-lora-image">${promptMediaPreviewHtml(pr.lora?.mediaKey || pr.styleImageKey, tr('prompts.lora.illustrativeOf', { title: pr.title }))}</div>` : ''}
+      ${isLoraPrompt(pr) ? `${pr.lora?.fileName ? `<div class="prompt-lora-file">${esc(pr.lora.fileName)}</div>` : ''}<div class="prompt-lora-description">${esc(pr.lora?.description || '')}</div>${loraInvocationHtml(pr)}${pr.lora?.usageInfo ? `<div class="prompt-lora-usage"><strong>${esc(tr('prompts.lora.correctUseShort'))}</strong> ${esc(pr.lora.usageInfo)}</div>` : ''}` : `<div class="prompt-library-text">${esc(pr.text)}</div>`}
+      <div class="prompt-library-actions">${isLoraPrompt(pr) ? '' : `<button class="mini-btn" data-pact="use">${esc(tr('prompts.use'))}</button>`}<button class="mini-btn" data-pact="edit">${IC('edit')} ${esc(tr('common.edit'))}</button><button class="mini-btn danger" data-pact="delete" title="${esc(tr('common.delete'))}">${IC('trash')}</button></div>
+    </article>`).join('') : `<div class="empty-note">${esc(tr('prompts.noMatch'))}</div>`;
   library.querySelectorAll('[data-prompt]').forEach((card) => {
     const pr = state.prompts.find((p) => p.id === card.dataset.prompt);
     card.querySelector('[data-pact="use"]')?.addEventListener('click', () => usePrompt(pr));
     if (isLoraPrompt(pr)) bindLoraInvocation(card, pr);
     card.querySelector('[data-pact="edit"]').addEventListener('click', () => openPromptEditor({ prompt: pr }));
     card.querySelector('[data-pact="delete"]').addEventListener('click', async () => {
-      if (!confirm(`¿Borrar “${pr.title}”?`)) return;
+      if (!confirm(tr('prompts.deleteConfirm', { title: pr.title }))) return;
       await api(`/api/prompts/${pr.id}`, { method: 'DELETE' });
       state.prompts = state.prompts.filter((p) => p.id !== pr.id);
       renderPromptLibrary(); renderPromptsPanel();
@@ -3304,7 +3330,7 @@ function openPromptCategoryForm(category = '') {
   row.hidden = false;
   $('#newCategoryMode').hidden = editing;
   $('#newCategoryName').value = category;
-  $('#newCategorySave').textContent = editing ? 'Guardar cambios' : 'Crear';
+  $('#newCategorySave').textContent = editing ? tr('categories.saveChanges') : tr('categories.create');
   $('#newCategoryName').focus();
   $('#newCategoryName').select();
 }
@@ -3315,7 +3341,7 @@ function closePromptCategoryForm() {
   row.dataset.action = '';
   row.dataset.originalName = '';
   $('#newCategoryMode').hidden = false;
-  $('#newCategorySave').textContent = 'Crear';
+  $('#newCategorySave').textContent = tr('categories.create');
 }
 
 function updateOpenPromptCategory(oldName, newName) {
@@ -3337,7 +3363,7 @@ $('#btnEditPromptCategory').addEventListener('click', () => {
 $('#btnDeletePromptCategory').addEventListener('click', async () => {
   const name = $('#promptCategoryFilter').value;
   if (!isManagedPromptCategory(name)) return;
-  if (!confirm(`¿Borrar la categoría “${name}”?\n\nLos prompts que la usan se conservarán y pasarán a General.`)) return;
+  if (!confirm(tr('prompts.categories.deleteConfirm', { name }))) return;
   try {
     const { promptCategories: updated, affected = 0 } = await api('/api/prompt-categories', { method: 'DELETE', body: { name } });
     state.promptCategoriesExtra = updated;
@@ -3346,7 +3372,9 @@ $('#btnDeletePromptCategory').addEventListener('click', async () => {
     closePromptCategoryForm();
     renderPromptLibrary();
     renderPromptsPanel();
-    toast(`Categoría “${name}” borrada${affected ? ` · ${affected} prompt${affected === 1 ? '' : 's'} movido${affected === 1 ? '' : 's'} a General` : ''}`);
+    toast(affected
+      ? trn('prompts.categories.deletedMoved', affected, { name })
+      : tr('prompts.categories.deleted', { name }));
   } catch (err) {
     toast(err.message, 'err');
   }
@@ -3359,7 +3387,7 @@ $('#newCategorySave').addEventListener('click', async () => {
   const originalName = row.dataset.originalName || '';
   const mode = $('#newCategoryMode').value;
   const name = $('#newCategoryName').value.trim();
-  if (!name) return toast('Escribí un nombre para la categoría', 'err');
+  if (!name) return toast(tr('categories.nameRequired'), 'err');
   try {
     const { promptCategories: updated, affected = 0 } = editing
       ? await api('/api/prompt-categories', { method: 'PUT', body: { name: originalName, newName: name } })
@@ -3372,8 +3400,8 @@ $('#newCategorySave').addEventListener('click', async () => {
     renderPromptLibrary();
     renderPromptsPanel();
     toast(editing
-      ? `Categoría actualizada${affected ? ` en ${affected} prompt${affected === 1 ? '' : 's'}` : ''}`
-      : `Categoría "${name}" creada`);
+      ? (affected ? trn('prompts.categories.updatedCount', affected) : tr('categories.updated'))
+      : tr('categories.created', { name }));
   } catch (err) {
     toast(err.message, 'err');
   }
@@ -3397,7 +3425,7 @@ function normalizeVocabularyWordsClient(value) {
 
 function vocabularyCategories() {
   return [...new Set(['General', ...state.vocabularyCategoriesExtra, ...state.vocabulary.map((item) => item.category).filter(Boolean)])]
-    .sort((a, b) => a.localeCompare(b));
+    .sort((a, b) => a.localeCompare(b, i18n.localeTag()));
 }
 
 function isManagedVocabularyCategory(name) {
@@ -3436,7 +3464,7 @@ async function copyVocabularyWord(word) {
     document.execCommand('copy');
     area.remove();
   }
-  toast(`“${text}” copiado`);
+  toast(tr('vocabulary.wordCopied', { word: text }));
 }
 
 // En el panel rápido (mientras se escribe) el click INSERTA en el cursor del
@@ -3448,10 +3476,10 @@ function insertVocabularyWord(word) {
   const before = promptBox.value.slice(0, caret);
   const lead = before.length && !/[\s,([{]$/.test(before) ? ' ' : '';
   insertAtCursor(`${lead}${text} `);
-  toast(`“${text}” insertado`);
+  toast(tr('vocabulary.wordInserted', { word: text }));
 }
 
-function vocabularyWordsMarkup(item, actionLabel = 'Copiar', icon = 'copy') {
+function vocabularyWordsMarkup(item, actionLabel = tr('assets.info.copy'), icon = 'copy') {
   return `<div class="vocabulary-words">${(item.words || []).map((word, index) => `
     <button type="button" class="vocabulary-word" data-vocabulary-word="${index}" title="${esc(actionLabel)} ${esc(word)}">
       <span>${esc(word)}</span>${IC(icon)}
@@ -3477,25 +3505,25 @@ function renderVocabularyLibrary() {
   }
   $('#vocabularySearch').value = state.vocabularySearch;
   const filter = $('#vocabularyCategoryFilter');
-  filter.innerHTML = '<option value="">Todas las categorías</option>'
+  filter.innerHTML = `<option value="">${esc(tr('categories.all'))}</option>`
     + categories.map((category) => `<option value="${esc(category)}">${esc(category)}</option>`).join('');
   filter.value = state.vocabularyCategoryFilter;
   updateVocabularyCategoryActions();
   const items = filteredVocabulary(state.vocabularySearch, state.vocabularyCategoryFilter);
-  $('#vocabularyCount').textContent = `${items.length} de ${state.vocabulary.length} ficha${state.vocabulary.length === 1 ? '' : 's'}`;
+  $('#vocabularyCount').textContent = trn('vocabulary.count', state.vocabulary.length, { visible: items.length, total: state.vocabulary.length });
   library.innerHTML = items.length ? items.map((item) => `
     <article class="vocabulary-card" data-vocabulary-id="${esc(item.id)}">
-      <button type="button" class="vocabulary-card-image" data-vocabulary-image aria-label="Ampliar ${esc(item.title)}"><img src="${esc(fileUrl(item.imageKey))}" alt="Referencia visual de ${esc(item.title)}" loading="lazy"></button>
+      <button type="button" class="vocabulary-card-image" data-vocabulary-image aria-label="${esc(tr('vocabulary.enlarge', { title: item.title }))}"><img src="${esc(fileUrl(item.imageKey))}" alt="${esc(tr('vocabulary.visualReference', { title: item.title }))}" loading="lazy"></button>
       <div class="vocabulary-card-head">
         <div><span class="prompt-category">${esc(item.category)}</span><h3>${esc(item.title)}</h3></div>
         ${nsfwBadgeHtml(item)}
       </div>
       ${vocabularyWordsMarkup(item)}
       <div class="vocabulary-card-actions">
-        <button type="button" class="mini-btn" data-vocabulary-action="edit">${IC('edit')} Editar</button>
-        <button type="button" class="mini-btn danger" data-vocabulary-action="delete">${IC('trash')} Borrar</button>
+        <button type="button" class="mini-btn" data-vocabulary-action="edit">${IC('edit')} ${esc(tr('common.edit'))}</button>
+        <button type="button" class="mini-btn danger" data-vocabulary-action="delete">${IC('trash')} ${esc(tr('common.delete'))}</button>
       </div>
-    </article>`).join('') : '<div class="empty-note">No hay fichas de vocabulario que coincidan con la búsqueda.</div>';
+    </article>`).join('') : `<div class="empty-note">${esc(tr('vocabulary.noMatch'))}</div>`;
   const visibleImageKeys = vocabularyImageKeys(items);
   library.querySelectorAll('[data-vocabulary-id]').forEach((card) => {
     const item = state.vocabulary.find((entry) => entry.id === card.dataset.vocabularyId);
@@ -3514,7 +3542,7 @@ function openVocabularyCategoryForm(category = '') {
   row.dataset.originalName = category;
   row.hidden = false;
   $('#newVocabularyCategoryName').value = category;
-  $('#newVocabularyCategorySave').textContent = editing ? 'Guardar cambios' : 'Crear';
+  $('#newVocabularyCategorySave').textContent = editing ? tr('categories.saveChanges') : tr('categories.create');
   $('#newVocabularyCategoryName').focus();
   $('#newVocabularyCategoryName').select();
 }
@@ -3524,7 +3552,7 @@ function closeVocabularyCategoryForm() {
   row.hidden = true;
   row.dataset.action = '';
   row.dataset.originalName = '';
-  $('#newVocabularyCategorySave').textContent = 'Crear';
+  $('#newVocabularyCategorySave').textContent = tr('categories.create');
 }
 
 function updateOpenVocabularyCategory(oldName, newName) {
@@ -3548,23 +3576,23 @@ function renderVocabularyQuickPanel() {
   const items = filteredVocabulary(state.vocabularyQuickSearch, state.vocabularyQuickCategory);
   panel.innerHTML = `
     <div class="vocabulary-quick-head">
-      <div><strong>Vocabulario visual</strong><span class="hint">Consultá la imagen y hacé click en una palabra para insertarla en el prompt donde tengas el cursor.</span></div>
-      <button type="button" class="icon-btn" data-vocabulary-quick-close title="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button>
+      <div><strong>${esc(tr('vocabulary.quick.title'))}</strong><span class="hint">${esc(tr('vocabulary.quick.lead'))}</span></div>
+      <button type="button" class="icon-btn" data-vocabulary-quick-close title="${esc(tr('common.close'))}"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
     <div class="vocabulary-quick-tools">
-      <input type="search" data-vocabulary-quick-search placeholder="Buscar prendas, construcciones, materiales…" value="${esc(state.vocabularyQuickSearch)}">
-      <select class="select" data-vocabulary-quick-category><option value="">Todas las categorías</option>${categories.map((category) => `<option value="${esc(category)}">${esc(category)}</option>`).join('')}</select>
-      <span class="hint">${items.length} resultado${items.length === 1 ? '' : 's'}</span>
+      <input type="search" data-vocabulary-quick-search placeholder="${esc(tr('vocabulary.quick.search'))}" value="${esc(state.vocabularyQuickSearch)}">
+      <select class="select" data-vocabulary-quick-category><option value="">${esc(tr('categories.all'))}</option>${categories.map((category) => `<option value="${esc(category)}">${esc(category)}</option>`).join('')}</select>
+      <span class="hint">${esc(trn('vocabulary.results', items.length))}</span>
     </div>
     <div class="vocabulary-quick-grid">${items.length ? items.map((item) => `
       <article class="vocabulary-quick-card" data-vocabulary-quick-id="${esc(item.id)}">
-        <button type="button" class="vocabulary-quick-image" data-vocabulary-quick-image aria-label="Ampliar ${esc(item.title)}"><img src="${esc(fileUrl(item.imageKey))}" alt="Referencia visual de ${esc(item.title)}" loading="lazy"></button>
+        <button type="button" class="vocabulary-quick-image" data-vocabulary-quick-image aria-label="${esc(tr('vocabulary.enlarge', { title: item.title }))}"><img src="${esc(fileUrl(item.imageKey))}" alt="${esc(tr('vocabulary.visualReference', { title: item.title }))}" loading="lazy"></button>
         <div class="vocabulary-quick-copy">
           <span class="prompt-category">${esc(item.category)}</span>
           <h4>${esc(item.title)}${nsfwBadgeHtml(item, 'compact')}</h4>
-          ${vocabularyWordsMarkup(item, 'Insertar', 'plus')}
+          ${vocabularyWordsMarkup(item, tr('vocabulary.insert'), 'plus')}
         </div>
-      </article>`).join('') : `<div class="empty-note">No hay coincidencias. <button type="button" class="mini-btn" data-open-vocabulary-section>${IC('plus')} Administrar vocabulario</button></div>`}</div>`;
+      </article>`).join('') : `<div class="empty-note">${esc(tr('vocabulary.quick.noMatch'))} <button type="button" class="mini-btn" data-open-vocabulary-section>${IC('plus')} ${esc(tr('vocabulary.quick.manage'))}</button></div>`}</div>`;
   const category = panel.querySelector('[data-vocabulary-quick-category]');
   category.value = state.vocabularyQuickCategory;
   category.addEventListener('change', () => {
@@ -3600,7 +3628,7 @@ $('#btnVocabulary').addEventListener('click', () => {
 function renderVocabularyEditorWords() {
   const words = state.vocabularyEditor?.words || [];
   $('#vocabularyEditorWordChips').innerHTML = words.length ? words.map((word, index) => `
-    <span class="vocabulary-editor-chip">${esc(word)}<button type="button" data-vocabulary-remove-word="${index}" title="Quitar">×</button></span>`).join('') : '<span class="hint">Todavía no hay palabras.</span>';
+    <span class="vocabulary-editor-chip">${esc(word)}<button type="button" data-vocabulary-remove-word="${index}" title="${esc(tr('common.remove'))}">×</button></span>`).join('') : `<span class="hint">${esc(tr('vocabulary.editor.noWords'))}</span>`;
   $('#vocabularyEditorWordChips').querySelectorAll('[data-vocabulary-remove-word]').forEach((button) => button.addEventListener('click', () => {
     state.vocabularyEditor.words.splice(Number(button.dataset.vocabularyRemoveWord), 1);
     renderVocabularyEditorWords();
@@ -3624,17 +3652,17 @@ function renderVocabularyEditorImage() {
   preview.innerHTML = '';
   const source = editor?.pendingDataUrl || (editor?.imageKey ? fileUrl(editor.imageKey) : '');
   if (!source) {
-    preview.innerHTML = '<span>Elegí una imagen ilustrativa</span>';
-    $('#vocabularyEditorImageStatus').textContent = 'La imagen es obligatoria.';
+    preview.innerHTML = `<span>${esc(tr('vocabulary.editor.chooseImage'))}</span>`;
+    $('#vocabularyEditorImageStatus').textContent = tr('vocabulary.editor.imageRequired');
     $('#vocabularyEditorAnalyze').disabled = true;
     return;
   }
   const image = document.createElement('img');
   image.src = source;
-  image.alt = 'Vista previa del vocabulario';
+  image.alt = tr('vocabulary.editor.previewAlt');
   preview.appendChild(image);
   $('#vocabularyEditorAnalyze').disabled = false;
-  $('#vocabularyEditorImageStatus').textContent = editor.pendingFileName || 'Imagen guardada. Podés reemplazarla.';
+  $('#vocabularyEditorImageStatus').textContent = editor.pendingFileName || tr('vocabulary.editor.savedImage');
   if (!editor.pendingDataUrl && editor.imageKey) preview.onclick = () => openLightbox(editor.imageKey, [editor.imageKey]);
   else preview.onclick = null;
 }
@@ -3647,7 +3675,7 @@ function openVocabularyEditor(item = null) {
     pendingFileName: '',
     words: [...(item?.words || [])]
   };
-  $('#vocabularyEditorTitle').textContent = item ? 'Editar ficha de vocabulario' : 'Nueva ficha de vocabulario';
+  $('#vocabularyEditorTitle').textContent = item ? tr('vocabulary.editor.editTitle') : tr('vocabulary.editor.newTitle');
   $('#vocabularyEditorName').value = item?.title || '';
   $('#vocabularyEditorCategory').value = item?.category || '';
   $('#vocabularyEditorNsfw').checked = Boolean(item?.nsfw);
@@ -3666,13 +3694,13 @@ function closeVocabularyEditor() {
 }
 
 async function deleteVocabularyEntry(item) {
-  if (!confirm(`¿Borrar la ficha “${item.title}”?\n\nLa imagen se conservará en Assets.`)) return;
+  if (!confirm(tr('vocabulary.deleteConfirm', { title: item.title }))) return;
   try {
     await api(`/api/vocabulary/${item.id}`, { method: 'DELETE' });
     state.vocabulary = state.vocabulary.filter((entry) => entry.id !== item.id);
     renderVocabularyLibrary();
     renderVocabularyQuickPanel();
-    toast('Ficha de vocabulario borrada');
+    toast(tr('vocabulary.deleted'));
   } catch (error) {
     toast(error.message, 'err');
   }
@@ -3693,8 +3721,8 @@ $('#vocabularyImportInput').addEventListener('change', async (event) => {
     state.vocabulary = [...entries.filter((item) => contentIsVisible(item)), ...state.vocabulary];
     renderVocabularyLibrary();
     renderVocabularyQuickPanel();
-    toast(imported ? `${imported} ficha${imported === 1 ? '' : 's'} de vocabulario importada${imported === 1 ? '' : 's'}` : 'No había fichas nuevas en el ZIP', imported ? 'ok' : 'err');
-  } catch (err) { toast(`No se pudo importar: ${err.message}`, 'err'); }
+    toast(imported ? trn('vocabulary.imported', imported) : tr('vocabulary.nothingToImport'), imported ? 'ok' : 'err');
+  } catch (err) { toast(tr('vocabulary.importFailed', { error: err.message }), 'err'); }
 });
 $('#vocabularySearch').addEventListener('input', (event) => { state.vocabularySearch = event.target.value; renderVocabularyLibrary(); });
 $('#vocabularyCategoryFilter').addEventListener('change', (event) => { state.vocabularyCategoryFilter = event.target.value; renderVocabularyLibrary(); });
@@ -3706,7 +3734,7 @@ $('#btnEditVocabularyCategory').addEventListener('click', () => {
 $('#btnDeleteVocabularyCategory').addEventListener('click', async () => {
   const name = $('#vocabularyCategoryFilter').value;
   if (!isManagedVocabularyCategory(name)) return;
-  if (!confirm(`¿Borrar la categoría “${name}”?\n\nLas fichas se conservarán y pasarán a General.`)) return;
+  if (!confirm(tr('vocabulary.categories.deleteConfirm', { name }))) return;
   try {
     const { vocabularyCategories: updated, affected = 0 } = await api('/api/vocabulary-categories', { method: 'DELETE', body: { name } });
     state.vocabularyCategoriesExtra = updated;
@@ -3715,7 +3743,9 @@ $('#btnDeleteVocabularyCategory').addEventListener('click', async () => {
     closeVocabularyCategoryForm();
     renderVocabularyLibrary();
     renderVocabularyQuickPanel();
-    toast(`Categoría “${name}” borrada${affected ? ` · ${affected} ficha${affected === 1 ? '' : 's'} movida${affected === 1 ? '' : 's'} a General` : ''}`);
+    toast(affected
+      ? trn('vocabulary.categories.deletedMoved', affected, { name })
+      : tr('prompts.categories.deleted', { name }));
   } catch (error) {
     toast(error.message, 'err');
   }
@@ -3732,7 +3762,7 @@ $('#newVocabularyCategorySave').addEventListener('click', async () => {
   const editing = row.dataset.action === 'edit';
   const originalName = row.dataset.originalName || '';
   const name = $('#newVocabularyCategoryName').value.trim();
-  if (!name) return toast('Escribí un nombre para la categoría.', 'err');
+  if (!name) return toast(tr('categories.nameRequired'), 'err');
   try {
     const { vocabularyCategories: updated, affected = 0 } = editing
       ? await api('/api/vocabulary-categories', { method: 'PUT', body: { name: originalName, newName: name } })
@@ -3744,8 +3774,8 @@ $('#newVocabularyCategorySave').addEventListener('click', async () => {
     renderVocabularyLibrary();
     renderVocabularyQuickPanel();
     toast(editing
-      ? `Categoría actualizada${affected ? ` en ${affected} ficha${affected === 1 ? '' : 's'}` : ''}`
-      : `Categoría “${name}” creada`);
+      ? (affected ? trn('vocabulary.categories.updatedCount', affected) : tr('categories.updated'))
+      : tr('categories.created', { name }));
   } catch (error) {
     toast(error.message, 'err');
   }
@@ -3756,10 +3786,10 @@ $('#vocabularyEditorModal').addEventListener('click', (event) => { if (event.tar
 $('#vocabularyEditorUpload').addEventListener('click', () => $('#vocabularyEditorFile').click());
 $('#vocabularyEditorAnalyze').addEventListener('click', async () => {
   const editor = state.vocabularyEditor;
-  if (!editor?.pendingDataUrl && !editor?.imageKey) return toast('Subí una imagen antes de analizarla.', 'err');
+  if (!editor?.pendingDataUrl && !editor?.imageKey) return toast(tr('vocabulary.editor.uploadBeforeAnalyze'), 'err');
   const button = $('#vocabularyEditorAnalyze');
   button.disabled = true;
-  $('#vocabularyEditorImageStatus').textContent = 'La IA está leyendo la jerarquía visual y separando etiquetas de títulos y descripciones…';
+  $('#vocabularyEditorImageStatus').textContent = tr('vocabulary.editor.analyzing');
   try {
     const result = await api('/api/vocabulary/analyze-image', {
       method: 'POST',
@@ -3771,9 +3801,11 @@ $('#vocabularyEditorAnalyze').addEventListener('click', async () => {
     editor.words = normalizeVocabularyWordsClient([...editor.words, ...(result.words || [])]);
     renderVocabularyEditorWords();
     const added = editor.words.length - before;
-    const titleNote = result.ignoredTitle ? ` Se reconoció y omitió el título “${result.ignoredTitle}”.` : '';
-    $('#vocabularyEditorImageStatus').textContent = `${result.words?.length || 0} término${result.words?.length === 1 ? '' : 's'} detectado${result.words?.length === 1 ? '' : 's'}${added !== (result.words?.length || 0) ? ` · ${added} nuevo${added === 1 ? '' : 's'}` : ''}.${titleNote}`;
-    toast(`${added} palabra${added === 1 ? '' : 's'} añadida${added === 1 ? '' : 's'} por IA`);
+    const detected = result.words?.length || 0;
+    const addedNote = added !== detected ? trn('vocabulary.editor.newTerms', added) : '';
+    const titleNote = result.ignoredTitle ? tr('vocabulary.editor.ignoredTitle', { title: result.ignoredTitle }) : '';
+    $('#vocabularyEditorImageStatus').textContent = trn('vocabulary.editor.detected', detected, { addedNote, titleNote });
+    toast(trn('vocabulary.editor.addedByAi', added));
   } catch (error) {
     $('#vocabularyEditorImageStatus').textContent = error.message;
     toast(error.message, 'err');
@@ -3792,8 +3824,8 @@ $('#vocabularyEditorFile').addEventListener('change', async (event) => {
   const file = event.target.files?.[0];
   event.target.value = '';
   if (!file || !state.vocabularyEditor) return;
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return toast('Usá una imagen PNG, JPG o WebP.', 'err');
-  if (file.size > 100 * 1024 * 1024) return toast('La imagen supera el límite de 100 MB.', 'err');
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return toast(tr('vocabulary.editor.invalidImage'), 'err');
+  if (file.size > 100 * 1024 * 1024) return toast(tr('vocabulary.editor.imageTooLarge'), 'err');
   try {
     state.vocabularyEditor.pendingDataUrl = await readFileAsDataUrl(file);
     state.vocabularyEditor.pendingFileName = file.name;
@@ -3812,10 +3844,10 @@ $('#vocabularyEditorForm').addEventListener('submit', async (event) => {
   const category = $('#vocabularyEditorCategory').value.trim();
   const words = normalizeVocabularyWordsClient(editor.words);
   const nsfw = $('#vocabularyEditorNsfw').checked;
-  if (!title) return toast('Escribí un título para la ficha.', 'err');
-  if (!category) return toast('Escribí o elegí una categoría.', 'err');
-  if (!words.length) return toast('Añadí al menos una palabra.', 'err');
-  if (!editor.imageKey && !editor.pendingDataUrl) return toast('Subí una imagen para esta ficha.', 'err');
+  if (!title) return toast(tr('vocabulary.editor.titleRequired'), 'err');
+  if (!category) return toast(tr('vocabulary.editor.categoryRequired'), 'err');
+  if (!words.length) return toast(tr('vocabulary.editor.wordRequired'), 'err');
+  if (!editor.imageKey && !editor.pendingDataUrl) return toast(tr('vocabulary.editor.entryImageRequired'), 'err');
   const submit = event.submitter;
   if (submit) submit.disabled = true;
   try {
@@ -3847,7 +3879,7 @@ $('#vocabularyEditorForm').addEventListener('submit', async (event) => {
     closeVocabularyEditor();
     renderVocabularyLibrary();
     renderVocabularyQuickPanel();
-    toast(editor.id ? 'Ficha de vocabulario actualizada' : 'Ficha de vocabulario guardada');
+    toast(editor.id ? tr('vocabulary.updated') : tr('vocabulary.saved'));
   } catch (error) {
     toast(error.message, 'err');
   } finally {
@@ -3865,7 +3897,7 @@ const SNIPPET_LANGUAGE_LABELS = { javascript: 'JavaScript / ExtendScript', pytho
 
 function snippetCategories() {
   const fromSnippets = state.snippets.map((s) => s.category).filter(Boolean);
-  return [...new Set([...fromSnippets, ...state.snippetCategoriesExtra])].sort((a, b) => a.localeCompare(b));
+  return [...new Set([...fromSnippets, ...state.snippetCategoriesExtra])].sort((a, b) => a.localeCompare(b, i18n.localeTag()));
 }
 
 function renderSnippetEditorCategories() {
@@ -3877,7 +3909,7 @@ function renderSnippetEditorCategories() {
 
 function openSnippetEditor(snippet = null) {
   state.snippetEditor = { id: snippet?.id || null };
-  $('#snippetEditorTitle').textContent = snippet ? 'Editar snippet' : 'Guardar snippet';
+  $('#snippetEditorTitle').textContent = snippet ? tr('snippets.editor.editTitle') : tr('snippets.editor.saveTitle');
   $('#snippetEditorName').value = snippet?.title || '';
   $('#snippetEditorLanguage').value = snippet?.language || 'javascript';
   $('#snippetEditorCategory').value = snippet?.category || '';
@@ -3930,16 +3962,16 @@ $('#snippetEditorForm').addEventListener('submit', async (e) => {
     code: $('#snippetEditorCode').value,
     notes: $('#snippetEditorNotes').value.trim()
   };
-  if (!body.title || !body.code.trim()) return toast('Falta el título o el código', 'err');
+  if (!body.title || !body.code.trim()) return toast(tr('snippets.editor.required'), 'err');
   try {
     if (editor.id) {
       const updated = await api(`/api/snippets/${editor.id}`, { method: 'PUT', body });
       state.snippets[state.snippets.findIndex((s) => s.id === editor.id)] = updated;
-      toast('Snippet actualizado');
+      toast(tr('snippets.updated'));
     } else {
       const item = await api('/api/snippets', { method: 'POST', body });
       state.snippets.unshift(item);
-      toast('Snippet guardado');
+      toast(tr('snippets.saved'));
     }
     closeSnippetEditor();
     renderSnippetLibrary();
@@ -3954,7 +3986,7 @@ function renderSnippetLibrary() {
   const categories = snippetCategories();
   const filter = $('#snippetCategoryFilter');
   const selectedCategory = filter.value;
-  filter.innerHTML = '<option value="">Todas las categorías</option>' + categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  filter.innerHTML = `<option value="">${esc(tr('categories.all'))}</option>` + categories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
   filter.value = selectedCategory;
   updateSnippetCategoryActions();
   const language = $('#snippetLanguageFilter').value;
@@ -3967,15 +3999,15 @@ function renderSnippetLibrary() {
       <div class="prompt-library-head"><div>${sn.category ? `<span class="prompt-category">${esc(sn.category)}</span>` : ''}<h3>${esc(sn.title)}</h3></div><span class="snippet-lang-badge">${esc(SNIPPET_LANGUAGE_LABELS[sn.language] || sn.language)}</span></div>
       <pre class="snippet-code-block"><code class="language-${esc(sn.language)}">${esc(sn.code)}</code></pre>
       ${sn.notes ? `<div class="prompt-library-text">${esc(sn.notes)}</div>` : ''}
-      <div class="prompt-library-actions"><button class="mini-btn" data-sact="view">${IC('eye')} Ver</button><button class="mini-btn" data-sact="copy">${IC('copy')} Copiar</button><button class="mini-btn" data-sact="edit">${IC('edit')} Editar</button><button class="mini-btn danger" data-sact="delete">${IC('trash')}</button></div>
-    </article>`).join('') : '<div class="empty-note">No hay snippets que coincidan.</div>';
+      <div class="prompt-library-actions"><button class="mini-btn" data-sact="view">${IC('eye')} ${esc(tr('common.view'))}</button><button class="mini-btn" data-sact="copy">${IC('copy')} ${esc(tr('assets.info.copy'))}</button><button class="mini-btn" data-sact="edit">${IC('edit')} ${esc(tr('common.edit'))}</button><button class="mini-btn danger" data-sact="delete" title="${esc(tr('common.delete'))}">${IC('trash')}</button></div>
+    </article>`).join('') : `<div class="empty-note">${esc(tr('snippets.noMatch'))}</div>`;
   library.querySelectorAll('[data-snippet]').forEach((card) => {
     const sn = state.snippets.find((s) => s.id === card.dataset.snippet);
     card.querySelector('[data-sact="view"]').addEventListener('click', () => openSnippetView(sn));
     card.querySelector('[data-sact="copy"]').addEventListener('click', () => copyPrompt(sn.code));
     card.querySelector('[data-sact="edit"]').addEventListener('click', () => openSnippetEditor(sn));
     card.querySelector('[data-sact="delete"]').addEventListener('click', async () => {
-      if (!confirm(`¿Borrar “${sn.title}”?`)) return;
+      if (!confirm(tr('snippets.deleteConfirm', { title: sn.title }))) return;
       await api(`/api/snippets/${sn.id}`, { method: 'DELETE' });
       state.snippets = state.snippets.filter((s) => s.id !== sn.id);
       renderSnippetLibrary();
@@ -4001,7 +4033,7 @@ function openSnippetCategoryForm(category = '') {
   row.dataset.originalName = category;
   row.hidden = false;
   $('#newSnippetCategoryName').value = category;
-  $('#newSnippetCategorySave').textContent = editing ? 'Guardar cambios' : 'Crear';
+  $('#newSnippetCategorySave').textContent = editing ? tr('categories.saveChanges') : tr('categories.create');
   $('#newSnippetCategoryName').focus();
   $('#newSnippetCategoryName').select();
 }
@@ -4011,7 +4043,7 @@ function closeSnippetCategoryForm() {
   row.hidden = true;
   row.dataset.action = '';
   row.dataset.originalName = '';
-  $('#newSnippetCategorySave').textContent = 'Crear';
+  $('#newSnippetCategorySave').textContent = tr('categories.create');
 }
 
 function updateOpenSnippetCategory(oldName, newName) {
@@ -4032,7 +4064,7 @@ $('#btnEditSnippetCategory').addEventListener('click', () => {
 $('#btnDeleteSnippetCategory').addEventListener('click', async () => {
   const name = $('#snippetCategoryFilter').value;
   if (!name) return;
-  if (!confirm(`¿Borrar la categoría “${name}”?\n\nLos snippets que la usan se conservarán sin categoría.`)) return;
+  if (!confirm(tr('snippets.categories.deleteConfirm', { name }))) return;
   try {
     const { snippetCategories: updated, affected = 0 } = await api('/api/snippet-categories', { method: 'DELETE', body: { name } });
     state.snippetCategoriesExtra = updated;
@@ -4040,7 +4072,9 @@ $('#btnDeleteSnippetCategory').addEventListener('click', async () => {
     $('#snippetCategoryFilter').value = '';
     closeSnippetCategoryForm();
     renderSnippetLibrary();
-    toast(`Categoría “${name}” borrada${affected ? ` · ${affected} snippet${affected === 1 ? '' : 's'} conservado${affected === 1 ? '' : 's'} sin categoría` : ''}`);
+    toast(affected
+      ? trn('snippets.categories.deletedKept', affected, { name })
+      : tr('prompts.categories.deleted', { name }));
   } catch (err) {
     toast(err.message, 'err');
   }
@@ -4052,7 +4086,7 @@ $('#newSnippetCategorySave').addEventListener('click', async () => {
   const editing = row.dataset.action === 'edit';
   const originalName = row.dataset.originalName || '';
   const name = $('#newSnippetCategoryName').value.trim();
-  if (!name) return toast('Escribí un nombre para la categoría', 'err');
+  if (!name) return toast(tr('categories.nameRequired'), 'err');
   try {
     const { snippetCategories: updated, affected = 0 } = editing
       ? await api('/api/snippet-categories', { method: 'PUT', body: { name: originalName, newName: name } })
@@ -4064,8 +4098,8 @@ $('#newSnippetCategorySave').addEventListener('click', async () => {
     $('#snippetCategoryFilter').value = name;
     renderSnippetLibrary();
     toast(editing
-      ? `Categoría actualizada${affected ? ` en ${affected} snippet${affected === 1 ? '' : 's'}` : ''}`
-      : `Categoría "${name}" creada`);
+      ? (affected ? trn('snippets.categories.updatedCount', affected) : tr('categories.updated'))
+      : tr('categories.created', { name }));
   } catch (err) {
     toast(err.message, 'err');
   }
@@ -4149,7 +4183,7 @@ async function downloadAssets(keys) {
     a.href = url; a.download = `manifestador-${keys.length}-assets.zip`;
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
-    toast(`${keys.length} asset${keys.length === 1 ? '' : 's'} descargado${keys.length === 1 ? '' : 's'} en un ZIP`);
+    toast(trn('assets.downloadedZip', keys.length));
   } catch (err) {
     toast(err.message, 'err');
   } finally {
@@ -4160,7 +4194,7 @@ $('#btnDownloadSelected').addEventListener('click', () => downloadAssets([...sta
 
 async function deleteAssets(keys) {
   if (!keys.length) return;
-  if (!confirm(`¿Borrar definitivamente ${keys.length} archivo${keys.length === 1 ? '' : 's'} del disco?\n\nEsta acción no se puede deshacer.`)) return;
+  if (!confirm(trn('assets.deleteConfirm', keys.length))) return;
   const result = await api('/api/assets/delete', { method: 'POST', body: { keys } });
   keys.forEach((key) => state.selectedAssets.delete(key));
   state.series.forEach((s) => { s.assetKeys = (s.assetKeys || []).filter((key) => !keys.includes(key)); });
@@ -4187,7 +4221,7 @@ async function deleteAssets(keys) {
   state.history = result.history;
   renderHistory();
   await refreshAssets();
-  toast(`${result.deleted} asset${result.deleted === 1 ? '' : 's'} eliminado${result.deleted === 1 ? '' : 's'}`);
+  toast(trn('assets.deleted', result.deleted));
   return true;
 }
 
@@ -4196,7 +4230,7 @@ async function duplicateAssets(keys) {
   try {
     const result = await api('/api/assets/duplicate', { method: 'POST', body: { keys } });
     await refreshAssets();
-    toast(`${result.keys.length} asset${result.keys.length === 1 ? '' : 's'} duplicado${result.keys.length === 1 ? '' : 's'}`);
+    toast(trn('assets.duplicated', result.keys.length));
     return result.keys;
   } catch (e) {
     toast(e.message, 'err');
@@ -4292,7 +4326,7 @@ function openAssetAudioPlayer(key, autoplay = true) {
   }
   updateAssetAudioPlayer();
   syncAssetAudioTiles();
-  if (autoplay) playingAudio.play().catch(() => toast('No se pudo reproducir este audio', 'err'));
+  if (autoplay) playingAudio.play().catch(() => toast(tr('player.playFailed', {}, 'No se pudo reproducir este audio'), 'err'));
 }
 
 function toggleAudioPlay(card, key) {
@@ -4301,7 +4335,7 @@ function toggleAudioPlay(card, key) {
   document.body.classList.add('asset-player-open');
   if (!sameTrack) return openAssetAudioPlayer(key);
   updateAssetAudioPlayer();
-  if (playingAudio.paused || playingAudio.ended) playingAudio.play().catch(() => toast('No se pudo reproducir este audio', 'err'));
+  if (playingAudio.paused || playingAudio.ended) playingAudio.play().catch(() => toast(tr('player.playFailed', {}, 'No se pudo reproducir este audio'), 'err'));
   else playingAudio.pause();
 }
 
@@ -4326,7 +4360,7 @@ playingAudio.addEventListener('play', syncAssetAudioTiles);
 playingAudio.addEventListener('pause', syncAssetAudioTiles);
 playingAudio.addEventListener('ended', syncAssetAudioTiles);
 playingAudio.addEventListener('error', () => {
-  if (assetAudioKey) toast('El reproductor no pudo abrir este archivo', 'err');
+  if (assetAudioKey) toast(tr('player.openFailed', {}, 'El reproductor no pudo abrir este archivo'), 'err');
   syncAssetAudioTiles();
 });
 $('#assetPlayerPrev').addEventListener('click', () => navigateAssetAudio(-1));
@@ -4424,20 +4458,20 @@ function openLightbox(key, keys = null, opts = {}) {
   $('#lbPrev').hidden = !multiple; $('#lbNext').hidden = !multiple; $('#lbCounter').hidden = !multiple;
   $('#lbCounter').textContent = multiple ? `${state.lightboxIndex + 1} / ${state.lightboxKeys.length}` : '';
   $('#lbActions').innerHTML = `
-    ${info ? `<button class="mini-btn" id="lbInfo">${IC('info')} Información</button>` : ''}
-    ${info?.prompt ? `<button class="mini-btn" id="lbCopyPrompt">${IC('copy')} Copiar prompt</button>` : ''}
-    ${!isVideo ? `<button class="mini-btn" id="lbRef">${IC('link')} Usar como referencia</button>` : ''}
-    ${!isVideo && isReusableImageKey(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} Asociar a personaje/elemento</button>` : ''}
-    <button class="mini-btn" id="lbSeries">${IC('layers')} Asociar a serie</button>
-    ${!isVideo && isReusableImageKey(key) ? `<button class="mini-btn" id="lbCharacter">${IC('user')} Convertir en personaje</button>` : ''}
-    ${!isVideo ? `<button class="mini-btn" id="lbPhotoshop">${IC('pen')} Abrir en Photoshop</button>` : ''}
-    ${/^(generated|uploads|audio|video)\//.test(key) ? `<button class="mini-btn" id="lbDuplicate">${IC('copy')} Duplicar</button>` : ''}
-    <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} Descargar</a>`;
+    ${info ? `<button class="mini-btn" id="lbInfo">${IC('info')} ${esc(tr('common.information'))}</button>` : ''}
+    ${info?.prompt ? `<button class="mini-btn" id="lbCopyPrompt">${IC('copy')} ${esc(tr('common.copyPrompt'))}</button>` : ''}
+    ${!isVideo ? `<button class="mini-btn" id="lbRef">${IC('link')} ${esc(tr('common.useAsReference'))}</button>` : ''}
+    ${!isVideo && isReusableImageKey(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} ${esc(tr('common.associateEntity'))}</button>` : ''}
+    <button class="mini-btn" id="lbSeries">${IC('layers')} ${esc(tr('common.associateSeries'))}</button>
+    ${!isVideo && isReusableImageKey(key) ? `<button class="mini-btn" id="lbCharacter">${IC('user')} ${esc(tr('common.convertCharacter'))}</button>` : ''}
+    ${!isVideo ? `<button class="mini-btn" id="lbPhotoshop">${IC('pen')} ${esc(tr('common.openPhotoshop'))}</button>` : ''}
+    ${/^(generated|uploads|audio|video)\//.test(key) ? `<button class="mini-btn" id="lbDuplicate">${IC('copy')} ${esc(tr('common.duplicate'))}</button>` : ''}
+    <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} ${esc(tr('common.download'))}</a>`;
   $('#lbPhotoshop')?.addEventListener('click', async () => {
     try {
       const r = await api('/api/photoshop/open', { method: 'POST', body: { key } });
       watchPhotoshopFile(key, r.mtime);
-      toast('Abriendo en Photoshop… al guardar allá, acá se actualiza sola');
+      toast(tr('lightbox.openingPhotoshop', {}, 'Abriendo en Photoshop… al guardar allá, acá se actualiza sola'));
     } catch (e) {
       toast(e.message, 'err');
     }
@@ -4447,7 +4481,7 @@ function openLightbox(key, keys = null, opts = {}) {
     closeLightbox();
     goToCreate();
     if (state.mode === 'audio') setMode('image');
-    toast('Agregada como referencia');
+    toast(tr('lightbox.referenceAdded', {}, 'Agregada como referencia'));
   });
   $('#lbCopyPrompt')?.addEventListener('click', () => copyPrompt(info.prompt));
   $('#lbInfo')?.addEventListener('click', () => openAssetInfo({ key, ...info }));
@@ -4540,15 +4574,15 @@ function openAssetInfo(asset) {
   const character = state.characters.find((c) => c.id === asset.characterId);
   const variant = (character?.variants || []).find((v) => v.id === asset.characterVariantId);
   const rows = [
-    ['Modelo', asset.modelName || asset.modelId || 'Sin información'],
-    ['Tipo', isAudio ? AUDIO_KIND_LABELS[audioKind] || 'Audio' : isVideo ? 'Video' : asset.type || 'Imagen'],
-    ...(automationProjectLabel ? [['Proyecto', automationProjectLabel], ['Origen', 'Generado por el Automatizador']] : []),
-    ...(!isAudio ? [['Categoría', asset.category || '—'], ['Etiquetas', (asset.tags || []).join(', ') || '—']] : []),
-    ...(isAudio ? [['Duración', '__DUR__']] : []),
-    ['Proporción', asset.aspectRatio || '—'], ['Resolución', asset.resolution || '—'],
-    ['Lote', asset.batch || 1], ['Referencias', (asset.refs || []).length],
-    ['Personaje', character ? `${character.name} · ${variant?.name || 'Original'}` : '—'],
-    ['Fecha', asset.ts ? fmtDate(asset.ts) : '—'], ['Costo estimado', asset.cost ? `$${Number(asset.cost).toFixed(4)}` : '—']
+    [tr('assets.info.model'), asset.modelName || asset.modelId || tr('assets.info.unavailable')],
+    [tr('assets.info.type'), isAudio ? AUDIO_KIND_LABELS[audioKind] || tr('common.audio') : isVideo ? tr('create.mode.video') : asset.type || tr('create.mode.image')],
+    ...(automationProjectLabel ? [[tr('assets.info.project'), automationProjectLabel], [tr('assets.info.origin'), tr('assets.info.automationOrigin')]] : []),
+    ...(!isAudio ? [[tr('categories.category'), asset.category || '—'], [tr('assets.filters.tags'), (asset.tags || []).join(', ') || '—']] : []),
+    ...(isAudio ? [[tr('assets.info.duration'), '__DUR__']] : []),
+    [tr('assets.info.aspectRatio'), asset.aspectRatio || '—'], [tr('assets.info.resolution'), asset.resolution || '—'],
+    [tr('assets.info.batch'), asset.batch || 1], [tr('assets.info.references'), (asset.refs || []).length],
+    [tr('assets.filters.character'), character ? `${character.name} · ${variant?.name || tr('picker.original')}` : '—'],
+    [tr('assets.info.date'), asset.ts ? fmtDate(asset.ts) : '—'], [tr('assets.info.estimatedCost'), asset.cost ? `$${Number(asset.cost).toFixed(4)}` : '—']
   ];
   const baseName = decodeURIComponent(asset.key.split('/').pop() || '').replace(/\.[^.]+$/, '');
   const ext = (asset.key.match(/\.[^.]+$/) || [''])[0];
@@ -4557,30 +4591,30 @@ function openAssetInfo(asset) {
       ? `<video class="asset-info-preview" src="${fileUrl(asset.key)}" controls preload="metadata"></video>`
       : `<img class="asset-info-preview" src="${fileUrl(asset.key)}" alt="">`) : ''}
     <div class="asset-info-rename">
-      <span>Nombre del archivo</span>
-      <div><input id="assetRenameInput" type="text" maxlength="80" value="${esc(baseName)}"><span class="asset-info-ext">${esc(ext)}</span><button class="mini-btn" id="assetRenameBtn">Renombrar</button></div>
+      <span>${esc(tr('assets.info.fileName'))}</span>
+      <div><input id="assetRenameInput" type="text" maxlength="80" value="${esc(baseName)}"><span class="asset-info-ext">${esc(ext)}</span><button class="mini-btn" id="assetRenameBtn">${esc(tr('assets.info.rename'))}</button></div>
     </div>
     <div class="asset-info-grid">${rows.map(([label, value]) => `<div><span>${label}</span><strong>${value === '__DUR__' ? `<span class="audio-dur" data-durkey="${esc(asset.key)}">…</span>` : esc(value)}</strong></div>`).join('')}</div>
-    ${isAudio ? `<div class="asset-info-audio-action"><button type="button" class="generate-btn small" id="assetInfoPlay">${IC('play')} Abrir en el reproductor</button></div><div class="audio-metadata-editor">
-      <h4>Clasificación del audio</h4>
-      <label>Tipo<select class="select" id="assetAudioKind">${[['voice', 'Voz'], ['music', 'Música'], ['sound', 'Sonido']].map(([value, label]) => `<option value="${value}"${audioKind === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
+    ${isAudio ? `<div class="asset-info-audio-action"><button type="button" class="generate-btn small" id="assetInfoPlay">${IC('play')} ${esc(tr('assets.audio.openPlayer'))}</button></div><div class="audio-metadata-editor">
+      <h4>${esc(tr('assets.audio.classification'))}</h4>
+      <label>${esc(tr('assets.info.type'))}<select class="select" id="assetAudioKind">${Object.entries(AUDIO_KIND_LABELS).map(([value, label]) => `<option value="${value}"${audioKind === value ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
       <div id="assetMusicFields" class="audio-music-fields"${audioKind === 'music' ? '' : ' hidden'}>
-        <label>Género<input id="assetMusicGenres" type="text" value="${esc((musicTags.genres || []).join(', '))}" placeholder="ambient, orchestral"></label>
-        <label>Instrumentos<input id="assetMusicInstruments" type="text" value="${esc((musicTags.instruments || []).join(', '))}" placeholder="piano, strings"></label>
-        <label>Sentimientos<input id="assetMusicMoods" type="text" value="${esc((musicTags.moods || []).join(', '))}" placeholder="mysterious, tense"></label>
+        <label>${esc(tr('assets.audio.genre'))}<input id="assetMusicGenres" type="text" value="${esc((musicTags.genres || []).join(', '))}" placeholder="ambient, orchestral"></label>
+        <label>${esc(tr('assets.audio.instruments'))}<input id="assetMusicInstruments" type="text" value="${esc((musicTags.instruments || []).join(', '))}" placeholder="piano, strings"></label>
+        <label>${esc(tr('assets.audio.moods'))}<input id="assetMusicMoods" type="text" value="${esc((musicTags.moods || []).join(', '))}" placeholder="mysterious, tense"></label>
       </div>
-      <label class="check-row"><input id="assetAudioNsfw" type="checkbox"${asset.nsfw ? ' checked' : ''}> Contenido NSFW</label>
-      <button type="button" class="mini-btn" id="assetAudioMetadataSave">Guardar clasificación</button>
+      <label class="check-row"><input id="assetAudioNsfw" type="checkbox"${asset.nsfw ? ' checked' : ''}> ${esc(tr('common.nsfwContent'))}</label>
+      <button type="button" class="mini-btn" id="assetAudioMetadataSave">${esc(tr('assets.classify.save'))}</button>
     </div>` : ''}
     ${!isAudio ? `<div class="visual-metadata-editor">
-      <h4>Clasificación visual</h4>
-      <label>Categoría<input id="assetVisualCategory" type="text" maxlength="80" list="visualCategoryList" value="${esc(asset.category || '')}" placeholder="Ej: Archivo histórico"></label>
-      <label>Etiquetas<input id="assetVisualTags" type="text" maxlength="500" value="${esc((asset.tags || []).join(', '))}" placeholder="noir, ciudad, noche"></label>
-      <label class="check-row"><input id="assetVisualNsfw" type="checkbox"${asset.nsfw ? ' checked' : ''}> Contenido NSFW</label>
-      <span class="hint">Separá las etiquetas con comas. Podrás combinarlas desde los filtros de Assets.</span>
-      <button type="button" class="mini-btn" id="assetVisualMetadataSave">Guardar clasificación</button>
+      <h4>${esc(tr('assets.visual.classification'))}</h4>
+      <label>${esc(tr('categories.category'))}<input id="assetVisualCategory" type="text" maxlength="80" list="visualCategoryList" value="${esc(asset.category || '')}" placeholder="${esc(tr('assets.categoryExample'))}"></label>
+      <label>${esc(tr('assets.filters.tags'))}<input id="assetVisualTags" type="text" maxlength="500" value="${esc((asset.tags || []).join(', '))}" placeholder="${esc(tr('assets.tagsExample'))}"></label>
+      <label class="check-row"><input id="assetVisualNsfw" type="checkbox"${asset.nsfw ? ' checked' : ''}> ${esc(tr('common.nsfwContent'))}</label>
+      <span class="hint">${esc(tr('assets.visual.tagsHint'))}</span>
+      <button type="button" class="mini-btn" id="assetVisualMetadataSave">${esc(tr('assets.classify.save'))}</button>
     </div>` : ''}
-    <div class="asset-info-prompt"><div><span>Prompt utilizado</span>${asset.prompt ? `<button class="mini-btn" id="assetInfoCopy">${IC('copy')} Copiar</button>` : ''}</div><pre>${esc(asset.prompt || 'No hay prompt guardado para este asset.')}</pre></div>`;
+    <div class="asset-info-prompt"><div><span>${esc(tr('assets.info.usedPrompt'))}</span>${asset.prompt ? `<button class="mini-btn" id="assetInfoCopy">${IC('copy')} ${esc(tr('assets.info.copy'))}</button>` : ''}</div><pre>${esc(asset.prompt || tr('assets.info.noPrompt'))}</pre></div>`;
   fillAudioDurations($('#assetInfoBody'));
   $('#assetInfoPlay')?.addEventListener('click', () => {
     $('#assetInfoModal').hidden = true;
@@ -4609,7 +4643,7 @@ function openAssetInfo(asset) {
       Object.assign(asset, updated);
       await refreshAssets();
       openAssetInfo(asset);
-      toast('Clasificación de audio guardada.', 'ok');
+      toast(tr('assets.audio.classificationSaved'), 'ok');
     } catch (error) {
       event.currentTarget.disabled = false;
       toast(error.message, 'err');
@@ -4630,7 +4664,7 @@ function openAssetInfo(asset) {
       Object.assign(asset, result.metadata?.[asset.key] || {});
       await refreshAssets();
       $('#assetInfoModal').hidden = true;
-      toast('Clasificación visual guardada.');
+      toast(tr('assets.visual.classificationSaved'));
     } catch (error) {
       event.currentTarget.disabled = false;
       toast(error.message, 'err');
@@ -4642,7 +4676,7 @@ function openAssetInfo(asset) {
 // renombra el archivo del asset y recarga las colecciones que lo referencian
 async function renameAsset(oldKey, name) {
   const clean = String(name || '').trim();
-  if (!clean) return toast('Poné un nombre', 'err');
+  if (!clean) return toast(tr('assets.info.nameRequired'), 'err');
   try {
     const res = await api('/api/assets/rename', { method: 'POST', body: { key: oldKey, name: clean } });
     const s = await api('/api/state');
@@ -4654,7 +4688,7 @@ async function renameAsset(oldKey, name) {
     state.history = s.history || [];
     await refreshAssets();
     $('#assetInfoModal').hidden = true;
-    toast(`Renombrado a “${res.name}”`);
+    toast(tr('assets.info.renamed', { name: res.name }));
   } catch (err) {
     toast(err.message, 'err');
   }
@@ -4692,14 +4726,14 @@ async function associateAsset(key) {
   resetAssociationNewVariant();
   renderAssociationOwners(existing ? (existing.characterId || existing.elementId) : '', existing?.variantId || '');
   $('#associateAsPhoto').checked = false;
-  $('#associateAssetPreview').innerHTML = `<img src="${fileUrl(key)}" alt=""><div><strong>${existing ? 'Reasignar asset' : 'Nuevo vínculo'}</strong><div class="hint">El archivo no se moverá ni duplicará.</div></div>`;
+  $('#associateAssetPreview').innerHTML = `<img src="${fileUrl(key)}" alt=""><div><strong>${esc(existing ? tr('assets.associate.reassign') : tr('assets.series.newLink'))}</strong><div class="hint">${esc(tr('assets.series.noMove'))}</div></div>`;
   $('#associateAssetModal').hidden = false;
 }
 
 function renderAssociationOwners(ownerId = '', variantId = '') {
   sortEntities();
   const isElement = associationIsElement();
-  $('#associateOwnerLabelText').textContent = isElement ? 'Locación u objeto' : 'Personaje';
+  $('#associateOwnerLabelText').textContent = isElement ? tr('assets.associate.element') : tr('assets.filters.character');
   const list = isElement ? state.elements : state.characters;
   const select = $('#associateCharacter');
   select.innerHTML = list.map((c) => `<option value="${c.id}">${esc(c.name)}${isElement ? ` (${ELEMENT_KIND_LABEL[c.kind] || ''})` : ''}</option>`).join('');
@@ -4710,9 +4744,9 @@ function renderAssociationOwners(ownerId = '', variantId = '') {
 function renderAssociationVariants(selected = '') {
   const list = associationIsElement() ? state.elements : state.characters;
   const owner = list.find((c) => c.id === $('#associateCharacter').value);
-  $('#associateVariant').innerHTML = '<option value="">Original</option>'
+  $('#associateVariant').innerHTML = `<option value="">${esc(tr('picker.original'))}</option>`
     + (owner?.variants || []).map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('')
-    + `<option value="${NEW_ASSOCIATION_VARIANT}">＋ Crear nueva variante…</option>`;
+    + `<option value="${NEW_ASSOCIATION_VARIANT}">＋ ${esc(tr('assets.associate.createVariant'))}</option>`;
   $('#associateVariant').value = selected;
   toggleAssociationNewVariant();
 }
@@ -4732,7 +4766,7 @@ $('#associateAssetForm').addEventListener('submit', async (e) => {
       const description = $('#associateNewVariantDescription').value.trim();
       if (!name) {
         $('#associateNewVariantName').focus();
-        return toast('Poné un nombre para la nueva variante', 'err');
+        return toast(tr('assets.associate.variantNameRequired'), 'err');
       }
       const owners = isElement ? state.elements : state.characters;
       const ownerBefore = owners.find((item) => item.id === ownerId);
@@ -4740,7 +4774,7 @@ $('#associateAssetForm').addEventListener('submit', async (e) => {
       const base = isElement ? `/api/elements/${ownerId}/variants` : `/api/characters/${ownerId}/variants`;
       const updated = await api(base, { method: 'POST', body: { name, description } });
       const created = (updated.variants || []).find((variant) => !previousIds.has(variant.id));
-      if (!created) throw new Error('La variante se guardó, pero no pude identificarla para asociar el asset.');
+      if (!created) throw new Error(tr('assets.associate.variantNotFound'));
       owners[owners.findIndex((item) => item.id === ownerId)] = updated;
       variantId = created.id;
       renderAssociationVariants(variantId);
@@ -4769,7 +4803,10 @@ $('#associateAssetForm').addEventListener('submit', async (e) => {
     const list = isElement ? state.elements : state.characters;
     const owner = list.find((c) => c.id === ownerId);
     const variant = (owner?.variants || []).find((v) => v.id === variantId);
-    toast(`Asset asociado a ${owner.name} · ${variant?.name || 'Original'}${asPhoto ? ' y agregado como foto' : ''}`);
+    toast(tr(asPhoto ? 'assets.associate.savedWithPhoto' : 'assets.associate.saved', {
+      owner: owner.name,
+      variant: variant?.name || tr('picker.original')
+    }));
     if (isElement) renderElements(); else { renderCharacters(); renderPinned(); }
   } catch (err) {
     toast(err.message, 'err');
@@ -4818,8 +4855,10 @@ function fmtSeriesStructure(s) {
   const total = (s.chapters || 0) * (s.chapterSeconds || 0);
   const mins = Math.floor(total / 60);
   const secs = total % 60;
-  const totalTxt = mins ? `${mins} min${secs ? ` ${secs} s` : ''}` : `${secs} s`;
-  return `${s.chapters} capítulo${s.chapters === 1 ? '' : 's'} × ${s.chapterSeconds} s · ${totalTxt} en total`;
+  const totalTxt = mins
+    ? tr('series.duration.minutes', { minutes: mins, seconds: secs ? ` ${secs} s` : '' })
+    : tr('series.duration.seconds', { seconds: secs });
+  return tr('series.structure', { chapters: trn('series.chapterCount', s.chapters || 0), seconds: s.chapterSeconds, total: totalTxt });
 }
 
 function seriesAssetThumb(key) {
@@ -4832,7 +4871,7 @@ function renderSeries() {
   sortEntities();
   const grid = $('#seriesGrid');
   if (!state.series.length) {
-    grid.innerHTML = '<div class="empty-note">Creá tu primera serie: título, descripción, formato y estructura. Después asociale personajes y assets.</div>';
+    grid.innerHTML = `<div class="empty-note">${esc(tr('series.empty'))}</div>`;
     return;
   }
   grid.innerHTML = '';
@@ -4852,20 +4891,20 @@ function renderSeries() {
         ? characters.map((c) => c.photos[0]
           ? `<img src="${fileUrl(c.photos[0])}" title="${esc(c.name)}" alt="">`
           : `<span class="series-char-ph" title="${esc(c.name)}">${IC('user')}</span>`).join('')
-        : '<span class="hint">Sin personajes asociados</span>'}</div>
+        : `<span class="hint">${esc(tr('series.noCharacters'))}</span>`}</div>
       <div class="char-actions">
-        <button class="mini-btn accent" data-act="view">${IC('eye')} Ver guion</button>
-        <button class="mini-btn" data-act="edit">${IC('edit')} Editar</button>
-        <button class="mini-btn" data-act="scripts">${IC('clapper')} Guiones${state.scripts.filter((sc) => sc.seriesId === s.id).length ? ` (${state.scripts.filter((sc) => sc.seriesId === s.id).length})` : ''}</button>
+        <button class="mini-btn accent" data-act="view">${IC('eye')} ${esc(tr('series.viewScript'))}</button>
+        <button class="mini-btn" data-act="edit">${IC('edit')} ${esc(tr('common.edit'))}</button>
+        <button class="mini-btn" data-act="scripts">${IC('clapper')} ${esc(tr('series.scripts'))}${state.scripts.filter((sc) => sc.seriesId === s.id).length ? ` (${state.scripts.filter((sc) => sc.seriesId === s.id).length})` : ''}</button>
         <button class="mini-btn" data-act="assets">${IC('image')} Assets${assetCount ? ` (${assetCount})` : ''}</button>
-        <button class="mini-btn danger" data-act="del" title="Eliminar">${IC('trash')}</button>
+        <button class="mini-btn danger" data-act="del" title="${esc(tr('common.delete'))}">${IC('trash')}</button>
       </div>`;
     card.querySelectorAll('[data-act]').forEach((b) => {
       b.addEventListener('click', async () => {
         const act = b.dataset.act;
         if (act === 'view') {
           const list = state.scripts.filter((sc) => sc.seriesId === s.id);
-          if (!list.length) return toast('Esta serie todavía no tiene guiones — creá o importá uno desde “Guiones”', 'err');
+          if (!list.length) return toast(tr('series.noScripts'), 'err');
           if (list.length === 1) return openScriptView(list[0].id);
           openSeriesScripts(s.id); // varios guiones: se elige desde la lista
         }
@@ -4873,7 +4912,7 @@ function renderSeries() {
         if (act === 'scripts') openSeriesScripts(s.id);
         if (act === 'assets') openSeriesAssets(s.id);
         if (act === 'del') {
-          if (!confirm(`¿Eliminar la serie “${s.title}”?\n\nSe eliminan también sus guiones. Los personajes y assets no se borran.`)) return;
+          if (!confirm(tr('series.deleteConfirm', { title: s.title }))) return;
           await api(`/api/series/${s.id}`, { method: 'DELETE' });
           state.series = state.series.filter((x) => x.id !== s.id);
           state.scripts = state.scripts.filter((sc) => sc.seriesId !== s.id);
@@ -4891,14 +4930,14 @@ function openSeriesAssets(id) {
   if (!s) return;
   const keys = s.assetKeys || [];
   const viewable = keys.filter((key) => !key.startsWith('audio/'));
-  $('#characterGalleryTitle').textContent = `${s.title} · Assets asociados`;
+  $('#characterGalleryTitle').textContent = tr('series.assetsTitle', { title: s.title });
   $('#characterGalleryBody').innerHTML = `<section class="character-gallery-group">
-    <div class="character-gallery-group-head"><h4>${esc(s.title)}</h4><span>${keys.length} asset${keys.length === 1 ? '' : 's'}</span></div>
+    <div class="character-gallery-group-head"><h4>${esc(s.title)}</h4><span>${esc(trn('characters.assetCount', keys.length))}</span></div>
     <div class="character-gallery-grid linked-assets">${keys.length ? keys.map((key) => `
       <div class="linked-asset">${key.startsWith('audio/')
         ? `<div class="series-audio big">${IC('mic', 'ic ic-lg')}</div>`
         : `<button data-gallery-photo="${esc(key)}">${seriesAssetThumb(key)}</button>`}
-      <button class="linked-remove" data-unlink="${esc(key)}" title="Quitar de la serie">×</button></div>`).join('') : '<div class="hint">Sin assets asociados. Desde Assets, usá el botón de capas o “Asociar a serie” en el visor.</div>'}</div>
+      <button class="linked-remove" data-unlink="${esc(key)}" title="${esc(tr('series.removeAsset'))}">×</button></div>`).join('') : `<div class="hint">${esc(tr('series.noAssetsHint'))}</div>`}</div>
   </section>`;
   $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) =>
     button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto, viewable)));
@@ -4924,7 +4963,7 @@ function renderSeriesCharacterChips() {
   const wrap = $('#seriesCharacterChips');
   const visibleCharacters = state.characters.filter(contentIsVisible);
   if (!visibleCharacters.length) {
-    wrap.innerHTML = '<span class="hint">Todavía no hay personajes creados.</span>';
+    wrap.innerHTML = `<span class="hint">${esc(tr('series.noCreatedCharacters'))}</span>`;
     return;
   }
   wrap.innerHTML = '';
@@ -4947,8 +4986,8 @@ function renderSeriesModalAssets() {
   if (!s) return;
   const keys = s.assetKeys || [];
   $('#seriesAssetsList').innerHTML = keys.length
-    ? keys.map((key) => `<div class="series-asset">${seriesAssetThumb(key)}<button type="button" class="linked-remove" data-unlink="${esc(key)}" title="Quitar de la serie">×</button></div>`).join('')
-    : '<span class="hint">Sin assets todavía.</span>';
+    ? keys.map((key) => `<div class="series-asset">${seriesAssetThumb(key)}<button type="button" class="linked-remove" data-unlink="${esc(key)}" title="${esc(tr('series.removeAsset'))}">×</button></div>`).join('')
+    : `<span class="hint">${esc(tr('series.noAssets'))}</span>`;
   $('#seriesAssetsList').querySelectorAll('[data-unlink]').forEach((button) =>
     button.addEventListener('click', async () => {
       const updated = await api(`/api/series/${s.id}/assets?key=${encodeURIComponent(button.dataset.unlink)}`, { method: 'DELETE' });
@@ -4962,7 +5001,7 @@ function openSeriesModal(id = null) {
   const s = id ? state.series.find((x) => x.id === id) : null;
   state.editingSeriesId = s ? s.id : null;
   state.seriesDraftCharacterIds = new Set(s?.characterIds || []);
-  $('#seriesModalTitle').textContent = s ? 'Editar serie' : 'Nueva serie';
+  $('#seriesModalTitle').textContent = s ? tr('series.editTitle') : tr('series.new');
   $('#seriesTitle').value = s?.title || '';
   $('#seriesDescription').value = s?.description || '';
   $('#seriesFormat').value = s?.format || '9:16';
@@ -5002,11 +5041,11 @@ $('#seriesForm').addEventListener('submit', async (e) => {
     if (state.editingSeriesId) {
       const updated = await api(`/api/series/${state.editingSeriesId}`, { method: 'PUT', body });
       state.series[state.series.findIndex((x) => x.id === updated.id)] = updated;
-      toast('Serie actualizada');
+      toast(tr('series.updated'));
     } else {
       const created = await api('/api/series', { method: 'POST', body });
       state.series.unshift(created);
-      toast(`Serie “${created.title}” creada`);
+      toast(tr('series.created', { title: created.title }));
     }
     closeSeriesModal();
     renderSeries();
@@ -5020,7 +5059,7 @@ $('#seriesForm').addEventListener('submit', async (e) => {
 function openSeriesAssign(keyOrKeys) {
   const keys = [...new Set(Array.isArray(keyOrKeys) ? keyOrKeys : [keyOrKeys])];
   if (!keys.length) return;
-  if (!state.series.length) return toast('Primero creá una serie en la sección Series', 'err');
+  if (!state.series.length) return toast(tr('assets.series.createFirst'), 'err');
   state.pendingSeriesAssetKey = keys;
   closeLightbox();
   const select = $('#seriesAssignSelect');
@@ -5028,9 +5067,9 @@ function openSeriesAssign(keyOrKeys) {
   if (keys.length === 1) {
     const current = state.series.filter((s) => (s.assetKeys || []).includes(keys[0]));
     if (current.length) select.value = current[0].id;
-    $('#seriesAssignPreview').innerHTML = `${seriesAssetThumb(keys[0])}<div><strong>${current.length ? `Ya está en ${current.map((s) => `“${esc(s.title)}”`).join(', ')}` : 'Nuevo vínculo'}</strong><div class="hint">Un asset puede estar en varias series a la vez.</div></div>`;
+    $('#seriesAssignPreview').innerHTML = `${seriesAssetThumb(keys[0])}<div><strong>${current.length ? tr('assets.series.alreadyIn', { series: current.map((s) => `“${esc(s.title)}”`).join(', ') }) : tr('assets.series.newLink')}</strong><div class="hint">${esc(tr('assets.series.multipleHint'))}</div></div>`;
   } else {
-    $('#seriesAssignPreview').innerHTML = `<div class="series-assign-batch">${keys.slice(0, 4).map(seriesAssetThumb).join('')}${keys.length > 4 ? `<div class="series-audio">+${keys.length - 4}</div>` : ''}</div><div><strong>${keys.length} assets seleccionados</strong><div class="hint">Se asocian todos a la serie elegida.</div></div>`;
+    $('#seriesAssignPreview').innerHTML = `<div class="series-assign-batch">${keys.slice(0, 4).map(seriesAssetThumb).join('')}${keys.length > 4 ? `<div class="series-audio">+${keys.length - 4}</div>` : ''}</div><div><strong>${esc(trn('assets.series.selected', keys.length))}</strong><div class="hint">${esc(tr('assets.series.allAssociatedHint'))}</div></div>`;
   }
   $('#seriesAssignModal').hidden = false;
 }
@@ -5051,7 +5090,7 @@ $('#seriesAssignForm').addEventListener('submit', async (e) => {
     const updated = await api(`/api/series/${seriesId}/assets`, { method: 'POST', body: { keys } });
     state.series[state.series.findIndex((x) => x.id === updated.id)] = updated;
     closeSeriesAssign();
-    toast(keys.length === 1 ? `Asset asociado a “${updated.title}”` : `${keys.length} assets asociados a “${updated.title}”`);
+    toast(trn('assets.series.associated', keys.length, { series: updated.title }));
     renderSeries();
     renderAssetsGrid();
   } catch (err) {
@@ -5090,11 +5129,11 @@ function openSeriesScripts(seriesId) {
   const s = state.series.find((x) => x.id === seriesId);
   if (!s) return;
   const scripts = state.scripts.filter((sc) => sc.seriesId === seriesId);
-  $('#characterGalleryTitle').textContent = `${s.title} · Guiones`;
+  $('#characterGalleryTitle').textContent = tr('scripts.seriesTitle', { title: s.title });
   $('#characterGalleryBody').innerHTML = `
     <div class="script-list-toolbar">
-      <button class="generate-btn small" id="scriptListNew">${IC('plus')} Nuevo guion</button>
-      <button class="mini-btn" id="scriptListImport">${IC('upload')} Importar JSON de Hookcast</button>
+      <button class="generate-btn small" id="scriptListNew">${IC('plus')} ${esc(tr('scripts.new'))}</button>
+      <button class="mini-btn" id="scriptListImport">${IC('upload')} ${esc(tr('scripts.importHookcast'))}</button>
     </div>
     ${scripts.length ? scripts.map((sc) => {
       const shots = scriptShotCount(sc);
@@ -5102,17 +5141,17 @@ function openSeriesScripts(seriesId) {
       return `<div class="script-row" data-script="${sc.id}">
         <div>
           <strong>${esc(sc.title)}</strong>
-          <div class="hint">${sc.scenes.length} escena${sc.scenes.length === 1 ? '' : 's'} · ${shots} plano${shots === 1 ? '' : 's'} · ${esc(sc.format)}${sc.source === 'hookcast' ? ' · importado de Hookcast' : ''} · ${fmtDate(sc.updatedAt || sc.ts)}</div>
+          <div class="hint">${esc(trn('scripts.sceneCount', sc.scenes.length))} · ${esc(trn('scripts.shotCount', shots))} · ${esc(sc.format)}${sc.source === 'hookcast' ? ` · ${esc(tr('scripts.importedHookcast'))}` : ''} · ${fmtDate(sc.updatedAt || sc.ts)}</div>
         </div>
         <div class="script-row-actions">
-          <button class="mini-btn accent" data-sact="view">${IC('eye')} Ver</button>
-          <button class="mini-btn" data-sact="open">${IC('edit')} Editar guion</button>
-          <button class="mini-btn" data-sact="assign">${IC('image')} Asignar assets</button>
-          ${assetCount ? `<a class="mini-btn" href="/api/scripts/${sc.id}/export" download title="ZIP con los ${assetCount} assets asignados, nombrados por escena y plano">${IC('download')} Exportar assets (${assetCount})</a>` : ''}
-          <button class="mini-btn danger" data-sact="del" title="Eliminar">${IC('trash')}</button>
+          <button class="mini-btn accent" data-sact="view">${IC('eye')} ${esc(tr('common.view'))}</button>
+          <button class="mini-btn" data-sact="open">${IC('edit')} ${esc(tr('scripts.edit'))}</button>
+          <button class="mini-btn" data-sact="assign">${IC('image')} ${esc(tr('storyboard.assignAssets'))}</button>
+          ${assetCount ? `<a class="mini-btn" href="/api/scripts/${sc.id}/export" download title="${esc(tr('scripts.exportAssetsTitle', { count: assetCount }))}">${IC('download')} ${esc(tr('scripts.exportAssets', { count: assetCount }))}</a>` : ''}
+          <button class="mini-btn danger" data-sact="del" title="${esc(tr('common.delete'))}">${IC('trash')}</button>
         </div>
       </div>`;
-    }).join('') : '<div class="hint" style="margin-top:12px">Sin guiones todavía: creá uno acá o importá el JSON exportado desde Hookcast (Export JSON, en el editor del guion).</div>'}`;
+    }).join('') : `<div class="hint" style="margin-top:12px">${esc(tr('scripts.empty'))}</div>`}`;
   $('#scriptListNew').addEventListener('click', async () => {
     try {
       const created = await api('/api/scripts', { method: 'POST', body: { seriesId } });
@@ -5133,10 +5172,14 @@ function openSeriesScripts(seriesId) {
         const idx = state.series.findIndex((x) => x.id === seriesId);
         if (idx !== -1) state.series[idx] = result.serie;
         const matched = result.script.characters.filter((ch) => ch.characterId).length;
-        toast(`“${result.script.title}” importado — ${result.script.scenes.length} escenas${matched ? `, ${matched} personaje${matched === 1 ? '' : 's'} reconocido${matched === 1 ? '' : 's'}` : ''}`);
+        toast(tr('scripts.imported', {
+          title: result.script.title,
+          scenes: trn('scripts.sceneCount', result.script.scenes.length),
+          matched: matched ? trn('scripts.matchedCharacters', matched) : ''
+        }));
         renderSeries(); renderCharacters();
         openSeriesScripts(seriesId);
-      } catch (err) { toast(`No se pudo importar: ${err.message}`, 'err'); }
+      } catch (err) { toast(tr('scripts.importFailed', { error: err.message }), 'err'); }
     };
     $('#scriptImportInput').click();
   });
@@ -5155,7 +5198,7 @@ function openSeriesScripts(seriesId) {
       openStoryboard(sc.id);
     });
     row.querySelector('[data-sact="del"]').addEventListener('click', async () => {
-      if (!confirm(`¿Eliminar el guion “${sc.title}”?`)) return;
+      if (!confirm(tr('scripts.deleteConfirm', { title: sc.title }))) return;
       await api(`/api/scripts/${sc.id}`, { method: 'DELETE' });
       state.scripts = state.scripts.filter((x) => x.id !== sc.id);
       renderSeries();
@@ -5183,7 +5226,7 @@ function openScriptEditor(id) {
 }
 
 function closeScriptEditor() {
-  if (state.scriptDirty && !confirm('Hay cambios sin guardar en el guion. ¿Salir igual?')) return;
+  if (state.scriptDirty && !confirm(tr('scripts.leaveUnsavedConfirm'))) return;
   state.scriptEditor = null;
   clearScriptDirty();
   $('.nav-btn[data-view="series"]').click();
@@ -5194,32 +5237,32 @@ function renderScriptEditor() {
   const ed = state.scriptEditor;
   if (!ed) return;
   const serie = state.series.find((s) => s.id === ed.seriesId);
-  $('#scriptViewTitle').textContent = ed.title || 'Guion';
-  $('#scriptViewSeries').textContent = serie ? `Serie: ${serie.title} · ${serie.format}` : '';
+  $('#scriptViewTitle').textContent = ed.title || tr('scripts.title');
+  $('#scriptViewSeries').textContent = serie ? tr('scripts.seriesMeta', { title: serie.title, format: serie.format }) : '';
   $('#scriptEditorRoot').innerHTML = `
     <datalist id="scriptCastList"></datalist>
     <section class="script-block">
-      <h3>Datos y elenco</h3>
+      <h3>${esc(tr('scripts.editor.dataCast'))}</h3>
       <div class="script-meta-grid">
-        <label>Título<input id="scMetaTitle" maxlength="140" value="${esc(ed.title)}"></label>
-        <label>Formato<select id="scMetaFormat" class="select">${SCRIPT_FORMATS.map((f) => `<option${f === ed.format ? ' selected' : ''}>${f}</option>`).join('')}</select></label>
+        <label>${esc(tr('common.title'))}<input id="scMetaTitle" maxlength="140" value="${esc(ed.title)}"></label>
+        <label>${esc(tr('series.editor.format'))}<select id="scMetaFormat" class="select">${SCRIPT_FORMATS.map((f) => `<option${f === ed.format ? ' selected' : ''}>${f}</option>`).join('')}</select></label>
       </div>
-      <label class="script-label">Sinopsis<textarea id="scMetaSummary" rows="2" maxlength="3000" placeholder="Un párrafo sobre de qué va este guion.">${esc(ed.summary || '')}</textarea></label>
+      <label class="script-label">${esc(tr('scripts.editor.synopsis'))}<textarea id="scMetaSummary" rows="2" maxlength="3000" placeholder="${esc(tr('scripts.editor.synopsisPlaceholder'))}">${esc(ed.summary || '')}</textarea></label>
       <div class="script-cast" id="scriptCastRows"></div>
-      <button class="mini-btn" id="scCastAdd">${IC('plus')} Agregar al elenco</button>
+      <button class="mini-btn" id="scCastAdd">${IC('plus')} ${esc(tr('scripts.editor.addCast'))}</button>
     </section>
     <section class="script-block">
-      <h3>Guionista IA</h3>
-      <p class="hint">Contá la historia y la IA escribe el guion técnico completo — escena por escena, con cámara, acciones y diálogos del elenco asignado. Usa tu API key de OpenAI (Configuración).</p>
-      <label class="script-label">Brief de la historia<textarea id="scBrief" rows="4" maxlength="6000" placeholder="Premisa, tono, beats clave, giro, cómo termina… El guion se escribe en el idioma del brief.">${esc(state.scriptBriefText || '')}</textarea></label>
-      <button class="generate-btn small" id="scGenerate">${ed.scenes.length ? 'Regenerar guion completo con IA' : 'Generar guion completo con IA'}</button>
+      <h3>${esc(tr('scripts.editor.aiWriter'))}</h3>
+      <p class="hint">${esc(tr('scripts.editor.aiWriterHint'))}</p>
+      <label class="script-label">${esc(tr('scripts.editor.brief'))}<textarea id="scBrief" rows="4" maxlength="6000" placeholder="${esc(tr('scripts.editor.briefPlaceholder'))}">${esc(state.scriptBriefText || '')}</textarea></label>
+      <button class="generate-btn small" id="scGenerate">${esc(ed.scenes.length ? tr('scripts.editor.regenerateAi') : tr('scripts.editor.generateAi'))}</button>
     </section>
     <section class="script-block">
-      <h3>Guion técnico</h3>
+      <h3>${esc(tr('scripts.editor.technicalScript'))}</h3>
       <div id="scriptScenes"></div>
-      <button class="mini-btn" id="scAddScene">${IC('plus')} Agregar escena</button>
+      <button class="mini-btn" id="scAddScene">${IC('plus')} ${esc(tr('scripts.editor.addScene'))}</button>
     </section>`;
-  $('#scMetaTitle').addEventListener('input', (e) => { ed.title = e.target.value; $('#scriptViewTitle').textContent = ed.title || 'Guion'; markScriptDirty(); });
+  $('#scMetaTitle').addEventListener('input', (e) => { ed.title = e.target.value; $('#scriptViewTitle').textContent = ed.title || tr('scripts.title'); markScriptDirty(); });
   $('#scMetaFormat').addEventListener('change', (e) => { ed.format = e.target.value; markScriptDirty(); });
   $('#scMetaSummary').addEventListener('input', (e) => { ed.summary = e.target.value; markScriptDirty(); });
   $('#scBrief').addEventListener('input', (e) => { state.scriptBriefText = e.target.value; });
@@ -5248,14 +5291,14 @@ function renderScriptCast() {
   const wrap = $('#scriptCastRows');
   wrap.innerHTML = ed.characters.length ? ed.characters.map((ch, i) => `
     <div class="script-cast-row" data-i="${i}">
-      <label>Personaje<select class="select" data-f="characterId">
-        <option value="">Sin vincular</option>
+      <label>${esc(tr('assets.filters.character'))}<select class="select" data-f="characterId">
+        <option value="">${esc(tr('scripts.editor.unlinked'))}</option>
         ${state.characters.map((c) => `<option value="${c.id}"${c.id === ch.characterId ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}
       </select></label>
-      <label>Nombre en el guion<input data-f="name" maxlength="80" value="${esc(ch.name)}" placeholder="VALENTINA"></label>
-      <label>Rol<input data-f="role" maxlength="160" value="${esc(ch.role || '')}" placeholder="Protagonista"></label>
-      <button class="icon-btn script-row-remove" title="Quitar del elenco">${IC('x')}</button>
-    </div>`).join('') : '<p class="hint">Sin elenco todavía. Sumá personajes para que la IA y los diálogos los usen.</p>';
+      <label>${esc(tr('scripts.editor.scriptName'))}<input data-f="name" maxlength="80" value="${esc(ch.name)}" placeholder="VALENTINA"></label>
+      <label>${esc(tr('scripts.editor.role'))}<input data-f="role" maxlength="160" value="${esc(ch.role || '')}" placeholder="${esc(tr('scripts.editor.rolePlaceholder'))}"></label>
+      <button class="icon-btn script-row-remove" title="${esc(tr('scripts.editor.removeCast'))}">${IC('x')}</button>
+    </div>`).join('') : `<p class="hint">${esc(tr('scripts.editor.noCast'))}</p>`;
   wrap.querySelectorAll('.script-cast-row').forEach((row) => {
     const ch = ed.characters[Number(row.dataset.i)];
     row.querySelector('[data-f="characterId"]').addEventListener('change', (e) => {
@@ -5281,7 +5324,7 @@ function renderScriptScenes() {
   if (!wrap) return;
   wrap.innerHTML = '';
   if (!ed.scenes.length) {
-    wrap.innerHTML = '<p class="hint">Sin escenas todavía. Agregá la primera o generá el guion completo con IA.</p>';
+    wrap.innerHTML = `<p class="hint">${esc(tr('scripts.editor.noScenes'))}</p>`;
     return;
   }
   ed.scenes.forEach((scene, si) => wrap.appendChild(buildSceneCard(scene, si)));
@@ -5293,24 +5336,24 @@ function buildSceneCard(scene, si) {
   card.className = 'script-scene';
   card.innerHTML = `
     <header class="script-scene-head">
-      <strong>Escena ${si + 1}</strong>
+      <strong>${esc(tr('scripts.scene', { number: si + 1 }))}</strong>
       <div class="script-mini-actions">
-        <button class="mini-btn" data-a="up"${si === 0 ? ' disabled' : ''} title="Subir escena">↑</button>
-        <button class="mini-btn" data-a="down"${si === ed.scenes.length - 1 ? ' disabled' : ''} title="Bajar escena">↓</button>
-        <button class="mini-btn danger" data-a="del">${IC('trash')} Eliminar</button>
+        <button class="mini-btn" data-a="up"${si === 0 ? ' disabled' : ''} title="${esc(tr('scripts.editor.moveSceneUp'))}">↑</button>
+        <button class="mini-btn" data-a="down"${si === ed.scenes.length - 1 ? ' disabled' : ''} title="${esc(tr('scripts.editor.moveSceneDown'))}">↓</button>
+        <button class="mini-btn danger" data-a="del">${IC('trash')} ${esc(tr('common.delete'))}</button>
       </div>
     </header>
     <div class="script-slug-row">
       <label>Int / Ext<select class="select" data-f="intExt"><option${scene.intExt !== 'EXT' ? ' selected' : ''}>INT</option><option${scene.intExt === 'EXT' ? ' selected' : ''}>EXT</option></select></label>
-      <label>Locación<input data-f="location" maxlength="120" value="${esc(scene.location || '')}" placeholder="SUITE DEL HOTEL"></label>
-      <label>Momento<select class="select" data-f="timeOfDay">${SCRIPT_TIMES.map((t) => `<option${t === scene.timeOfDay ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
+      <label>${esc(tr('elements.location'))}<input data-f="location" maxlength="120" value="${esc(scene.location || '')}" placeholder="SUITE DEL HOTEL"></label>
+      <label>${esc(tr('scripts.editor.time'))}<select class="select" data-f="timeOfDay">${SCRIPT_TIMES.map((t) => `<option${t === scene.timeOfDay ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
     </div>
     <div class="script-shots"></div>
-    <button class="mini-btn" data-a="addshot">${IC('plus')} Agregar plano</button>`;
+    <button class="mini-btn" data-a="addshot">${IC('plus')} ${esc(tr('scripts.editor.addShot'))}</button>`;
   card.querySelector('[data-a="up"]').addEventListener('click', () => { moveInArray(ed.scenes, si, -1); markScriptDirty(); renderScriptScenes(); });
   card.querySelector('[data-a="down"]').addEventListener('click', () => { moveInArray(ed.scenes, si, 1); markScriptDirty(); renderScriptScenes(); });
   card.querySelector('[data-a="del"]').addEventListener('click', () => {
-    if (!confirm(`¿Eliminar la escena ${si + 1}?`)) return;
+    if (!confirm(tr('scripts.editor.deleteSceneConfirm', { number: si + 1 }))) return;
     ed.scenes.splice(si, 1);
     markScriptDirty();
     renderScriptScenes();
@@ -5333,23 +5376,23 @@ function buildShotCard(scene, shot, si, hi) {
   div.className = 'script-shot';
   div.innerHTML = `
     <div class="script-shot-head">
-      <strong>Plano ${si + 1}.${hi + 1}</strong>
+      <strong>${esc(tr('scripts.shot', { number: `${si + 1}.${hi + 1}` }))}</strong>
       <div class="script-mini-actions">
-        <button class="mini-btn" data-a="insert" title="Insertar un plano nuevo debajo de este">${IC('plus')} Insertar debajo</button>
-        <button class="mini-btn" data-a="up"${hi === 0 ? ' disabled' : ''} title="Subir plano">↑</button>
-        <button class="mini-btn" data-a="down"${hi === scene.shots.length - 1 ? ' disabled' : ''} title="Bajar plano">↓</button>
-        <button class="mini-btn danger" data-a="del"${scene.shots.length === 1 ? ' disabled' : ''} title="Quitar plano">${IC('trash')}</button>
+        <button class="mini-btn" data-a="insert" title="${esc(tr('scripts.editor.insertBelowTitle'))}">${IC('plus')} ${esc(tr('scripts.editor.insertBelow'))}</button>
+        <button class="mini-btn" data-a="up"${hi === 0 ? ' disabled' : ''} title="${esc(tr('scripts.editor.moveShotUp'))}">↑</button>
+        <button class="mini-btn" data-a="down"${hi === scene.shots.length - 1 ? ' disabled' : ''} title="${esc(tr('scripts.editor.moveShotDown'))}">↓</button>
+        <button class="mini-btn danger" data-a="del"${scene.shots.length === 1 ? ' disabled' : ''} title="${esc(tr('scripts.editor.removeShot'))}">${IC('trash')}</button>
       </div>
     </div>
     <div class="script-camera-row">
-      <label>Plano (tamaño)<select class="select" data-f="size">${SCRIPT_SIZES.map((x) => `<option${x === shot.size ? ' selected' : ''}>${x}</option>`).join('')}</select></label>
-      <label>Lente<select class="select" data-f="lens">${SCRIPT_LENSES.map((x) => `<option${x === shot.lens ? ' selected' : ''}>${x}</option>`).join('')}</select></label>
-      <label>Cámara — ángulo, movimiento, sensación<textarea data-f="camera" rows="2" maxlength="600" placeholder="Ángulo bajo, push-in lento, cámara en mano.">${esc(shot.camera || '')}</textarea></label>
+      <label>${esc(tr('scripts.editor.shotSize'))}<select class="select" data-f="size">${SCRIPT_SIZES.map((x) => `<option${x === shot.size ? ' selected' : ''}>${x}</option>`).join('')}</select></label>
+      <label>${esc(tr('scripts.editor.lens'))}<select class="select" data-f="lens">${SCRIPT_LENSES.map((x) => `<option${x === shot.lens ? ' selected' : ''}>${x}</option>`).join('')}</select></label>
+      <label>${esc(tr('scripts.editor.camera'))}<textarea data-f="camera" rows="2" maxlength="600" placeholder="${esc(tr('scripts.editor.cameraPlaceholder'))}">${esc(shot.camera || '')}</textarea></label>
     </div>
     <div class="script-items"></div>
     <div class="script-shot-foot">
-      <button class="mini-btn" data-a="addaction">${IC('plus')} Acción</button>
-      <button class="mini-btn" data-a="adddialogue">${IC('plus')} Diálogo</button>
+      <button class="mini-btn" data-a="addaction">${IC('plus')} ${esc(tr('scripts.editor.action'))}</button>
+      <button class="mini-btn" data-a="adddialogue">${IC('plus')} ${esc(tr('scripts.editor.dialogue'))}</button>
     </div>`;
   div.querySelector('[data-a="insert"]').addEventListener('click', () => {
     scene.shots.splice(hi + 1, 0, newScriptShot());
@@ -5386,14 +5429,14 @@ function buildItemRow(shot, item, ii) {
   row.className = `script-item ${item.kind}`;
   if (item.kind === 'dialogue') {
     row.innerHTML = `
-      <label>Personaje<input data-f="character" maxlength="80" list="scriptCastList" value="${esc(item.character || '')}" placeholder="VALENTINA"></label>
-      <label>Línea<input data-f="text" maxlength="500" value="${esc(item.text || '')}" placeholder="Nunca tendrías que haber encontrado eso."></label>
-      <button class="icon-btn script-row-remove" title="Quitar diálogo">${IC('x')}</button>`;
+      <label>${esc(tr('assets.filters.character'))}<input data-f="character" maxlength="80" list="scriptCastList" value="${esc(item.character || '')}" placeholder="VALENTINA"></label>
+      <label>${esc(tr('scripts.editor.line'))}<input data-f="text" maxlength="500" value="${esc(item.text || '')}" placeholder="${esc(tr('scripts.editor.linePlaceholder'))}"></label>
+      <button class="icon-btn script-row-remove" title="${esc(tr('scripts.editor.removeDialogue'))}">${IC('x')}</button>`;
     row.querySelector('[data-f="character"]').addEventListener('input', (e) => { item.character = e.target.value; markScriptDirty(); });
   } else {
     row.innerHTML = `
-      <label>Acción<textarea data-f="text" rows="2" maxlength="1500" placeholder="Qué vemos en este plano, en presente.">${esc(item.text || '')}</textarea></label>
-      <button class="icon-btn script-row-remove" title="Quitar acción">${IC('x')}</button>`;
+      <label>${esc(tr('scripts.editor.action'))}<textarea data-f="text" rows="2" maxlength="1500" placeholder="${esc(tr('scripts.editor.actionPlaceholder'))}">${esc(item.text || '')}</textarea></label>
+      <button class="icon-btn script-row-remove" title="${esc(tr('scripts.editor.removeAction'))}">${IC('x')}</button>`;
   }
   row.querySelector('[data-f="text"]').addEventListener('input', (e) => { item.text = e.target.value; markScriptDirty(); });
   row.querySelector('.script-row-remove').addEventListener('click', () => {
@@ -5416,7 +5459,7 @@ async function saveScript() {
     state.scriptEditor = structuredClone(updated);
     clearScriptDirty();
     renderScriptEditor();
-    toast('Guion guardado');
+    toast(tr('scripts.saved'));
     return true;
   } catch (err) {
     toast(err.message, 'err');
@@ -5429,19 +5472,22 @@ async function generateScriptWithAI() {
   const ed = state.scriptEditor;
   if (!ed) return;
   const brief = $('#scBrief').value.trim();
-  if (!brief) return toast('Escribí un brief de la historia para generar el guion', 'err');
-  if (ed.scenes.length && !confirm('Generar con IA reemplaza todas las escenas actuales. ¿Continuar?')) return;
+  if (!brief) return toast(tr('scripts.editor.briefRequired'), 'err');
+  if (ed.scenes.length && !confirm(tr('scripts.editor.replaceScenesConfirm'))) return;
   const btn = $('#scGenerate');
   btn.disabled = true;
-  btn.textContent = 'Escribiendo el guion… puede tardar un minuto';
+  btn.textContent = tr('scripts.editor.writing');
   try {
-    if (state.scriptDirty && !(await saveScript())) throw new Error('No se pudo guardar el guion antes de generar.');
+    if (state.scriptDirty && !(await saveScript())) throw new Error(tr('scripts.editor.saveBeforeGenerateFailed'));
     const updated = await api(`/api/scripts/${state.scriptEditor.id}/generate`, { method: 'POST', body: { brief } });
     state.scripts[state.scripts.findIndex((x) => x.id === updated.id)] = updated;
     state.scriptEditor = structuredClone(updated);
     clearScriptDirty();
     renderScriptEditor();
-    toast(`Guion generado: ${updated.scenes.length} escenas, ${scriptShotCount(updated)} planos`);
+    toast(tr('scripts.editor.generated', {
+      scenes: trn('scripts.sceneCount', updated.scenes.length),
+      shots: trn('scripts.shotCount', scriptShotCount(updated))
+    }));
   } catch (err) {
     toast(err.message, 'err');
     renderScriptEditor();
@@ -5534,7 +5580,7 @@ function playAudioChip(btn) {
 function sbPromptView(shot) {
   if (!shot.prompt) return '';
   return `<details class="sb-prompt-view">
-    <summary>Prompt utilizado${shot.promptTitle ? `: <strong>${esc(shot.promptTitle)}</strong>` : ''}</summary>
+    <summary>${esc(tr('storyboard.promptUsed'))}${shot.promptTitle ? `: <strong>${esc(shot.promptTitle)}</strong>` : ''}</summary>
     <pre>${esc(shot.prompt)}</pre>
   </details>`;
 }
@@ -5543,38 +5589,38 @@ function renderStoryboard() {
   const sb = state.storyboardScript;
   if (!sb) return;
   const serie = state.series.find((s) => s.id === sb.seriesId);
-  $('#storyboardTitle').textContent = `Asignar assets · ${sb.title}`;
-  $('#storyboardSeries').textContent = serie ? `Serie: ${serie.title} · ${sb.format} · el guion no se edita acá` : '';
+  $('#storyboardTitle').textContent = tr('storyboard.titleForScript', { title: sb.title });
+  $('#storyboardSeries').textContent = serie ? tr('storyboard.seriesMeta', { title: serie.title, format: sb.format }) : '';
   const root = $('#storyboardRoot');
   if (!sb.scenes.length) {
-    root.innerHTML = '<p class="hint">Este guion todavía no tiene escenas. Se editan en “Editar guion”.</p>';
+    root.innerHTML = `<p class="hint">${esc(tr('storyboard.noScenes'))}</p>`;
     return;
   }
   root.innerHTML = sb.scenes.map((scene, si) => `
     <article class="sb-scene">
       <div class="sb-scene-head">
-        <h4>Escena ${si + 1}</h4>
+        <h4>${esc(tr('scripts.scene', { number: si + 1 }))}</h4>
         <span class="sb-slug">${esc(`${scene.intExt}. ${(scene.location || '').toUpperCase()} — ${scene.timeOfDay}`)}</span>
       </div>
       ${scene.shots.map((shot, hi) => `
         <div class="sb-shot">
           <div class="sb-shot-head">
-            <div><strong>Plano ${si + 1}.${hi + 1}</strong> <span class="sb-shot-specs">· ${esc(shot.size)} · ${esc(shot.lens)}</span></div>
-            <button class="mini-btn" data-sb="${si}:${hi}">${IC('image')} Asignar assets${(shot.assetKeys || []).length ? ` (${shot.assetKeys.length})` : ''}</button>
+            <div><strong>${esc(tr('scripts.shot', { number: `${si + 1}.${hi + 1}` }))}</strong> <span class="sb-shot-specs">· ${esc(shot.size)} · ${esc(shot.lens)}</span></div>
+            <button class="mini-btn" data-sb="${si}:${hi}">${IC('image')} ${esc(tr('storyboard.assignAssets'))}${(shot.assetKeys || []).length ? ` (${shot.assetKeys.length})` : ''}</button>
           </div>
           ${shot.camera ? `<div class="sb-camera">${esc(shot.camera)}</div>` : ''}
           ${shot.items.length ? `<div class="sb-items">${shot.items.map(sbItemLine).join('')}</div>` : ''}
           <div class="sb-assets" data-sbstrip="${si}:${hi}">${(shot.assetKeys || []).map((k) => `<button class="script-asset-thumb" data-k="${esc(k)}" title="${esc(k)}">${seriesAssetThumb(k)}</button>`).join('')}</div>
           <div class="sb-audio-row">
-            <button class="mini-btn" data-sbaudio="${si}:${hi}">${IC('mic')} Asignar audio${(shot.audioKeys || []).length ? ` (${shot.audioKeys.length})` : ''}</button>
+            <button class="mini-btn" data-sbaudio="${si}:${hi}">${IC('mic')} ${esc(tr('storyboard.assignAudio'))}${(shot.audioKeys || []).length ? ` (${shot.audioKeys.length})` : ''}</button>
             <div class="sb-audios" data-sbaudiostrip="${si}:${hi}">${(shot.audioKeys || []).map(audioChipHtml).join('')}</div>
           </div>
           <div class="sb-prompt">
-            <div class="sb-prompt-head"><span>Prompt del plano</span><div class="sb-prompt-actions">
-              ${shot.prompt ? `<button class="mini-btn" data-sbcopy="${si}:${hi}">${IC('copy')} Copiar</button><button class="mini-btn danger" data-sbclearprompt="${si}:${hi}">Quitar</button>` : ''}
-              <button class="mini-btn" data-sbpickprompt="${si}:${hi}">${IC('book')} Elegir de Prompts</button>
+            <div class="sb-prompt-head"><span>${esc(tr('storyboard.shotPrompt'))}</span><div class="sb-prompt-actions">
+              ${shot.prompt ? `<button class="mini-btn" data-sbcopy="${si}:${hi}">${IC('copy')} ${esc(tr('assets.info.copy'))}</button><button class="mini-btn danger" data-sbclearprompt="${si}:${hi}">${esc(tr('common.remove'))}</button>` : ''}
+              <button class="mini-btn" data-sbpickprompt="${si}:${hi}">${IC('book')} ${esc(tr('storyboard.chooseFromPrompts'))}</button>
             </div></div>
-            ${shot.prompt ? sbPromptView(shot) : '<span class="hint">Sin prompt asignado — elegilo de tu biblioteca de Prompts.</span>'}
+            ${shot.prompt ? sbPromptView(shot) : `<span class="hint">${esc(tr('storyboard.noPrompt'))}</span>`}
           </div>
         </div>`).join('')}
     </article>`).join('');
@@ -5601,7 +5647,7 @@ function renderStoryboard() {
     const [si, hi] = b.dataset.sbclearprompt.split(':').map(Number);
     const shot = sb.scenes[si].shots[hi];
     shot.prompt = ''; shot.promptId = ''; shot.promptTitle = '';
-    await saveStoryboard('Prompt quitado del plano');
+    await saveStoryboard(tr('storyboard.promptRemoved'));
     renderStoryboard();
   }));
   root.querySelectorAll('[data-sbcopy]').forEach((b) => b.addEventListener('click', () => {
@@ -5633,7 +5679,12 @@ function renderScriptView() {
   const serie = state.series.find((s) => s.id === sc.seriesId);
   const shots = scriptShotCount(sc);
   $('#scriptViewTitle').textContent = sc.title;
-  $('#scriptViewMeta').textContent = `${serie ? `Serie: ${serie.title} · ` : ''}${sc.format} · ${sc.scenes.length} escena${sc.scenes.length === 1 ? '' : 's'} · ${shots} plano${shots === 1 ? '' : 's'}`;
+  $('#scriptViewMeta').textContent = tr('scripts.viewMeta', {
+    series: serie ? tr('scripts.viewSeriesPrefix', { title: serie.title }) : '',
+    format: sc.format,
+    scenes: trn('scripts.sceneCount', sc.scenes.length),
+    shots: trn('scripts.shotCount', shots)
+  });
   const root = $('#scriptViewRoot');
   const cast = sc.characters || [];
   root.innerHTML = `
@@ -5645,12 +5696,12 @@ function renderScriptView() {
     ${sc.scenes.length ? sc.scenes.map((scene, si) => `
       <article class="sb-scene">
         <div class="sb-scene-head">
-          <h4>Escena ${si + 1}</h4>
+          <h4>${esc(tr('scripts.scene', { number: si + 1 }))}</h4>
           <span class="sb-slug">${esc(`${scene.intExt}. ${(scene.location || '').toUpperCase()} — ${scene.timeOfDay}`)}</span>
         </div>
         ${scene.shots.map((shot, hi) => `
           <div class="sb-shot">
-            <div class="sb-shot-head"><div><strong>Plano ${si + 1}.${hi + 1}</strong> <span class="sb-shot-specs">· ${esc(shot.size)} · ${esc(shot.lens)}</span></div></div>
+            <div class="sb-shot-head"><div><strong>${esc(tr('scripts.shot', { number: `${si + 1}.${hi + 1}` }))}</strong> <span class="sb-shot-specs">· ${esc(shot.size)} · ${esc(shot.lens)}</span></div></div>
             ${shot.camera ? `<div class="sb-camera">${esc(shot.camera)}</div>` : ''}
             ${shot.items.length ? `<div class="sb-items">${shot.items.map(sbItemLine).join('')}</div>` : ''}
             ${sbPromptView(shot)}
@@ -5658,7 +5709,7 @@ function renderScriptView() {
               `<button class="script-asset-thumb" data-k="${esc(k)}" title="${esc(k)}">${seriesAssetThumb(k)}</button>`).join('')}</div>` : ''}
             ${(shot.audioKeys || []).length ? `<div class="sb-audios">${IC('mic')} ${shot.audioKeys.map(audioChipHtml).join('')}</div>` : ''}
           </div>`).join('')}
-      </article>`).join('') : '<p class="hint">Este guion todavía no tiene escenas.</p>'}`;
+      </article>`).join('') : `<p class="hint">${esc(tr('scripts.noScenes'))}</p>`}`;
   root.querySelectorAll('.script-asset-thumb').forEach((b) => b.addEventListener('click', () => {
     const key = b.dataset.k;
     const [si, hi] = b.closest('[data-vgstrip]').dataset.vgstrip.split(':').map(Number);
@@ -5672,12 +5723,12 @@ function renderScriptView() {
 // --- picker de prompts de la biblioteca para un plano ---
 
 function openShotPromptPicker(si, hi) {
-  if (!state.prompts.length) return toast('Todavía no hay prompts guardados — archivalos desde la caja de Crear', 'err');
+  if (!state.prompts.length) return toast(tr('storyboard.noSavedPrompts'), 'err');
   state.shotPromptTarget = { si, hi };
-  $('#shotPromptTitle').textContent = `Prompt para el plano ${si + 1}.${hi + 1}`;
+  $('#shotPromptTitle').textContent = tr('storyboard.promptForShot', { number: `${si + 1}.${hi + 1}` });
   $('#shotPromptSearch').value = '';
   const cats = promptCategories();
-  $('#shotPromptCategory').innerHTML = '<option value="">Todas las categorías</option>'
+  $('#shotPromptCategory').innerHTML = `<option value="">${esc(tr('categories.all'))}</option>`
     + cats.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
   renderShotPromptList();
   $('#shotPromptModal').hidden = false;
@@ -5693,7 +5744,7 @@ function renderShotPromptList() {
     <button class="shot-prompt-row" data-p="${p.id}">
       <div><strong>${esc(p.title)}</strong><span>${esc(p.category || 'General')}</span>${p.mode === 'video' ? IC('film') : p.mode === 'audio' ? IC('mic') : IC('image')}</div>
       <div class="shot-prompt-text">${esc(p.text)}</div>
-    </button>`).join('') : '<div class="hint">No hay prompts que coincidan.</div>';
+    </button>`).join('') : `<div class="hint">${esc(tr('prompts.noMatch'))}</div>`;
   $('#shotPromptList').querySelectorAll('[data-p]').forEach((b) => b.addEventListener('click', async () => {
     const pr = state.prompts.find((x) => x.id === b.dataset.p);
     const target = state.shotPromptTarget;
@@ -5703,7 +5754,7 @@ function renderShotPromptList() {
     shot.promptId = pr.id;
     shot.promptTitle = pr.title;
     closeShotPromptPicker();
-    await saveStoryboard(`Prompt “${pr.title}” asignado al plano`);
+    await saveStoryboard(tr('storyboard.promptAssigned', { title: pr.title }));
     renderStoryboard();
   }));
 }
@@ -5757,7 +5808,7 @@ async function openShotAssets(si, hi, field = 'assetKeys') {
     const z = t.dataset.szone;
     t.hidden = !(z === 'series' || (audioMode ? z === 'audio' : z !== 'audio'));
   });
-  $('#shotAssetsTitle').textContent = `${audioMode ? 'Audio' : 'Assets'} del plano ${si + 1}.${hi + 1}`;
+  $('#shotAssetsTitle').textContent = tr(audioMode ? 'storyboard.audioForShot' : 'storyboard.assetsForShot', { number: `${si + 1}.${hi + 1}` });
   renderShotAssetsGrid();
   $('#shotAssetsModal').hidden = false;
 }
@@ -5777,7 +5828,7 @@ function renderShotAssetsGrid() {
   $('#shotAssetsGrid').className = audioMode ? 'shot-audio-list' : 'shot-assets-grid';
   $('#shotAssetsGrid').innerHTML = keys.length ? keys.map((k) => audioMode
     ? `<div class="shot-audio-cell${selected.includes(k) ? ' selected' : ''}" data-k="${esc(k)}" title="${esc(k)}">
-        <button class="shot-audio-play" data-audiokey="${esc(k)}" title="Reproducir">${IC('play')}</button>
+        <button class="shot-audio-play" data-audiokey="${esc(k)}" title="${esc(tr('storyboard.play'))}">${IC('play')}</button>
         <span class="shot-audio-cell-name">${esc(sbAudioName(k))}</span>
         <span class="audio-dur shot-audio-cell-dur" data-durkey="${esc(k)}"></span>
         <span class="shot-audio-cell-check">${selected.includes(k) ? IC('check') : ''}</span>
@@ -5786,8 +5837,8 @@ function renderShotAssetsGrid() {
         ${seriesAssetThumb(k)}${selected.includes(k) ? `<span class="shot-asset-check">${IC('check')}</span>` : ''}
       </button>`).join('')
     : `<div class="hint">${state.shotAssetsZone === 'series'
-      ? `La serie no tiene ${audioMode ? 'audios' : 'assets'} asociados — asocialos desde la sección Assets.`
-      : 'No hay audios en esta zona todavía. Generá voces en Crear → Audio.'}</div>`;
+      ? esc(tr(audioMode ? 'storyboard.seriesNoAudio' : 'storyboard.seriesNoAssets'))
+      : esc(tr('storyboard.noAudioZone'))}</div>`;
   $('#shotAssetsGrid').querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => {
     const k = b.dataset.k;
     shot[field] = shot[field] || [];
@@ -5812,7 +5863,7 @@ async function closeShotAssets() {
   $('#shotAssetsModal').hidden = true;
   state.shotAssetsTarget = null;
   if (!state.storyboardScript) return;
-  await saveStoryboard('Asignación guardada');
+  await saveStoryboard(tr('storyboard.assignmentSaved'));
   renderStoryboard();
 }
 $('#shotAssetsClose').addEventListener('click', closeShotAssets);
@@ -5827,7 +5878,7 @@ function renderCharacters() {
   sortEntities();
   const grid = $('#charsGrid');
   if (!state.characters.length) {
-    grid.innerHTML = '<div class="empty-note">Creá tu primer personaje: nombre, descripción, fotos y una voz de ElevenLabs.</div>';
+    grid.innerHTML = `<div class="empty-note">${esc(tr('characters.empty'))}</div>`;
     return;
   }
   grid.innerHTML = '';
@@ -5842,22 +5893,22 @@ function renderCharacters() {
     card.innerHTML = `
       <div class="char-top">${avatar}<div>
         <div class="char-name">${esc(c.name)}${nsfwBadgeHtml(c)}</div>
-        <div class="char-voice">${c.voiceName ? IC('mic') + ' ' + esc(c.voiceName) : '<span style="color:#6f5f8d">sin voz</span>'}</div>
+        <div class="char-voice">${c.voiceName ? IC('mic') + ' ' + esc(c.voiceName) : `<span style="color:#6f5f8d">${esc(tr('characters.noVoice'))}</span>`}</div>
       </div></div>
       <div class="char-desc">${esc(c.description || '')}</div>
-      ${heygenCharacterReady(c) ? `<div class="heygen-card-badge">HeyGen · ${c.heygen?.closeAvatarId ? '2 planos' : '1 plano'}</div>` : ''}
-      ${(c.variants || []).length ? `<div class="hint" style="margin-bottom:8px">${(c.variants || []).length} variante${c.variants.length === 1 ? '' : 's'} de outfit</div>` : ''}
+      ${heygenCharacterReady(c) ? `<div class="heygen-card-badge">HeyGen · ${esc(trn('characters.shots', c.heygen?.closeAvatarId ? 2 : 1))}</div>` : ''}
+      ${(c.variants || []).length ? `<div class="hint" style="margin-bottom:8px">${esc(trn('characters.outfitVariants', c.variants.length))}</div>` : ''}
       ${inSeries.length ? `<div class="char-series">${IC('layers')} ${inSeries.map((s) => esc(s.title)).join(' · ')}</div>` : ''}
       <div class="char-photos-mini">${minis}</div>
       <div class="char-actions">
-        <button class="mini-btn" data-act="pin">${IC('pin')} ${c.id === state.pinnedId ? 'Anclado' : 'Anclar'}</button>
-        <button class="mini-btn" data-act="use">${IC('link')} Usar fotos</button>
-        <button class="mini-btn" data-act="edit">${IC('edit')} Editar</button>
-        <button class="mini-btn" data-act="variants">Variantes</button>
-        <button class="mini-btn" data-act="gallery">${IC('eye')} Ver fotos</button>
+        <button class="mini-btn" data-act="pin">${IC('pin')} ${esc(c.id === state.pinnedId ? tr('characters.pinned') : tr('characters.pin'))}</button>
+        <button class="mini-btn" data-act="use">${IC('link')} ${esc(tr('characters.usePhotos'))}</button>
+        <button class="mini-btn" data-act="edit">${IC('edit')} ${esc(tr('common.edit'))}</button>
+        <button class="mini-btn" data-act="variants">${esc(tr('characters.variants'))}</button>
+        <button class="mini-btn" data-act="gallery">${IC('eye')} ${esc(tr('characters.viewPhotos'))}</button>
         <button class="mini-btn" data-act="assets">${IC('image')} Assets${linkedCount ? ` (${linkedCount})` : ''}</button>
-        <a class="mini-btn" href="/api/characters/${c.id}/export" download>${IC('download')} Exportar ZIP</a>
-        <button class="mini-btn danger" data-act="del" title="Eliminar">${IC('trash')}</button>
+        <a class="mini-btn" href="/api/characters/${c.id}/export" download>${IC('download')} ${esc(tr('characters.export'))}</a>
+        <button class="mini-btn danger" data-act="del" title="${esc(tr('common.delete'))}">${IC('trash')}</button>
       </div>`;
     card.querySelectorAll('[data-act]').forEach((b) => {
       b.addEventListener('click', async () => {
@@ -5867,14 +5918,14 @@ function renderCharacters() {
           setMode('image');
           for (const p of c.photos) addRef(p, false);
           goToCreate();
-          toast(`Fotos de ${c.name} agregadas como referencia`);
+          toast(tr('characters.photosAdded', { name: c.name }));
         }
         if (act === 'edit') openCharModal(c.id);
         if (act === 'variants') openCharModal(c.id);
         if (act === 'gallery') openCharacterGallery(c.id);
         if (act === 'assets') openCharacterAssets(c.id);
         if (act === 'del') {
-          if (!confirm(`¿Eliminar a ${c.name} y sus fotos?`)) return;
+          if (!confirm(tr('characters.deleteConfirm', { name: c.name }))) return;
           await api(`/api/characters/${c.id}`, { method: 'DELETE' });
           state.characters = state.characters.filter((x) => x.id !== c.id);
           state.series.forEach((s) => { s.characterIds = (s.characterIds || []).filter((cid) => cid !== c.id); });
@@ -5891,14 +5942,14 @@ function openCharacterGallery(id) {
   const c = state.characters.find((x) => x.id === id);
   if (!c) return;
   $('#characterGalleryTitle').textContent = c.name;
-  const groups = [{ name: 'Original', description: c.description || '', photos: c.photos || [] }, ...(c.variants || [])];
+  const groups = [{ name: tr('picker.original'), description: c.description || '', photos: c.photos || [] }, ...(c.variants || [])];
   $('#characterGalleryBody').innerHTML = groups.map((group) => `
     <section class="character-gallery-group">
-      <div class="character-gallery-group-head"><h4>${esc(group.name)}</h4><span>${group.photos.length} foto${group.photos.length === 1 ? '' : 's'}</span></div>
+      <div class="character-gallery-group-head"><h4>${esc(group.name)}</h4><span>${esc(trn('characters.photoCount', group.photos.length))}</span></div>
       ${group.description ? `<p>${esc(group.description)}</p>` : ''}
       <div class="character-gallery-grid">${group.photos.length
         ? group.photos.map((photo) => `<button data-gallery-photo="${esc(photo)}"><img src="${fileUrl(photo)}" loading="lazy" alt=""></button>`).join('')
-        : '<div class="hint">Esta variante todavía no tiene fotos.</div>'}</div>
+        : `<div class="hint">${esc(tr('characters.noVariantPhotos'))}</div>`}</div>
     </section>`).join('');
   $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) => {
     button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto, groups.flatMap((group) => group.photos || [])));
@@ -5909,18 +5960,18 @@ function openCharacterGallery(id) {
 function openCharacterAssets(id) {
   const c = state.characters.find((x) => x.id === id);
   if (!c) return;
-  $('#characterGalleryTitle').textContent = `${c.name} · Assets asociados`;
+  $('#characterGalleryTitle').textContent = tr('characters.associatedAssetsTitle', { name: c.name });
   const groups = [
-    { id: null, name: 'Original' },
+    { id: null, name: tr('picker.original') },
     ...(c.variants || []).map((v) => ({ id: v.id, name: v.name }))
   ];
   const links = state.assetLinks.filter((link) => link.characterId === id);
   $('#characterGalleryBody').innerHTML = groups.map((group) => {
     const items = links.filter((link) => (link.variantId || null) === group.id);
     return `<section class="character-gallery-group">
-      <div class="character-gallery-group-head"><h4>${esc(group.name)}</h4><span>${items.length} asset${items.length === 1 ? '' : 's'}</span></div>
+      <div class="character-gallery-group-head"><h4>${esc(group.name)}</h4><span>${esc(trn('characters.assetCount', items.length))}</span></div>
       <div class="character-gallery-grid linked-assets">${items.length ? items.map((link) => `
-        <div class="linked-asset"><button data-gallery-photo="${esc(link.key)}"><img src="${fileUrl(link.key)}" loading="lazy" alt=""></button><button class="linked-remove" data-unlink="${esc(link.key)}" title="Quitar asociación">×</button></div>`).join('') : '<div class="hint">Sin assets asociados.</div>'}</div>
+        <div class="linked-asset"><button data-gallery-photo="${esc(link.key)}"><img src="${fileUrl(link.key)}" loading="lazy" alt=""></button><button class="linked-remove" data-unlink="${esc(link.key)}" title="${esc(tr('characters.removeAssociation'))}">×</button></div>`).join('') : `<div class="hint">${esc(tr('characters.noAssociatedAssets'))}</div>`}</div>
     </section>`;
   }).join('');
   $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) => button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto, links.map((link) => link.key))));
@@ -5947,8 +5998,8 @@ $('#characterImportInput').addEventListener('change', async (e) => {
     const dataUrl = await readFileAsDataUrl(file);
     const created = await api('/api/characters/import', { method: 'POST', body: { zipBase64: dataUrl.split(',')[1] } });
     state.characters.unshift(created); renderCharacters();
-    toast(`${created.name} importado con ${created.photos.length} fotos y ${created.variants.length} variantes`);
-  } catch (err) { toast(`No se pudo importar: ${err.message}`, 'err'); }
+    toast(tr('characters.imported', { name: created.name, photos: created.photos.length, variants: created.variants.length }));
+  } catch (err) { toast(tr('characters.importFailed', { error: err.message }), 'err'); }
 });
 $('#charModalClose').addEventListener('click', () => {
   $('#charModal').hidden = true;
@@ -5960,7 +6011,7 @@ function openCharModal(id, assetKey = null) {
   state.editingCharId = id || '';
   state.pendingCharacterAsset = id ? null : assetKey;
   $('#charModal').hidden = false;
-  $('#charModalTitle').textContent = id ? 'Editar personaje' : 'Nuevo personaje';
+  $('#charModalTitle').textContent = id ? tr('characters.editTitle') : tr('characters.new');
   if (state.voices === null) loadVoices(false);
   renderCharModal();
 }
@@ -5971,63 +6022,63 @@ function renderCharModal() {
   const voices = state.voices || [];
   const body = $('#charModalBody');
   body.innerHTML = `
-    ${state.pendingCharacterAsset ? `<div class="character-source"><img src="${fileUrl(state.pendingCharacterAsset)}" alt=""><div><strong>Foto inicial</strong><span>Se copiará al archivo del personaje cuando lo crees.</span></div></div>` : ''}
-    <div><label>Nombre</label><input type="text" id="chName" value="${esc(c.name)}" placeholder="ej: Luna"></div>
-    <div><label>Descripción</label><textarea id="chDesc" placeholder="quién es, cómo se ve, su vibra…">${esc(c.description || '')}</textarea></div>
-    <label class="check-row"><input type="checkbox" id="chNsfw"${c.nsfw ? ' checked' : ''}> Contenido NSFW</label>
-    <div><label>Voz de ElevenLabs</label>
+    ${state.pendingCharacterAsset ? `<div class="character-source"><img src="${fileUrl(state.pendingCharacterAsset)}" alt=""><div><strong>${esc(tr('characters.editor.initialPhoto'))}</strong><span>${esc(tr('characters.editor.initialPhotoHint'))}</span></div></div>` : ''}
+    <div><label>${esc(tr('assets.associate.name'))}</label><input type="text" id="chName" value="${esc(c.name)}" placeholder="${esc(tr('characters.editor.namePlaceholder'))}"></div>
+    <div><label>${esc(tr('common.description'))}</label><textarea id="chDesc" placeholder="${esc(tr('characters.editor.descriptionPlaceholder'))}">${esc(c.description || '')}</textarea></div>
+    <label class="check-row"><input type="checkbox" id="chNsfw"${c.nsfw ? ' checked' : ''}> ${esc(tr('common.nsfwContent'))}</label>
+    <div><label>${esc(tr('characters.editor.elevenVoice'))}</label>
       <select id="chVoice">
-        <option value="">— sin voz —</option>
+        <option value="">— ${esc(tr('characters.noVoice'))} —</option>
         ${voices.map((v) => `<option value="${v.id}" ${v.id === c.voiceId ? 'selected' : ''}>${esc(v.name)}${v.category ? ' · ' + esc(v.category) : ''}</option>`).join('')}
       </select>
-      ${voices.length ? '' : '<div class="hint" style="margin-top:4px">Cargá la key de ElevenLabs en Configuración y recargá.</div>'}
+      ${voices.length ? '' : `<div class="hint" style="margin-top:4px">${esc(tr('characters.editor.voiceConfigHint'))}</div>`}
     </div>
-    <div><label>Asset ID de Seedance (rostro real verificado)</label>
+    <div><label>${esc(tr('characters.editor.seedanceAsset'))}</label>
       <input type="text" id="chArkAsset" value="${esc(c.arkAssetId || '')}" placeholder="ej: asset-20260222234430-mxpgh">
-      <div class="hint" style="margin-top:4px">Para personas reales: verificá la identidad en la consola de ModelArk (Playground → My assets → Real-human) y pegá acá el asset ID. En video se usa en lugar de las fotos, que Seedance rechaza si tienen rostros reales.</div>
+      <div class="hint" style="margin-top:4px">${esc(tr('characters.editor.seedanceHint'))}</div>
     </div>
     <div class="heygen-character-card">
-      <div class="variant-manager-head"><label>Variante especial · HeyGen</label>${heygenCharacterReady(c) ? '<span class="heygen-ready">Lista para video</span>' : ''}</div>
-      <label class="heygen-character-field"><span>Plano general · avatar_id</span><input type="text" id="chHeyGenWideAvatar" value="${esc(heygenWideAvatarId(c))}" placeholder="91bd75d9e4414cc58043c82bcfc340f4"></label>
-      <label class="heygen-character-field"><span>Primer plano · avatar_id</span><input type="text" id="chHeyGenCloseAvatar" value="${esc(c.heygen?.closeAvatarId || '')}" placeholder="6f85c7941c594c94ae8594e17337bef0"></label>
-      <label class="heygen-character-field"><span>Prompt de comportamiento · plano general</span><textarea id="chHeyGenWideMotionPrompt" maxlength="1000" rows="3" placeholder="Describe cómo debe comportarse y moverse el personaje en el plano general…">${esc(heygenMotionPromptFor(c, 'wide'))}</textarea></label>
-      <label class="heygen-character-field"><span>Prompt de comportamiento · primer plano</span><textarea id="chHeyGenCloseMotionPrompt" maxlength="1000" rows="3" placeholder="Describe la actuación facial y el movimiento para el primer plano…">${esc(heygenMotionPromptFor(c, 'close'))}</textarea></label>
-      <div class="hint" style="margin-top:4px">Cada instrucción se envía únicamente con su encuadre. El plano general es obligatorio y el primer plano habilita la toma alternada. La imagen espejo es una referencia visual local y opcional.</div>
+      <div class="variant-manager-head"><label>${esc(tr('characters.editor.heygenVariant'))}</label>${heygenCharacterReady(c) ? `<span class="heygen-ready">${esc(tr('characters.editor.videoReady'))}</span>` : ''}</div>
+      <label class="heygen-character-field"><span>${esc(tr('characters.editor.wideAvatar'))}</span><input type="text" id="chHeyGenWideAvatar" value="${esc(heygenWideAvatarId(c))}" placeholder="91bd75d9e4414cc58043c82bcfc340f4"></label>
+      <label class="heygen-character-field"><span>${esc(tr('characters.editor.closeAvatar'))}</span><input type="text" id="chHeyGenCloseAvatar" value="${esc(c.heygen?.closeAvatarId || '')}" placeholder="6f85c7941c594c94ae8594e17337bef0"></label>
+      <label class="heygen-character-field"><span>${esc(tr('characters.editor.widePrompt'))}</span><textarea id="chHeyGenWideMotionPrompt" maxlength="1000" rows="3" placeholder="${esc(tr('characters.editor.widePromptPlaceholder'))}">${esc(heygenMotionPromptFor(c, 'wide'))}</textarea></label>
+      <label class="heygen-character-field"><span>${esc(tr('characters.editor.closePrompt'))}</span><textarea id="chHeyGenCloseMotionPrompt" maxlength="1000" rows="3" placeholder="${esc(tr('characters.editor.closePromptPlaceholder'))}">${esc(heygenMotionPromptFor(c, 'close'))}</textarea></label>
+      <div class="hint" style="margin-top:4px">${esc(tr('characters.editor.heygenHint'))}</div>
       ${id ? `<div class="heygen-mirror">
-        ${c.heygen?.imageKey ? `<img src="${fileUrl(c.heygen.imageKey)}" alt="Imagen espejo de HeyGen">` : '<div class="heygen-mirror-empty">Sin imagen espejo</div>'}
-        <div><button type="button" class="mini-btn" id="chHeyGenUpload">${IC('upload')} Subir imagen espejo</button>
+        ${c.heygen?.imageKey ? `<img src="${fileUrl(c.heygen.imageKey)}" alt="${esc(tr('characters.editor.mirrorAlt'))}">` : `<div class="heygen-mirror-empty">${esc(tr('characters.editor.noMirror'))}</div>`}
+        <div><button type="button" class="mini-btn" id="chHeyGenUpload">${IC('upload')} ${esc(tr('characters.editor.uploadMirror'))}</button>
         <input type="file" id="chHeyGenFileInput" accept="image/png,image/jpeg,image/webp" hidden>
-        ${c.photos?.[0] ? `<button type="button" class="mini-btn" id="chHeyGenUseCover">Usar portada</button>` : ''}
-        ${c.heygen?.imageKey ? `<button type="button" class="mini-btn danger" id="chHeyGenRemove">Quitar</button>` : ''}</div>
-      </div>` : '<p class="hint">Creá el personaje primero para subir su imagen espejo.</p>'}
+        ${c.photos?.[0] ? `<button type="button" class="mini-btn" id="chHeyGenUseCover">${esc(tr('characters.editor.useCover'))}</button>` : ''}
+        ${c.heygen?.imageKey ? `<button type="button" class="mini-btn danger" id="chHeyGenRemove">${esc(tr('common.remove'))}</button>` : ''}</div>
+      </div>` : `<p class="hint">${esc(tr('characters.editor.createBeforeMirror'))}</p>`}
     </div>
     ${id ? `
-    ${c.photos.length ? '<div><label>Portada</label><div id="chCover"></div></div>' : ''}
+    ${c.photos.length ? `<div><label>${esc(tr('characters.editor.cover'))}</label><div id="chCover"></div></div>` : ''}
     <div>
-      <div class="variant-manager-head"><label>Fotos (${c.photos.length})</label><div>
-        <button type="button" class="mini-btn" id="chAddPhoto">${IC('upload')} Subir</button>
-        <button type="button" class="mini-btn" id="chAddPhotoFromAssets">${IC('image')} Desde assets</button>
+      <div class="variant-manager-head"><label>${esc(tr('characters.editor.photos', { count: c.photos.length }))}</label><div>
+        <button type="button" class="mini-btn" id="chAddPhoto">${IC('upload')} ${esc(tr('common.upload'))}</button>
+        <button type="button" class="mini-btn" id="chAddPhotoFromAssets">${IC('image')} ${esc(tr('characters.editor.fromAssets'))}</button>
       </div></div>
-      ${c.photos.length > 1 ? '<div class="hint" style="margin-bottom:6px">Arrastrá para ordenar — la primera es la foto de perfil</div>' : ''}
+      ${c.photos.length > 1 ? `<div class="hint" style="margin-bottom:6px">${esc(tr('characters.editor.reorderHint'))}</div>` : ''}
       <div class="char-photos-grid" id="chPhotos">
-        ${c.photos.map((p, pi) => `<div class="ref-thumb${pi === 0 ? ' is-profile' : ''}${p === c.sheet ? ' is-sheet' : ''}" draggable="true" data-photo="${esc(p)}"><img src="${fileUrl(p)}" draggable="false" alt=""><button class="ficha-btn" data-ficha="${esc(p)}" title="${p === c.sheet ? 'Ficha del personaje (clic para quitar)' : 'Marcar como ficha de personaje'}">${IC('star')}</button><button class="rm" data-key="${esc(p)}">×</button></div>`).join('')}
+        ${c.photos.map((p, pi) => `<div class="ref-thumb${pi === 0 ? ' is-profile' : ''}${p === c.sheet ? ' is-sheet' : ''}" draggable="true" data-photo="${esc(p)}"><img src="${fileUrl(p)}" draggable="false" alt=""><button class="ficha-btn" data-ficha="${esc(p)}" title="${esc(p === c.sheet ? tr('characters.editor.removeCharacterSheet') : tr('characters.editor.markCharacterSheet'))}">${IC('star')}</button><button class="rm" data-key="${esc(p)}">×</button></div>`).join('')}
       </div>
     </div>
     <div class="variant-manager">
-      <div class="variant-manager-head"><label>Variantes / outfits (${(c.variants || []).length})</label><button type="button" class="mini-btn" id="chAddVariant">${IC('plus')} Nueva variante</button></div>
+      <div class="variant-manager-head"><label>${esc(tr('characters.editor.variants', { count: (c.variants || []).length }))}</label><button type="button" class="mini-btn" id="chAddVariant">${IC('plus')} ${esc(tr('assets.associate.newVariant'))}</button></div>
       <div class="variant-list">${(c.variants || []).map((v) => `
         <div class="variant-item" data-variant="${v.id}">
           <div class="variant-item-head"><strong>${esc(v.name)}</strong><div>
-            <button type="button" class="mini-btn" data-vact="rename">Editar</button>
-            <button type="button" class="mini-btn" data-vact="photo">${IC('upload')} Subir</button>
-            <button type="button" class="mini-btn" data-vact="fromassets">${IC('image')} Desde assets</button>
+            <button type="button" class="mini-btn" data-vact="rename">${esc(tr('common.edit'))}</button>
+            <button type="button" class="mini-btn" data-vact="photo">${IC('upload')} ${esc(tr('common.upload'))}</button>
+            <button type="button" class="mini-btn" data-vact="fromassets">${IC('image')} ${esc(tr('characters.editor.fromAssets'))}</button>
             <button type="button" class="mini-btn danger" data-vact="delete">${IC('trash')}</button>
           </div></div>
           ${v.description ? `<div class="hint">${esc(v.description)}</div>` : ''}
-          <div class="variant-photos">${v.photos.map((p) => `<span class="ref-thumb${p === v.sheet ? ' is-sheet' : ''}"><img src="${fileUrl(p)}" alt=""><button class="ficha-btn" data-vficha="${esc(p)}" title="${p === v.sheet ? 'Ficha de la variante (clic para quitar)' : 'Marcar como ficha de la variante'}">${IC('star')}</button><button class="rm" data-vphoto="${esc(p)}">×</button></span>`).join('') || '<span class="hint">Sin fotos todavía</span>'}</div>
+          <div class="variant-photos">${v.photos.map((p) => `<span class="ref-thumb${p === v.sheet ? ' is-sheet' : ''}"><img src="${fileUrl(p)}" alt=""><button class="ficha-btn" data-vficha="${esc(p)}" title="${esc(p === v.sheet ? tr('characters.editor.removeVariantSheet') : tr('characters.editor.markVariantSheet'))}">${IC('star')}</button><button class="rm" data-vphoto="${esc(p)}">×</button></span>`).join('') || `<span class="hint">${esc(tr('characters.editor.noPhotos'))}</span>`}</div>
         </div>`).join('')}</div>
-    </div>` : '<p class="hint">Guardá el personaje primero y después subile fotos y variantes.</p>'}
-    <button class="generate-btn small" id="chSave">${id ? 'Guardar cambios' : 'Crear personaje'}</button>`;
+    </div>` : `<p class="hint">${esc(tr('characters.editor.saveBeforePhotos'))}</p>`}
+    <button class="generate-btn small" id="chSave">${esc(id ? tr('categories.saveChanges') : tr('characters.editor.create'))}</button>`;
 
   if (id && c.photos.length) {
     $('#chCover').appendChild(buildCoverPositioner(c, async (avatarPos) => {
@@ -6060,7 +6111,7 @@ function renderCharModal() {
         state.characters[i] = updated;
         $('#charModal').hidden = true;
         state.editingCharId = null;
-        toast('Personaje actualizado');
+        toast(tr('characters.updated'));
         if (!contentIsVisible(updated)) state.characters = state.characters.filter((item) => item.id !== updated.id);
       } else {
         let created = await api('/api/characters', { method: 'POST', body: payload });
@@ -6072,9 +6123,9 @@ function renderCharModal() {
         state.characters.unshift(created);
         state.editingCharId = created.id;
         state.pendingCharacterAsset = null;
-        $('#charModalTitle').textContent = 'Editar personaje';
+        $('#charModalTitle').textContent = tr('characters.editTitle');
         renderCharModal();
-        toast(created.photos.length ? 'Personaje creado con su foto inicial' : 'Personaje creado — ahora subile fotos');
+        toast(created.photos.length ? tr('characters.createdWithPhoto') : tr('characters.createdAddPhotos'));
       }
       renderCharacters();
       renderPinned();
@@ -6123,7 +6174,7 @@ function renderCharModal() {
       renderCharModal();
       renderCharacters();
       renderVideoControls();
-      toast('Imagen espejo actualizada.');
+      toast(tr('characters.editor.mirrorUpdated'));
     } catch (error) {
       button.disabled = false;
       toast(error.message, 'err');
@@ -6138,7 +6189,7 @@ function renderCharModal() {
       renderCharModal();
       renderCharacters();
       renderVideoControls();
-      toast('Portada usada como imagen espejo.');
+      toast(tr('characters.editor.coverUsedAsMirror'));
     } catch (error) {
       button.disabled = false;
       toast(error.message, 'err');
@@ -6153,7 +6204,7 @@ function renderCharModal() {
       renderCharModal();
       renderCharacters();
       renderVideoControls();
-      toast('Imagen espejo quitada.');
+      toast(tr('characters.editor.mirrorRemoved'));
     } catch (error) {
       button.disabled = false;
       toast(error.message, 'err');
@@ -6167,7 +6218,7 @@ function renderCharModal() {
     const variant = (c.variants || []).find((v) => v.id === variantId);
     item.querySelector('[data-vact="rename"]').addEventListener('click', () => openVariantEditor(id, variantId));
     item.querySelector('[data-vact="delete"]').addEventListener('click', async () => {
-      if (!confirm(`¿Borrar la variante “${variant.name}” y sus fotos?`)) return;
+      if (!confirm(tr('characters.editor.deleteVariantConfirm', { name: variant.name }))) return;
       const updated = await api(`/api/characters/${id}/variants/${variantId}`, { method: 'DELETE' });
       state.characters[state.characters.findIndex((x) => x.id === id)] = updated;
       if (state.characterVariantId === variantId) { state.characterVariantId = ''; applyPinnedCharacterPhotos(); }
@@ -6294,7 +6345,7 @@ async function openCharAssetPicker(target) {
   }
   const owner = (t.entity === 'element' ? state.elements : state.characters).find((x) => x.id === t.ownerId);
   const v = (owner?.variants || []).find((x) => x.id === t.variantId);
-  $('#charAssetPickerTitle').textContent = `Fotos para “${v?.name || owner?.name || ''}”`;
+  $('#charAssetPickerTitle').textContent = tr('characters.assetPicker.photosFor', { name: v?.name || owner?.name || '' });
   renderCharAssetPickerGrid();
   $('#charAssetPickerModal').hidden = false;
 }
@@ -6327,12 +6378,12 @@ function renderCharAssetPickerGrid() {
   $$('#charAssetPickerTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.czone === cp.zone));
   const items = (state.assets[cp.zone] || []).filter((a) => /\.(png|jpe?g|webp)$/i.test(a.key));
   const added = cp.added.size;
-  $('#charAssetPickerHint').textContent = added ? `${added} agregada${added === 1 ? '' : 's'} en esta tanda — clickeá de nuevo para quitar` : '';
+  $('#charAssetPickerHint').textContent = added ? trn('characters.assetPicker.addedBatch', added) : '';
   $('#charAssetPickerGrid').innerHTML = items.length ? items.map((a) => {
     const on = cp.added.has(a.key);
     return `<button class="shot-asset-cell${on ? ' selected' : ''}" data-k="${esc(a.key)}" title="${esc(a.name)}">
       <img src="${fileUrl(a.key)}" loading="lazy" alt="">${on ? `<span class="shot-asset-check">${IC('check')}</span>` : ''}</button>`;
-  }).join('') : '<div class="hint">No hay imágenes en esta zona.</div>';
+  }).join('') : `<div class="hint">${esc(tr('characters.assetPicker.empty'))}</div>`;
   $('#charAssetPickerGrid').querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', async () => {
     const key = b.dataset.k;
     if (!cp.ownerId) return;
@@ -6345,14 +6396,14 @@ function renderCharAssetPickerGrid() {
         const updated = await api(`${endpoint}?key=${encodeURIComponent(photoKey)}`, { method: 'DELETE' });
         cp.added.delete(key);
         refreshPickerEntity(updated);
-        toast('Foto quitada');
+        toast(tr('characters.photoRemoved'));
       } else {
         const before = pickerTargetPhotos();
         const updated = await api(endpoint, { method: 'POST', body: { assetKey: key } });
         const newKey = pickerTargetPhotos(updated).find((k) => !before.includes(k));
         if (newKey) cp.added.set(key, newKey);
         refreshPickerEntity(updated);
-        toast('Foto agregada');
+        toast(tr('characters.photoAdded'));
       }
       renderCharAssetPickerGrid();
     } catch (err) {
@@ -6381,7 +6432,7 @@ function openVariantEditor(ownerId, variantId = null, entity = 'character') {
   const owner = (entity === 'element' ? state.elements : state.characters).find((c) => c.id === ownerId);
   const variant = (owner?.variants || []).find((v) => v.id === variantId);
   state.variantEditor = { ownerId, variantId, entity };
-  $('#variantEditorTitle').textContent = variant ? 'Editar variante' : 'Nueva variante';
+  $('#variantEditorTitle').textContent = variant ? tr('characters.variant.editTitle') : tr('characters.variant.newTitle');
   $('#variantEditorName').value = variant?.name || '';
   $('#variantEditorDescription').value = variant?.description || '';
   $('#variantEditorModal').hidden = false;
@@ -6410,7 +6461,7 @@ $('#variantEditorForm').addEventListener('submit', async (e) => {
       closeVariantEditor();
       renderCharModal(); renderCharacters(); renderCharacterVariantControl();
     }
-    toast(variantId ? 'Variante actualizada' : 'Variante creada');
+    toast(variantId ? tr('characters.variant.updated') : tr('characters.variant.created'));
   } catch (err) {
     toast(err.message, 'err');
   }
@@ -6420,19 +6471,19 @@ $('#variantEditorForm').addEventListener('submit', async (e) => {
 // locaciones y objetos ("elementos")
 // ---------------------------------------------------------------------------
 
-const ELEMENT_KIND_LABEL = { location: 'Locación', object: 'Objeto' };
+const ELEMENT_KIND_LABEL = { location: tr('elements.location'), object: tr('elements.object') };
 
 function elementCategories(kind = '') {
   return [...new Set(state.elements
     .filter((el) => !kind || el.kind === kind)
-    .map((el) => (el.category || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    .map((el) => (el.category || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, i18n.localeTag()));
 }
 
 function renderElements() {
   sortEntities();
   const catSel = $('#elementCategoryFilter');
   const cats = elementCategories(state.elementKindFilter);
-  catSel.innerHTML = '<option value="">Todas</option>' + cats.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  catSel.innerHTML = `<option value="">${esc(tr('common.allFeminine'))}</option>` + cats.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
   catSel.value = cats.includes(state.elementCategoryFilter) ? state.elementCategoryFilter : '';
   state.elementCategoryFilter = catSel.value;
   $$('#elementKindChips .chip').forEach((c) => c.classList.toggle('active', c.dataset.ekind === state.elementKindFilter));
@@ -6442,7 +6493,7 @@ function renderElements() {
     contentIsVisible(el) && (!state.elementKindFilter || el.kind === state.elementKindFilter)
     && (!state.elementCategoryFilter || (el.category || '') === state.elementCategoryFilter));
   if (!items.length) {
-    grid.innerHTML = '<div class="empty-note">Creá tu primera locación u objeto: nombre, categoría, fotos y variantes (ej: “Fábrica abandonada” → “en invierno”).</div>';
+    grid.innerHTML = `<div class="empty-note">${esc(tr('elements.empty'))}</div>`;
     return;
   }
   grid.innerHTML = '';
@@ -6459,30 +6510,30 @@ function renderElements() {
         <div class="element-meta"><span class="element-kind-badge ${el.kind}">${ELEMENT_KIND_LABEL[el.kind] || el.kind}</span>${el.category ? `<span class="element-category">${esc(el.category)}</span>` : ''}</div>
       </div></div>
       <div class="char-desc">${esc(el.description || '')}</div>
-      ${(el.variants || []).length ? `<div class="hint" style="margin-bottom:8px">${el.variants.length} variante${el.variants.length === 1 ? '' : 's'}</div>` : ''}
+      ${(el.variants || []).length ? `<div class="hint" style="margin-bottom:8px">${esc(trn('elements.variantCount', el.variants.length))}</div>` : ''}
       <div class="char-photos-mini">${minis}</div>
       <div class="char-actions">
-        <button class="mini-btn" data-eact="use">${IC('link')} Usar fotos</button>
-        <button class="mini-btn" data-eact="edit">${IC('edit')} Editar</button>
-        <button class="mini-btn" data-eact="gallery">${IC('eye')} Ver fotos</button>
+        <button class="mini-btn" data-eact="use">${IC('link')} ${esc(tr('characters.usePhotos'))}</button>
+        <button class="mini-btn" data-eact="edit">${IC('edit')} ${esc(tr('common.edit'))}</button>
+        <button class="mini-btn" data-eact="gallery">${IC('eye')} ${esc(tr('characters.viewPhotos'))}</button>
         <button class="mini-btn" data-eact="assets">${IC('image')} Assets${linkedCount ? ` (${linkedCount})` : ''}</button>
-        <button class="mini-btn danger" data-eact="del" title="Eliminar">${IC('trash')}</button>
+        <button class="mini-btn danger" data-eact="del" title="${esc(tr('common.delete'))}">${IC('trash')}</button>
       </div>`;
     card.querySelectorAll('[data-eact]').forEach((b) => {
       b.addEventListener('click', async () => {
         const act = b.dataset.eact;
         if (act === 'use') {
-          if (!el.photos.length) return toast('No tiene fotos todavía', 'err');
+          if (!el.photos.length) return toast(tr('elements.noPhotos'), 'err');
           setMode('image');
           for (const p of el.photos) addRef(p, false);
           goToCreate();
-          toast(`Fotos de ${el.name} agregadas como referencia`);
+          toast(tr('characters.photosAdded', { name: el.name }));
         }
         if (act === 'edit') openElementModal(el.id);
         if (act === 'gallery') openElementGallery(el.id);
         if (act === 'assets') openElementAssets(el.id);
         if (act === 'del') {
-          if (!confirm(`¿Eliminar “${el.name}” y sus fotos?`)) return;
+          if (!confirm(tr('elements.deleteConfirm', { name: el.name }))) return;
           await api(`/api/elements/${el.id}`, { method: 'DELETE' });
           state.elements = state.elements.filter((x) => x.id !== el.id);
           state.elementLinks = state.elementLinks.filter((link) => link.elementId !== el.id);
@@ -6506,7 +6557,7 @@ $('#elementCategoryFilter').addEventListener('change', () => {
 
 function openElementModal(id) {
   state.editingElementId = id || null;
-  $('#elementModalTitle').textContent = id ? 'Editar locación u objeto' : 'Nueva locación u objeto';
+  $('#elementModalTitle').textContent = id ? tr('elements.editTitle') : tr('elements.new');
   renderElementModal();
   $('#elementModal').hidden = false;
 }
@@ -6520,43 +6571,43 @@ $('#elementModal').addEventListener('click', (e) => { if (e.target.id === 'eleme
 function renderElementModal() {
   const id = state.editingElementId;
   const el = id ? state.elements.find((x) => x.id === id) : null;
-  const thumb = (p, attr) => `<span class="ref-thumb"><img src="${fileUrl(p)}" alt=""><button class="rm" ${attr}="${esc(p)}" title="Quitar">×</button></span>`;
+  const thumb = (p, attr) => `<span class="ref-thumb"><img src="${fileUrl(p)}" alt=""><button class="rm" ${attr}="${esc(p)}" title="${esc(tr('common.remove'))}">×</button></span>`;
   $('#elementModalBody').innerHTML = `
-    <label>Tipo
+    <label>${esc(tr('assets.info.type'))}
       <select id="elKind" class="select">
-        <option value="location"${(el?.kind || 'location') === 'location' ? ' selected' : ''}>Locación</option>
-        <option value="object"${el?.kind === 'object' ? ' selected' : ''}>Objeto</option>
+        <option value="location"${(el?.kind || 'location') === 'location' ? ' selected' : ''}>${esc(tr('elements.location'))}</option>
+        <option value="object"${el?.kind === 'object' ? ' selected' : ''}>${esc(tr('elements.object'))}</option>
       </select>
     </label>
-    <label>Nombre<input id="elName" type="text" maxlength="120" value="${esc(el?.name || '')}" placeholder="Ej: Fábrica abandonada, Espada mandoble"></label>
-    <label>Categoría<input id="elCategory" type="text" maxlength="80" value="${esc(el?.category || '')}" placeholder="Ej: Exteriores, Armas… escribí para crear una nueva"></label>
+    <label>${esc(tr('assets.associate.name'))}<input id="elName" type="text" maxlength="120" value="${esc(el?.name || '')}" placeholder="${esc(tr('elements.namePlaceholder'))}"></label>
+    <label>${esc(tr('categories.category'))}<input id="elCategory" type="text" maxlength="80" value="${esc(el?.category || '')}" placeholder="${esc(tr('elements.categoryPlaceholder'))}"></label>
     <div id="elCategoryChips" class="chips"></div>
-    <label>Descripción<textarea id="elDescription" rows="3">${esc(el?.description || '')}</textarea></label>
-    <label class="check-row"><input type="checkbox" id="elNsfw"${el?.nsfw ? ' checked' : ''}> Contenido NSFW</label>
+    <label>${esc(tr('common.description'))}<textarea id="elDescription" rows="3">${esc(el?.description || '')}</textarea></label>
+    <label class="check-row"><input type="checkbox" id="elNsfw"${el?.nsfw ? ' checked' : ''}> ${esc(tr('common.nsfwContent'))}</label>
     ${el ? `
-    ${el.photos.length ? '<div class="variant-manager"><label>Portada</label><div id="elCover"></div></div>' : ''}
+    ${el.photos.length ? `<div class="variant-manager"><label>${esc(tr('characters.editor.cover'))}</label><div id="elCover"></div></div>` : ''}
     <div class="variant-manager">
-      <div class="variant-manager-head"><label>Fotos (${el.photos.length})</label><div>
-        <button type="button" class="mini-btn" id="elAddPhoto">${IC('upload')} Subir</button>
-        <button type="button" class="mini-btn" id="elAddFromAssets">${IC('image')} Desde assets</button>
+      <div class="variant-manager-head"><label>${esc(tr('characters.editor.photos', { count: el.photos.length }))}</label><div>
+        <button type="button" class="mini-btn" id="elAddPhoto">${IC('upload')} ${esc(tr('common.upload'))}</button>
+        <button type="button" class="mini-btn" id="elAddFromAssets">${IC('image')} ${esc(tr('characters.editor.fromAssets'))}</button>
       </div></div>
-      <div class="variant-photos">${el.photos.map((p) => thumb(p, 'data-elphoto')).join('') || '<span class="hint">Sin fotos todavía</span>'}</div>
+      <div class="variant-photos">${el.photos.map((p) => thumb(p, 'data-elphoto')).join('') || `<span class="hint">${esc(tr('characters.editor.noPhotos'))}</span>`}</div>
     </div>
     <div class="variant-manager">
-      <div class="variant-manager-head"><label>Variantes (${(el.variants || []).length})</label><button type="button" class="mini-btn" id="elAddVariant">${IC('plus')} Nueva variante</button></div>
+      <div class="variant-manager-head"><label>${esc(tr('elements.variants', { count: (el.variants || []).length }))}</label><button type="button" class="mini-btn" id="elAddVariant">${IC('plus')} ${esc(tr('assets.associate.newVariant'))}</button></div>
       <div class="variant-list">${(el.variants || []).map((v) => `
         <div class="variant-item" data-elvariant="${v.id}">
           <div class="variant-item-head"><strong>${esc(v.name)}</strong><div>
-            <button type="button" class="mini-btn" data-evact="rename">Editar</button>
-            <button type="button" class="mini-btn" data-evact="photo">${IC('upload')} Subir</button>
-            <button type="button" class="mini-btn" data-evact="fromassets">${IC('image')} Desde assets</button>
+            <button type="button" class="mini-btn" data-evact="rename">${esc(tr('common.edit'))}</button>
+            <button type="button" class="mini-btn" data-evact="photo">${IC('upload')} ${esc(tr('common.upload'))}</button>
+            <button type="button" class="mini-btn" data-evact="fromassets">${IC('image')} ${esc(tr('characters.editor.fromAssets'))}</button>
             <button type="button" class="mini-btn danger" data-evact="delete">${IC('trash')}</button>
           </div></div>
           ${v.description ? `<div class="hint">${esc(v.description)}</div>` : ''}
-          <div class="variant-photos">${v.photos.map((p) => thumb(p, 'data-evphoto')).join('') || '<span class="hint">Sin fotos todavía</span>'}</div>
+          <div class="variant-photos">${v.photos.map((p) => thumb(p, 'data-evphoto')).join('') || `<span class="hint">${esc(tr('characters.editor.noPhotos'))}</span>`}</div>
         </div>`).join('')}</div>
-    </div>` : '<p class="hint">Guardalo primero y después cargale fotos y variantes.</p>'}
-    <button class="generate-btn small" id="elSave">${el ? 'Guardar cambios' : 'Crear'}</button>`;
+    </div>` : `<p class="hint">${esc(tr('elements.saveBeforePhotos'))}</p>`}
+    <button class="generate-btn small" id="elSave">${esc(el ? tr('categories.saveChanges') : tr('categories.create'))}</button>`;
 
   const body = $('#elementModalBody');
   const renderElCategoryChips = () => chipRow($('#elCategoryChips'), elementCategories(), $('#elCategory').value.trim(), (c) => {
@@ -6586,19 +6637,19 @@ function renderElementModal() {
       description: $('#elDescription').value.trim(),
       nsfw: $('#elNsfw').checked
     };
-    if (!payload.name) return toast('Poné un nombre', 'err');
+    if (!payload.name) return toast(tr('assets.info.nameRequired'), 'err');
     try {
       if (id) {
         refreshElement(await api(`/api/elements/${id}`, { method: 'PUT', body: payload }));
-        toast('Guardado');
+        toast(tr('common.saved'));
       } else {
         const created = await api('/api/elements', { method: 'POST', body: payload });
         state.elements.unshift(created);
         state.editingElementId = created.id;
-        $('#elementModalTitle').textContent = 'Editar locación u objeto';
+        $('#elementModalTitle').textContent = tr('elements.editTitle');
         renderElementModal();
         renderElements();
-        toast(`${created.name} — ahora cargale fotos`);
+        toast(tr('elements.createdAddPhotos', { name: created.name }));
       }
     } catch (err) { toast(err.message, 'err'); }
   });
@@ -6645,7 +6696,7 @@ function renderElementModal() {
     item.querySelector('[data-evact="photo"]').addEventListener('click', () => uploadPhotos(`/api/elements/${id}/variants/${variantId}/photos`));
     item.querySelector('[data-evact="fromassets"]').addEventListener('click', () => openCharAssetPicker({ entity: 'element', ownerId: id, variantId }));
     item.querySelector('[data-evact="delete"]').addEventListener('click', async () => {
-      if (!confirm(`¿Borrar la variante “${variant.name}” y sus fotos?`)) return;
+      if (!confirm(tr('characters.editor.deleteVariantConfirm', { name: variant.name }))) return;
       refreshElement(await api(`/api/elements/${id}/variants/${variantId}`, { method: 'DELETE' }));
     });
     item.querySelectorAll('[data-evphoto]').forEach((b) => b.addEventListener('click', async () => {
@@ -6658,14 +6709,14 @@ function openElementGallery(id) {
   const el = state.elements.find((x) => x.id === id);
   if (!el) return;
   $('#characterGalleryTitle').textContent = `${el.name} · ${ELEMENT_KIND_LABEL[el.kind] || ''}`;
-  const groups = [{ name: 'Original', description: el.description || '', photos: el.photos || [] }, ...(el.variants || [])];
+  const groups = [{ name: tr('picker.original'), description: el.description || '', photos: el.photos || [] }, ...(el.variants || [])];
   $('#characterGalleryBody').innerHTML = groups.map((group) => `
     <section class="character-gallery-group">
-      <div class="character-gallery-group-head"><h4>${esc(group.name)}</h4><span>${group.photos.length} foto${group.photos.length === 1 ? '' : 's'}</span></div>
+      <div class="character-gallery-group-head"><h4>${esc(group.name)}</h4><span>${esc(trn('characters.photoCount', group.photos.length))}</span></div>
       ${group.description ? `<p>${esc(group.description)}</p>` : ''}
       <div class="character-gallery-grid">${group.photos.length
         ? group.photos.map((photo) => `<button data-gallery-photo="${esc(photo)}"><img src="${fileUrl(photo)}" loading="lazy" alt=""></button>`).join('')
-        : '<div class="hint">Esta variante todavía no tiene fotos.</div>'}</div>
+        : `<div class="hint">${esc(tr('characters.noVariantPhotos'))}</div>`}</div>
     </section>`).join('');
   $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) => {
     button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto, groups.flatMap((group) => group.photos || [])));
@@ -6676,15 +6727,15 @@ function openElementGallery(id) {
 function openElementAssets(id) {
   const el = state.elements.find((x) => x.id === id);
   if (!el) return;
-  $('#characterGalleryTitle').textContent = `${el.name} · Assets asociados`;
-  const groups = [{ id: null, name: 'Original' }, ...(el.variants || []).map((v) => ({ id: v.id, name: v.name }))];
+  $('#characterGalleryTitle').textContent = tr('characters.associatedAssetsTitle', { name: el.name });
+  const groups = [{ id: null, name: tr('picker.original') }, ...(el.variants || []).map((v) => ({ id: v.id, name: v.name }))];
   const links = state.elementLinks.filter((link) => link.elementId === id);
   $('#characterGalleryBody').innerHTML = groups.map((group) => {
     const items = links.filter((link) => (link.variantId || null) === group.id);
     return `<section class="character-gallery-group">
-      <div class="character-gallery-group-head"><h4>${esc(group.name)}</h4><span>${items.length} asset${items.length === 1 ? '' : 's'}</span></div>
+      <div class="character-gallery-group-head"><h4>${esc(group.name)}</h4><span>${esc(trn('characters.assetCount', items.length))}</span></div>
       <div class="character-gallery-grid linked-assets">${items.length ? items.map((link) => `
-        <div class="linked-asset"><button data-gallery-photo="${esc(link.key)}"><img src="${fileUrl(link.key)}" loading="lazy" alt=""></button><button class="linked-remove" data-elunlink="${esc(link.key)}" title="Quitar asociación">×</button></div>`).join('') : '<div class="hint">Sin assets asociados.</div>'}</div>
+        <div class="linked-asset"><button data-gallery-photo="${esc(link.key)}"><img src="${fileUrl(link.key)}" loading="lazy" alt=""></button><button class="linked-remove" data-elunlink="${esc(link.key)}" title="${esc(tr('characters.removeAssociation'))}">×</button></div>`).join('') : `<div class="hint">${esc(tr('characters.noAssociatedAssets'))}</div>`}</div>
     </section>`;
   }).join('');
   $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) => button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto, links.map((link) => link.key))));
@@ -6746,8 +6797,8 @@ async function syncAutomations() {
     const received = added.find((project) => project.integration?.source === 'controversy-tracker');
     const updated = incoming.find((project) =>
       changedIds.has(project.id) && project.integration?.source === 'controversy-tracker');
-    if (received) toast(`Nuevo guion recibido: ${received.name}`, 'ok');
-    else if (updated) toast(`Guion actualizado: ${updated.name}`, 'ok');
+    if (received) toast(tr('automation.sync.received', { name: received.name }), 'ok');
+    else if (updated) toast(tr('automation.sync.updated', { name: updated.name }), 'ok');
   } catch {
     // La siguiente consulta reintenta. Los errores de sesión ya los gestiona api().
   } finally {
@@ -6770,16 +6821,16 @@ function startAutomationSync() {
 
 function automationMissing(pr) {
   const miss = [];
-  for (const r of pr.requirements.characters) if (!automationAssignedEntity(pr, 'characters', r.role)) miss.push(`personaje ${r.role}`);
-  for (const r of pr.requirements.locations) if (!automationAssignedEntity(pr, 'locations', r.role)) miss.push(`locación ${r.role}`);
-  for (const r of pr.requirements.objects) if (!automationAssignedEntity(pr, 'objects', r.role)) miss.push(`objeto ${r.role}`);
+  for (const r of pr.requirements.characters) if (!automationAssignedEntity(pr, 'characters', r.role)) miss.push(tr('automation.requirements.character', { role: r.role }));
+  for (const r of pr.requirements.locations) if (!automationAssignedEntity(pr, 'locations', r.role)) miss.push(tr('automation.requirements.location', { role: r.role }));
+  for (const r of pr.requirements.objects) if (!automationAssignedEntity(pr, 'objects', r.role)) miss.push(tr('automation.requirements.object', { role: r.role }));
   return miss;
 }
 
 function renderAutomations() {
   const grid = $('#automationsGrid');
   if (!state.automations.length) {
-    grid.innerHTML = '<div class="empty-note">Todavía no hay proyectos. Importá un guion JSON de Controversy Tracker o creá un proyecto vacío.</div>';
+    grid.innerHTML = `<div class="empty-note">${esc(tr('automation.empty'))}</div>`;
     return;
   }
   grid.innerHTML = '';
@@ -6789,15 +6840,20 @@ function renderAutomations() {
     card.className = 'char-card';
     card.innerHTML = `
       <div class="char-name">${esc(pr.name)}</div>
-      <div class="hint" style="margin-bottom:8px">${pr.blocks.length} bloque${pr.blocks.length === 1 ? '' : 's'} · ${pr.requirements.characters.length} personaje(s), ${pr.requirements.locations.length} locación(es), ${pr.requirements.objects.length} objeto(s)</div>
-      <div class="automation-status ${missing ? 'pending' : 'ready'}">${missing ? `Faltan asignar ${missing} rol${missing === 1 ? '' : 'es'}` : 'Todo asignado ✓'}</div>
+      <div class="hint" style="margin-bottom:8px">${esc(tr('automation.card.summary', {
+        blocks: trn('automation.blockCount', pr.blocks.length),
+        characters: trn('automation.characterCount', pr.requirements.characters.length),
+        locations: trn('automation.locationCount', pr.requirements.locations.length),
+        objects: trn('automation.objectCount', pr.requirements.objects.length)
+      }))}</div>
+      <div class="automation-status ${missing ? 'pending' : 'ready'}">${esc(missing ? trn('automation.missingRoles', missing) : tr('automation.allAssigned'))}</div>
       <div class="char-actions">
-        <button class="mini-btn accent" data-aact="open">${IC('edit')} Abrir</button>
-        <button class="mini-btn danger" data-aact="del">${IC('trash')}</button>
+        <button class="mini-btn accent" data-aact="open">${IC('edit')} ${esc(tr('common.open'))}</button>
+        <button class="mini-btn danger" data-aact="del" title="${esc(tr('common.delete'))}">${IC('trash')}</button>
       </div>`;
     card.querySelector('[data-aact="open"]').addEventListener('click', () => openAutomation(pr.id));
     card.querySelector('[data-aact="del"]').addEventListener('click', async () => {
-      if (!confirm(`¿Eliminar el proyecto “${pr.name}”?`)) return;
+      if (!confirm(tr('automation.deleteConfirm', { name: pr.name }))) return;
       await api(`/api/automations/${pr.id}`, { method: 'DELETE' });
       state.automations = state.automations.filter((x) => x.id !== pr.id);
       renderAutomations();
@@ -6807,10 +6863,10 @@ function renderAutomations() {
 }
 
 $('#btnNewAutomation').addEventListener('click', async () => {
-  const name = window.prompt('Nombre del proyecto:', 'Nuevo proyecto');
+  const name = window.prompt(tr('automation.projectNamePrompt'), tr('automation.defaultProjectName'));
   if (name === null) return;
   try {
-    const created = await api('/api/automations', { method: 'POST', body: { name: name.trim() || 'Nuevo proyecto' } });
+    const created = await api('/api/automations', { method: 'POST', body: { name: name.trim() || tr('automation.defaultProjectName') } });
     state.automations.unshift(created);
     openAutomation(created.id);
   } catch (err) { toast(err.message, 'err'); }
@@ -6824,9 +6880,9 @@ $('#automationImportInput').addEventListener('change', async (e) => {
     const data = JSON.parse(await file.text());
     const created = await api('/api/automations', { method: 'POST', body: { data } });
     state.automations.unshift(created);
-    toast(`“${created.name}” importado — ${created.blocks.length} bloques`);
+    toast(tr('automation.imported', { name: created.name, blocks: trn('automation.blockCount', created.blocks.length) }));
     openAutomation(created.id);
-  } catch (err) { toast(`No se pudo importar: ${err.message}`, 'err'); }
+  } catch (err) { toast(tr('automation.importFailed', { error: err.message }), 'err'); }
 });
 
 function currentAutomation() {
@@ -6835,10 +6891,10 @@ function currentAutomation() {
 
 function formatAutomationBytes(value) {
   const bytes = Math.max(0, Number(value) || 0);
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  if (bytes < 1024) return `${i18n?.formatNumber(bytes) ?? bytes} B`;
+  if (bytes < 1024 ** 2) return `${i18n?.formatNumber(bytes / 1024, { maximumFractionDigits: 1 }) ?? (bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3) return `${i18n?.formatNumber(bytes / 1024 ** 2, { maximumFractionDigits: 1 }) ?? (bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${i18n?.formatNumber(bytes / 1024 ** 3, { maximumFractionDigits: 2 }) ?? (bytes / 1024 ** 3).toFixed(2)} GB`;
 }
 
 async function finalizeAutomationProject(projectId) {
@@ -6848,22 +6904,22 @@ async function finalizeAutomationProject(projectId) {
   const originalHtml = button.innerHTML;
   try {
     button.disabled = true;
-    button.textContent = 'Calculando material descartado…';
+    button.textContent = tr('automation.finalize.calculating');
     const preview = await api(`/api/automations/${projectId}/finalize`);
     if (preview.deleteCount) {
       const detail = [
-        `${preview.deleteCount} archivo${preview.deleteCount === 1 ? '' : 's'} descartado${preview.deleteCount === 1 ? '' : 's'}`,
-        `${formatAutomationBytes(preview.deleteBytes)} recuperables`,
-        `${preview.activeCount} materiales vigentes preservados`,
-        preview.sharedCount ? `${preview.sharedCount} reutilizados en otras secciones preservados` : ''
+        trn('automation.finalize.discardedFiles', preview.deleteCount),
+        tr('automation.finalize.recoverable', { size: formatAutomationBytes(preview.deleteBytes) }),
+        trn('automation.finalize.preservedActive', preview.activeCount),
+        preview.sharedCount ? trn('automation.finalize.preservedShared', preview.sharedCount) : ''
       ].filter(Boolean).join('\n');
-      if (!confirm(`¿Finalizar “${project.name}” y limpiar sus descartes?\n\n${detail}\n\nLos archivos eliminados no se pueden recuperar.`)) {
+      if (!confirm(tr('automation.finalize.confirm', { name: project.name, detail }))) {
         button.disabled = false;
         button.innerHTML = originalHtml;
         return;
       }
     }
-    button.textContent = preview.deleteCount ? 'Eliminando descartes…' : 'Comprobando proyecto…';
+    button.textContent = tr(preview.deleteCount ? 'automation.finalize.deleting' : 'automation.finalize.checking');
     const result = await api(`/api/automations/${projectId}/finalize`, { method: 'POST' });
     const index = state.automations.findIndex((item) => item.id === projectId);
     if (index !== -1) state.automations[index] = result.project;
@@ -6872,11 +6928,11 @@ async function finalizeAutomationProject(projectId) {
     await refreshAssets();
     if (state.openAutomationId === projectId) renderAutomationProject();
     if (result.failed?.length) {
-      toast(`${result.deleted} archivos eliminados; ${result.failed.length} no pudieron borrarse y se intentarán en la próxima finalización.`, 'err');
+      toast(tr('automation.finalize.partialFailure', { deleted: result.deleted, failed: result.failed.length }), 'err');
     } else if (result.deleted) {
-      toast(`Proyecto finalizado: ${result.deleted} descarte${result.deleted === 1 ? '' : 's'} eliminado${result.deleted === 1 ? '' : 's'} y ${formatAutomationBytes(result.project.finalization?.deletedBytes)} liberados.`, 'ok');
+      toast(trn('automation.finalize.completed', result.deleted, { size: formatAutomationBytes(result.project.finalization?.deletedBytes) }), 'ok');
     } else {
-      toast('Proyecto finalizado: no había material descartado para eliminar.', 'ok');
+      toast(tr('automation.finalize.nothingToDelete'), 'ok');
     }
   } catch (error) {
     button.disabled = false;
@@ -6901,7 +6957,7 @@ $('#automationBack').addEventListener('click', () => {
 });
 $('#automationDelete').addEventListener('click', async () => {
   const pr = currentAutomation();
-  if (!pr || !confirm(`¿Eliminar el proyecto “${pr.name}”?`)) return;
+  if (!pr || !confirm(tr('automation.deleteConfirm', { name: pr.name }))) return;
   await api(`/api/automations/${pr.id}`, { method: 'DELETE' });
   state.automations = state.automations.filter((x) => x.id !== pr.id);
   state.openAutomationId = null;
@@ -6915,7 +6971,7 @@ $('#automationSave').addEventListener('click', async () => {
   const updated = await saveAutomation({ name, config: { artStyle } });
   if (updated) {
     $('#automationTitle').textContent = updated.name;
-    toast('Proyecto guardado');
+    toast(tr('automation.saved'));
   }
 });
 
@@ -6938,7 +6994,7 @@ function automationRequirement(pr, kind, role) {
 
 function automationRoleName(role) {
   return String(role || '').toLowerCase().split('_').filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ') || 'Sin nombre';
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ') || tr('common.unnamed');
 }
 
 function automationGeneratedCharacter(pr, role) {
@@ -7014,7 +7070,7 @@ function automationTransitionSoundOptions(selectedId = '') {
     if (!groups.has(sound.category)) groups.set(sound.category, []);
     groups.get(sound.category).push(sound);
   }
-  return '<option value="">— elegí un sonido —</option>' + [...groups.entries()].map(([category, sounds]) =>
+  return `<option value="">— ${esc(tr('automation.transition.chooseSound'))} —</option>` + [...groups.entries()].map(([category, sounds]) =>
     `<optgroup label="${esc(category)}">${sounds.map((sound) => `<option value="${esc(sound.id)}"${sound.id === selectedId ? ' selected' : ''}>${esc(sound.name)}</option>`).join('')}</optgroup>`
   ).join('');
 }
@@ -7025,7 +7081,7 @@ function previewAutomationTransitionSound(soundId) {
   if (automationTransitionPreview) automationTransitionPreview.pause();
   automationTransitionPreview = new Audio(sound.url);
   automationTransitionPreview.loop = false;
-  automationTransitionPreview.play().catch(() => toast('No se pudo reproducir este sonido de transición', 'err'));
+  automationTransitionPreview.play().catch(() => toast(tr('automation.transition.playFailed'), 'err'));
   automationTransitionPreview.addEventListener('ended', () => { automationTransitionPreview = null; }, { once: true });
 }
 
@@ -7378,10 +7434,14 @@ async function generateAutomationResource(projectId, kind, role, card) {
   try {
     button.disabled = true;
     await createAutomationResource({ projectId, kind, role, modelId, prompt, voiceId, setStatus });
-    toast(`${kind === 'characters' ? 'Ficha interna' : kind === 'locations' ? 'Fondo' : 'Objeto'} generada y asignada a @${role}${kind === 'characters' ? '; no se añadió a Personajes' : ''}`);
+    toast(tr('automation.resources.generatedAssigned', {
+      resource: tr(kind === 'characters' ? 'automation.resources.internalCard' : kind === 'locations' ? 'automation.resources.background' : 'automation.resources.object'),
+      role,
+      note: kind === 'characters' ? tr('automation.resources.notAddedToCharacters') : ''
+    }));
     renderAutomationProject();
   } catch (error) {
-    const suffix = error.automationResourceCreated ? ' El recurso quedó creado y podés asignarlo manualmente.' : '';
+    const suffix = error.automationResourceCreated ? ` ${tr('automation.resources.createdForManualAssignment')}` : '';
     setStatus(`${error.message}${suffix}`, true);
     toast(`${error.message}${suffix}`, 'err');
     button.disabled = false;
@@ -7408,11 +7468,11 @@ async function generateAllAutomationResources(projectId) {
     };
   }).filter(Boolean);
 
-  if (!tasks.length) return toast('Todos los assets requeridos ya están asignados.', 'ok');
-  if (!confirm(`¿Generar y asignar los ${tasks.length} assets faltantes? Se realizará una generación de imagen por cada rol.`)) return;
+  if (!tasks.length) return toast(tr('automation.resources.allAssigned'), 'ok');
+  if (!confirm(trn('automation.resources.generateMissingConfirm', tasks.length))) return;
   const monitorTaskId = startUiTask({
-    title: `Generando assets de ${pr.name}`,
-    detail: `Preparando el primer rol de ${tasks.length}…`,
+    title: tr('automation.resources.generatingForProject', { name: pr.name }),
+    detail: tr('automation.resources.preparingFirst', { count: tasks.length }),
     total: tasks.length,
     current: 1
   });
@@ -7426,7 +7486,7 @@ async function generateAllAutomationResources(projectId) {
 
   for (let index = 0; index < tasks.length; index++) {
     const task = tasks[index];
-    updateUiTask(monitorTaskId, { current: index + 1, detail: `${index + 1}/${tasks.length} · preparando @${task.role}…` });
+    updateUiTask(monitorTaskId, { current: index + 1, detail: tr('automation.resources.preparingRole', { current: index + 1, total: tasks.length, role: task.role }) });
     const status = task.card.querySelector('[data-role-status]');
     const setStatus = (message, error = false) => {
       if (status) {
@@ -7439,23 +7499,23 @@ async function generateAllAutomationResources(projectId) {
     try {
       await createAutomationResource({ projectId, ...task, setStatus });
       completed++;
-      setStatus('Generado y asignado ✓');
+      setStatus(tr('automation.resources.generatedCheck'));
       updateUiTask(monitorTaskId, { current: index + 1 });
     } catch (error) {
-      const suffix = error.automationResourceCreated ? ' El recurso quedó creado para asignarlo manualmente.' : '';
+      const suffix = error.automationResourceCreated ? ` ${tr('automation.resources.createdForManualAssignment')}` : '';
       const message = `${error.message}${suffix}`;
       errors.push(`@${task.role}: ${message}`);
-      setStatus(`Falló: ${message}`, true);
+      setStatus(tr('automation.resources.failed', { error: message }), true);
     }
   }
 
   if (state.openAutomationId === projectId) renderAutomationProject();
   if (errors.length) {
-    finishUiTask(monitorTaskId, { error: `${completed}/${tasks.length} completados · ${errors.length} con error` });
-    toast(`Assets: ${completed}/${tasks.length} generados. Fallaron ${errors.length}; podés reintentar sólo los faltantes.`, 'err');
+    finishUiTask(monitorTaskId, { error: tr('automation.resources.bulkErrorSummary', { completed, total: tasks.length, errors: errors.length }) });
+    toast(tr('automation.resources.bulkPartial', { completed, total: tasks.length, errors: errors.length }), 'err');
   } else {
-    finishUiTask(monitorTaskId, { detail: `${completed}/${tasks.length} assets generados y asignados.` });
-    toast(`Todos los assets fueron generados y asignados: ${completed}/${tasks.length}.`, 'ok');
+    finishUiTask(monitorTaskId, { detail: tr('automation.resources.bulkDoneDetail', { completed, total: tasks.length }) });
+    toast(tr('automation.resources.bulkDone', { completed, total: tasks.length }), 'ok');
   }
 }
 
@@ -7478,14 +7538,14 @@ function bindAutomationHeyGenSegmentActions(root, project) {
       const segmentIndex = Number(button.dataset.segmentIndex);
       const segmentKeys = Array.isArray(output?.heygenSegmentVideoKeys) ? output.heygenSegmentVideoKeys : [];
       if (!block || block.generator !== 'heygen' || block.heygenFraming !== 'split' || segmentKeys.length !== 2 || ![0, 1].includes(segmentIndex)) {
-        return toast('Esta toma ya no tiene dos planos HeyGen completos.', 'err');
+        return toast(tr('automation.heygen.noCompleteSplit'), 'err');
       }
       const expectedAudio = Number(output.audioCountExpected) || (block.items || []).length;
       if (!Array.isArray(output.audioKeys) || output.audioKeys.length < expectedAudio) {
-        return toast('Faltan audios guardados para regenerar sólo este plano.', 'err');
+        return toast(tr('automation.heygen.missingSavedAudio'), 'err');
       }
-      const label = segmentIndex === 0 ? 'plano general' : 'primer plano';
-      if (!confirm(`¿Regenerar únicamente el ${label} de “${block.title || 'este bloque'}”? Se conservarán el otro plano y todos los audios; HeyGen consumirá sólo esta nueva toma y luego se volverán a unir ambas.`)) return;
+      const label = tr(segmentIndex === 0 ? 'automation.heygen.wideShot' : 'automation.heygen.closeUp');
+      if (!confirm(tr('automation.heygen.regenerateSegmentConfirm', { shot: label, title: block.title || tr('automation.thisBlock') }))) return;
       button.disabled = true;
       await runAutomationBlock(liveProject.id, block, button.closest('.auto-block'), {
         requireExistingAudio: true,
@@ -7498,13 +7558,14 @@ function bindAutomationHeyGenSegmentActions(root, project) {
 function renderAutomationAssetsPicker() {
   const picker = state.automationAssetPicker;
   if (!picker) return;
-  const search = String(picker.search || '').trim().toLocaleLowerCase('es');
+  const locale = i18n?.localeTag() || 'es-AR';
+  const search = String(picker.search || '').trim().toLocaleLowerCase(locale);
   const selected = new Set(picker.keys);
   const generativeVideoPicker = picker.purpose === 'generative-video-block';
   const sourceItems = generativeVideoPicker ? automationReferenceAssets() : automationVisualAssets();
   const items = sourceItems.filter((item) =>
     (picker.zone === 'all' || item.zone === picker.zone)
-    && (!search || String(item.name || item.key).toLocaleLowerCase('es').includes(search))
+    && (!search || String(item.name || item.key).toLocaleLowerCase(locale).includes(search))
   );
   $$('#automationAssetsTabs [data-auto-assets-zone]').forEach((button) =>
     button.classList.toggle('active', button.dataset.autoAssetsZone === picker.zone));
@@ -7512,7 +7573,7 @@ function renderAutomationAssetsPicker() {
   $('#automationAssetsPickerGrid').innerHTML = items.length ? items.map((item) => {
     const preview = automationAssetPreview(item);
     return `<button type="button" class="automation-assets-pick${selected.has(item.key) ? ' selected' : ''}" data-auto-asset-key="${esc(item.key)}">${preview}<span>${esc(item.name || item.key)}</span><b>${selected.has(item.key) ? picker.keys.indexOf(item.key) + 1 : '+'}</b></button>`;
-  }).join('') : '<div class="empty-note">No hay Assets que coincidan con este filtro.</div>';
+  }).join('') : `<div class="empty-note">${esc(tr('automation.assets.noMatch'))}</div>`;
   $('#automationAssetsPickerGrid').querySelectorAll('[data-auto-asset-key]').forEach((button) => button.addEventListener('click', () => {
     const key = button.dataset.autoAssetKey;
     const index = picker.keys.indexOf(key);
@@ -7527,19 +7588,23 @@ function renderAutomationAssetsPicker() {
       };
       const limits = picker.mediaLimits || {};
       if (generativeVideoPicker && (next.length > limits.total || counts.image > limits.image || counts.video > limits.video || counts.audio > limits.audio)) {
-        return toast(`${picker.modelName} admite hasta ${limits.total} referencias: ${limits.image} imágenes, ${limits.video} videos y ${limits.audio} audios.`, 'err');
+        return toast(tr('automation.assets.referenceLimits', {
+          model: picker.modelName, total: limits.total, images: limits.image, videos: limits.video, audios: limits.audio
+        }), 'err');
       }
       picker.keys.push(item.key);
     }
     renderAutomationAssetsPicker();
   }));
 
-  $('#automationAssetsCount').textContent = `${picker.keys.length} seleccionado${picker.keys.length === 1 ? '' : 's'}`;
+  $('#automationAssetsCount').textContent = trn('automation.assets.selected', picker.keys.length);
   $('#automationAssetsOrder').innerHTML = picker.keys.length ? picker.keys.map((key, index) => {
     const item = automationVisualAsset(key);
     const preview = automationAssetPreview(item, key);
-    return `<div class="automation-assets-order-item" data-order-key="${esc(key)}"><b>${index + 1}</b>${preview}<span title="${esc(item.name || key)}">${esc(item.name || key)}</span><button type="button" class="icon-btn" data-order-up${index ? '' : ' disabled'} title="Subir">↑</button><button type="button" class="icon-btn" data-order-down${index < picker.keys.length - 1 ? '' : ' disabled'} title="Bajar">↓</button><button type="button" class="icon-btn" data-order-remove title="Quitar">×</button></div>`;
-  }).join('') : `<span class="hint">${generativeVideoPicker ? `Sin referencias adicionales: ${esc(picker.modelName)} usará la imagen base del bloque.` : 'Elegí al menos una imagen o video.'}</span>`;
+    return `<div class="automation-assets-order-item" data-order-key="${esc(key)}"><b>${index + 1}</b>${preview}<span title="${esc(item.name || key)}">${esc(item.name || key)}</span><button type="button" class="icon-btn" data-order-up${index ? '' : ' disabled'} title="${esc(tr('common.moveUp'))}">↑</button><button type="button" class="icon-btn" data-order-down${index < picker.keys.length - 1 ? '' : ' disabled'} title="${esc(tr('common.moveDown'))}">↓</button><button type="button" class="icon-btn" data-order-remove title="${esc(tr('common.remove'))}">×</button></div>`;
+  }).join('') : `<span class="hint">${generativeVideoPicker
+    ? esc(tr('automation.assets.noAdditionalReferences', { model: picker.modelName }))
+    : esc(tr('automation.assets.chooseVisual'))}</span>`;
   $('#automationAssetsOrder').querySelectorAll('[data-order-key]').forEach((row) => {
     const key = row.dataset.orderKey;
     row.querySelector('[data-order-up]')?.addEventListener('click', () => {
@@ -7574,7 +7639,7 @@ async function openAutomationAssetsPicker(blockElement, block) {
     zone: 'all',
     search: ''
   };
-  $('#automationAssetsTitle').textContent = `Assets · ${block.title || 'Bloque'}`;
+  $('#automationAssetsTitle').textContent = tr('automation.assets.forBlock', { title: block.title || tr('automation.block') });
   renderAutomationAssetsPicker();
   $('#automationAssetsModal').hidden = false;
 }
@@ -7598,7 +7663,7 @@ async function openGenerativeVideoBlockAssetsPicker(blockElement, block, modelId
   };
   $('#automationAssetsAudioTab').hidden = (model?.mediaLimits?.audio || 0) === 0;
   if ((model?.mediaLimits?.audio || 0) === 0 && state.automationAssetPicker.zone === 'audio') state.automationAssetPicker.zone = 'all';
-  $('#automationAssetsTitle').textContent = `Referencias ${model?.name || ''} · ${block.title || 'Bloque'}`;
+  $('#automationAssetsTitle').textContent = tr('automation.assets.referencesForBlock', { model: model?.name || '', title: block.title || tr('automation.block') });
   renderAutomationAssetsPicker();
   $('#automationAssetsModal').hidden = false;
 }
@@ -7632,7 +7697,7 @@ $('#automationAssetsSearch').addEventListener('input', () => {
 $('#automationAssetsClose').addEventListener('click', () => closeAutomationAssetsPicker(false));
 $('#automationAssetsCancel').addEventListener('click', () => closeAutomationAssetsPicker(false));
 $('#automationAssetsDone').addEventListener('click', () => {
-  if (!state.automationAssetPicker?.keys.length) return toast('Elegí al menos un archivo.', 'err');
+  if (!state.automationAssetPicker?.keys.length) return toast(tr('automation.assets.chooseFile'), 'err');
   closeAutomationAssetsPicker(true);
 });
 $('#automationAssetsModal').addEventListener('click', (event) => {
@@ -7645,7 +7710,10 @@ function renderAutomationProject() {
   sortEntities();
   $('#automationTitle').textContent = pr.name;
   const missing = automationMissing(pr);
-  $('#automationMeta').textContent = `${pr.blocks.length} bloques · ${missing.length ? `faltan ${missing.length} asignaciones` : 'listo para automatizar'}`;
+  $('#automationMeta').textContent = tr('automation.projectMeta', {
+    blocks: trn('automation.blockCount', pr.blocks.length),
+    status: missing.length ? trn('automation.missingAssignments', missing.length) : tr('automation.readyToRun')
+  });
   const models = state.models || [];
   const model = models.find((m) => m.id === pr.config.imageModelId) || models[0];
   const chars = state.characters;
@@ -7656,7 +7724,7 @@ function renderAutomationProject() {
   const finalOutput = pr.finalOutput?.videoKey ? pr.finalOutput : null;
   const effectOutput = pr.effectOutput?.videoKey ? pr.effectOutput : null;
   const textRefreshOutput = effectOutput || finalOutput;
-  const textRefreshTargetLabel = effectOutput ? 'la versión con efectos' : 'el video final limpio';
+  const textRefreshTargetLabel = tr(effectOutput ? 'automation.textRefresh.effectVersion' : 'automation.textRefresh.cleanFinal');
   const textRefreshPending = Boolean(pr.textRefreshRequiredAt);
   const finalization = pr.finalization || null;
   const includeLogos = pr.config?.includeLogos === true;
@@ -7705,40 +7773,40 @@ function renderAutomationProject() {
     const assigned = generated?.id === cur ? { ...generated, automationOnly: true } : options.find((item) => item.id === cur);
     const cover = assigned && (assigned.sheet || assigned.photos?.[0]);
     const selectedVoiceId = kind === 'characters' ? (assigned?.voiceId || '') : '';
-    const kindLabel = kind === 'characters' ? 'personaje' : kind === 'locations' ? 'fondo' : 'objeto';
+    const kindLabel = tr(kind === 'characters' ? 'automation.resources.character' : kind === 'locations' ? 'automation.resources.background' : 'automation.resources.object');
     return `<div class="assign-row resource-role-card" data-role-card="${kind}:${esc(r.role)}">
       <div class="assign-copy">
         <span class="assign-role">@${esc(r.role)}</span>
         <span class="assign-desc hint">${esc(r.description || '')}</span>
-        ${r.clothing ? `<span class="assign-detail"><strong>Vestimenta:</strong> ${esc(r.clothing)}</span>` : ''}
-        ${kind === 'characters' && r.voice ? `<span class="assign-detail"><strong>Voz sugerida:</strong> ${esc(r.voice)}</span>` : ''}
+        ${r.clothing ? `<span class="assign-detail"><strong>${esc(tr('automation.resources.clothing'))}:</strong> ${esc(r.clothing)}</span>` : ''}
+        ${kind === 'characters' && r.voice ? `<span class="assign-detail"><strong>${esc(tr('automation.resources.suggestedVoice'))}:</strong> ${esc(r.voice)}</span>` : ''}
       </div>
-        ${cover ? `<button type="button" class="role-sheet-preview" data-open-asset="${esc(cover)}" title="Abrir ficha y acciones${assigned?.automationOnly ? '; desde ahí puedes convertirla manualmente en personaje' : ''}"><img src="${fileUrl(cover)}" alt=""></button>` : ''}
+        ${cover ? `<button type="button" class="role-sheet-preview" data-open-asset="${esc(cover)}" title="${esc(tr('automation.resources.openProfile', { note: assigned?.automationOnly ? tr('automation.resources.convertManuallyNote') : '' }))}"><img src="${fileUrl(cover)}" alt=""></button>` : ''}
       <div class="role-resource-controls">
-        <label>${kind === 'locations' ? 'Fondo asignado' : `${kindLabel.charAt(0).toUpperCase() + kindLabel.slice(1)} asignado`}</label>
+        <label>${esc(tr('automation.resources.assigned', { resource: kindLabel }))}</label>
          <select class="select" data-assign="${kind}:${esc(r.role)}">
-           <option value="">— sin asignar —</option>
-           ${generated ? `<option value="${esc(generated.id)}"${generated.id === cur ? ' selected' : ''}>${esc(generated.name)} · sólo este proyecto</option>` : ''}
+           <option value="">— ${esc(tr('automation.resources.unassigned'))} —</option>
+           ${generated ? `<option value="${esc(generated.id)}"${generated.id === cur ? ' selected' : ''}>${esc(generated.name)} · ${esc(tr('automation.resources.thisProjectOnly'))}</option>` : ''}
            ${options.map((o) => `<option value="${o.id}"${o.id === cur ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}
          </select>
-        <label>Modelo para generar esta ficha</label>
+        <label>${esc(tr('automation.resources.modelForProfile'))}</label>
         <div class="role-generate-line">
           <select class="select" data-role-model>
             ${models.map((item) => `<option value="${item.id}"${item.id === model?.id ? ' selected' : ''}>${esc(item.name)}</option>`).join('')}
           </select>
-          <button type="button" class="mini-btn" data-generate-resource>${IC('spark')} Generar ${kindLabel}</button>
+          <button type="button" class="mini-btn" data-generate-resource>${IC('spark')} ${esc(tr('automation.resources.generate', { resource: kindLabel }))}</button>
         </div>
-        ${kind === 'characters' ? `<label>Voz del personaje</label>
+        ${kind === 'characters' ? `<label>${esc(tr('automation.resources.characterVoice'))}</label>
           <div class="role-generate-line">
             <select class="select" data-role-voice>
-              <option value="">— sin voz propia —</option>
+              <option value="">— ${esc(tr('automation.resources.noOwnVoice'))} —</option>
               ${(state.voices || []).map((voice) => `<option value="${voice.id}"${voice.id === selectedVoiceId ? ' selected' : ''}>${esc(voice.name)}${voice.category ? ` · ${esc(voice.category)}` : ''}</option>`).join('')}
             </select>
-            <button type="button" class="mini-btn" data-save-role-voice${cur ? '' : ' disabled'}>Guardar voz</button>
+            <button type="button" class="mini-btn" data-save-role-voice${cur ? '' : ' disabled'}>${esc(tr('automation.resources.saveVoice'))}</button>
           </div>
-          <span class="hint">${cur ? (assigned?.voiceId ? `Voz actual: ${esc(assigned.voiceName || assigned.voiceId)}` : 'Este personaje todavía no tiene voz propia.') : 'La voz elegida se guardará con el recurso interno del proyecto.'}${assigned?.automationOnly ? ' No se añadió a la biblioteca de Personajes.' : ''}</span>` : ''}
+          <span class="hint">${cur ? (assigned?.voiceId ? esc(tr('automation.resources.currentVoice', { voice: assigned.voiceName || assigned.voiceId })) : esc(tr('automation.resources.characterHasNoVoice'))) : esc(tr('automation.resources.voiceStoredInternally'))}${assigned?.automationOnly ? ` ${esc(tr('automation.resources.notInCharacterLibrary'))}` : ''}</span>` : ''}
       </div>
-      <label class="role-prompt-label">Prompt de la ficha · inglés
+      <label class="role-prompt-label">${esc(tr('automation.resources.profilePrompt'))}
         <textarea data-role-prompt rows="5">${esc(automationResourcePrompt(kind, r))}</textarea>
       </label>
       <span class="hint role-status" data-role-status></span>
@@ -7749,232 +7817,232 @@ function renderAutomationProject() {
     <div class="automation-panel">
       <div class="automation-panel-heading">
         <div>
-          <h3>Asignación de roles</h3>
-          <span class="hint" id="autoResourcesProgress">${missing.length ? `${missing.length} assets requeridos todavía no están asignados.` : 'Todos los assets requeridos están asignados.'}</span>
+          <h3>${esc(tr('automation.roles.title'))}</h3>
+          <span class="hint" id="autoResourcesProgress">${esc(missing.length ? trn('automation.roles.assetsMissing', missing.length) : tr('automation.roles.allAssetsAssigned'))}</span>
         </div>
         <button type="button" class="generate-btn" id="autoGenerateAllResources"${missing.length ? '' : ' disabled'}>
-          ${IC('spark')} Generar todos los assets faltantes
+          ${IC('spark')} ${esc(tr('automation.roles.generateAllMissing'))}
         </button>
       </div>
-      ${pr.requirements.characters.length ? `<div class="assign-group"><h4>Personajes</h4>${pr.requirements.characters.map((r) => assignRow('characters', r, chars)).join('')}</div>` : ''}
-      ${pr.requirements.locations.length ? `<div class="assign-group"><h4>Locaciones</h4>${pr.requirements.locations.map((r) => assignRow('locations', r, locs)).join('')}</div>` : ''}
-      ${pr.requirements.objects.length ? `<div class="assign-group"><h4>Objetos</h4>${pr.requirements.objects.map((r) => assignRow('objects', r, objs)).join('')}</div>` : ''}
-      ${!pr.requirements.characters.length && !pr.requirements.locations.length && !pr.requirements.objects.length ? '<p class="hint">Este proyecto no declara requisitos. Importá un guion de Controversy Tracker para tenerlos.</p>' : ''}
+      ${pr.requirements.characters.length ? `<div class="assign-group"><h4>${esc(tr('characters.title'))}</h4>${pr.requirements.characters.map((r) => assignRow('characters', r, chars)).join('')}</div>` : ''}
+      ${pr.requirements.locations.length ? `<div class="assign-group"><h4>${esc(tr('automation.roles.locations'))}</h4>${pr.requirements.locations.map((r) => assignRow('locations', r, locs)).join('')}</div>` : ''}
+      ${pr.requirements.objects.length ? `<div class="assign-group"><h4>${esc(tr('automation.roles.objects'))}</h4>${pr.requirements.objects.map((r) => assignRow('objects', r, objs)).join('')}</div>` : ''}
+      ${!pr.requirements.characters.length && !pr.requirements.locations.length && !pr.requirements.objects.length ? `<p class="hint">${esc(tr('automation.roles.noRequirements'))}</p>` : ''}
     </div>
 
     <div class="automation-panel">
-      <h3>Configuración</h3>
-      <div class="control-row"><label>Nombre del proyecto</label>
+      <h3>${esc(tr('config.title'))}</h3>
+      <div class="control-row"><label>${esc(tr('automation.config.projectName'))}</label>
         <input type="text" id="autoProjectName" maxlength="120" value="${esc(pr.name)}">
-        <span class="hint">Los cambios del proyecto se guardan en Manifestador. El botón superior confirma el nombre.</span>
+        <span class="hint">${esc(tr('automation.config.projectNameHint'))}</span>
       </div>
-      <div class="control-row auto-style-row"><label>Estilo artístico global</label>
+      <div class="control-row auto-style-row"><label>${esc(tr('automation.config.globalArtStyle'))}</label>
         <div class="auto-style-field">
           <textarea id="autoArtStyle" maxlength="1200" rows="3" placeholder="Write the global art direction in English…">${esc(pr.config.artStyle || DEFAULT_AUTOMATION_ART_STYLE)}</textarea>
           <div class="auto-style-prompt-tools">
             <select class="select" id="autoArtPrompt">${automationArtPromptOptions()}</select>
-            <button type="button" class="mini-btn" id="autoApplyArtPrompt"${(state.prompts || []).some((prompt) => !['audio', 'video'].includes(prompt.mode)) ? '' : ' disabled'}>${IC('book')} Usar prompt guardado</button>
+            <button type="button" class="mini-btn" id="autoApplyArtPrompt"${(state.prompts || []).some((prompt) => !['audio', 'video'].includes(prompt.mode)) ? '' : ' disabled'}>${IC('book')} ${esc(tr('automation.config.useSavedPrompt'))}</button>
           </div>
           ${automationStyleReferenceMarkup(pr)}
-          <span class="hint">Escribilo en inglés o cargalo desde tu biblioteca de Prompts. Se añade obligatoriamente a todas las fichas y bloques para mantener el mismo lenguaje visual.</span>
+          <span class="hint">${esc(tr('automation.config.globalArtStyleHint'))}</span>
         </div>
       </div>
-      <div class="control-row"><label>Modelo de imagen</label>
+      <div class="control-row"><label>${esc(tr('automation.config.imageModel'))}</label>
         <select class="select" id="autoModel">${models.map((m) => `<option value="${m.id}"${m.id === model?.id ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
-        <label>Modelo de respaldo</label>
+        <label>${esc(tr('automation.config.fallbackModel'))}</label>
         <select class="select" id="autoFallbackModel">
-          <option value="">— sin respaldo —</option>
+          <option value="">— ${esc(tr('automation.config.noFallback'))} —</option>
           ${models.map((m) => `<option value="${m.id}"${m.id === pr.config.fallbackImageModelId ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}
         </select>
-        <span class="hint">Si el principal rechaza o falla, se intenta una vez con este modelo.</span>
+        <span class="hint">${esc(tr('automation.config.fallbackHint'))}</span>
       </div>
-      <div class="control-row"><label>Proporción</label>
+      <div class="control-row"><label>${esc(tr('automation.config.aspectRatio'))}</label>
         <select class="select" id="autoAr">${(model?.aspectRatios || []).map((a) => `<option${a === pr.config.aspectRatio ? ' selected' : ''}>${a}</option>`).join('')}</select>
-        <label>Resolución</label>
+        <label>${esc(tr('automation.config.resolution'))}</label>
         <select class="select" id="autoRes">${(model?.resolutions || []).map((r) => `<option${r === pr.config.resolution ? ' selected' : ''}>${r}</option>`).join('')}</select></div>
-      <div class="control-row"><label>Voz del narrador</label>
-        <select class="select" id="autoVoice"><option value="">— elegí una voz —</option>${(state.voices || []).map((v) => `<option value="${v.id}"${v.id === pr.config.narratorVoiceId ? ' selected' : ''}>${esc(v.name)}</option>`).join('')}</select>
-        <label>Modelo de ElevenLabs</label>
+      <div class="control-row"><label>${esc(tr('automation.config.narratorVoice'))}</label>
+        <select class="select" id="autoVoice"><option value="">— ${esc(tr('automation.config.chooseVoice'))} —</option>${(state.voices || []).map((v) => `<option value="${v.id}"${v.id === pr.config.narratorVoiceId ? ' selected' : ''}>${esc(v.name)}</option>`).join('')}</select>
+        <label>${esc(tr('automation.config.elevenLabsModel'))}</label>
         <select class="select" id="autoAudioModel">${(state.audioModels || []).map((audioModel) => `<option value="${esc(audioModel.id)}"${audioModel.id === automationAudioModel?.id ? ' selected' : ''}>${esc(audioModel.name)}</option>`).join('')}</select>
-        <span class="hint">Los diálogos usan la voz del personaje asignado (si tiene); si no, la del narrador. ${esc(automationAudioModel?.notes || '')}</span>
+        <span class="hint">${esc(tr('automation.config.dialogueVoiceHint'))} ${esc(automationAudioModel?.notes || '')}</span>
       </div>
-      <div class="control-row"><label>Conexión HeyGen para bloques</label>
+      <div class="control-row"><label>${esc(tr('automation.config.heygenConnection'))}</label>
         <select class="select" id="autoHeyGenAuth"><option value="key"${pr.config.heygenAuthMode === 'oauth' ? '' : ' selected'}>API key</option><option value="oauth"${pr.config.heygenAuthMode === 'oauth' ? ' selected' : ''}>OAuth · plan web</option></select>
-        <span class="hint">${pr.config.heygenAuthMode === 'oauth' ? (state.heygenOAuth.connected ? 'OAuth conectado.' : 'OAuth no conectado; hacelo desde Configuración.') : (state.config?.keys?.heygen ? 'API key configurada.' : 'Falta la API key de HeyGen en Configuración.')}</span>
+        <span class="hint">${esc(pr.config.heygenAuthMode === 'oauth' ? (state.heygenOAuth.connected ? tr('automation.config.oauthConnected') : tr('automation.config.oauthNotConnected')) : (state.config?.keys?.heygen ? tr('automation.config.apiKeyConfigured') : tr('automation.config.apiKeyMissing')))}</span>
       </div>
       <div class="automation-music-panel${music.enabled ? ' enabled' : ''}" id="autoMusicPanel">
         <div class="automation-music-head">
-          <div><h4>Música de fondo</h4><span class="hint">Opcional · una pista se repite en bucle durante todo el video final.</span></div>
-          <label class="poser-toggle"><input type="checkbox" id="autoMusicEnabled"${music.enabled ? ' checked' : ''}> usar música</label>
+          <div><h4>${esc(tr('automation.music.title'))}</h4><span class="hint">${esc(tr('automation.music.hint'))}</span></div>
+          <label class="poser-toggle"><input type="checkbox" id="autoMusicEnabled"${music.enabled ? ' checked' : ''}> ${esc(tr('automation.music.use'))}</label>
         </div>
         <div class="automation-music-grid">
-          <label class="automation-music-source"><span>Origen</span><select class="select" id="autoMusicSource">
-            <option value="asset"${music.source === 'asset' ? ' selected' : ''}>Elegir de Assets / subida</option>
-            <option value="auto"${music.source === 'auto' ? ' selected' : ''}>Elegir automáticamente por etiquetas</option>
-            <option value="suno"${music.source === 'suno' ? ' selected' : ''}>Generar con Suno</option>
+          <label class="automation-music-source"><span>${esc(tr('automation.music.source'))}</span><select class="select" id="autoMusicSource">
+            <option value="asset"${music.source === 'asset' ? ' selected' : ''}>${esc(tr('automation.music.fromAssets'))}</option>
+            <option value="auto"${music.source === 'auto' ? ' selected' : ''}>${esc(tr('automation.music.autoByTags'))}</option>
+            <option value="suno"${music.source === 'suno' ? ' selected' : ''}>${esc(tr('automation.music.generateSuno'))}</option>
           </select></label>
-          <label class="automation-music-track"><span>Pista</span><select class="select" id="autoMusicTrack"><option value="">— ninguna —</option>${musicAssets.map((asset) => `<option value="${esc(asset.key)}"${asset.key === music.assetKey ? ' selected' : ''}>${esc(asset.name)}</option>`).join('')}</select></label>
-          <label class="automation-music-gain"><span>Nivel musical · dB</span><input type="number" id="autoMusicGain" min="-60" max="0" step="1" value="${Number(music.gainDb).toFixed(1)}"></label>
-          <label class="automation-music-model"><span>Modelo Suno</span><select class="select" id="autoMusicModel">${(state.musicModel?.versions || [music.sunoModel]).map((version) => `<option value="${esc(version)}"${version === music.sunoModel ? ' selected' : ''}>${esc(version)}</option>`).join('')}</select></label>
-          <label class="automation-music-toggle"><span>Final musical</span><span><input type="checkbox" id="autoMusicFadeOut"${music.fadeOut ? ' checked' : ''}> Fade out</span></label>
-          <label class="automation-music-fade"><span>Duración del fade · segundos</span><input type="number" id="autoMusicFadeSeconds" min="0.25" max="30" step="0.25" value="${music.fadeOutSeconds}"${music.fadeOut ? '' : ' disabled'}></label>
-          <label class="automation-music-genres"><span>Género</span><input type="text" id="autoMusicGenres" value="${esc((music.genres || []).join(', '))}" placeholder="ambient, orchestral"></label>
-          <label class="automation-music-instruments"><span>Instrumentos</span><input type="text" id="autoMusicInstruments" value="${esc((music.instruments || []).join(', '))}" placeholder="piano, strings"></label>
-          <label class="automation-music-moods"><span>Sentimientos</span><input type="text" id="autoMusicMoods" value="${esc((music.moods || []).join(', '))}" placeholder="mysterious, tense"></label>
+          <label class="automation-music-track"><span>${esc(tr('automation.music.track'))}</span><select class="select" id="autoMusicTrack"><option value="">— ${esc(tr('automation.music.none'))} —</option>${musicAssets.map((asset) => `<option value="${esc(asset.key)}"${asset.key === music.assetKey ? ' selected' : ''}>${esc(asset.name)}</option>`).join('')}</select></label>
+          <label class="automation-music-gain"><span>${esc(tr('automation.music.level'))}</span><input type="number" id="autoMusicGain" min="-60" max="0" step="1" value="${Number(music.gainDb).toFixed(1)}"></label>
+          <label class="automation-music-model"><span>${esc(tr('automation.music.sunoModel'))}</span><select class="select" id="autoMusicModel">${(state.musicModel?.versions || [music.sunoModel]).map((version) => `<option value="${esc(version)}"${version === music.sunoModel ? ' selected' : ''}>${esc(version)}</option>`).join('')}</select></label>
+          <label class="automation-music-toggle"><span>${esc(tr('automation.music.ending'))}</span><span><input type="checkbox" id="autoMusicFadeOut"${music.fadeOut ? ' checked' : ''}> Fade out</span></label>
+          <label class="automation-music-fade"><span>${esc(tr('automation.music.fadeDuration'))}</span><input type="number" id="autoMusicFadeSeconds" min="0.25" max="30" step="0.25" value="${music.fadeOutSeconds}"${music.fadeOut ? '' : ' disabled'}></label>
+          <label class="automation-music-genres"><span>${esc(tr('assets.audio.genre'))}</span><input type="text" id="autoMusicGenres" value="${esc((music.genres || []).join(', '))}" placeholder="ambient, orchestral"></label>
+          <label class="automation-music-instruments"><span>${esc(tr('assets.audio.instruments'))}</span><input type="text" id="autoMusicInstruments" value="${esc((music.instruments || []).join(', '))}" placeholder="piano, strings"></label>
+          <label class="automation-music-moods"><span>${esc(tr('assets.audio.moods'))}</span><input type="text" id="autoMusicMoods" value="${esc((music.moods || []).join(', '))}" placeholder="mysterious, tense"></label>
         </div>
         <div class="automation-music-actions">
-          <button type="button" class="mini-btn" id="autoMusicAuto">${IC('spark')} Elegir automáticamente</button>
-          <button type="button" class="mini-btn" id="autoMusicGenerate">${IC('music')} Generar con Suno</button>
-          <button type="button" class="mini-btn" id="autoMusicUpload">${IC('upload')} Subir música</button>
-          <button type="button" class="mini-btn" id="autoMusicTest"${selectedMusic ? '' : ' disabled'}>${IC('play')} ${musicTestVoiceKey ? 'Probar con voz' : 'Probar música'}</button>
-          <span class="hint" id="autoMusicStatus">${selectedMusic ? `Seleccionada: ${esc(selectedMusic.name)}` : music.assetKey ? 'La pista seleccionada ya no está disponible.' : 'Todavía no hay una pista seleccionada.'}</span>
+          <button type="button" class="mini-btn" id="autoMusicAuto">${IC('spark')} ${esc(tr('automation.music.chooseAutomatically'))}</button>
+          <button type="button" class="mini-btn" id="autoMusicGenerate">${IC('music')} ${esc(tr('automation.music.generateSuno'))}</button>
+          <button type="button" class="mini-btn" id="autoMusicUpload">${IC('upload')} ${esc(tr('automation.music.upload'))}</button>
+          <button type="button" class="mini-btn" id="autoMusicTest"${selectedMusic ? '' : ' disabled'}>${IC('play')} ${esc(tr(musicTestVoiceKey ? 'automation.music.testWithVoice' : 'automation.music.test'))}</button>
+          <span class="hint" id="autoMusicStatus">${selectedMusic ? esc(tr('automation.music.selected', { name: selectedMusic.name })) : music.assetKey ? esc(tr('automation.music.unavailable')) : esc(tr('automation.music.notSelected'))}</span>
         </div>
-        ${selectedMusic ? `<audio class="automation-music-preview" id="autoMusicPreview" src="${fileUrl(selectedMusic.key)}" controls preload="metadata"></audio>${musicTestVoiceKey ? `<audio id="autoMusicVoicePreview" src="${fileUrl(musicTestVoiceKey)}" preload="metadata" hidden></audio>` : ''}<span class="hint automation-music-test-hint">La reproducción respeta ${Number(music.gainDb).toFixed(1)} dB${musicTestVoiceKey ? ' y puede compararse con una voz ya generada del proyecto.' : '. Generá al menos una voz para probar el balance conjunto.'}</span>` : ''}
+        ${selectedMusic ? `<audio class="automation-music-preview" id="autoMusicPreview" src="${fileUrl(selectedMusic.key)}" controls preload="metadata"></audio>${musicTestVoiceKey ? `<audio id="autoMusicVoicePreview" src="${fileUrl(musicTestVoiceKey)}" preload="metadata" hidden></audio>` : ''}<span class="hint automation-music-test-hint">${esc(tr(musicTestVoiceKey ? 'automation.music.previewWithVoice' : 'automation.music.previewNeedsVoice', { gain: Number(music.gainDb).toFixed(1) }))}</span>` : ''}
       </div>
       <div class="automation-transition-panel${transitionSound.enabled ? ' enabled' : ''}" id="autoTransitionPanel">
         <div class="automation-transition-head">
-          <div><h4>Transición sonora entre tomas</h4><span class="hint">Opcional · se reproduce en cada corte interno, nunca al inicio ni después de la última toma.</span></div>
-          <label class="poser-toggle"><input type="checkbox" id="autoTransitionEnabled"${transitionSound.enabled ? ' checked' : ''}> activar</label>
+          <div><h4>${esc(tr('automation.transition.title'))}</h4><span class="hint">${esc(tr('automation.transition.hint'))}</span></div>
+          <label class="poser-toggle"><input type="checkbox" id="autoTransitionEnabled"${transitionSound.enabled ? ' checked' : ''}> ${esc(tr('common.enable'))}</label>
         </div>
         <div class="automation-transition-controls">
-          <label><span>Sonido por categoría</span><select class="select" id="autoTransitionSound">${automationTransitionSoundOptions(transitionSound.soundId)}</select></label>
-          <button type="button" class="mini-btn" id="autoTransitionTest"${selectedTransitionSound ? '' : ' disabled'}>${IC('play')} Probar una vez</button>
-          <span class="hint" id="autoTransitionStatus">${selectedTransitionSound ? `${esc(selectedTransitionSound.category)} · ${esc(selectedTransitionSound.name)}` : (state.transitionSounds || []).length ? 'Elegí un sonido; se reproducirá automáticamente una vez.' : 'No hay sonidos instalados.'}</span>
+          <label><span>${esc(tr('automation.transition.soundByCategory'))}</span><select class="select" id="autoTransitionSound">${automationTransitionSoundOptions(transitionSound.soundId)}</select></label>
+          <button type="button" class="mini-btn" id="autoTransitionTest"${selectedTransitionSound ? '' : ' disabled'}>${IC('play')} ${esc(tr('automation.transition.testOnce'))}</button>
+          <span class="hint" id="autoTransitionStatus">${selectedTransitionSound ? `${esc(selectedTransitionSound.category)} · ${esc(selectedTransitionSound.name)}` : esc((state.transitionSounds || []).length ? tr('automation.transition.chooseHint') : tr('automation.transition.noneInstalled'))}</span>
         </div>
       </div>
       <div class="overlay-preset-bar">
-        <div><h4>Estilos de títulos y textos</h4><span class="hint">Guarda tipografía, resaltado, posiciones y animaciones como un preset reutilizable.</span></div>
+        <div><h4>${esc(tr('automation.textStyles.title'))}</h4><span class="hint">${esc(tr('automation.textStyles.hint'))}</span></div>
         <select class="select" id="overlayPresetSelect">${overlayPresetOptions()}</select>
-        <button type="button" class="mini-btn" id="overlayPresetApply"${(state.overlayPresets || []).length ? '' : ' disabled'}>${IC('check')} Aplicar</button>
-        <button type="button" class="mini-btn accent" id="overlayPresetSave">${IC('save')} Guardar estilo actual</button>
+        <button type="button" class="mini-btn" id="overlayPresetApply"${(state.overlayPresets || []).length ? '' : ' disabled'}>${IC('check')} ${esc(tr('common.apply'))}</button>
+        <button type="button" class="mini-btn accent" id="overlayPresetSave">${IC('save')} ${esc(tr('automation.textStyles.saveCurrent'))}</button>
         <button type="button" class="mini-btn danger" id="overlayPresetDelete" disabled>${IC('trash')}</button>
       </div>
       <div class="automation-dynamic-text-panel${dynamicText.enabled ? ' enabled' : ''}" id="autoDynamicTextPanel">
         <div class="automation-dynamic-text-head">
           <div>
-            <h4>Texto dinámico · Remotion</h4>
-            <span class="hint">Genera una capa transparente animada, sincronizada palabra por palabra con la voz, y la integra tanto en imágenes como en HeyGen.</span>
+            <h4>${esc(tr('automation.dynamicText.title'))}</h4>
+            <span class="hint">${esc(tr('automation.dynamicText.hint'))}</span>
           </div>
-          <label class="poser-toggle"><input type="checkbox" id="autoDynamicTextEnabled"${dynamicText.enabled ? ' checked' : ''}> activar</label>
+          <label class="poser-toggle"><input type="checkbox" id="autoDynamicTextEnabled"${dynamicText.enabled ? ' checked' : ''}> ${esc(tr('common.enable'))}</label>
         </div>
         <div class="automation-dynamic-text-grid">
-          <label><span>Animación del título</span><select class="select" id="autoTitleAnimation">
-            <option value="rise"${dynamicText.titleAnimation === 'rise' ? ' selected' : ''}>Ascenso suave</option>
-            <option value="slam"${dynamicText.titleAnimation === 'slam' ? ' selected' : ''}>Impacto</option>
-            <option value="typewriter"${dynamicText.titleAnimation === 'typewriter' ? ' selected' : ''}>Máquina de escribir</option>
+          <label><span>${esc(tr('automation.dynamicText.titleAnimation'))}</span><select class="select" id="autoTitleAnimation">
+            <option value="rise"${dynamicText.titleAnimation === 'rise' ? ' selected' : ''}>${esc(tr('automation.dynamicText.rise'))}</option>
+            <option value="slam"${dynamicText.titleAnimation === 'slam' ? ' selected' : ''}>${esc(tr('automation.dynamicText.slam'))}</option>
+            <option value="typewriter"${dynamicText.titleAnimation === 'typewriter' ? ' selected' : ''}>${esc(tr('automation.dynamicText.typewriter'))}</option>
           </select></label>
-          <label><span>Animación de subtítulos</span><select class="select" id="autoCaptionAnimation">
-            <option value="word-pop"${dynamicText.captionAnimation === 'word-pop' ? ' selected' : ''}>Palabra con impacto</option>
-            <option value="karaoke"${dynamicText.captionAnimation === 'karaoke' ? ' selected' : ''}>Resaltado karaoke</option>
-            <option value="bounce"${dynamicText.captionAnimation === 'bounce' ? ' selected' : ''}>Rebote</option>
+          <label><span>${esc(tr('automation.dynamicText.captionAnimation'))}</span><select class="select" id="autoCaptionAnimation">
+            <option value="word-pop"${dynamicText.captionAnimation === 'word-pop' ? ' selected' : ''}>${esc(tr('automation.dynamicText.wordPop'))}</option>
+            <option value="karaoke"${dynamicText.captionAnimation === 'karaoke' ? ' selected' : ''}>${esc(tr('automation.dynamicText.karaoke'))}</option>
+            <option value="bounce"${dynamicText.captionAnimation === 'bounce' ? ' selected' : ''}>${esc(tr('automation.dynamicText.bounce'))}</option>
           </select></label>
-          <label><span>Palabras visibles por grupo</span><input type="number" id="autoWordsPerPage" min="1" max="12" step="1" value="${dynamicText.wordsPerPage}"></label>
+          <label><span>${esc(tr('automation.dynamicText.wordsPerGroup'))}</span><input type="number" id="autoWordsPerPage" min="1" max="12" step="1" value="${dynamicText.wordsPerPage}"></label>
         </div>
-        <span class="hint automation-dynamic-text-note">Los audios nuevos de ElevenLabs usan sus marcas temporales exactas. Los audios antiguos se sincronizan por estimación hasta que vuelvan a generarse.</span>
+        <span class="hint automation-dynamic-text-note">${esc(tr('automation.dynamicText.timingHint'))}</span>
       </div>
-      <h4>Texto sobreimpreso</h4>
+      <h4>${esc(tr('automation.overlay.title'))}</h4>
       <div class="overlay-typography-grid">
         <div class="overlay-type-card">
-          <h5>Texto normal</h5>
-          <label><span>Fuente</span><span class="overlay-font-line"><select class="select" id="ovFont">${overlayFontOptions(pr.config.overlay.font)}</select><button type="button" class="mini-btn" data-import-font="font">Importar</button></span></label>
-          <label><span>Tamaño · px @ 1080</span><input type="number" id="ovSize" min="8" max="300" step="1" value="${pr.config.overlay.fontSizePx}"></label>
-          <label><span>Peso</span><select class="select" id="ovWeight">${[400, 500, 600, 700, 800, 900].map((weight) => `<option value="${weight}"${weight === pr.config.overlay.fontWeight ? ' selected' : ''}>${weight}</option>`).join('')}</select></label>
-          <label><span>Mayúsculas y minúsculas</span><select class="select" id="ovTransform">${[['none', 'Como fue escrito'], ['uppercase', 'MAYÚSCULAS'], ['lowercase', 'minúsculas'], ['capitalize', 'Iniciales En Mayúscula']].map(([value, label]) => `<option value="${value}"${value === (pr.config.overlay.textTransform || 'none') ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
-          <div class="overlay-format-options" aria-label="Formato del texto normal">
-            <label><input type="checkbox" id="ovItalic"${pr.config.overlay.fontItalic ? ' checked' : ''}> <em>Cursiva</em></label>
-            <label><input type="checkbox" id="ovUnderline"${pr.config.overlay.fontUnderline ? ' checked' : ''}> <u>Subrayado</u></label>
-            <label><input type="checkbox" id="ovStrike"${pr.config.overlay.fontStrikeThrough ? ' checked' : ''}> <s>Tachado</s></label>
+          <h5>${esc(tr('automation.overlay.normalText'))}</h5>
+          <label><span>${esc(tr('automation.overlay.font'))}</span><span class="overlay-font-line"><select class="select" id="ovFont">${overlayFontOptions(pr.config.overlay.font)}</select><button type="button" class="mini-btn" data-import-font="font">${esc(tr('common.import'))}</button></span></label>
+          <label><span>${esc(tr('automation.overlay.size'))}</span><input type="number" id="ovSize" min="8" max="300" step="1" value="${pr.config.overlay.fontSizePx}"></label>
+          <label><span>${esc(tr('automation.overlay.weight'))}</span><select class="select" id="ovWeight">${[400, 500, 600, 700, 800, 900].map((weight) => `<option value="${weight}"${weight === pr.config.overlay.fontWeight ? ' selected' : ''}>${weight}</option>`).join('')}</select></label>
+          <label><span>${esc(tr('automation.overlay.letterCase'))}</span><select class="select" id="ovTransform">${[['none', tr('automation.overlay.asWritten')], ['uppercase', tr('automation.overlay.uppercase')], ['lowercase', tr('automation.overlay.lowercase')], ['capitalize', tr('automation.overlay.capitalize')]].map(([value, label]) => `<option value="${value}"${value === (pr.config.overlay.textTransform || 'none') ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
+          <div class="overlay-format-options" aria-label="${esc(tr('automation.overlay.normalFormat'))}">
+            <label><input type="checkbox" id="ovItalic"${pr.config.overlay.fontItalic ? ' checked' : ''}> <em>${esc(tr('automation.overlay.italic'))}</em></label>
+            <label><input type="checkbox" id="ovUnderline"${pr.config.overlay.fontUnderline ? ' checked' : ''}> <u>${esc(tr('automation.overlay.underline'))}</u></label>
+            <label><input type="checkbox" id="ovStrike"${pr.config.overlay.fontStrikeThrough ? ' checked' : ''}> <s>${esc(tr('automation.overlay.strike'))}</s></label>
           </div>
-          <label><span>Color</span><input type="color" id="ovColor" value="${pr.config.overlay.color}"></label>
-          <label><span>Color del borde</span><input type="color" id="ovStroke" value="${pr.config.overlay.strokeColor}"></label>
-          <label><span>Borde · px @ 1080</span><input type="number" id="ovStrokeW" min="0" max="30" step="0.5" value="${pr.config.overlay.strokeWidthPx}"></label>
+          <label><span>${esc(tr('automation.overlay.color'))}</span><input type="color" id="ovColor" value="${pr.config.overlay.color}"></label>
+          <label><span>${esc(tr('automation.overlay.strokeColor'))}</span><input type="color" id="ovStroke" value="${pr.config.overlay.strokeColor}"></label>
+          <label><span>${esc(tr('automation.overlay.strokeWidth'))}</span><input type="number" id="ovStrokeW" min="0" max="30" step="0.5" value="${pr.config.overlay.strokeWidthPx}"></label>
         </div>
         <div class="overlay-type-card highlight">
-          <h5>Texto resaltado</h5>
-          <label><span>Fuente</span><span class="overlay-font-line"><select class="select" id="ovHlFont">${overlayFontOptions(pr.config.overlay.highlightFont || '', { inherit: true })}</select><button type="button" class="mini-btn" data-import-font="highlightFont">Importar</button></span></label>
-          <label><span>Tamaño · px @ 1080</span><input type="number" id="ovHlSize" min="8" max="300" step="1" value="${pr.config.overlay.highlightFontSizePx}"></label>
-          <label><span>Peso</span><select class="select" id="ovHlWeight">${[400, 500, 600, 700, 800, 900].map((weight) => `<option value="${weight}"${weight === pr.config.overlay.highlightFontWeight ? ' selected' : ''}>${weight}</option>`).join('')}</select></label>
-          <label><span>Mayúsculas y minúsculas</span><select class="select" id="ovHlTransform">${[['none', 'Como fue escrito'], ['uppercase', 'MAYÚSCULAS'], ['lowercase', 'minúsculas'], ['capitalize', 'Iniciales En Mayúscula']].map(([value, label]) => `<option value="${value}"${value === (pr.config.overlay.highlightTextTransform || 'none') ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
-          <div class="overlay-format-options" aria-label="Formato del texto resaltado">
-            <label><input type="checkbox" id="ovHlItalic"${pr.config.overlay.highlightFontItalic ? ' checked' : ''}> <em>Cursiva</em></label>
-            <label><input type="checkbox" id="ovHlUnderline"${pr.config.overlay.highlightFontUnderline ? ' checked' : ''}> <u>Subrayado</u></label>
-            <label><input type="checkbox" id="ovHlStrike"${pr.config.overlay.highlightFontStrikeThrough ? ' checked' : ''}> <s>Tachado</s></label>
+          <h5>${esc(tr('automation.overlay.highlightedText'))}</h5>
+          <label><span>${esc(tr('automation.overlay.font'))}</span><span class="overlay-font-line"><select class="select" id="ovHlFont">${overlayFontOptions(pr.config.overlay.highlightFont || '', { inherit: true })}</select><button type="button" class="mini-btn" data-import-font="highlightFont">${esc(tr('common.import'))}</button></span></label>
+          <label><span>${esc(tr('automation.overlay.size'))}</span><input type="number" id="ovHlSize" min="8" max="300" step="1" value="${pr.config.overlay.highlightFontSizePx}"></label>
+          <label><span>${esc(tr('automation.overlay.weight'))}</span><select class="select" id="ovHlWeight">${[400, 500, 600, 700, 800, 900].map((weight) => `<option value="${weight}"${weight === pr.config.overlay.highlightFontWeight ? ' selected' : ''}>${weight}</option>`).join('')}</select></label>
+          <label><span>${esc(tr('automation.overlay.letterCase'))}</span><select class="select" id="ovHlTransform">${[['none', tr('automation.overlay.asWritten')], ['uppercase', tr('automation.overlay.uppercase')], ['lowercase', tr('automation.overlay.lowercase')], ['capitalize', tr('automation.overlay.capitalize')]].map(([value, label]) => `<option value="${value}"${value === (pr.config.overlay.highlightTextTransform || 'none') ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
+          <div class="overlay-format-options" aria-label="${esc(tr('automation.overlay.highlightFormat'))}">
+            <label><input type="checkbox" id="ovHlItalic"${pr.config.overlay.highlightFontItalic ? ' checked' : ''}> <em>${esc(tr('automation.overlay.italic'))}</em></label>
+            <label><input type="checkbox" id="ovHlUnderline"${pr.config.overlay.highlightFontUnderline ? ' checked' : ''}> <u>${esc(tr('automation.overlay.underline'))}</u></label>
+            <label><input type="checkbox" id="ovHlStrike"${pr.config.overlay.highlightFontStrikeThrough ? ' checked' : ''}> <s>${esc(tr('automation.overlay.strike'))}</s></label>
           </div>
-          <label><span>Color</span><input type="color" id="ovHl" value="${pr.config.overlay.highlightColor || '#fbbf24'}"></label>
-          <label><span>Color del borde</span><input type="color" id="ovHlStroke" value="${pr.config.overlay.highlightStrokeColor || '#000000'}"></label>
-          <label><span>Borde · px @ 1080</span><input type="number" id="ovHlStrokeW" min="0" max="30" step="0.5" value="${pr.config.overlay.highlightStrokeWidthPx}"></label>
+          <label><span>${esc(tr('automation.overlay.color'))}</span><input type="color" id="ovHl" value="${pr.config.overlay.highlightColor || '#fbbf24'}"></label>
+          <label><span>${esc(tr('automation.overlay.strokeColor'))}</span><input type="color" id="ovHlStroke" value="${pr.config.overlay.highlightStrokeColor || '#000000'}"></label>
+          <label><span>${esc(tr('automation.overlay.strokeWidth'))}</span><input type="number" id="ovHlStrokeW" min="0" max="30" step="0.5" value="${pr.config.overlay.highlightStrokeWidthPx}"></label>
         </div>
       </div>
       <input type="file" id="ovFontFile" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" hidden>
-      <span class="hint">Las fuentes importadas (TTF, OTF, WOFF o WOFF2) quedan guardadas en Manifestador y disponibles para todos los proyectos. Los valores tipográficos son píxeles sobre una referencia de 1080 px de alto y se escalan proporcionalmente.</span>
+      <span class="hint">${esc(tr('automation.overlay.fontHint'))}</span>
       <div class="overlay-layout-controls">
-        <label><span>Posición vertical</span><select class="select" id="ovPos">${[['top', 'Arriba'], ['center', 'Centro'], ['bottom', 'Abajo']].map(([v, l]) => `<option value="${v}"${v === pr.config.overlay.position ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
-        <label><span>Alineación horizontal</span><select class="select" id="ovAlign">${[['left', 'Izquierda'], ['center', 'Centro'], ['right', 'Derecha']].map(([v, l]) => `<option value="${v}"${v === (pr.config.overlay.align || 'center') ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
-        <label><span>Ancho máximo · %</span><input type="number" id="ovMaxWidth" min="20" max="100" step="1" value="${pr.config.overlay.maxWidthPct || 88}"></label>
-        <button type="button" class="mini-btn" id="ovCenterX">Centrar horizontalmente</button>
-        <label class="poser-toggle"><input type="checkbox" id="ovBg" ${pr.config.overlay.bg ? 'checked' : ''}> caja de fondo</label>
+        <label><span>${esc(tr('automation.overlay.verticalPosition'))}</span><select class="select" id="ovPos">${[['top', tr('automation.overlay.top')], ['center', tr('automation.overlay.center')], ['bottom', tr('automation.overlay.bottom')]].map(([v, l]) => `<option value="${v}"${v === pr.config.overlay.position ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+        <label><span>${esc(tr('automation.overlay.horizontalAlign'))}</span><select class="select" id="ovAlign">${[['left', tr('automation.overlay.left')], ['center', tr('automation.overlay.center')], ['right', tr('automation.overlay.right')]].map(([v, l]) => `<option value="${v}"${v === (pr.config.overlay.align || 'center') ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+        <label><span>${esc(tr('automation.overlay.maxWidth'))}</span><input type="number" id="ovMaxWidth" min="20" max="100" step="1" value="${pr.config.overlay.maxWidthPct || 88}"></label>
+        <button type="button" class="mini-btn" id="ovCenterX">${esc(tr('automation.overlay.centerHorizontally'))}</button>
+        <label class="poser-toggle"><input type="checkbox" id="ovBg" ${pr.config.overlay.bg ? 'checked' : ''}> ${esc(tr('automation.overlay.backgroundBox'))}</label>
       </div>
       <div class="title-overlay-panel${titleOverlay.enabled ? ' enabled' : ''}" id="autoTitlePanel">
         <div class="title-overlay-heading">
-          <div><h4>Títulos</h4><span class="hint">Opcional · puede mostrar el título propio de cada bloque, sin anteponer “Bloque X”, o un título general en una toma elegida. No se agrega a la voz.</span></div>
-          <label class="poser-toggle"><input type="checkbox" id="autoTitleEnabled"${titleOverlay.enabled ? ' checked' : ''}> incluir título</label>
+          <div><h4>${esc(tr('automation.overlay.titles'))}</h4><span class="hint">${esc(tr('automation.overlay.titlesHint'))}</span></div>
+          <label class="poser-toggle"><input type="checkbox" id="autoTitleEnabled"${titleOverlay.enabled ? ' checked' : ''}> ${esc(tr('automation.overlay.includeTitle'))}</label>
         </div>
         <div class="title-overlay-targets">
-          <label><span>Qué título mostrar</span><select class="select" id="autoTitleMode"><option value="block"${titleOverlay.mode === 'block' ? ' selected' : ''}>Título propio de cada bloque</option><option value="project"${titleOverlay.mode === 'project' ? ' selected' : ''}>Título general del proyecto</option></select></label>
-          <label id="autoTitleTextField"><span>Texto del título general</span><input type="text" id="autoTitleText" maxlength="300" value="${esc(titleOverlay.text || pr.integration?.scriptTitle || pr.name)}"></label>
-          <label><span id="autoTitleBlockLabel">${titleOverlay.mode === 'block' ? 'Bloque para la previsualización' : 'Mostrar el título general en'}</span><select class="select" id="autoTitleBlock">${pr.blocks.map((block, index) => `<option value="${esc(block.id)}"${block.id === titleOverlay.blockId ? ' selected' : ''}>Bloque ${index + 1}${block.title ? ` · ${esc(block.title)}` : ''}</option>`).join('')}</select></label>
+          <label><span>${esc(tr('automation.overlay.whichTitle'))}</span><select class="select" id="autoTitleMode"><option value="block"${titleOverlay.mode === 'block' ? ' selected' : ''}>${esc(tr('automation.overlay.eachBlockTitle'))}</option><option value="project"${titleOverlay.mode === 'project' ? ' selected' : ''}>${esc(tr('automation.overlay.projectTitle'))}</option></select></label>
+          <label id="autoTitleTextField"><span>${esc(tr('automation.overlay.projectTitleText'))}</span><input type="text" id="autoTitleText" maxlength="300" value="${esc(titleOverlay.text || pr.integration?.scriptTitle || pr.name)}"></label>
+          <label><span id="autoTitleBlockLabel">${esc(tr(titleOverlay.mode === 'block' ? 'automation.overlay.previewBlock' : 'automation.overlay.showProjectTitleIn'))}</span><select class="select" id="autoTitleBlock">${pr.blocks.map((block, index) => `<option value="${esc(block.id)}"${block.id === titleOverlay.blockId ? ' selected' : ''}>${esc(tr('automation.script.blockNumber', { number: index + 1 }))}${block.title ? ` · ${esc(block.title)}` : ''}</option>`).join('')}</select></label>
         </div>
         <div class="overlay-type-card title">
-          <h5>Estilo independiente del título</h5>
-          <label><span>Fuente</span><span class="overlay-font-line"><select class="select" id="titleFont">${overlayFontOptions(titleOverlay.font)}</select><button type="button" class="mini-btn" data-import-font="titleFont">Importar</button></span></label>
-          <label><span>Tamaño · px @ 1080</span><input type="number" id="titleSize" min="8" max="300" step="1" value="${titleOverlay.fontSizePx}"></label>
-          <label><span>Peso</span><select class="select" id="titleWeight">${[400, 500, 600, 700, 800, 900].map((weight) => `<option value="${weight}"${weight === titleOverlay.fontWeight ? ' selected' : ''}>${weight}</option>`).join('')}</select></label>
-          <label><span>Mayúsculas y minúsculas</span><select class="select" id="titleTransform">${[['none', 'Como fue escrito'], ['uppercase', 'MAYÚSCULAS'], ['lowercase', 'minúsculas'], ['capitalize', 'Iniciales En Mayúscula']].map(([value, label]) => `<option value="${value}"${value === titleOverlay.textTransform ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
-          <div class="overlay-format-options" aria-label="Formato del título">
-            <label><input type="checkbox" id="titleItalic"${titleOverlay.fontItalic ? ' checked' : ''}> <em>Cursiva</em></label>
-            <label><input type="checkbox" id="titleUnderline"${titleOverlay.fontUnderline ? ' checked' : ''}> <u>Subrayado</u></label>
-            <label><input type="checkbox" id="titleStrike"${titleOverlay.fontStrikeThrough ? ' checked' : ''}> <s>Tachado</s></label>
+          <h5>${esc(tr('automation.overlay.independentTitleStyle'))}</h5>
+          <label><span>${esc(tr('automation.overlay.font'))}</span><span class="overlay-font-line"><select class="select" id="titleFont">${overlayFontOptions(titleOverlay.font)}</select><button type="button" class="mini-btn" data-import-font="titleFont">${esc(tr('common.import'))}</button></span></label>
+          <label><span>${esc(tr('automation.overlay.size'))}</span><input type="number" id="titleSize" min="8" max="300" step="1" value="${titleOverlay.fontSizePx}"></label>
+          <label><span>${esc(tr('automation.overlay.weight'))}</span><select class="select" id="titleWeight">${[400, 500, 600, 700, 800, 900].map((weight) => `<option value="${weight}"${weight === titleOverlay.fontWeight ? ' selected' : ''}>${weight}</option>`).join('')}</select></label>
+          <label><span>${esc(tr('automation.overlay.letterCase'))}</span><select class="select" id="titleTransform">${[['none', tr('automation.overlay.asWritten')], ['uppercase', tr('automation.overlay.uppercase')], ['lowercase', tr('automation.overlay.lowercase')], ['capitalize', tr('automation.overlay.capitalize')]].map(([value, label]) => `<option value="${value}"${value === titleOverlay.textTransform ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
+          <div class="overlay-format-options" aria-label="${esc(tr('automation.overlay.titleFormat'))}">
+            <label><input type="checkbox" id="titleItalic"${titleOverlay.fontItalic ? ' checked' : ''}> <em>${esc(tr('automation.overlay.italic'))}</em></label>
+            <label><input type="checkbox" id="titleUnderline"${titleOverlay.fontUnderline ? ' checked' : ''}> <u>${esc(tr('automation.overlay.underline'))}</u></label>
+            <label><input type="checkbox" id="titleStrike"${titleOverlay.fontStrikeThrough ? ' checked' : ''}> <s>${esc(tr('automation.overlay.strike'))}</s></label>
           </div>
-          <label><span>Color</span><input type="color" id="titleColor" value="${titleOverlay.color}"></label>
-          <label><span>Color del borde</span><input type="color" id="titleStroke" value="${titleOverlay.strokeColor}"></label>
-          <label><span>Borde · px @ 1080</span><input type="number" id="titleStrokeW" min="0" max="30" step="0.5" value="${titleOverlay.strokeWidthPx}"></label>
+          <label><span>${esc(tr('automation.overlay.color'))}</span><input type="color" id="titleColor" value="${titleOverlay.color}"></label>
+          <label><span>${esc(tr('automation.overlay.strokeColor'))}</span><input type="color" id="titleStroke" value="${titleOverlay.strokeColor}"></label>
+          <label><span>${esc(tr('automation.overlay.strokeWidth'))}</span><input type="number" id="titleStrokeW" min="0" max="30" step="0.5" value="${titleOverlay.strokeWidthPx}"></label>
         </div>
         <div class="overlay-layout-controls title-layout-controls">
-          <label><span>Posición vertical</span><select class="select" id="titlePos">${[['top', 'Arriba'], ['center', 'Centro'], ['bottom', 'Abajo']].map(([value, label]) => `<option value="${value}"${value === titleOverlay.position ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
-          <label><span>Alineación horizontal</span><select class="select" id="titleAlign">${[['left', 'Izquierda'], ['center', 'Centro'], ['right', 'Derecha']].map(([value, label]) => `<option value="${value}"${value === titleOverlay.align ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
-          <label><span>Ancho máximo · %</span><input type="number" id="titleMaxWidth" min="20" max="100" step="1" value="${titleOverlay.maxWidthPct}"></label>
-          <button type="button" class="mini-btn" id="titleCenterX">Centrar horizontalmente</button>
-          <label class="poser-toggle"><input type="checkbox" id="titleBg"${titleOverlay.bg ? ' checked' : ''}> caja de fondo</label>
+          <label><span>${esc(tr('automation.overlay.verticalPosition'))}</span><select class="select" id="titlePos">${[['top', tr('automation.overlay.top')], ['center', tr('automation.overlay.center')], ['bottom', tr('automation.overlay.bottom')]].map(([value, label]) => `<option value="${value}"${value === titleOverlay.position ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
+          <label><span>${esc(tr('automation.overlay.horizontalAlign'))}</span><select class="select" id="titleAlign">${[['left', tr('automation.overlay.left')], ['center', tr('automation.overlay.center')], ['right', tr('automation.overlay.right')]].map(([value, label]) => `<option value="${value}"${value === titleOverlay.align ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
+          <label><span>${esc(tr('automation.overlay.maxWidth'))}</span><input type="number" id="titleMaxWidth" min="20" max="100" step="1" value="${titleOverlay.maxWidthPct}"></label>
+          <button type="button" class="mini-btn" id="titleCenterX">${esc(tr('automation.overlay.centerHorizontally'))}</button>
+          <label class="poser-toggle"><input type="checkbox" id="titleBg"${titleOverlay.bg ? ' checked' : ''}> ${esc(tr('automation.overlay.backgroundBox'))}</label>
         </div>
       </div>
       <div class="ov-preview-tools">
-        <button type="button" class="mini-btn" id="ovPickBg">${IC('image')} Fondo de referencia</button>
-        ${pr.config.overlay.previewBg ? `<button type="button" class="mini-btn" id="ovClearBg">Quitar fondo</button>` : ''}
-        <span class="hint">Arrastrá el texto en la vista para ubicarlo</span>
+        <button type="button" class="mini-btn" id="ovPickBg">${IC('image')} ${esc(tr('automation.overlay.referenceBackground'))}</button>
+        ${pr.config.overlay.previewBg ? `<button type="button" class="mini-btn" id="ovClearBg">${esc(tr('automation.overlay.removeBackground'))}</button>` : ''}
+        <span class="hint">${esc(tr('automation.overlay.dragHint'))}</span>
       </div>
       <div class="ov-preview" id="ovPreview" style="aspect-ratio:${(pr.config.aspectRatio || '9:16').replace(':', '/')}">
         ${pr.config.overlay.previewBg ? `<img class="ov-preview-bg" src="${fileUrl(pr.config.overlay.previewBg)}" alt="">` : ''}
         <div class="ov-title" id="ovTitle"${titleOverlay.enabled ? '' : ' hidden'}>${esc(titleOverlay.text || pr.integration?.scriptTitle || pr.name)}</div>
-        <div class="ov-text" id="ovText"><span class="ov-normal">Un texto de </span><span class="ov-hl">ejemplo</span><span class="ov-normal"> dramático acá</span></div>
+        <div class="ov-text" id="ovText"><span class="ov-normal">${esc(tr('automation.overlay.previewBefore'))}</span><span class="ov-hl">${esc(tr('automation.overlay.previewHighlight'))}</span><span class="ov-normal">${esc(tr('automation.overlay.previewAfter'))}</span></div>
       </div>
     </div>
 
     <div class="automation-panel">
       <div class="automation-panel-heading automation-script-heading">
-        <div><h3>Guion (${pr.blocks.length} bloques)</h3><span class="hint">Los bloques manuales se integran en la misma secuencia que los importados.</span></div>
-        <button type="button" class="mini-btn accent" id="autoAddBlock">${IC('plus')} Añadir bloque</button>
+        <div><h3>${esc(tr('automation.script.title', { blocks: trn('automation.blockCount', pr.blocks.length) }))}</h3><span class="hint">${esc(tr('automation.script.manualHint'))}</span></div>
+        <button type="button" class="mini-btn accent" id="autoAddBlock">${IC('plus')} ${esc(tr('automation.script.addBlock'))}</button>
       </div>
       <form class="auto-block-create" id="autoNewBlockForm" hidden>
-        <div class="auto-block-create-head"><div><strong>Nuevo bloque manual</strong><span class="hint">Guardar el bloque no genera contenido.</span></div><button type="button" class="mini-btn" id="autoNewBlockCancel">Cancelar</button></div>
+        <div class="auto-block-create-head"><div><strong>${esc(tr('automation.script.newManualBlock'))}</strong><span class="hint">${esc(tr('automation.script.saveDoesNotGenerate'))}</span></div><button type="button" class="mini-btn" id="autoNewBlockCancel">${esc(tr('common.cancel'))}</button></div>
         <div class="auto-block-create-grid">
-          <label><span>Título interno</span><input type="text" id="autoNewBlockTitle" maxlength="160" placeholder="Ej: La revelación"></label>
-          <label><span>Ubicación en el guion</span><select class="select" id="autoNewBlockPosition"><option value="end">Al final</option><option value="start">Al principio</option>${pr.blocks.map((block, index) => `<option value="after:${esc(block.id)}">Después del bloque ${index + 1}${block.title ? ` · ${esc(block.title)}` : ''}</option>`).join('')}</select></label>
-          <label class="auto-block-create-wide"><span>Prompt visual · inglés</span><textarea id="autoNewBlockPrompt" maxlength="4000" rows="4" required placeholder="Describe la imagen de esta toma…"></textarea></label>
-          <label><span>Tipo de texto inicial</span><select class="select" id="autoNewBlockKind"><option value="narration">Narración</option><option value="dialogue"${pr.requirements.characters.length ? '' : ' disabled'}>Diálogo</option></select></label>
-          <label id="autoNewBlockCharacterField" hidden><span>Personaje del diálogo</span><select class="select" id="autoNewBlockCharacter">${pr.requirements.characters.map((role) => `<option value="${esc(role.role)}">${esc(automationRoleName(role.role))} · @${esc(role.role)}</option>`).join('')}</select></label>
-          <label class="auto-block-create-wide"><span id="autoNewBlockTextLabel">Narración inicial</span><textarea id="autoNewBlockText" maxlength="2000" rows="3" required placeholder="Texto que se convertirá en audio…"></textarea></label>
+          <label><span>${esc(tr('automation.script.internalTitle'))}</span><input type="text" id="autoNewBlockTitle" maxlength="160" placeholder="${esc(tr('automation.script.titlePlaceholder'))}"></label>
+          <label><span>${esc(tr('automation.script.position'))}</span><select class="select" id="autoNewBlockPosition"><option value="end">${esc(tr('automation.script.atEnd'))}</option><option value="start">${esc(tr('automation.script.atStart'))}</option>${pr.blocks.map((block, index) => `<option value="after:${esc(block.id)}">${esc(tr('automation.script.afterBlock', { number: index + 1 }))}${block.title ? ` · ${esc(block.title)}` : ''}</option>`).join('')}</select></label>
+          <label class="auto-block-create-wide"><span>${esc(tr('automation.script.visualPrompt'))}</span><textarea id="autoNewBlockPrompt" maxlength="4000" rows="4" required placeholder="${esc(tr('automation.script.visualPromptPlaceholder'))}"></textarea></label>
+          <label><span>${esc(tr('automation.script.initialTextType'))}</span><select class="select" id="autoNewBlockKind"><option value="narration">${esc(tr('automation.script.narration'))}</option><option value="dialogue"${pr.requirements.characters.length ? '' : ' disabled'}>${esc(tr('automation.script.dialogue'))}</option></select></label>
+          <label id="autoNewBlockCharacterField" hidden><span>${esc(tr('automation.script.dialogueCharacter'))}</span><select class="select" id="autoNewBlockCharacter">${pr.requirements.characters.map((role) => `<option value="${esc(role.role)}">${esc(automationRoleName(role.role))} · @${esc(role.role)}</option>`).join('')}</select></label>
+          <label class="auto-block-create-wide"><span id="autoNewBlockTextLabel">${esc(tr('automation.script.initialNarration'))}</span><textarea id="autoNewBlockText" maxlength="2000" rows="3" required placeholder="${esc(tr('automation.script.audioTextPlaceholder'))}"></textarea></label>
         </div>
-        <div class="auto-block-create-actions"><span class="hint">Después podrás configurar generador, prompt negativo, HeyGen y el resto de opciones desde el bloque.</span><button type="submit" class="mini-btn accent" id="autoNewBlockSave">${IC('save')} Crear bloque</button></div>
+        <div class="auto-block-create-actions"><span class="hint">${esc(tr('automation.script.configureLaterHint'))}</span><button type="submit" class="mini-btn accent" id="autoNewBlockSave">${IC('save')} ${esc(tr('automation.script.createBlock'))}</button></div>
       </form>
       ${pr.blocks.length ? pr.blocks.map((b, i) => {
         const out = pr.outputs?.[b.id] || null;
@@ -7987,165 +8055,165 @@ function renderAutomationProject() {
         return `
         <div class="auto-block${done ? ' is-done' : ''}" data-block="${b.id}">
           <div class="auto-block-head">
-            <strong>Bloque ${i + 1}${b.title ? ` · ${esc(b.title)}` : ''}</strong> <span class="hint">${esc([b.characters.join(', '), b.location, b.prop].filter(Boolean).join(' · '))}</span>
+            <strong>${esc(tr('automation.script.blockNumber', { number: i + 1 }))}${b.title ? ` · ${esc(b.title)}` : ''}</strong> <span class="hint">${esc([b.characters.join(', '), b.location, b.prop].filter(Boolean).join(' · '))}</span>
             <span class="auto-block-btns">
-              <button class="mini-btn" data-genblock="${b.id}" data-force="${done ? '1' : '0'}"${missing.length ? ' disabled' : ''}>${IC('spark')} ${done ? 'Regenerar' : partial ? 'Continuar' : 'Generar / continuar'}</button>
-              ${(out?.imageKey || blockGenerator === 'assets') && reusableAudioReady ? `<button class="mini-btn" data-regen-downstream="${b.id}"${missing.length ? ' disabled' : ''} title="Conserva los visuales y audios existentes; sólo rehace el texto y ensambla el video">${IC('film')} Rehacer texto + video</button>` : ''}
-              ${partial ? `<button class="mini-btn danger" data-regenblock="${b.id}"${missing.length ? ' disabled' : ''}>Regenerar desde cero</button>` : ''}
+              <button class="mini-btn" data-genblock="${b.id}" data-force="${done ? '1' : '0'}"${missing.length ? ' disabled' : ''}>${IC('spark')} ${esc(tr(done ? 'automation.script.regenerate' : partial ? 'automation.script.continue' : 'automation.script.generateContinue'))}</button>
+              ${(out?.imageKey || blockGenerator === 'assets') && reusableAudioReady ? `<button class="mini-btn" data-regen-downstream="${b.id}"${missing.length ? ' disabled' : ''} title="${esc(tr('automation.script.redoTextVideoHint'))}">${IC('film')} ${esc(tr('automation.script.redoTextVideo'))}</button>` : ''}
+              ${partial ? `<button class="mini-btn danger" data-regenblock="${b.id}"${missing.length ? ' disabled' : ''}>${esc(tr('automation.script.regenerateFromScratch'))}</button>` : ''}
             </span>
           </div>
           <div class="auto-block-editor">
             <div class="auto-block-generator">
-              <label><span>Generador de la toma</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>Imagen + audio</option><option value="seedance25"${blockGenerator === 'seedance25' ? ' selected' : ''}>Seedance 2.5 · video multimodal</option><option value="h3"${blockGenerator === 'h3' ? ' selected' : ''}>MiniMax H3 · video multimodal</option><option value="omni"${blockGenerator === 'omni' ? ' selected' : ''}>Gemini Omni 1.1 Flash · video</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + audio de ElevenLabs</option><option value="assets"${blockGenerator === 'assets' ? ' selected' : ''}>Assets · imágenes y videos</option></select></label>
+              <label><span>${esc(tr('automation.generators.label'))}</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>${esc(tr('automation.generators.imageAudio'))}</option><option value="seedance25"${blockGenerator === 'seedance25' ? ' selected' : ''}>Seedance 2.5 · ${esc(tr('automation.generators.multimodalVideo'))}</option><option value="h3"${blockGenerator === 'h3' ? ' selected' : ''}>MiniMax H3 · ${esc(tr('automation.generators.multimodalVideo'))}</option><option value="omni"${blockGenerator === 'omni' ? ' selected' : ''}>Gemini Omni 1.1 Flash · ${esc(tr('common.video'))}</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + ${esc(tr('automation.generators.elevenLabsAudio'))}</option><option value="assets"${blockGenerator === 'assets' ? ' selected' : ''}>Assets · ${esc(tr('automation.generators.imagesVideos'))}</option></select></label>
               <div class="auto-block-heygen-settings" data-block-heygen-settings${blockGenerator === 'heygen' ? '' : ' hidden'}>
-                <label><span>Personaje · variante HeyGen</span><select class="select" data-block-heygen-character>${heygenCharacters.length ? heygenCharacters.map((character) => `<option value="${character.id}"${character.id === selectedHeyGenCharacter?.id ? ' selected' : ''}>${esc(character.name)} · HeyGen · ${character.heygen?.closeAvatarId ? '2 planos' : '1 plano'}</option>`).join('') : '<option value="">— no hay personajes HeyGen listos —</option>'}</select></label>
-                <label><span>Encuadre</span><select class="select" data-block-heygen-framing><option value="wide"${b.heygenFraming === 'wide' || !b.heygenFraming ? ' selected' : ''}>Plano general</option><option value="close"${b.heygenFraming === 'close' ? ' selected' : ''}>Primer plano</option><option value="split"${b.heygenFraming === 'split' ? ' selected' : ''}>Alternar general → primer plano</option></select></label>
-                <span class="hint" data-block-heygen-hint>${selectedHeyGenCharacter?.heygen?.closeAvatarId ? 'La alternancia corta el texto cerca del punto medio y une ambos videos.' : 'Este personaje solo tiene código de plano general.'}</span>
+                <label><span>${esc(tr('automation.heygen.characterVariant'))}</span><select class="select" data-block-heygen-character>${heygenCharacters.length ? heygenCharacters.map((character) => `<option value="${character.id}"${character.id === selectedHeyGenCharacter?.id ? ' selected' : ''}>${esc(character.name)} · HeyGen · ${esc(trn('characters.shots', character.heygen?.closeAvatarId ? 2 : 1))}</option>`).join('') : `<option value="">— ${esc(tr('automation.heygen.noReadyCharacters'))} —</option>`}</select></label>
+                <label><span>${esc(tr('automation.heygen.framing'))}</span><select class="select" data-block-heygen-framing><option value="wide"${b.heygenFraming === 'wide' || !b.heygenFraming ? ' selected' : ''}>${esc(tr('automation.heygen.wideShot'))}</option><option value="close"${b.heygenFraming === 'close' ? ' selected' : ''}>${esc(tr('automation.heygen.closeUp'))}</option><option value="split"${b.heygenFraming === 'split' ? ' selected' : ''}>${esc(tr('automation.heygen.alternate'))}</option></select></label>
+                <span class="hint" data-block-heygen-hint>${esc(tr(selectedHeyGenCharacter?.heygen?.closeAvatarId ? 'automation.heygen.splitHint' : 'automation.heygen.wideOnlyHint'))}</span>
               </div>
               <div class="auto-block-assets-settings auto-block-h3-settings" data-block-h3-settings${blockGenerator === 'h3' ? '' : ' hidden'} data-h3-reference-keys="${esc(JSON.stringify(b.h3ReferenceKeys || []))}">
                 <div class="auto-block-assets-head">
-                  <div><strong>MiniMax H3</strong><span class="hint">Video generativo multimodal por cada tramo de narración, luego ensamblado con el texto del proyecto.</span></div>
-                  <button type="button" class="mini-btn" data-pick-block-h3>${IC('image')} Referencias adicionales</button>
+                  <div><strong>MiniMax H3</strong><span class="hint">${esc(tr('automation.generators.h3Hint'))}</span></div>
+                  <button type="button" class="mini-btn" data-pick-block-h3>${IC('image')} ${esc(tr('automation.generators.additionalReferences'))}</button>
                 </div>
                 <div class="auto-block-assets-list" data-block-h3-list>${automationBlockAssetSelectionMarkup(b.h3ReferenceKeys || [])}</div>
                 <div class="auto-block-create-grid">
-                  <label><span>Modo</span><select class="select" data-block-h3-mode><option value="reference"${b.h3Mode !== 'frames' ? ' selected' : ''}>Referencias multimodales</option><option value="frames"${b.h3Mode === 'frames' ? ' selected' : ''}>Fotograma de entrada → salida</option></select></label>
-                  <label><span>Resolución H3</span><select class="select" data-block-h3-resolution><option value="768P"${b.h3Resolution !== '2K' ? ' selected' : ''}>768P</option><option value="2K"${b.h3Resolution === '2K' ? ' selected' : ''}>2K</option></select></label>
+                  <label><span>${esc(tr('automation.generators.mode'))}</span><select class="select" data-block-h3-mode><option value="reference"${b.h3Mode !== 'frames' ? ' selected' : ''}>${esc(tr('automation.generators.multimodalReferences'))}</option><option value="frames"${b.h3Mode === 'frames' ? ' selected' : ''}>${esc(tr('automation.generators.startEndFrames'))}</option></select></label>
+                  <label><span>${esc(tr('automation.generators.h3Resolution'))}</span><select class="select" data-block-h3-resolution><option value="768P"${b.h3Resolution !== '2K' ? ' selected' : ''}>768P</option><option value="2K"${b.h3Resolution === '2K' ? ' selected' : ''}>2K</option></select></label>
                 </div>
-                <label class="poser-toggle"><input type="checkbox" data-block-h3-context${b.h3ContextIr ? ' checked' : ''}> enriquecer instrucciones con Context-IR</label>
-                <label class="poser-toggle"><input type="checkbox" data-block-h3-narration${b.h3UseNarrationReference !== false ? ' checked' : ''}> enviar la narración a H3 como referencia de audio</label>
-                <label class="poser-toggle"><input type="checkbox" data-block-h3-native-audio${b.h3KeepGeneratedAudio ? ' checked' : ''}> conservar el audio generado por H3 en lugar del archivo original de ElevenLabs</label>
-                <span class="hint" data-block-h3-hint>En Referencias, la imagen base del bloque y la voz se envían a H3. En Inicio → Fin debés elegir exactamente dos imágenes; la voz se añade durante el ensamblado.</span>
+                <label class="poser-toggle"><input type="checkbox" data-block-h3-context${b.h3ContextIr ? ' checked' : ''}> ${esc(tr('automation.generators.contextIr'))}</label>
+                <label class="poser-toggle"><input type="checkbox" data-block-h3-narration${b.h3UseNarrationReference !== false ? ' checked' : ''}> ${esc(tr('automation.generators.h3NarrationReference'))}</label>
+                <label class="poser-toggle"><input type="checkbox" data-block-h3-native-audio${b.h3KeepGeneratedAudio ? ' checked' : ''}> ${esc(tr('automation.generators.keepH3Audio'))}</label>
+                <span class="hint" data-block-h3-hint>${esc(tr('automation.generators.h3ModeHint'))}</span>
               </div>
               <div class="auto-block-assets-settings auto-block-h3-settings" data-block-seedance25-settings${blockGenerator === 'seedance25' ? '' : ' hidden'} data-seedance25-reference-keys="${esc(JSON.stringify(b.seedance25ReferenceKeys || []))}">
                 <div class="auto-block-assets-head">
-                  <div><strong>Seedance 2.5</strong><span class="hint">Video generativo de hasta 30 segundos por tramo, con referencias multimodales y audio nativo.</span></div>
-                  <button type="button" class="mini-btn" data-pick-block-seedance25>${IC('image')} Referencias adicionales</button>
+                  <div><strong>Seedance 2.5</strong><span class="hint">${esc(tr('automation.generators.seedanceHint'))}</span></div>
+                  <button type="button" class="mini-btn" data-pick-block-seedance25>${IC('image')} ${esc(tr('automation.generators.additionalReferences'))}</button>
                 </div>
                 <div class="auto-block-assets-list" data-block-seedance25-list>${automationBlockAssetSelectionMarkup(b.seedance25ReferenceKeys || [])}</div>
                 <div class="auto-block-create-grid">
-                  <label><span>Modo</span><select class="select" data-block-seedance25-mode><option value="reference"${b.seedance25Mode !== 'frames' ? ' selected' : ''}>Referencias multimodales</option><option value="frames"${b.seedance25Mode === 'frames' ? ' selected' : ''}>Fotograma de entrada → salida</option></select></label>
-                  <label><span>Resolución</span><select class="select" data-block-seedance25-resolution><option value="480p"${b.seedance25Resolution === '480p' ? ' selected' : ''}>480p</option><option value="720p"${b.seedance25Resolution !== '480p' ? ' selected' : ''}>720p</option></select></label>
+                  <label><span>${esc(tr('automation.generators.mode'))}</span><select class="select" data-block-seedance25-mode><option value="reference"${b.seedance25Mode !== 'frames' ? ' selected' : ''}>${esc(tr('automation.generators.multimodalReferences'))}</option><option value="frames"${b.seedance25Mode === 'frames' ? ' selected' : ''}>${esc(tr('automation.generators.startEndFrames'))}</option></select></label>
+                  <label><span>${esc(tr('automation.config.resolution'))}</span><select class="select" data-block-seedance25-resolution><option value="480p"${b.seedance25Resolution === '480p' ? ' selected' : ''}>480p</option><option value="720p"${b.seedance25Resolution !== '480p' ? ' selected' : ''}>720p</option></select></label>
                 </div>
-                <label class="poser-toggle"><input type="checkbox" data-block-seedance25-narration${b.seedance25UseNarrationReference !== false ? ' checked' : ''}> enviar la narración como @Audio de referencia</label>
-                <label class="poser-toggle"><input type="checkbox" data-block-seedance25-native-audio${b.seedance25KeepGeneratedAudio ? ' checked' : ''}> conservar el audio generado por Seedance en lugar del archivo original de ElevenLabs</label>
-                <span class="hint">En Referencias, la imagen base y la voz se envían a Seedance. Podés citar cada tipo por separado como @Image1, @Video1 o @Audio1. En Inicio → Fin elegí exactamente dos imágenes; la voz se añade durante el ensamblado.</span>
+                <label class="poser-toggle"><input type="checkbox" data-block-seedance25-narration${b.seedance25UseNarrationReference !== false ? ' checked' : ''}> ${esc(tr('automation.generators.seedanceNarrationReference'))}</label>
+                <label class="poser-toggle"><input type="checkbox" data-block-seedance25-native-audio${b.seedance25KeepGeneratedAudio ? ' checked' : ''}> ${esc(tr('automation.generators.keepSeedanceAudio'))}</label>
+                <span class="hint">${esc(tr('automation.generators.seedanceModeHint'))}</span>
               </div>
               <div class="auto-block-assets-settings auto-block-h3-settings" data-block-omni-settings${blockGenerator === 'omni' ? '' : ' hidden'} data-omni-reference-keys="${esc(JSON.stringify(b.omniReferenceKeys || []))}">
                 <div class="auto-block-assets-head">
-                  <div><strong>Gemini Omni 1.1 Flash</strong><span class="hint">Tomas de hasta 10 segundos; el montaje conserva la narración exacta de ElevenLabs.</span></div>
-                  <button type="button" class="mini-btn" data-pick-block-omni>${IC('image')} Referencias adicionales</button>
+                  <div><strong>Gemini Omni 1.1 Flash</strong><span class="hint">${esc(tr('automation.generators.omniHint'))}</span></div>
+                  <button type="button" class="mini-btn" data-pick-block-omni>${IC('image')} ${esc(tr('automation.generators.additionalReferences'))}</button>
                 </div>
                 <div class="auto-block-assets-list" data-block-omni-list>${automationBlockAssetSelectionMarkup(b.omniReferenceKeys || [])}</div>
                 <div class="auto-block-create-grid">
-                  <label><span>Modo</span><select class="select" data-block-omni-mode><option value="reference"${b.omniMode !== 'frames' ? ' selected' : ''}>Referencias</option><option value="frames"${b.omniMode === 'frames' ? ' selected' : ''}>Fotograma de entrada → salida</option></select></label>
-                  <label><span>Resolución</span><select class="select" data-block-omni-resolution>${['360p', '720p', '1080p', '4K'].map((value) => `<option value="${value}"${value === (b.omniResolution || '720p') ? ' selected' : ''}>${value}</option>`).join('')}</select></label>
+                  <label><span>${esc(tr('automation.generators.mode'))}</span><select class="select" data-block-omni-mode><option value="reference"${b.omniMode !== 'frames' ? ' selected' : ''}>${esc(tr('automation.generators.references'))}</option><option value="frames"${b.omniMode === 'frames' ? ' selected' : ''}>${esc(tr('automation.generators.startEndFrames'))}</option></select></label>
+                  <label><span>${esc(tr('automation.config.resolution'))}</span><select class="select" data-block-omni-resolution>${['360p', '720p', '1080p', '4K'].map((value) => `<option value="${value}"${value === (b.omniResolution || '720p') ? ' selected' : ''}>${value}</option>`).join('')}</select></label>
                 </div>
-                <span class="hint">En Referencias usa la imagen base del bloque y hasta 6 imágenes / 3 clips de 3s. Omni no acepta la narración como audio de referencia; se reemplaza por el audio de ElevenLabs al ensamblar.</span>
+                <span class="hint">${esc(tr('automation.generators.omniModeHint'))}</span>
               </div>
               <div class="auto-block-assets-settings" data-block-assets-settings${blockGenerator === 'assets' ? '' : ' hidden'} data-asset-keys="${esc(JSON.stringify(b.assetKeys || []))}">
                 <div class="auto-block-assets-head">
-                  <div><strong>Secuencia de Assets</strong><span class="hint">Cada archivo recibe la misma parte de la duración total del audio.</span></div>
-                  <button type="button" class="mini-btn" data-pick-block-assets>${IC('image')} Elegir y ordenar</button>
+                  <div><strong>${esc(tr('automation.generators.assetSequence'))}</strong><span class="hint">${esc(tr('automation.generators.assetSequenceHint'))}</span></div>
+                  <button type="button" class="mini-btn" data-pick-block-assets>${IC('image')} ${esc(tr('automation.generators.chooseOrder'))}</button>
                 </div>
                 <div class="auto-block-assets-list" data-block-assets-list>${automationBlockAssetSelectionMarkup(b.assetKeys || [])}</div>
-                <label class="poser-toggle auto-block-assets-mute"><input type="checkbox" data-block-assets-mute${b.assetMuteOriginal !== false ? ' checked' : ''}> silenciar el sonido original de los videos</label>
-                <span class="hint">Si un video es más corto que su tramo, se repite automáticamente hasta completarlo.</span>
+                <label class="poser-toggle auto-block-assets-mute"><input type="checkbox" data-block-assets-mute${b.assetMuteOriginal !== false ? ' checked' : ''}> ${esc(tr('automation.generators.muteAssetAudio'))}</label>
+                <span class="hint">${esc(tr('automation.generators.loopShortVideo'))}</span>
               </div>
             </div>
-            <label><span>Título interno del bloque</span><input type="text" data-block-title maxlength="160" value="${esc(b.title || '')}"></label>
-            <label data-block-prompt-field><span>Prompt visual · inglés</span><textarea data-block-prompt maxlength="4000" rows="5">${esc(automationPromptForEditor(pr, b.imagePrompt))}</textarea></label>
-            <label data-block-prompt-field><span>Prompt negativo · inglés</span><textarea data-block-negative maxlength="2000" rows="2">${esc(b.negativePrompt || '')}</textarea></label>
+            <label><span>${esc(tr('automation.generators.internalBlockTitle'))}</span><input type="text" data-block-title maxlength="160" value="${esc(b.title || '')}"></label>
+            <label data-block-prompt-field><span>${esc(tr('automation.script.visualPrompt'))}</span><textarea data-block-prompt maxlength="4000" rows="5">${esc(automationPromptForEditor(pr, b.imagePrompt))}</textarea></label>
+            <label data-block-prompt-field><span>${esc(tr('automation.generators.negativePrompt'))}</span><textarea data-block-negative maxlength="2000" rows="2">${esc(b.negativePrompt || '')}</textarea></label>
             <div class="auto-block-script-items">
-              ${(b.items || []).map((it, itemIndex) => `<label><span>${it.kind === 'dialogue' ? `Diálogo · ${esc(it.character || 'sin personaje')}` : 'Narración'}</span><textarea data-block-item="${itemIndex}" maxlength="2000" rows="3">${esc(it.text)}</textarea></label>`).join('')}
+              ${(b.items || []).map((it, itemIndex) => `<label><span>${it.kind === 'dialogue' ? `${esc(tr('automation.script.dialogue'))} · ${esc(it.character || tr('automation.generators.noCharacter'))}` : esc(tr('automation.script.narration'))}</span><textarea data-block-item="${itemIndex}" maxlength="2000" rows="3">${esc(it.text)}</textarea></label>`).join('')}
             </div>
-            <div class="auto-block-edit-actions"><span class="hint">Guardar no genera nada. Si ya había material, se conservarán las etapas que sigan siendo válidas.</span><button type="button" class="mini-btn accent" data-save-block="${esc(b.id)}">${IC('save')} Guardar cambios del bloque</button></div>
+            <div class="auto-block-edit-actions"><span class="hint">${esc(tr('automation.generators.saveReuseHint'))}</span><button type="button" class="mini-btn accent" data-save-block="${esc(b.id)}">${IC('save')} ${esc(tr('automation.generators.saveBlockChanges'))}</button></div>
           </div>
           <div class="auto-block-out" data-out="${b.id}">${automationBlockOutHtml(out, b)}</div>
         </div>`;
-      }).join('') : '<p class="hint">Sin bloques. Añadí uno manualmente o importá un guion.</p>'}
+      }).join('') : `<p class="hint">${esc(tr('automation.script.noBlocks'))}</p>`}
     </div>
 
     <div class="automation-actions">
-      ${missing.length ? `<span class="hint warn">No se puede automatizar: faltan ${missing.map(esc).join(', ')}.</span>` : `<span class="hint">Todo asignado · ${Object.values(pr.outputs || {}).filter((o) => o?.videoKey).length}/${pr.blocks.length} bloques generados.</span>`}
+      ${missing.length ? `<span class="hint warn">${esc(tr('automation.run.cannotRun', { missing: missing.join(', ') }))}</span>` : `<span class="hint">${esc(tr('automation.run.assignedProgress', { completed: Object.values(pr.outputs || {}).filter((o) => o?.videoKey).length, total: pr.blocks.length }))}</span>`}
       <select class="select" id="autoMode"${missing.length ? ' disabled' : ''}>
-        <option value="missing">Generar sólo los faltantes</option>
-        <option value="all">Regenerar todos</option>
+        <option value="missing">${esc(tr('automation.run.missingOnly'))}</option>
+        <option value="all">${esc(tr('automation.run.regenerateAll'))}</option>
       </select>
-      <button class="generate-btn" id="autoStart"${missing.length ? ' disabled' : ''}>${IC('spark')} Automatizar</button>
+      <button class="generate-btn" id="autoStart"${missing.length ? ' disabled' : ''}>${IC('spark')} ${esc(tr('automation.run.start'))}</button>
     </div>
 
       <div class="automation-panel final-assembly-panel">
         <div class="final-assembly-copy">
-          <h3>Video final</h3>
+          <h3>${esc(tr('automation.finalVideo.title'))}</h3>
           <label class="final-logo-toggle">
             <input type="checkbox" id="autoIncludeLogos"${includeLogos ? ' checked' : ''}>
-            <span><strong>Incluir logos</strong><small>Agrega el cierre de Controversy Tracker con su audio. El video funde a negro y la música termina antes del logo.</small></span>
+            <span><strong>${esc(tr('automation.finalVideo.includeLogos'))}</strong><small>${esc(tr('automation.finalVideo.logosHint'))}</small></span>
           </label>
           <span class="hint" id="autoAssembleStatus">${
           allVideosReady
-            ? `${completedVideos}/${pr.blocks.length} videos listos para unir en el orden del guion.`
-            : `Faltan ${pr.blocks.length - completedVideos} de ${pr.blocks.length} videos de bloque.`
+            ? esc(tr('automation.finalVideo.ready', { completed: completedVideos, total: pr.blocks.length }))
+            : esc(tr('automation.finalVideo.missing', { missing: pr.blocks.length - completedVideos, total: pr.blocks.length }))
         }</span>
         ${finalOutput ? `<span class="automation-stage-status">Último ensamble · ${finalOutput.blockCount || pr.blocks.length} bloques${finalOutput.width && finalOutput.height ? ` · ${finalOutput.width}×${finalOutput.height}` : ''}${finalOutput.musicKey ? ` · música en bucle${finalOutput.musicFadeOutSeconds ? ` · fade out ${finalOutput.musicFadeOutSeconds}s` : ''}` : ''}${finalOutput.transitionCount ? ` · ${finalOutput.transitionCount} transiciones (${esc(finalOutput.transitionSoundName || 'sonido')})` : ''}${finalOutput.includeLogos ? ` · logo ${finalOutput.logoVariant === 'vertical' ? 'vertical' : 'horizontal'}` : ''} · ${fmtDate(finalOutput.assembledAt)}</span>` : ''}
         <button type="button" class="generate-btn" id="autoAssemble"${allVideosReady ? '' : ' disabled'}>
-          ${IC('film')} ${finalOutput ? 'Reensamblar video final' : 'Ensamblar video final'}
+          ${IC('film')} ${esc(tr(finalOutput ? 'automation.finalVideo.reassemble' : 'automation.finalVideo.assemble'))}
         </button>
       </div>
       ${finalOutput ? `<div class="final-assembly-preview">
         <video src="${fileUrl(finalOutput.videoKey)}" controls preload="metadata"></video>
-        <button type="button" class="mini-btn" data-open-asset="${esc(finalOutput.videoKey)}">Abrir asset y acciones</button>
+        <button type="button" class="mini-btn" data-open-asset="${esc(finalOutput.videoKey)}">${esc(tr('automation.openAssetActions'))}</button>
       </div>` : ''}
     </div>
 
     <div class="automation-panel post-effect-panel${videoEffect.enabled ? ' enabled' : ''}" id="autoEffectPanel">
       <div class="post-effect-copy">
         <div class="post-effect-heading">
-          <div><h3>Efectos finales</h3><span class="hint">Posproducción opcional: imagen o video HeyGen → efecto → máscara de color → subtítulos. No vuelve a llamar a modelos generativos.</span></div>
-          <label class="poser-toggle"><input type="checkbox" id="autoEffectEnabled"${videoEffect.enabled ? ' checked' : ''}> activar</label>
+          <div><h3>${esc(tr('automation.effects.title'))}</h3><span class="hint">${esc(tr('automation.effects.hint'))}</span></div>
+          <label class="poser-toggle"><input type="checkbox" id="autoEffectEnabled"${videoEffect.enabled ? ' checked' : ''}> ${esc(tr('common.enable'))}</label>
         </div>
         <div class="post-effect-controls">
-          <label><span>Efecto</span><select class="select" id="autoEffectPreset">
-            <option value="wiggle"${videoEffect.preset === 'wiggle' ? ' selected' : ''}>Wiggle suave</option>
-            <option value="oldFilm"${videoEffect.preset === 'oldFilm' ? ' selected' : ''}>Cinta vieja</option>
+          <label><span>${esc(tr('automation.effects.effect'))}</span><select class="select" id="autoEffectPreset">
+            <option value="wiggle"${videoEffect.preset === 'wiggle' ? ' selected' : ''}>${esc(tr('automation.effects.softWiggle'))}</option>
+            <option value="oldFilm"${videoEffect.preset === 'oldFilm' ? ' selected' : ''}>${esc(tr('automation.effects.oldFilm'))}</option>
             <option value="vhs"${videoEffect.preset === 'vhs' ? ' selected' : ''}>VHS</option>
           </select></label>
-          <label class="post-effect-intensity"><span>Presencia / intensidad</span><span class="post-effect-range"><input type="range" id="autoEffectIntensity" min="0" max="100" step="1" value="${videoEffect.intensity}"><output id="autoEffectIntensityValue">${videoEffect.intensity}%</output></span></label>
+          <label class="post-effect-intensity"><span>${esc(tr('automation.effects.intensity'))}</span><span class="post-effect-range"><input type="range" id="autoEffectIntensity" min="0" max="100" step="1" value="${videoEffect.intensity}"><output id="autoEffectIntensityValue">${videoEffect.intensity}%</output></span></label>
         </div>
         <div class="post-effect-mask${videoEffect.maskEnabled ? ' enabled' : ''}" id="autoEffectMaskPanel">
-          <label class="post-effect-mask-toggle"><input type="checkbox" id="autoEffectMaskEnabled"${videoEffect.maskEnabled ? ' checked' : ''}><span>Máscara de color</span></label>
-          <label><span>Color</span><input type="color" id="autoEffectMaskColor" value="${esc(videoEffect.maskColor)}"${videoEffect.maskEnabled ? '' : ' disabled'}></label>
-          <label class="post-effect-mask-opacity"><span>Opacidad</span><span class="post-effect-range"><input type="range" id="autoEffectMaskOpacity" min="0" max="100" step="1" value="${videoEffect.maskOpacity}"${videoEffect.maskEnabled ? '' : ' disabled'}><output id="autoEffectMaskOpacityValue">${videoEffect.maskOpacity}%</output></span></label>
-          <span class="hint">Se coloca sobre la imagen o el video y debajo de títulos, texto y resaltado.</span>
+          <label class="post-effect-mask-toggle"><input type="checkbox" id="autoEffectMaskEnabled"${videoEffect.maskEnabled ? ' checked' : ''}><span>${esc(tr('automation.effects.colorMask'))}</span></label>
+          <label><span>${esc(tr('automation.effects.color'))}</span><input type="color" id="autoEffectMaskColor" value="${esc(videoEffect.maskColor)}"${videoEffect.maskEnabled ? '' : ' disabled'}></label>
+          <label class="post-effect-mask-opacity"><span>${esc(tr('automation.effects.opacity'))}</span><span class="post-effect-range"><input type="range" id="autoEffectMaskOpacity" min="0" max="100" step="1" value="${videoEffect.maskOpacity}"${videoEffect.maskEnabled ? '' : ' disabled'}><output id="autoEffectMaskOpacityValue">${videoEffect.maskOpacity}%</output></span></label>
+          <span class="hint">${esc(tr('automation.effects.maskHint'))}</span>
         </div>
-        <span class="hint" id="autoEffectStatus">${finalOutput ? 'El video limpio se conserva. Si hay logo, el efecto termina antes del cierre.' : 'Primero ensamblá el video final limpio.'}</span>
+        <span class="hint" id="autoEffectStatus">${esc(finalOutput ? tr('automation.effects.cleanPreserved') : tr('automation.effects.assembleFirst'))}</span>
         ${effectOutput ? `<span class="automation-stage-status">Última versión · ${esc(effectOutput.presetName || effectOutput.preset)} · intensidad ${effectOutput.intensity}%${effectOutput.maskEnabled ? ` · máscara ${esc(effectOutput.maskColor)} al ${effectOutput.maskOpacity}%` : ''}${effectOutput.subtitlesPreserved ? ' · subtítulos nítidos' : ''}${effectOutput.logoPreserved ? ' · logo preservado' : ''} · ${fmtDate(effectOutput.processedAt)}</span>` : ''}
-        <button type="button" class="generate-btn" id="autoApplyEffect"${finalOutput && videoEffect.enabled ? '' : ' disabled'}>${IC('spark')} ${effectOutput ? 'Crear otra versión con efecto' : 'Aplicar efecto al video final'}</button>
+        <button type="button" class="generate-btn" id="autoApplyEffect"${finalOutput && videoEffect.enabled ? '' : ' disabled'}>${IC('spark')} ${esc(tr(effectOutput ? 'automation.effects.createAnother' : 'automation.effects.apply'))}</button>
       </div>
       ${effectOutput ? `<div class="final-assembly-preview post-effect-preview">
         <video src="${fileUrl(effectOutput.videoKey)}" controls preload="metadata"></video>
-        <button type="button" class="mini-btn" data-open-asset="${esc(effectOutput.videoKey)}">Abrir versión y acciones</button>
+        <button type="button" class="mini-btn" data-open-asset="${esc(effectOutput.videoKey)}">${esc(tr('automation.effects.openVersion'))}</button>
       </div>` : ''}
     </div>
 
     <div class="automation-panel automation-text-refresh-panel${textRefreshPending ? ' is-pending' : ''}">
       <div>
-        <h3>Actualizar todos los textos del video</h3>
+        <h3>${esc(tr('automation.textRefresh.title'))}</h3>
         <p id="autoRefreshTextStatus">${finalOutput
-          ? `${textRefreshPending ? 'Hay cambios de texto o diseño pendientes. ' : ''}Regenera títulos, subtítulos y resaltados y reemplaza únicamente ${textRefreshTargetLabel}. No vuelve a generar imágenes, voces, Assets ni planos HeyGen.`
-          : 'Esta opción estará disponible después de ensamblar el video final.'}</p>
-        ${textRefreshOutput?.textRefreshedAt ? `<span class="automation-stage-status">Última actualización de textos · ${fmtDate(textRefreshOutput.textRefreshedAt)}</span>` : ''}
+          ? esc(tr('automation.textRefresh.description', { pending: textRefreshPending ? tr('automation.textRefresh.pendingPrefix') : '', target: textRefreshTargetLabel }))
+          : esc(tr('automation.textRefresh.availableAfterAssembly'))}</p>
+        ${textRefreshOutput?.textRefreshedAt ? `<span class="automation-stage-status">${esc(tr('automation.textRefresh.lastUpdate', { date: fmtDate(textRefreshOutput.textRefreshedAt) }))}</span>` : ''}
       </div>
-      <button type="button" class="mini-btn accent automation-text-refresh-button" id="autoRefreshAllText"${finalOutput ? '' : ' disabled'}>${IC('refresh')} ${textRefreshPending ? 'Aplicar cambios a todos los textos' : 'Regenerar todos los textos'}</button>
+      <button type="button" class="mini-btn accent automation-text-refresh-button" id="autoRefreshAllText"${finalOutput ? '' : ' disabled'}>${IC('refresh')} ${esc(tr(textRefreshPending ? 'automation.textRefresh.applyChanges' : 'automation.textRefresh.regenerateAll'))}</button>
     </div>
 
     <div class="automation-panel automation-finalize-panel">
       <div>
-        <h3>Finalizar proyecto</h3>
-        <p>Elimina del disco las regeneraciones y parciales descartados que pertenecen a este proyecto. Conserva los resultados vigentes de cada bloque, audios, capas, planos HeyGen, música y videos finales, además de cualquier material reutilizado en otra sección.</p>
+        <h3>${esc(tr('automation.finalize.title'))}</h3>
+        <p>${esc(tr('automation.finalize.description'))}</p>
         ${finalization?.finalizedAt ? `<span class="automation-stage-status">Última limpieza · ${finalization.deletedCount || 0} archivo${finalization.deletedCount === 1 ? '' : 's'} · ${formatAutomationBytes(finalization.deletedBytes || 0)} liberados · ${fmtDate(finalization.finalizedAt)}${finalization.failedCount ? ` · ${finalization.failedCount} pendientes` : ''}</span>` : '<span class="hint">Antes de borrar se mostrará la cantidad exacta de archivos y espacio recuperable.</span>'}
       </div>
-      <button type="button" class="mini-btn danger automation-finalize-button" id="autoFinalize">${IC('trash')} Finalizar proyecto</button>
+      <button type="button" class="mini-btn danger automation-finalize-button" id="autoFinalize">${IC('trash')} ${esc(tr('automation.finalize.title'))}</button>
     </div>`;
 
   $('#automationRoot').querySelectorAll('[data-assign]').forEach((sel) => sel.addEventListener('change', async () => {
@@ -8175,8 +8243,8 @@ function renderAutomationProject() {
   const syncNewBlockKind = () => {
     const isDialogue = newBlockKind.value === 'dialogue';
     newBlockCharacterField.hidden = !isDialogue;
-    $('#autoNewBlockTextLabel').textContent = isDialogue ? 'Diálogo inicial' : 'Narración inicial';
-    $('#autoNewBlockText').placeholder = isDialogue ? 'Texto que dirá el personaje…' : 'Texto que se convertirá en audio…';
+    $('#autoNewBlockTextLabel').textContent = tr(isDialogue ? 'automation.script.initialDialogue' : 'automation.script.initialNarration');
+    $('#autoNewBlockText').placeholder = tr(isDialogue ? 'automation.script.dialogueTextPlaceholder' : 'automation.script.audioTextPlaceholder');
   };
   $('#autoAddBlock').addEventListener('click', () => {
     newBlockForm.hidden = false;
@@ -8197,13 +8265,13 @@ function renderAutomationProject() {
     const text = $('#autoNewBlockText').value.trim();
     const kind = newBlockKind.value === 'dialogue' ? 'dialogue' : 'narration';
     const character = kind === 'dialogue' ? $('#autoNewBlockCharacter').value : '';
-    if (!imagePrompt) return toast('Escribí el prompt visual del nuevo bloque.', 'err');
-    if (!text) return toast('Escribí la narración o diálogo inicial.', 'err');
-    if (kind === 'dialogue' && !character) return toast('Elegí el personaje que dirá el diálogo.', 'err');
+    if (!imagePrompt) return toast(tr('automation.script.visualPromptRequired'), 'err');
+    if (!text) return toast(tr('automation.script.initialTextRequired'), 'err');
+    if (kind === 'dialogue' && !character) return toast(tr('automation.script.dialogueCharacterRequired'), 'err');
 
     const newBlock = {
       id: `manual-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-      title: $('#autoNewBlockTitle').value.trim() || `Bloque ${pr.blocks.length + 1}`,
+      title: $('#autoNewBlockTitle').value.trim() || tr('automation.script.blockNumber', { number: pr.blocks.length + 1 }),
       imagePrompt,
       negativePrompt: '',
       items: [{ kind, character, text }],
@@ -8242,7 +8310,7 @@ function renderAutomationProject() {
     renderAutomationProject();
     const createdElement = $('#automationRoot').querySelector(`[data-block="${newBlock.id}"]`);
     createdElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    toast(`Bloque “${newBlock.title}” añadido al guion.`);
+    toast(tr('automation.script.added', { title: newBlock.title }));
   });
   syncNewBlockKind();
 
@@ -8279,7 +8347,7 @@ function renderAutomationProject() {
   });
   $('#overlayPresetApply').addEventListener('click', async () => {
     const preset = (state.overlayPresets || []).find((item) => item.id === $('#overlayPresetSelect').value);
-    if (!preset) return toast('Elegí un estilo guardado.', 'err');
+    if (!preset) return toast(tr('automation.textStyles.chooseSaved'), 'err');
     Object.assign(ov, preset.overlay || {});
     const titleBehavior = {
       enabled: titleOv.enabled,
@@ -8291,10 +8359,10 @@ function renderAutomationProject() {
     Object.assign(dynamicText, preset.dynamicText || {});
     await saveAutomation({ config: { overlay: ov, titleOverlay: titleOv, dynamicText } });
     renderAutomationProject();
-    toast(`Estilo “${preset.name}” aplicado.`);
+    toast(tr('automation.textStyles.applied', { name: preset.name }));
   });
   $('#overlayPresetSave').addEventListener('click', async () => {
-    const name = window.prompt('Nombre para este estilo de títulos y textos:');
+    const name = window.prompt(tr('automation.textStyles.namePrompt'));
     if (!name?.trim()) return;
     try {
       const item = await api('/api/overlay-presets', {
@@ -8303,17 +8371,17 @@ function renderAutomationProject() {
       });
       state.overlayPresets.unshift(item);
       renderAutomationProject();
-      toast(`Estilo “${item.name}” guardado.`);
+      toast(tr('automation.textStyles.saved', { name: item.name }));
     } catch (error) { toast(error.message, 'err'); }
   });
   $('#overlayPresetDelete').addEventListener('click', async () => {
     const preset = (state.overlayPresets || []).find((item) => item.id === $('#overlayPresetSelect').value);
-    if (!preset || !confirm(`¿Borrar el estilo “${preset.name}”?`)) return;
+    if (!preset || !confirm(tr('automation.textStyles.deleteConfirm', { name: preset.name }))) return;
     try {
       await api(`/api/overlay-presets/${preset.id}`, { method: 'DELETE' });
       state.overlayPresets = state.overlayPresets.filter((item) => item.id !== preset.id);
       renderAutomationProject();
-      toast('Estilo eliminado.');
+      toast(tr('automation.textStyles.deleted'));
     } catch (error) { toast(error.message, 'err'); }
   });
   $('#autoModel').addEventListener('change', async () => { await saveAll(); renderAutomationProject(); });
@@ -8328,15 +8396,13 @@ function renderAutomationProject() {
   });
   $('#autoApplyArtPrompt')?.addEventListener('click', async () => {
     const savedPrompt = state.prompts.find((prompt) => prompt.id === $('#autoArtPrompt').value);
-    if (!savedPrompt) return toast('Elegí un prompt guardado.', 'err');
+    if (!savedPrompt) return toast(tr('automation.config.chooseSavedPrompt'), 'err');
     $('#autoArtStyle').value = savedPrompt.text.slice(0, 1200);
     artStylePromptId = savedPrompt.id;
     artStyleImageKey = isStylePrompt(savedPrompt) ? (savedPrompt.styleImageKey || '') : '';
     await saveAll();
     renderAutomationProject();
-    toast(savedPrompt.text.length > 1200
-      ? `“${savedPrompt.title}” aplicado; se usaron los primeros 1200 caracteres.`
-      : `“${savedPrompt.title}” aplicado al estilo artístico global.`);
+    toast(tr(savedPrompt.text.length > 1200 ? 'automation.config.promptAppliedTruncated' : 'automation.config.promptApplied', { title: savedPrompt.title }));
   });
 
   const readMusicControls = () => {
@@ -8363,7 +8429,7 @@ function renderAutomationProject() {
     $('#autoTransitionTest').disabled = !transitionSound.soundId;
     $('#autoTransitionStatus').textContent = selected
       ? `${selected.category} · ${selected.name}`
-      : (state.transitionSounds || []).length ? 'Elegí un sonido; se reproducirá automáticamente una vez.' : 'No hay sonidos instalados.';
+      : (state.transitionSounds || []).length ? tr('automation.transition.chooseHint') : tr('automation.transition.noneInstalled');
     return transitionSound;
   };
   const readEffectControls = () => {
@@ -8455,7 +8521,7 @@ function renderAutomationProject() {
     const db = Number.isFinite(enteredDb) ? Math.max(-60, Math.min(0, enteredDb)) : -15;
     musicPreview.volume = Math.max(0, Math.min(1, 10 ** (db / 20)));
     const hint = $('#autoMusicPanel .automation-music-test-hint');
-    if (hint) hint.textContent = `La reproducción respeta ${db.toFixed(1)} dB${voicePreview ? ' y puede compararse con una voz ya generada del proyecto.' : '. Generá al menos una voz para probar el balance conjunto.'}`;
+    if (hint) hint.textContent = tr(voicePreview ? 'automation.music.previewWithVoice' : 'automation.music.previewNeedsVoice', { gain: db.toFixed(1) });
   };
   applyPreviewGain();
   $('#autoMusicGain').addEventListener('input', applyPreviewGain);
@@ -8467,8 +8533,8 @@ function renderAutomationProject() {
       musicPreview.pause();
       if (voicePreview) voicePreview.pause();
       musicPreview.loop = false;
-      musicTestButton.innerHTML = `${IC('play')} ${voicePreview ? 'Probar con voz' : 'Probar música'}`;
-      status.textContent = 'Prueba detenida.';
+      musicTestButton.innerHTML = `${IC('play')} ${tr(voicePreview ? 'automation.music.testWithVoice' : 'automation.music.test')}`;
+      status.textContent = tr('automation.music.testStopped');
       return;
     }
     try {
@@ -8479,23 +8545,23 @@ function renderAutomationProject() {
         voicePreview.currentTime = 0;
         voicePreview.volume = 1;
         await Promise.all([musicPreview.play(), voicePreview.play()]);
-        status.textContent = `Probando voz con música a ${Number($('#autoMusicGain').value).toFixed(1)} dB…`;
+        status.textContent = tr('automation.music.testingWithVoice', { gain: Number($('#autoMusicGain').value).toFixed(1) });
       } else {
         await musicPreview.play();
-        status.textContent = `Reproduciendo música a ${Number($('#autoMusicGain').value).toFixed(1)} dB…`;
+        status.textContent = tr('automation.music.playing', { gain: Number($('#autoMusicGain').value).toFixed(1) });
       }
-      musicTestButton.textContent = 'Detener prueba';
+      musicTestButton.textContent = tr('automation.music.stopTest');
     } catch (error) {
       musicPreview.pause();
       if (voicePreview) voicePreview.pause();
-      status.textContent = `No se pudo reproducir la prueba: ${error.message}`;
+      status.textContent = tr('automation.music.testFailed', { error: error.message });
     }
   });
   voicePreview?.addEventListener('ended', () => {
     musicPreview.pause();
     musicPreview.loop = false;
-    musicTestButton.innerHTML = `${IC('play')} Probar con voz`;
-    $('#autoMusicStatus').textContent = 'Prueba de balance terminada.';
+    musicTestButton.innerHTML = `${IC('play')} ${tr('automation.music.testWithVoice')}`;
+    $('#autoMusicStatus').textContent = tr('automation.music.balanceFinished');
   });
   $('#autoMusicTrack').addEventListener('change', async () => {
     readMusicControls();
@@ -8513,14 +8579,12 @@ function renderAutomationProject() {
     music.enabled = true;
     music.source = 'auto';
     button.disabled = true;
-    status.textContent = 'Buscando la música con mayor coincidencia…';
+    status.textContent = tr('automation.music.searchingBestMatch');
     try {
       const result = await api(`/api/automations/${pr.id}/music/auto-select`, { method: 'POST', body: music });
       state.automations[state.automations.findIndex((item) => item.id === pr.id)] = result.project;
       renderAutomationProject();
-      toast(result.selected.score > 0
-        ? `Música elegida automáticamente (${result.selected.score} puntos de coincidencia).`
-        : 'Música elegida automáticamente; no había coincidencias exactas y se usó la más reciente.', 'ok');
+      toast(tr(result.selected.score > 0 ? 'automation.music.autoSelectedScore' : 'automation.music.autoSelectedRecent', { score: result.selected.score }), 'ok');
     } catch (error) {
       button.disabled = false;
       status.textContent = error.message;
@@ -8533,15 +8597,15 @@ function renderAutomationProject() {
     readMusicControls();
     music.enabled = true;
     music.source = 'suno';
-    if (!confirm('Suno generará dos variantes y consumirá créditos. La primera quedará asignada al proyecto y ambas se guardarán en Assets. ¿Continuar?')) return;
+    if (!confirm(tr('automation.music.sunoConfirm'))) return;
     button.disabled = true;
-    status.textContent = 'Suno está componiendo la música; esto puede tardar varios minutos…';
+    status.textContent = tr('automation.music.sunoComposing');
     try {
       const result = await api(`/api/automations/${pr.id}/music/generate`, { method: 'POST', body: music });
       state.automations[state.automations.findIndex((item) => item.id === pr.id)] = result.project;
       await refreshAssets();
       renderAutomationProject();
-      toast('Suno generó dos variantes; la primera quedó asignada al proyecto.', 'ok');
+      toast(tr('automation.music.sunoGenerated'), 'ok');
     } catch (error) {
       button.disabled = false;
       status.textContent = error.message;
@@ -8564,7 +8628,7 @@ function renderAutomationProject() {
     $('#autoTitlePanel')?.classList.toggle('enabled', !!titleOv.enabled);
     $('#autoTitleText').disabled = titleOv.mode === 'block';
     $('#autoTitleTextField')?.classList.toggle('is-unused', titleOv.mode === 'block');
-    $('#autoTitleBlockLabel').textContent = titleOv.mode === 'block' ? 'Bloque para la previsualización' : 'Mostrar el título general en';
+    $('#autoTitleBlockLabel').textContent = tr(titleOv.mode === 'block' ? 'automation.overlay.previewBlock' : 'automation.overlay.showProjectTitleIn');
   };
   const bindOv = (id, prop, transform = (v) => v) => {
     const el = $('#' + id);
@@ -8637,7 +8701,7 @@ function renderAutomationProject() {
       else ov[fontImportTarget] = font.family;
       await saveAutomation({ config: { overlay: ov, titleOverlay: titleOv } });
       renderAutomationProject();
-      toast(`Fuente “${font.name}” importada y guardada.`);
+      toast(tr('automation.overlay.fontImported', { name: font.name }));
     } catch (error) {
       toast(error.message, 'err');
     }
@@ -8683,7 +8747,7 @@ function renderAutomationProject() {
   if (window.ResizeObserver) new ResizeObserver(styleText).observe(preview);
 
   // fondo de referencia (solo para previsualizar; no se usa al generar)
-  $('#ovPickBg').addEventListener('click', () => { state.overlayBgPick = true; openPicker(); $('#pickerTitle').textContent = 'Elegir fondo de referencia'; });
+  $('#ovPickBg').addEventListener('click', () => { state.overlayBgPick = true; openPicker(); $('#pickerTitle').textContent = tr('automation.overlay.chooseReferenceBackground'); });
   $('#ovClearBg')?.addEventListener('click', () => { ov.previewBg = ''; saveAll().then(() => renderAutomationProject()); });
 
   $('#automationRoot').querySelectorAll('[data-block-generator]').forEach((select) => {
@@ -8704,9 +8768,7 @@ function renderAutomationProject() {
       omniSettings.hidden = select.value !== 'omni';
       blockElement.querySelectorAll('[data-block-prompt-field]').forEach((field) => { field.hidden = select.value === 'assets'; });
       const character = state.characters.find((item) => item.id === characterSelect?.value);
-      if (hint) hint.textContent = character?.heygen?.closeAvatarId
-        ? 'La alternancia corta el texto cerca del punto medio y une ambos videos.'
-        : 'Este personaje solo tiene código de plano general.';
+      if (hint) hint.textContent = tr(character?.heygen?.closeAvatarId ? 'automation.heygen.splitHint' : 'automation.heygen.wideOnlyHint');
       if (character && !character.heygen?.closeAvatarId && ['close', 'split'].includes(framingSelect?.value)) framingSelect.value = 'wide';
     };
     select.addEventListener('change', sync);
@@ -8742,7 +8804,7 @@ function renderAutomationProject() {
     if (!blockElement || !currentBlock) return;
     const imagePrompt = automationPromptFromEditor(pr, blockElement.querySelector('[data-block-prompt]').value.trim());
     const negativePrompt = blockElement.querySelector('[data-block-negative]').value.trim();
-    const title = blockElement.querySelector('[data-block-title]').value.trim() || currentBlock.title || 'Bloque';
+    const title = blockElement.querySelector('[data-block-title]').value.trim() || currentBlock.title || tr('automation.block');
     const selectedGenerator = blockElement.querySelector('[data-block-generator]').value;
     const generator = ['image', 'heygen', 'assets', 'h3', 'seedance25', 'omni'].includes(selectedGenerator) ? selectedGenerator : 'image';
     const heygenCharacterId = generator === 'heygen' ? (blockElement.querySelector('[data-block-heygen-character]').value || '') : '';
@@ -8777,29 +8839,29 @@ function renderAutomationProject() {
       ...item,
       text: blockElement.querySelector(`[data-block-item="${index}"]`)?.value.trim() || ''
     })).filter((item) => item.text);
-    if (generator !== 'assets' && !imagePrompt) return toast('El bloque debe conservar un prompt visual.', 'err');
-    if (!items.length) return toast('El bloque debe conservar al menos un texto de narración o diálogo.', 'err');
-    if (generator === 'heygen' && !heygenCharacterReady(heygenCharacter)) return toast('Elegí un personaje con variante HeyGen completa.', 'err');
-    if (generator === 'heygen' && ['close', 'split'].includes(heygenFraming) && !heygenCharacter.heygen?.closeAvatarId) return toast('Ese personaje no tiene código de primer plano.', 'err');
-    if (generator === 'assets' && !assetKeys.length) return toast('Elegí al menos una imagen o video para este bloque.', 'err');
+    if (generator !== 'assets' && !imagePrompt) return toast(tr('automation.blockValidation.visualPromptRequired'), 'err');
+    if (!items.length) return toast(tr('automation.blockValidation.textRequired'), 'err');
+    if (generator === 'heygen' && !heygenCharacterReady(heygenCharacter)) return toast(tr('automation.blockValidation.heygenCharacterRequired'), 'err');
+    if (generator === 'heygen' && ['close', 'split'].includes(heygenFraming) && !heygenCharacter.heygen?.closeAvatarId) return toast(tr('automation.blockValidation.noCloseUpCode'), 'err');
+    if (generator === 'assets' && !assetKeys.length) return toast(tr('automation.blockValidation.assetsRequired'), 'err');
     if (generator === 'h3' && h3Mode === 'frames') {
       const frameItems = h3ReferenceKeys.map(automationVisualAsset);
       if (frameItems.length !== 2 || frameItems.some((item) => ['video', 'audio'].includes(item.zone))) {
-        return toast('Inicio → Fin de H3 necesita exactamente dos imágenes, en orden: entrada y salida.', 'err');
+        return toast(tr('automation.blockValidation.h3Frames'), 'err');
       }
     }
     if (generator === 'seedance25' && seedance25Mode === 'frames') {
       if (seedance25ReferenceKeys.length !== 2 || seedance25ReferenceKeys.some((key) => /^(video|audio)\//.test(key))) {
-        return toast('Inicio → Fin de Seedance 2.5 necesita exactamente dos imágenes.', 'err');
+        return toast(tr('automation.blockValidation.seedanceFrames'), 'err');
       }
     }
     if (generator === 'omni' && omniMode === 'frames') {
       if (omniReferenceKeys.length !== 2 || omniReferenceKeys.some((key) => /^(video|audio)\//.test(key))) {
-        return toast('Inicio → Fin de Gemini Omni necesita exactamente dos imágenes.', 'err');
+        return toast(tr('automation.blockValidation.omniFrames'), 'err');
       }
     }
     if (generator === 'omni' && omniReferenceKeys.some((key) => /^audio\//.test(key))) {
-      return toast('Gemini Omni todavía no admite audio subido como referencia.', 'err');
+      return toast(tr('automation.blockValidation.omniNoAudio'), 'err');
     }
     button.disabled = true;
     const updated = await saveAutomation({
@@ -8812,7 +8874,7 @@ function renderAutomationProject() {
     });
     if (updated) {
       renderAutomationProject();
-      toast(`Cambios guardados en “${title}”. Las imágenes o audios válidos se reutilizarán.`);
+      toast(tr('automation.blockValidation.saved', { title }));
     } else {
       button.disabled = false;
     }
@@ -9222,32 +9284,32 @@ function automationBlockOutHtml(out, block = null) {
   const isOmni = out.generator === 'omni';
   const canRegenerateHeyGenPlanes = isHeyGen && out.heygenFraming === 'split' && segmentVideoKeys.length === 2 && block?.id;
   const sourceStatus = isHeyGen
-    ? `HeyGen · ${out.heygenFraming === 'split' ? '2 planos' : '1 plano'}`
+    ? `HeyGen · ${trn('characters.shots', out.heygenFraming === 'split' ? 2 : 1)}`
     : isH3
-      ? `MiniMax H3 · ${out.h3Resolution || '768P'} · ${h3SegmentVideoKeys.length} tramo${h3SegmentVideoKeys.length === 1 ? '' : 's'}`
+      ? `MiniMax H3 · ${out.h3Resolution || '768P'} · ${trn('automation.outputs.segmentCount', h3SegmentVideoKeys.length)}`
     : isSeedance25
-      ? `Seedance 2.5 · ${out.h3Resolution || '720p'} · ${h3SegmentVideoKeys.length} tramo${h3SegmentVideoKeys.length === 1 ? '' : 's'}`
+      ? `Seedance 2.5 · ${out.h3Resolution || '720p'} · ${trn('automation.outputs.segmentCount', h3SegmentVideoKeys.length)}`
     : isOmni
-      ? `Gemini Omni · ${out.h3Resolution || '720p'} · ${h3SegmentVideoKeys.length} tramo${h3SegmentVideoKeys.length === 1 ? '' : 's'}`
+      ? `Gemini Omni · ${out.h3Resolution || '720p'} · ${trn('automation.outputs.segmentCount', h3SegmentVideoKeys.length)}`
     : isAssets
-      ? `Assets · ${(out.assetKeys || []).length} visuales · ${out.assetMuteOriginal !== false ? 'audio original silenciado' : 'audio original mezclado'} · ${out.motionOverlayKey ? 'texto dinámico ✓' : `capa ${out.textLayerKey ? '✓' : '—'}`}`
-      : `Imagen ${out.imageKey ? '✓' : '—'} · ${out.motionOverlayKey ? 'Texto dinámico ✓' : `Texto ${out.textImageKey ? '✓' : '—'} · Capa ${out.textLayerKey ? '✓' : '—'}`}`;
+      ? `Assets · ${trn('automation.outputs.visualCount', (out.assetKeys || []).length)} · ${tr(out.assetMuteOriginal !== false ? 'automation.outputs.originalAudioMuted' : 'automation.outputs.originalAudioMixed')} · ${out.motionOverlayKey ? `${tr('automation.outputs.dynamicText')} ✓` : `${tr('automation.outputs.layer')} ${out.textLayerKey ? '✓' : '—'}`}`
+      : `${tr('automation.outputs.image')} ${out.imageKey ? '✓' : '—'} · ${out.motionOverlayKey ? `${tr('automation.outputs.dynamicText')} ✓` : `${tr('automation.outputs.text')} ${out.textImageKey ? '✓' : '—'} · ${tr('automation.outputs.layer')} ${out.textLayerKey ? '✓' : '—'}`}`;
   return `
     <span class="automation-stage-status">
-      ${sourceStatus} · Audio ${audioKeys.length}/${expected || '—'} · Video ${out.videoKey ? '✓' : '—'}
+      ${sourceStatus} · ${esc(tr('common.audio'))} ${audioKeys.length}/${expected || '—'} · ${esc(tr('common.video'))} ${out.videoKey ? '✓' : '—'}
     </span>
-    ${out.fallbackUsed ? `<span class="hint warn">Imagen generada con respaldo: ${esc(out.imageModelName || out.imageModelId || '')}</span>` : ''}
-    ${out.imageKey ? `<button type="button" class="auto-output-asset" data-open-asset="${esc(out.imageKey)}" title="Abrir asset y acciones"><img src="${fileUrl(out.imageKey)}" alt="imagen"></button>` : ''}
-    ${out.textImageKey ? `<button type="button" class="auto-output-asset" data-open-asset="${esc(out.textImageKey)}" title="Abrir asset y acciones"><img src="${fileUrl(out.textImageKey)}" alt="con texto"></button>` : ''}
-    ${out.textLayerKey ? `<button type="button" class="mini-btn" data-open-asset="${esc(out.textLayerKey)}">Capa de subtítulos</button>` : ''}
-    ${out.motionOverlayKey ? `<button type="button" class="mini-btn accent" data-open-asset="${esc(out.motionOverlayKey)}">Capa animada Remotion</button>` : ''}
-    ${audioKeys.map((key, index) => `<span class="auto-output-audio"><small>Audio ${index + 1}</small><audio src="${fileUrl(key)}" controls preload="metadata"></audio></span>`).join('')}
-    ${segmentVideoKeys.length ? `<span class="heygen-segment-list"><small>Segmentos HeyGen</small>${segmentVideoKeys.map((key, index) => {
-      const label = out.heygenFraming === 'split' ? (index === 0 ? 'Plano general' : 'Primer plano') : 'Toma HeyGen';
-      return `<span class="heygen-segment-row"><button type="button" class="mini-btn" data-open-asset="${esc(key)}">${label}</button>${canRegenerateHeyGenPlanes ? `<button type="button" class="mini-btn accent" data-regenerate-heygen-segment data-block-id="${esc(block.id)}" data-segment-index="${index}">${IC('refresh')} Regenerar</button>` : ''}</span>`;
+    ${out.fallbackUsed ? `<span class="hint warn">${esc(tr('automation.outputs.fallbackImage', { model: out.imageModelName || out.imageModelId || '' }))}</span>` : ''}
+    ${out.imageKey ? `<button type="button" class="auto-output-asset" data-open-asset="${esc(out.imageKey)}" title="${esc(tr('automation.openAssetActions'))}"><img src="${fileUrl(out.imageKey)}" alt="${esc(tr('automation.outputs.image'))}"></button>` : ''}
+    ${out.textImageKey ? `<button type="button" class="auto-output-asset" data-open-asset="${esc(out.textImageKey)}" title="${esc(tr('automation.openAssetActions'))}"><img src="${fileUrl(out.textImageKey)}" alt="${esc(tr('automation.outputs.withText'))}"></button>` : ''}
+    ${out.textLayerKey ? `<button type="button" class="mini-btn" data-open-asset="${esc(out.textLayerKey)}">${esc(tr('automation.outputs.subtitleLayer'))}</button>` : ''}
+    ${out.motionOverlayKey ? `<button type="button" class="mini-btn accent" data-open-asset="${esc(out.motionOverlayKey)}">${esc(tr('automation.outputs.remotionLayer'))}</button>` : ''}
+    ${audioKeys.map((key, index) => `<span class="auto-output-audio"><small>${esc(tr('automation.outputs.audioNumber', { number: index + 1 }))}</small><audio src="${fileUrl(key)}" controls preload="metadata"></audio></span>`).join('')}
+    ${segmentVideoKeys.length ? `<span class="heygen-segment-list"><small>${esc(tr('automation.outputs.heygenSegments'))}</small>${segmentVideoKeys.map((key, index) => {
+      const label = out.heygenFraming === 'split' ? tr(index === 0 ? 'automation.heygen.wideShot' : 'automation.heygen.closeUp') : tr('automation.outputs.heygenTake');
+      return `<span class="heygen-segment-row"><button type="button" class="mini-btn" data-open-asset="${esc(key)}">${esc(label)}</button>${canRegenerateHeyGenPlanes ? `<button type="button" class="mini-btn accent" data-regenerate-heygen-segment data-block-id="${esc(block.id)}" data-segment-index="${index}">${IC('refresh')} ${esc(tr('automation.script.regenerate'))}</button>` : ''}</span>`;
     }).join('')}</span>` : ''}
-    ${h3SegmentVideoKeys.length ? `<span class="heygen-segment-list"><small>Tramos ${isSeedance25 ? 'Seedance 2.5' : isOmni ? 'Gemini Omni' : 'MiniMax H3'}</small>${h3SegmentVideoKeys.map((key, index) => `<span class="heygen-segment-row"><button type="button" class="mini-btn" data-open-asset="${esc(key)}">Tramo ${index + 1}</button></span>`).join('')}</span>` : ''}
-    ${out.videoKey ? `<span class="auto-output-video"><video src="${fileUrl(out.videoKey)}" controls preload="metadata"></video><button type="button" class="mini-btn" data-open-asset="${esc(out.videoKey)}">Acciones del video</button></span>` : ''}`;
+    ${h3SegmentVideoKeys.length ? `<span class="heygen-segment-list"><small>${esc(tr('automation.outputs.modelSegments', { model: isSeedance25 ? 'Seedance 2.5' : isOmni ? 'Gemini Omni' : 'MiniMax H3' }))}</small>${h3SegmentVideoKeys.map((key, index) => `<span class="heygen-segment-row"><button type="button" class="mini-btn" data-open-asset="${esc(key)}">${esc(tr('automation.outputs.segmentNumber', { number: index + 1 }))}</button></span>`).join('')}</span>` : ''}
+    ${out.videoKey ? `<span class="auto-output-video"><video src="${fileUrl(out.videoKey)}" controls preload="metadata"></video><button type="button" class="mini-btn" data-open-asset="${esc(out.videoKey)}">${esc(tr('automation.outputs.videoActions'))}</button></span>` : ''}`;
 }
 
 function automationImageSettings(model, config) {
@@ -9493,8 +9555,8 @@ async function runAutomationHeyGenBlock(pr, block, output, { regenerate = false,
   if (['close', 'split'].includes(block.heygenFraming) && !character.heygen?.closeAvatarId) {
     throw new Error('El personaje HeyGen elegido no tiene código de primer plano.');
   }
-  if (pr.config?.heygenAuthMode === 'oauth' && !state.heygenOAuth.connected) throw new Error('Conectá HeyGen OAuth desde Configuración.');
-  if (pr.config?.heygenAuthMode !== 'oauth' && !state.config?.keys?.heygen) throw new Error('Guardá la API key de HeyGen en Configuración.');
+  if (pr.config?.heygenAuthMode === 'oauth' && !state.heygenOAuth.connected) throw new Error(tr('automation.pipeline.connectHeygenOauth'));
+  if (pr.config?.heygenAuthMode !== 'oauth' && !state.config?.keys?.heygen) throw new Error(tr('automation.pipeline.saveHeygenKey'));
 
   const plan = automationAudioPlan(block);
   const audioKeys = Array.isArray(output.audioKeys) ? output.audioKeys.slice(0, plan.segments.length) : [];
@@ -9842,7 +9904,12 @@ async function assembleAutomationProject(projectId) {
       // El ensamble ya quedó guardado aunque la vista de Assets no pueda refrescarse.
     }
     renderAutomationProject();
-    toast(`Video final ensamblado: ${result.finalOutput.blockCount} bloques${result.finalOutput.transitionCount ? `, ${result.finalOutput.transitionCount} transiciones sonoras` : ''}${result.finalOutput.musicKey ? ' con música' : ''}${result.finalOutput.includeLogos ? ' y logo final' : ''}`, 'ok');
+    toast(tr('automation.finalVideo.assembled', {
+      blocks: trn('automation.blockCount', result.finalOutput.blockCount),
+      transitions: result.finalOutput.transitionCount ? `, ${trn('automation.finalVideo.soundTransitions', result.finalOutput.transitionCount)}` : '',
+      music: result.finalOutput.musicKey ? tr('automation.finalVideo.withMusic') : '',
+      logo: result.finalOutput.includeLogos ? tr('automation.finalVideo.withLogo') : ''
+    }), 'ok');
   } catch (error) {
     if (button) button.disabled = false;
     if (status) status.textContent = `Falló el ensamble: ${error.message}`;
@@ -10292,7 +10359,7 @@ function updateEstimate() {
     const model = currentVideoModel();
     if (model?.provider === 'heygen') {
       if (state.video.heygenAuthMode === 'oauth') {
-        el.textContent = 'incluido según tu plan HeyGen';
+        el.textContent = tr('create.estimate.heygenPlan');
       } else {
         const seconds = Math.max(1, Math.ceil(promptBox.value.trim().length / 14));
         const amount = seconds * Number(model.apiPricePerSecond || 0);
@@ -10306,17 +10373,17 @@ function updateEstimate() {
     el.textContent = p ? `≈ $${p.toFixed(3)} (${state.video.duration}s)` : '';
   } else if (state.mode === 'music') {
     const perTrack = state.pricing.music?.perTrack ?? 0;
-    el.textContent = perTrack ? `≈ $${(perTrack * 2).toFixed(3)} (2 variantes)` : '';
+    el.textContent = perTrack ? `≈ $${(perTrack * 2).toFixed(3)} (${tr('create.estimate.variants')})` : '';
   } else if (state.mode === 'comfyui') {
-    el.textContent = 'Gratis (tu ComfyUI local)';
+    el.textContent = tr('create.estimate.localFree');
   } else {
     const per1k = state.pricing.audio?.[state.audioModelId]?.per1kChars
       ?? state.pricing.audio?.['eleven-v3']?.per1kChars
       ?? 0;
     const chars = promptBox.value.length;
     el.textContent = chars
-      ? `≈ $${((chars / 1000) * per1k).toFixed(3)} (${chars} car.)`
-      : `$${per1k.toFixed(2)} / 1k caracteres`;
+      ? `≈ $${((chars / 1000) * per1k).toFixed(3)} (${tr('create.estimate.charactersShort', { count: i18n?.formatNumber(chars) ?? chars })})`
+      : tr('create.estimate.perCharacters', { price: per1k.toFixed(2) });
   }
 }
 
@@ -10539,6 +10606,7 @@ $('#btnSavePricing').addEventListener('click', async () => {
 function fillConfigForm() {
   const f = $('#configForm');
   const c = state.config;
+  f.language.value = c.language === 'en' ? 'en' : 'es';
   f.key_gemini.value = c.keys.gemini || '';
   f.key_googleTranslate.value = c.keys.googleTranslate || '';
   f.key_ark.value = c.keys.ark || '';
@@ -10679,12 +10747,14 @@ $('#configForm').addEventListener('submit', async (e) => {
   }
   try {
     const previousNsfwEnabled = Boolean(state.config?.nsfwEnabled);
+    const previousLanguage = state.config?.language === 'en' ? 'en' : 'es';
     if (previousNsfwEnabled !== f.nsfwEnabled.checked && !f.nsfwAdminPassword.value) {
       return toast('Ingresá la contraseña administrativa para cambiar el acceso NSFW.', 'err');
     }
     state.config = await api('/api/config', {
       method: 'PUT',
       body: {
+        language: f.language.value,
         keys: {
           gemini: f.key_gemini.value.trim(),
           googleTranslate: f.key_googleTranslate.value.trim(),
@@ -10729,12 +10799,17 @@ $('#configForm').addEventListener('submit', async (e) => {
         accessPassword: f.accessPassword.value
       }
     });
+    const languageChanged = previousLanguage !== state.config.language;
+    setAppLanguage(state.config.language);
     renderTagPalette();
     f.accessPassword.value = '';
     f.accessPasswordConfirm.value = '';
     fillConfigForm();
-    if (previousNsfwEnabled !== Boolean(state.config.nsfwEnabled)) location.reload();
-    toast('Configuración guardada (queda solo en tu máquina)');
+    if (previousNsfwEnabled !== Boolean(state.config.nsfwEnabled) || languageChanged) {
+      location.reload();
+      return;
+    }
+    toast(tr('config.saved', {}, 'Configuración guardada (queda solo en tu máquina)'));
     state.voices = null; // por si cambió la key de ElevenLabs
   } catch (err) {
     toast(err.message, 'err');
@@ -10749,6 +10824,7 @@ async function init() {
   try {
     const s = await api('/api/state');
     state.config = s.config;
+    setAppLanguage(state.config?.language || 'es');
     state.models = s.models;
     state.videoModels = s.videoModels || [];
     state.audioModels = s.audioModels || (s.audioModel ? [s.audioModel] : []);
@@ -10781,7 +10857,7 @@ async function init() {
     state.modelId = s.models[0]?.id;
     await loadHeyGenOAuthStatus(false);
   } catch (e) {
-    toast('No pude cargar el estado: ' + e.message, 'err');
+    toast(tr('app.loadFailed', { error: e.message }, `No pude cargar el estado: ${e.message}`), 'err');
     return;
   }
   renderImageControls();

@@ -60,25 +60,25 @@
     <div class="logo"><img src="brand/manifestador-logo.png" alt="Manifestador"></div>
 
     <nav>
-      <button class="nav-btn active" data-view="create"><svg class="ic"><use href="#i-wand"/></svg> Crear</button>
-      <button class="nav-btn" data-view="assets"><svg class="ic"><use href="#i-grid"/></svg> Assets</button>
-      <button class="nav-btn" data-view="characters"><svg class="ic"><use href="#i-user"/></svg> Personajes</button>
-      <button class="nav-btn" data-view="elements"><svg class="ic"><use href="#i-globe"/></svg> Locaciones y objetos</button>
-      <button class="nav-btn" data-view="series"><svg class="ic"><use href="#i-layers"/></svg> Series</button>
-      <button class="nav-btn" data-view="automatizador"><svg class="ic"><use href="#i-spark"/></svg> Automatizador</button>
-      <button class="nav-btn" data-view="subtitler"><svg class="ic"><use href="#i-clapper"/></svg> Subtitulador</button>
-      <button class="nav-btn" data-view="poser"><svg class="ic"><use href="#i-cube"/></svg> Poser</button>
-      <button class="nav-btn" data-view="prompts"><svg class="ic"><use href="#i-book"/></svg> Prompts</button>
-      <button class="nav-btn" data-view="vocabulary"><svg class="ic"><use href="#i-tag"/></svg> Vocabulario</button>
-      <button class="nav-btn" data-view="snippets"><svg class="ic"><use href="#i-code"/></svg> Snippets</button>
-      <button class="nav-btn" data-view="costs"><svg class="ic"><use href="#i-dollar"/></svg> Consumo</button>
-      <button class="nav-btn" data-view="config"><svg class="ic"><use href="#i-gear"/></svg> Configuración</button>
+      <button class="nav-btn active" data-view="create"><svg class="ic"><use href="#i-wand"/></svg><span data-i18n="nav.create">Crear</span></button>
+      <button class="nav-btn" data-view="assets"><svg class="ic"><use href="#i-grid"/></svg><span data-i18n="nav.assets">Assets</span></button>
+      <button class="nav-btn" data-view="characters"><svg class="ic"><use href="#i-user"/></svg><span data-i18n="nav.characters">Personajes</span></button>
+      <button class="nav-btn" data-view="elements"><svg class="ic"><use href="#i-globe"/></svg><span data-i18n="nav.elements">Locaciones y objetos</span></button>
+      <button class="nav-btn" data-view="series"><svg class="ic"><use href="#i-layers"/></svg><span data-i18n="nav.series">Series</span></button>
+      <button class="nav-btn" data-view="automatizador"><svg class="ic"><use href="#i-spark"/></svg><span data-i18n="nav.automation">Automatizador</span></button>
+      <button class="nav-btn" data-view="subtitler"><svg class="ic"><use href="#i-clapper"/></svg><span data-i18n="nav.subtitler">Subtitulador</span></button>
+      <button class="nav-btn" data-view="poser"><svg class="ic"><use href="#i-cube"/></svg><span data-i18n="nav.poser">Poser</span></button>
+      <button class="nav-btn" data-view="prompts"><svg class="ic"><use href="#i-book"/></svg><span data-i18n="nav.prompts">Prompts</span></button>
+      <button class="nav-btn" data-view="vocabulary"><svg class="ic"><use href="#i-tag"/></svg><span data-i18n="nav.vocabulary">Vocabulario</span></button>
+      <button class="nav-btn" data-view="snippets"><svg class="ic"><use href="#i-code"/></svg><span data-i18n="nav.snippets">Snippets</span></button>
+      <button class="nav-btn" data-view="costs"><svg class="ic"><use href="#i-dollar"/></svg><span data-i18n="nav.costs">Consumo</span></button>
+      <button class="nav-btn" data-view="config"><svg class="ic"><use href="#i-gear"/></svg><span data-i18n="nav.config">Configuración</span></button>
     </nav>
 
     <div id="pinnedCard" class="pinned-card" hidden>
       <div class="pinned-head">
-        <span class="pinned-label">Personaje anclado</span>
-        <button id="unpinBtn" class="icon-btn" title="Desanclar"><svg class="ic"><use href="#i-x"/></svg></button>
+        <span class="pinned-label" data-i18n="create.character.pinnedTitle">Personaje anclado</span>
+        <button id="unpinBtn" class="icon-btn" data-i18n-title="create.character.unpin" title="Desanclar"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
       <div id="pinnedInfo" class="pinned-info"></div>
     </div>
@@ -86,12 +86,12 @@
     <section id="taskMonitor" class="task-monitor" aria-live="polite">
       <div class="task-monitor-head">
         <span class="task-loop" aria-hidden="true"><span></span></span>
-        <div><strong>Tareas</strong><small id="taskMonitorSummary">Sin tareas activas</small></div>
+        <div><strong data-i18n="tasks.title">Tareas</strong><small id="taskMonitorSummary" data-i18n="tasks.none">Sin tareas activas</small></div>
       </div>
-      <div id="taskMonitorList" class="task-monitor-list"><span class="task-monitor-empty">La actividad aparecerá aquí.</span></div>
+      <div id="taskMonitorList" class="task-monitor-list"><span class="task-monitor-empty" data-i18n="tasks.empty">La actividad aparecerá aquí.</span></div>
     </section>
 
-    <div class="sidebar-footer">local · sin nubes de más</div>
+    <div class="sidebar-footer" data-i18n="sidebar.local">local · sin nubes de más</div>
   </aside>
 
   <main>
@@ -99,25 +99,25 @@
     <section id="view-create" class="view active">
       <div class="create-top">
         <div class="mode-switch">
-          <button id="modeImage" class="mode-btn active"><svg class="ic"><use href="#i-image"/></svg> Imagen</button>
-          <button id="modeVideo" class="mode-btn"><svg class="ic"><use href="#i-film"/></svg> Video</button>
-          <button id="modeAudio" class="mode-btn"><svg class="ic"><use href="#i-mic"/></svg> Audio</button>
-          <button id="modeMusic" class="mode-btn"><svg class="ic"><use href="#i-music"/></svg> Música</button>
-          <button id="modeComfyUI" class="mode-btn"><svg class="ic"><use href="#i-layers"/></svg> ComfyUI</button>
+          <button id="modeImage" class="mode-btn active"><svg class="ic"><use href="#i-image"/></svg><span data-i18n="create.mode.image">Imagen</span></button>
+          <button id="modeVideo" class="mode-btn"><svg class="ic"><use href="#i-film"/></svg><span data-i18n="create.mode.video">Video</span></button>
+          <button id="modeAudio" class="mode-btn"><svg class="ic"><use href="#i-mic"/></svg><span data-i18n="create.mode.audio">Audio</span></button>
+          <button id="modeMusic" class="mode-btn"><svg class="ic"><use href="#i-music"/></svg><span data-i18n="create.mode.music">Música</span></button>
+          <button id="modeComfyUI" class="mode-btn"><svg class="ic"><use href="#i-layers"/></svg><span data-i18n="create.mode.comfyui">ComfyUI</span></button>
         </div>
         <div id="pinnedHint" class="pinned-hint" hidden></div>
-        <button id="btnShotPanel" class="mode-btn shot-tab"><svg class="ic"><use href="#i-clapper"/></svg> Toma del guion</button>
+        <button id="btnShotPanel" class="mode-btn shot-tab"><svg class="ic"><use href="#i-clapper"/></svg><span data-i18n="create.scriptShot">Toma del guion</span></button>
       </div>
 
       <!-- consulta de una toma del guion mientras se escribe el prompt -->
       <div id="shotPanel" class="shot-panel" hidden>
         <div class="shot-panel-pickers">
-          <label>Serie<select id="shotPanelSeries" class="select"></select></label>
-          <label>Guion<select id="shotPanelScript" class="select"></select></label>
-          <label class="shot-panel-shot">Toma<select id="shotPanelShot" class="select"></select></label>
+          <label><span data-i18n="create.shot.series">Serie</span><select id="shotPanelSeries" class="select"></select></label>
+          <label><span data-i18n="create.shot.script">Guion</span><select id="shotPanelScript" class="select"></select></label>
+          <label class="shot-panel-shot"><span data-i18n="create.shot.shot">Toma</span><select id="shotPanelShot" class="select"></select></label>
           <div class="shot-panel-nav">
-            <button id="shotPanelPrev" class="mini-btn" title="Toma anterior">←</button>
-            <button id="shotPanelNext" class="mini-btn" title="Toma siguiente">→</button>
+            <button id="shotPanelPrev" class="mini-btn" data-i18n-title="create.shot.previous" title="Toma anterior">←</button>
+            <button id="shotPanelNext" class="mini-btn" data-i18n-title="create.shot.next" title="Toma siguiente">→</button>
           </div>
         </div>
         <div id="shotPanelBody" class="shot-panel-body"></div>
@@ -126,41 +126,41 @@
       <div class="prompt-card">
         <div class="editor-wrap">
           <div id="highlighter" class="highlighter" aria-hidden="true"></div>
-          <textarea id="promptBox" placeholder="Escribí lo que querés manifestar…" spellcheck="false"></textarea>
+          <textarea id="promptBox" data-i18n-placeholder="create.placeholder.image" placeholder="Escribí lo que querés manifestar…" spellcheck="false"></textarea>
         </div>
-        <div class="prompt-meta"><span id="promptCharCount" class="char-count">0 caracteres</span></div>
+        <div class="prompt-meta"><span id="promptCharCount" class="char-count" data-i18n="create.characters.zero">0 caracteres</span></div>
 
         <div id="tagPalette" class="tag-palette" hidden></div>
 
         <div class="prompt-tools">
           <div class="tools-left">
-            <button id="btnToEn" class="tool-btn" title="Traducir el prompt al inglés">ES → EN</button>
-            <button id="btnToEs" class="tool-btn" title="Traducir el prompt al castellano">EN → ES</button>
+            <button id="btnToEn" class="tool-btn" data-i18n-title="create.translateEnglish" title="Traducir el prompt al inglés">ES → EN</button>
+            <button id="btnToEs" class="tool-btn" data-i18n-title="create.translateSpanish" title="Traducir el prompt al castellano">EN → ES</button>
             <span class="tool-sep"></span>
-            <button id="btnSavePrompt" class="tool-btn" title="Archivar este prompt"><svg class="ic"><use href="#i-save"/></svg> Guardar</button>
-            <button id="btnPrompts" class="tool-btn" title="Prompts archivados"><svg class="ic"><use href="#i-book"/></svg> Prompts</button>
-            <button id="btnVocabulary" class="tool-btn" title="Consultar vocabulario visual"><svg class="ic"><use href="#i-tag"/></svg> Vocabulario</button>
-            <button id="btnShotList" class="tool-btn" title="Insertar una lista de tomas con sus tiempos" hidden><svg class="ic"><use href="#i-clapper"/></svg> Tomas</button>
+            <button id="btnSavePrompt" class="tool-btn" data-i18n-title="create.savePromptTitle" title="Archivar este prompt"><svg class="ic"><use href="#i-save"/></svg><span data-i18n="create.savePrompt">Guardar</span></button>
+            <button id="btnPrompts" class="tool-btn" data-i18n-title="create.savedPromptsTitle" title="Prompts archivados"><svg class="ic"><use href="#i-book"/></svg><span data-i18n="nav.prompts">Prompts</span></button>
+            <button id="btnVocabulary" class="tool-btn" data-i18n-title="create.vocabularyTitle" title="Consultar vocabulario visual"><svg class="ic"><use href="#i-tag"/></svg><span data-i18n="nav.vocabulary">Vocabulario</span></button>
+            <button id="btnShotList" class="tool-btn" data-i18n-title="create.shotsTitle" title="Insertar una lista de tomas con sus tiempos" hidden><svg class="ic"><use href="#i-clapper"/></svg><span data-i18n="create.shots">Tomas</span></button>
           </div>
           <div class="gen-side">
-            <span id="costEstimate" class="cost-estimate" title="Costo estimado de esta generación"></span>
-            <button id="btnGenerate" class="generate-btn"><svg class="ic"><use href="#i-spark"/></svg> Manifestar</button>
+            <span id="costEstimate" class="cost-estimate" data-i18n-title="create.estimatedCost" title="Costo estimado de esta generación"></span>
+            <button id="btnGenerate" class="generate-btn"><svg class="ic"><use href="#i-spark"/></svg><span data-i18n="create.generate.image">Manifestar</span></button>
           </div>
         </div>
 
         <div id="shotListPanel" class="shot-list-panel" hidden>
           <div class="shot-list-head">
-            <strong>Lista de tomas</strong>
+            <strong data-i18n="create.shotList.title">Lista de tomas</strong>
             <span class="hint" id="shotListTotal"></span>
-            <label class="check-row"><input type="checkbox" id="shotListMarks" checked> marcas de tiempo</label>
-            <button id="shotListClose" class="icon-btn" title="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button>
+            <label class="check-row"><input type="checkbox" id="shotListMarks" checked><span data-i18n="create.shotList.timestamps">marcas de tiempo</span></label>
+            <button id="shotListClose" class="icon-btn" data-i18n-title="common.close" title="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button>
           </div>
           <div class="shot-list-rows" id="shotListRows"></div>
           <div class="shot-list-actions">
-            <button id="shotListAdd" class="mini-btn"><svg class="ic"><use href="#i-plus"/></svg> Agregar toma</button>
-            <button id="shotListEven" class="mini-btn">Repartir parejo</button>
+            <button id="shotListAdd" class="mini-btn"><svg class="ic"><use href="#i-plus"/></svg><span data-i18n="create.shotList.add">Agregar toma</span></button>
+            <button id="shotListEven" class="mini-btn" data-i18n="create.shotList.even">Repartir parejo</button>
             <span class="hint" id="shotListWarn"></span>
-            <button id="shotListInsert" class="generate-btn small">Insertar en el prompt</button>
+            <button id="shotListInsert" class="generate-btn small" data-i18n="create.shotList.insert">Insertar en el prompt</button>
           </div>
           <pre class="shot-list-preview" id="shotListPreview"></pre>
         </div>
@@ -172,30 +172,30 @@
       <!-- Controles de imagen -->
       <div id="imageControls" class="controls-card">
         <div class="control-row">
-          <label>Modelo</label>
+          <label data-i18n="create.controls.model">Modelo</label>
           <div id="modelChips" class="chips"></div>
         </div>
         <div class="control-row">
-          <label>Proporción</label>
+          <label data-i18n="create.controls.aspectRatio">Proporción</label>
           <div id="arChips" class="chips"></div>
         </div>
         <div class="control-row">
-          <label>Resolución</label>
+          <label data-i18n="create.controls.resolution">Resolución</label>
           <div id="resChips" class="chips"></div>
         </div>
         <div class="control-row">
-          <label>Lote</label>
+          <label data-i18n="create.controls.batch">Lote</label>
           <div id="batchChips" class="chips"></div>
-          <span class="hint">generaciones en paralelo</span>
+          <span class="hint" data-i18n="create.controls.parallel">generaciones en paralelo</span>
         </div>
         <div class="control-row refs-row">
-          <label>Referencias <span id="refsCount" class="refs-count"></span></label>
+          <label><span data-i18n="create.controls.references">Referencias</span> <span id="refsCount" class="refs-count"></span></label>
           <div id="refsStrip" class="refs-strip"></div>
         </div>
         <div id="characterVariantRow" class="control-row" hidden>
-          <label>Personaje</label>
+          <label data-i18n="create.controls.character">Personaje</label>
           <select id="characterVariantSelect" class="select"></select>
-          <span class="hint">Elegí el original o un outfit variante</span>
+          <span class="hint" data-i18n="create.controls.variantHint">Elegí el original o un outfit variante</span>
         </div>
         <div id="modelNote" class="model-note"></div>
       </div>
@@ -203,32 +203,32 @@
       <!-- Controles de video -->
       <div id="videoControls" class="controls-card" hidden>
         <div class="control-row">
-          <label>Modelo</label>
+          <label data-i18n="create.controls.model">Modelo</label>
           <div id="videoModelChips" class="chips"></div>
         </div>
         <div class="control-row">
-          <label>Proporción</label>
+          <label data-i18n="create.controls.aspectRatio">Proporción</label>
           <div id="videoArChips" class="chips"></div>
         </div>
         <div class="control-row">
-          <label>Resolución</label>
+          <label data-i18n="create.controls.resolution">Resolución</label>
           <div id="videoResChips" class="chips"></div>
         </div>
         <div class="control-row" id="videoDurationRow">
-          <label>Duración</label>
+          <label data-i18n="create.controls.duration">Duración</label>
           <div id="videoDurChips" class="chips"></div>
-          <span class="hint">segundos — el costo escala con la duración</span>
+          <span class="hint" data-i18n="create.controls.secondsCost">segundos — el costo escala con la duración</span>
         </div>
         <div class="control-row" id="videoAudioRow">
-          <label>Audio</label>
-          <label class="poser-toggle"><input type="checkbox" id="videoAudio"> generar audio (voces, ambiente, efectos)</label>
+          <label data-i18n="create.controls.audio">Audio</label>
+          <label class="poser-toggle"><input type="checkbox" id="videoAudio"><span data-i18n="create.controls.generateAudio">generar audio (voces, ambiente, efectos)</span></label>
         </div>
         <div class="control-row" id="videoModeRow">
-          <label>Modo</label>
+          <label data-i18n="create.controls.mode">Modo</label>
           <div id="videoModeChips" class="chips"></div>
         </div>
         <div class="control-row refs-row">
-          <label><span id="videoRefsLabel">Imágenes</span> <span id="videoRefsCount" class="refs-count"></span></label>
+          <label><span id="videoRefsLabel" data-i18n="create.controls.images">Imágenes</span> <span id="videoRefsCount" class="refs-count"></span></label>
           <div class="video-refs-content">
             <div id="videoRefsStrip" class="refs-strip"></div>
             <span class="hint" id="videoRefsHint"></span>
@@ -237,22 +237,22 @@
         <div id="h3VideoControls" class="heygen-video-controls" hidden>
           <div class="control-row">
             <label>Context-IR</label>
-            <label class="poser-toggle"><input type="checkbox" id="h3ContextIr"> analizar todas las referencias y enriquecer el prompt antes de generar</label>
+            <label class="poser-toggle"><input type="checkbox" id="h3ContextIr"><span data-i18n="create.h3.analyze">analizar todas las referencias y enriquecer el prompt antes de generar</span></label>
           </div>
         </div>
         <div id="omniVideoControls" class="heygen-video-controls" hidden>
           <div class="control-row">
-            <label>Continuidad</label>
-            <span id="omniChainHint" class="hint">Nueva generación independiente.</span>
-            <button id="omniClearConversation" type="button" class="mini-btn" hidden>Desvincular conversación</button>
+            <label data-i18n="create.omni.continuity">Continuidad</label>
+            <span id="omniChainHint" class="hint" data-i18n="create.omni.independent">Nueva generación independiente.</span>
+            <button id="omniClearConversation" type="button" class="mini-btn" data-i18n="create.omni.unlink" hidden>Desvincular conversación</button>
           </div>
-          <div class="model-note">Editar y Extender pueden continuar directamente desde un resultado Omni del historial. Los videos llevan audio nativo y SynthID invisible.</div>
+          <div class="model-note" data-i18n="create.omni.note">Editar y Extender pueden continuar directamente desde un resultado Omni del historial. Los videos llevan audio nativo y SynthID invisible.</div>
         </div>
         <div id="heygenVideoControls" class="heygen-video-controls" hidden>
-          <div class="control-row"><label>Conexión</label><select id="heygenAuthMode" class="select"><option value="oauth">OAuth · plan web</option><option value="key">API key · saldo API</option></select><span id="heygenVideoAuthStatus" class="hint"></span></div>
-          <div class="control-row" id="heygenCharacterRow"><label>Personaje HeyGen</label><select id="heygenCharacterSelect" class="select"></select><span id="heygenCharacterHint" class="hint"></span></div>
-          <div class="control-row" id="heygenVoiceRow"><label>Voz HeyGen</label><input id="heygenVoiceId" class="text-input" type="text" placeholder="Código de voz de HeyGen"><span class="hint">Obligatoria para Imagen libre; opcional si el avatar ya tiene voz.</span></div>
-          <div class="control-row" id="heygenMotionRow"><label>Movimiento</label><input id="heygenMotionPrompt" class="text-input" type="text" placeholder="Natural hand gestures, subtle head movement…"><select id="heygenExpressiveness" class="select"><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option></select></div>
+          <div class="control-row"><label data-i18n="create.heygen.connection">Conexión</label><select id="heygenAuthMode" class="select"><option value="oauth" data-i18n="create.heygen.webPlan">OAuth · plan web</option><option value="key" data-i18n="create.heygen.apiBalance">API key · saldo API</option></select><span id="heygenVideoAuthStatus" class="hint"></span></div>
+          <div class="control-row" id="heygenCharacterRow"><label data-i18n="create.heygen.character">Personaje HeyGen</label><select id="heygenCharacterSelect" class="select"></select><span id="heygenCharacterHint" class="hint"></span></div>
+          <div class="control-row" id="heygenVoiceRow"><label data-i18n="create.heygen.voice">Voz HeyGen</label><input id="heygenVoiceId" class="text-input" type="text" data-i18n-placeholder="create.heygen.voicePlaceholder" placeholder="Código de voz de HeyGen"><span class="hint" data-i18n="create.heygen.voiceHint">Obligatoria para Imagen libre; opcional si el avatar ya tiene voz.</span></div>
+          <div class="control-row" id="heygenMotionRow"><label data-i18n="create.heygen.motion">Movimiento</label><input id="heygenMotionPrompt" class="text-input" type="text" placeholder="Natural hand gestures, subtle head movement…"><select id="heygenExpressiveness" class="select"><option value="low" data-i18n="create.heygen.low">Baja</option><option value="medium" data-i18n="create.heygen.medium">Media</option><option value="high" data-i18n="create.heygen.high">Alta</option></select></div>
         </div>
         <div id="videoModelNote" class="model-note"></div>
       </div>
@@ -260,13 +260,13 @@
       <!-- Controles de audio -->
       <div id="audioControls" class="controls-card" hidden>
         <div class="control-row">
-          <label>Voz</label>
+          <label data-i18n="create.voice.label">Voz</label>
           <select id="voiceSelect" class="select"></select>
-          <button id="btnReloadVoices" class="tool-btn" title="Recargar voces de ElevenLabs"><svg class="ic"><use href="#i-refresh"/></svg></button>
+          <button id="btnReloadVoices" class="tool-btn" data-i18n-title="create.voice.reload" title="Recargar voces de ElevenLabs"><svg class="ic"><use href="#i-refresh"/></svg></button>
           <span id="voiceHint" class="hint"></span>
         </div>
         <div class="control-row">
-          <label>Modelo</label>
+          <label data-i18n="create.controls.model">Modelo</label>
           <select id="audioModelSelect" class="select"></select>
           <span id="audioModelHint" class="hint"></span>
         </div>
@@ -274,24 +274,24 @@
 
       <div id="musicControls" class="controls-card" hidden>
         <div class="control-row">
-          <label>Modelo</label>
+          <label data-i18n="create.controls.model">Modelo</label>
           <div id="musicModelChips" class="chips"></div>
         </div>
         <div class="control-row">
-          <label>Modo</label>
-          <label class="poser-toggle"><input type="checkbox" id="musicCustom" checked> personalizado (letra + estilo + título)</label>
+          <label data-i18n="create.controls.mode">Modo</label>
+          <label class="poser-toggle"><input type="checkbox" id="musicCustom" checked><span data-i18n="create.music.custom">personalizado (letra + estilo + título)</span></label>
         </div>
         <div class="control-row">
-          <label>Instrumental</label>
-          <label class="poser-toggle"><input type="checkbox" id="musicInstrumental"> sin voces (solo música)</label>
+          <label data-i18n="create.music.instrumental">Instrumental</label>
+          <label class="poser-toggle"><input type="checkbox" id="musicInstrumental"><span data-i18n="create.music.noVoices">sin voces (solo música)</span></label>
         </div>
         <div class="control-row" id="musicStyleRow">
-          <label>Estilo / género</label>
-          <input id="musicStyle" class="text-input" placeholder="ej: synthwave, 120 BPM, bajo agresivo, voz masculina" maxlength="200">
+          <label data-i18n="create.music.style">Estilo / género</label>
+          <input id="musicStyle" class="text-input" data-i18n-placeholder="create.music.stylePlaceholder" placeholder="ej: synthwave, 120 BPM, bajo agresivo, voz masculina" maxlength="200">
         </div>
         <div class="control-row" id="musicTitleRow">
-          <label>Título</label>
-          <input id="musicTitle" class="text-input" placeholder="ej: Luces de neón" maxlength="80">
+          <label data-i18n="create.music.title">Título</label>
+          <input id="musicTitle" class="text-input" data-i18n-placeholder="create.music.titlePlaceholder" placeholder="ej: Luces de neón" maxlength="80">
         </div>
         <span class="hint" id="musicHint"></span>
       </div>
@@ -299,35 +299,35 @@
       <!-- Controles de ComfyUI -->
       <div id="comfyuiControls" class="controls-card" hidden>
         <div class="control-row">
-          <label>Workflow</label>
+          <label data-i18n="create.comfy.workflow">Workflow</label>
           <div id="comfyWorkflowChips" class="chips"></div>
         </div>
-        <div id="comfyWorkflowEmpty" class="model-note" hidden>Todavía no agregaste ningún workflow — hacelo desde Configuración → ComfyUI.</div>
+        <div id="comfyWorkflowEmpty" class="model-note" data-i18n="create.comfy.empty" hidden>Todavía no agregaste ningún workflow — hacelo desde Configuración → ComfyUI.</div>
         <div id="comfyWorkflowDesc" class="hint"></div>
         <div class="control-row">
-          <label>Proporción</label>
+          <label data-i18n="create.controls.aspectRatio">Proporción</label>
           <div id="comfyArChips" class="chips"></div>
         </div>
         <div class="control-row">
-          <label>Resolución</label>
+          <label data-i18n="create.controls.resolution">Resolución</label>
           <div id="comfyResChips" class="chips"></div>
         </div>
         <div class="control-row refs-row">
-          <label>Referencia <span id="comfyReqReference" class="comfy-req-tag" hidden>obligatorio</span></label>
+          <label><span data-i18n="create.comfy.reference">Referencia</span> <span id="comfyReqReference" class="comfy-req-tag" data-i18n="create.comfy.required" hidden>obligatorio</span></label>
           <div id="comfyRefReference" class="refs-strip refs-strip-single"></div>
         </div>
         <div class="control-row refs-row">
-          <label>Pose (ControlNet) <span id="comfyReqPoseControlNet" class="comfy-req-tag" hidden>obligatorio</span></label>
+          <label>Pose (ControlNet) <span id="comfyReqPoseControlNet" class="comfy-req-tag" data-i18n="create.comfy.required" hidden>obligatorio</span></label>
           <div id="comfyRefPoseControlNet" class="refs-strip refs-strip-single"></div>
         </div>
         <div class="control-row refs-row">
-          <label>Face (IP-Adapter) <span id="comfyReqPoseIpAdapter" class="comfy-req-tag" hidden>obligatorio</span></label>
+          <label>Face (IP-Adapter) <span id="comfyReqPoseIpAdapter" class="comfy-req-tag" data-i18n="create.comfy.required" hidden>obligatorio</span></label>
           <div id="comfyRefPoseIpAdapter" class="refs-strip refs-strip-single"></div>
         </div>
         <div id="comfyCustomValuesRow" class="comfy-cv-row" hidden></div>
         <div class="comfy-loop-row">
-          <label class="poser-toggle"><input type="checkbox" id="comfyLoopToggle"> Generación ininterrumpida</label>
-          <span id="comfyLoopHint" class="hint">repite el mismo prompt automáticamente después de cada generación, hasta que la desactivés (se corta sola si hay un error)</span>
+          <label class="poser-toggle"><input type="checkbox" id="comfyLoopToggle"><span data-i18n="create.comfy.continuous">Generación ininterrumpida</span></label>
+          <span id="comfyLoopHint" class="hint" data-i18n="create.comfy.continuousHint">repite el mismo prompt automáticamente después de cada generación, hasta que la desactivés (se corta sola si hay un error)</span>
         </div>
         <div id="comfySlotsHint" class="model-note"></div>
       </div>
@@ -337,8 +337,8 @@
         <div id="bigView" class="big-view" hidden></div>
         <div id="generationQueue" class="generation-queue" hidden></div>
         <div class="history-head">
-          <h3>Historial</h3>
-          <button id="btnClearHistory" class="mini-btn danger"><svg class="ic"><use href="#i-trash"/></svg> Borrar todo</button>
+          <h3 data-i18n="create.history">Historial</h3>
+          <button id="btnClearHistory" class="mini-btn danger"><svg class="ic"><use href="#i-trash"/></svg><span data-i18n="create.history.clear">Borrar todo</span></button>
         </div>
         <div id="historyList" class="history-list"></div>
       </div>
@@ -458,23 +458,23 @@
 
     <!-- ==================== PROMPTS ==================== -->
     <section id="view-prompts" class="view">
-      <div class="chars-head"><h2>Prompts</h2><button id="btnNewPrompt" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Nuevo prompt</button></div>
+      <div class="chars-head"><h2 data-i18n="prompts.title">Prompts</h2><button id="btnNewPrompt" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="prompts.new">Nuevo prompt</span></button></div>
       <div class="prompt-library-tools">
-        <input id="promptSearch" type="search" placeholder="Buscar prompts…">
-        <select id="promptCategoryFilter" class="select"><option value="">Todas las categorías</option></select>
-        <button type="button" id="btnNewPromptCategory" class="mini-btn" title="Crear categoría nueva"><svg class="ic"><use href="#i-plus"/></svg> Categoría</button>
-        <button type="button" id="btnEditPromptCategory" class="mini-btn" title="Editar la categoría seleccionada" hidden><svg class="ic"><use href="#i-edit"/></svg> Editar categoría</button>
-        <button type="button" id="btnDeletePromptCategory" class="mini-btn danger" title="Borrar la categoría seleccionada" hidden><svg class="ic"><use href="#i-trash"/></svg> Borrar categoría</button>
+        <input id="promptSearch" type="search" placeholder="Buscar prompts…" data-i18n-placeholder="prompts.search">
+        <select id="promptCategoryFilter" class="select"><option value="" data-i18n="categories.all">Todas las categorías</option></select>
+        <button type="button" id="btnNewPromptCategory" class="mini-btn" title="Crear categoría nueva" data-i18n-title="categories.newTitle"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="categories.category">Categoría</span></button>
+        <button type="button" id="btnEditPromptCategory" class="mini-btn" title="Editar la categoría seleccionada" data-i18n-title="categories.editTitle" hidden><svg class="ic"><use href="#i-edit"/></svg> <span data-i18n="categories.edit">Editar categoría</span></button>
+        <button type="button" id="btnDeletePromptCategory" class="mini-btn danger" title="Borrar la categoría seleccionada" data-i18n-title="categories.deleteTitle" hidden><svg class="ic"><use href="#i-trash"/></svg> <span data-i18n="categories.delete">Borrar categoría</span></button>
       </div>
       <div id="newCategoryRow" class="prompt-library-tools" hidden>
         <select id="newCategoryMode" class="select">
-          <option value="image">Imagen</option>
-          <option value="video">Video</option>
-          <option value="audio">Audio</option>
+          <option value="image" data-i18n="create.mode.image">Imagen</option>
+          <option value="video" data-i18n="create.mode.video">Video</option>
+          <option value="audio" data-i18n="create.mode.audio">Audio</option>
         </select>
-        <input id="newCategoryName" type="text" maxlength="80" placeholder="Nombre de la categoría">
-        <button type="button" id="newCategorySave" class="mini-btn">Crear</button>
-        <button type="button" id="newCategoryCancel" class="icon-btn" title="Cancelar"><svg class="ic"><use href="#i-x"/></svg></button>
+        <input id="newCategoryName" type="text" maxlength="80" placeholder="Nombre de la categoría" data-i18n-placeholder="categories.namePlaceholder">
+        <button type="button" id="newCategorySave" class="mini-btn" data-i18n="categories.create">Crear</button>
+        <button type="button" id="newCategoryCancel" class="icon-btn" title="Cancelar" data-i18n-title="common.cancel"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
       <div id="promptLibrary" class="prompt-library"></div>
     </section>
@@ -482,95 +482,95 @@
     <!-- ==================== VOCABULARIO ==================== -->
     <section id="view-vocabulary" class="view">
       <div class="chars-head">
-        <div><h2>Vocabulario</h2><p class="section-lead">Referencias visuales con términos precisos para construir prompts en inglés.</p></div>
+        <div><h2 data-i18n="vocabulary.title">Vocabulario</h2><p class="section-lead" data-i18n="vocabulary.lead">Referencias visuales con términos precisos para construir prompts en inglés.</p></div>
         <div class="chars-head-actions">
-          <a id="btnExportVocabulary" class="mini-btn" href="/api/vocabulary/export" download title="Descargar todo el vocabulario en un ZIP (imágenes + términos + categorías)"><svg class="ic"><use href="#i-download"/></svg> Exportar ZIP</a>
-          <button id="btnImportVocabulary" class="mini-btn" title="Importar un ZIP de vocabulario de otro Manifestador"><svg class="ic"><use href="#i-upload"/></svg> Importar ZIP</button>
+          <a id="btnExportVocabulary" class="mini-btn" href="/api/vocabulary/export" download title="Descargar todo el vocabulario en un ZIP (imágenes + términos + categorías)" data-i18n-title="vocabulary.exportTitle"><svg class="ic"><use href="#i-download"/></svg> <span data-i18n="vocabulary.export">Exportar ZIP</span></a>
+          <button id="btnImportVocabulary" class="mini-btn" title="Importar un ZIP de vocabulario de otro Manifestador" data-i18n-title="vocabulary.importTitle"><svg class="ic"><use href="#i-upload"/></svg> <span data-i18n="vocabulary.import">Importar ZIP</span></button>
           <input id="vocabularyImportInput" type="file" accept=".zip,application/zip" hidden>
-          <button id="btnNewVocabulary" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Nueva ficha</button>
+          <button id="btnNewVocabulary" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="vocabulary.new">Nueva ficha</span></button>
         </div>
       </div>
       <div class="prompt-library-tools vocabulary-library-tools">
-        <input id="vocabularySearch" type="search" placeholder="Buscar por título, categoría o palabra…">
-        <select id="vocabularyCategoryFilter" class="select"><option value="">Todas las categorías</option></select>
-        <button type="button" id="btnNewVocabularyCategory" class="mini-btn" title="Crear categoría nueva"><svg class="ic"><use href="#i-plus"/></svg> Categoría</button>
-        <button type="button" id="btnEditVocabularyCategory" class="mini-btn" title="Editar la categoría seleccionada" hidden><svg class="ic"><use href="#i-edit"/></svg> Editar categoría</button>
-        <button type="button" id="btnDeleteVocabularyCategory" class="mini-btn danger" title="Borrar la categoría seleccionada" hidden><svg class="ic"><use href="#i-trash"/></svg> Borrar categoría</button>
+        <input id="vocabularySearch" type="search" placeholder="Buscar por título, categoría o palabra…" data-i18n-placeholder="vocabulary.search">
+        <select id="vocabularyCategoryFilter" class="select"><option value="" data-i18n="categories.all">Todas las categorías</option></select>
+        <button type="button" id="btnNewVocabularyCategory" class="mini-btn" title="Crear categoría nueva" data-i18n-title="categories.newTitle"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="categories.category">Categoría</span></button>
+        <button type="button" id="btnEditVocabularyCategory" class="mini-btn" title="Editar la categoría seleccionada" data-i18n-title="categories.editTitle" hidden><svg class="ic"><use href="#i-edit"/></svg> <span data-i18n="categories.edit">Editar categoría</span></button>
+        <button type="button" id="btnDeleteVocabularyCategory" class="mini-btn danger" title="Borrar la categoría seleccionada" data-i18n-title="categories.deleteTitle" hidden><svg class="ic"><use href="#i-trash"/></svg> <span data-i18n="categories.delete">Borrar categoría</span></button>
         <span id="vocabularyCount" class="hint"></span>
       </div>
       <div id="newVocabularyCategoryRow" class="prompt-library-tools" hidden>
-        <input id="newVocabularyCategoryName" type="text" maxlength="80" placeholder="Nombre de la categoría">
-        <button type="button" id="newVocabularyCategorySave" class="mini-btn">Crear</button>
-        <button type="button" id="newVocabularyCategoryCancel" class="icon-btn" title="Cancelar"><svg class="ic"><use href="#i-x"/></svg></button>
+        <input id="newVocabularyCategoryName" type="text" maxlength="80" placeholder="Nombre de la categoría" data-i18n-placeholder="categories.namePlaceholder">
+        <button type="button" id="newVocabularyCategorySave" class="mini-btn" data-i18n="categories.create">Crear</button>
+        <button type="button" id="newVocabularyCategoryCancel" class="icon-btn" title="Cancelar" data-i18n-title="common.cancel"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
       <div id="vocabularyLibrary" class="vocabulary-library"></div>
     </section>
 
     <section id="view-snippets" class="view">
-      <div class="chars-head"><h2>Snippets de código</h2><button id="btnNewSnippet" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Nuevo snippet</button></div>
+      <div class="chars-head"><h2 data-i18n="snippets.title">Snippets de código</h2><button id="btnNewSnippet" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="snippets.new">Nuevo snippet</span></button></div>
       <div class="prompt-library-tools">
-        <input id="snippetSearch" type="search" placeholder="Buscar snippets…">
+        <input id="snippetSearch" type="search" placeholder="Buscar snippets…" data-i18n-placeholder="snippets.search">
         <select id="snippetLanguageFilter" class="select">
-          <option value="">Todos los lenguajes</option>
+          <option value="" data-i18n="snippets.allLanguages">Todos los lenguajes</option>
           <option value="javascript">JavaScript / ExtendScript</option>
           <option value="python">Python</option>
           <option value="bash">Bash</option>
         </select>
-        <select id="snippetCategoryFilter" class="select"><option value="">Todas las categorías</option></select>
-        <button type="button" id="btnNewSnippetCategory" class="mini-btn" title="Crear categoría nueva"><svg class="ic"><use href="#i-plus"/></svg> Categoría</button>
-        <button type="button" id="btnEditSnippetCategory" class="mini-btn" title="Editar la categoría seleccionada" hidden><svg class="ic"><use href="#i-edit"/></svg> Editar categoría</button>
-        <button type="button" id="btnDeleteSnippetCategory" class="mini-btn danger" title="Borrar la categoría seleccionada" hidden><svg class="ic"><use href="#i-trash"/></svg> Borrar categoría</button>
+        <select id="snippetCategoryFilter" class="select"><option value="" data-i18n="categories.all">Todas las categorías</option></select>
+        <button type="button" id="btnNewSnippetCategory" class="mini-btn" title="Crear categoría nueva" data-i18n-title="categories.newTitle"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="categories.category">Categoría</span></button>
+        <button type="button" id="btnEditSnippetCategory" class="mini-btn" title="Editar la categoría seleccionada" data-i18n-title="categories.editTitle" hidden><svg class="ic"><use href="#i-edit"/></svg> <span data-i18n="categories.edit">Editar categoría</span></button>
+        <button type="button" id="btnDeleteSnippetCategory" class="mini-btn danger" title="Borrar la categoría seleccionada" data-i18n-title="categories.deleteTitle" hidden><svg class="ic"><use href="#i-trash"/></svg> <span data-i18n="categories.delete">Borrar categoría</span></button>
       </div>
       <div id="newSnippetCategoryRow" class="prompt-library-tools" hidden>
-        <input id="newSnippetCategoryName" type="text" maxlength="80" placeholder="Nombre de la categoría">
-        <button type="button" id="newSnippetCategorySave" class="mini-btn">Crear</button>
-        <button type="button" id="newSnippetCategoryCancel" class="icon-btn" title="Cancelar"><svg class="ic"><use href="#i-x"/></svg></button>
+        <input id="newSnippetCategoryName" type="text" maxlength="80" placeholder="Nombre de la categoría" data-i18n-placeholder="categories.namePlaceholder">
+        <button type="button" id="newSnippetCategorySave" class="mini-btn" data-i18n="categories.create">Crear</button>
+        <button type="button" id="newSnippetCategoryCancel" class="icon-btn" title="Cancelar" data-i18n-title="common.cancel"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
       <div id="snippetLibrary" class="prompt-library"></div>
     </section>
 
     <!-- ==================== ASSETS ==================== -->
     <section id="view-assets" class="view">
-      <h2>Assets</h2>
+      <h2 data-i18n="assets.title">Assets</h2>
       <div class="tabs">
-        <button class="tab active" data-zone="generated">Generadas</button>
-        <button class="tab" data-zone="uploads">Subidas</button>
-        <button class="tab" data-zone="video">Videos</button>
-        <button class="tab" data-zone="audio">Audio</button>
+        <button class="tab active" data-zone="generated" data-i18n="common.generated">Generadas</button>
+        <button class="tab" data-zone="uploads" data-i18n="common.uploaded">Subidas</button>
+        <button class="tab" data-zone="video" data-i18n="common.videos">Videos</button>
+        <button class="tab" data-zone="audio" data-i18n="common.audio">Audio</button>
       </div>
       <div class="audio-kind-tabs" id="audioKindTabs" hidden>
-        <button class="mini-btn active" data-audio-kind="all">Todo</button>
-        <button class="mini-btn" data-audio-kind="voice">Voz</button>
-        <button class="mini-btn" data-audio-kind="music">Música</button>
-        <button class="mini-btn" data-audio-kind="sound">Sonidos</button>
+        <button class="mini-btn active" data-audio-kind="all" data-i18n="common.all">Todo</button>
+        <button class="mini-btn" data-audio-kind="voice" data-i18n="assets.audio.voice">Voz</button>
+        <button class="mini-btn" data-audio-kind="music" data-i18n="assets.audio.music">Música</button>
+        <button class="mini-btn" data-audio-kind="sound" data-i18n="assets.audio.sounds">Sonidos</button>
       </div>
       <div class="assets-toolbar">
-        <button id="btnUploadAsset" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> Subir imágenes</button>
-        <button id="btnSelectVisible" class="tool-btn">Seleccionar visibles</button>
-        <button id="btnSeriesSelected" class="tool-btn" disabled><svg class="ic"><use href="#i-layers"/></svg> Asociar a serie <span id="seriesSelectedCount">0</span></button>
-        <button id="btnClassifySelected" class="tool-btn" disabled><svg class="ic"><use href="#i-layers"/></svg> Categorizar <span id="classifySelectedCount">0</span></button>
-        <button id="btnDownloadSelected" class="tool-btn" disabled><svg class="ic"><use href="#i-download"/></svg> Descargar <span id="downloadSelectedCount">0</span></button>
-        <button id="btnDuplicateSelected" class="tool-btn" disabled><svg class="ic"><use href="#i-copy"/></svg> Duplicar <span id="duplicateSelectedCount">0</span></button>
-        <button id="btnDeleteSelected" class="tool-btn danger" disabled><svg class="ic"><use href="#i-trash"/></svg> Borrar <span id="selectedCount">0</span></button>
+        <button id="btnUploadAsset" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> <span data-i18n="assets.uploadImages">Subir imágenes</span></button>
+        <button id="btnSelectVisible" class="tool-btn" data-i18n="assets.selectVisible">Seleccionar visibles</button>
+        <button id="btnSeriesSelected" class="tool-btn" disabled><svg class="ic"><use href="#i-layers"/></svg> <span data-i18n="common.associateSeries">Asociar a serie</span> <span id="seriesSelectedCount">0</span></button>
+        <button id="btnClassifySelected" class="tool-btn" disabled><svg class="ic"><use href="#i-layers"/></svg> <span data-i18n="assets.categorize">Categorizar</span> <span id="classifySelectedCount">0</span></button>
+        <button id="btnDownloadSelected" class="tool-btn" disabled><svg class="ic"><use href="#i-download"/></svg> <span data-i18n="common.download">Descargar</span> <span id="downloadSelectedCount">0</span></button>
+        <button id="btnDuplicateSelected" class="tool-btn" disabled><svg class="ic"><use href="#i-copy"/></svg> <span data-i18n="common.duplicate">Duplicar</span> <span id="duplicateSelectedCount">0</span></button>
+        <button id="btnDeleteSelected" class="tool-btn danger" disabled><svg class="ic"><use href="#i-trash"/></svg> <span data-i18n="common.delete">Borrar</span> <span id="selectedCount">0</span></button>
         <span id="assetsSummary" class="hint"></span>
       </div>
       <div class="asset-filters">
         <div class="filter-presets">
-          <button class="mini-btn" data-range="all">Todo</button>
-          <button class="mini-btn" data-range="today">Hoy</button>
-          <button class="mini-btn" data-range="morning">Esta mañana</button>
-          <button class="mini-btn" data-range="afternoon">Esta tarde</button>
+          <button class="mini-btn" data-range="all" data-i18n="common.all">Todo</button>
+          <button class="mini-btn" data-range="today" data-i18n="assets.range.today">Hoy</button>
+          <button class="mini-btn" data-range="morning" data-i18n="assets.range.morning">Esta mañana</button>
+          <button class="mini-btn" data-range="afternoon" data-i18n="assets.range.afternoon">Esta tarde</button>
         </div>
-        <label>Personaje <select id="assetFilterCharacter" class="select"><option value="">Todos</option></select></label>
-        <label>Serie <select id="assetFilterSeries" class="select"><option value="">Todas</option></select></label>
-        <label data-visual-asset-filter>Buscar <input id="assetFilterSearch" type="search" placeholder="Nombre o prompt"></label>
-        <label data-visual-asset-filter>Categoría <select id="assetFilterCategory" class="select"><option value="">Todas</option></select></label>
-        <label data-visual-asset-filter>Etiquetas <input id="assetFilterTags" type="search" list="assetTagsList" placeholder="noir, ciudad"></label>
+        <label><span data-i18n="assets.filters.character">Personaje</span> <select id="assetFilterCharacter" class="select"><option value="" data-i18n="common.allMasculine">Todos</option></select></label>
+        <label><span data-i18n="assets.filters.series">Serie</span> <select id="assetFilterSeries" class="select"><option value="" data-i18n="common.allFeminine">Todas</option></select></label>
+        <label data-visual-asset-filter><span data-i18n="common.search">Buscar</span> <input id="assetFilterSearch" type="search" placeholder="Nombre o prompt" data-i18n-placeholder="assets.filters.searchPlaceholder"></label>
+        <label data-visual-asset-filter><span data-i18n="categories.category">Categoría</span> <select id="assetFilterCategory" class="select"><option value="" data-i18n="common.allFeminine">Todas</option></select></label>
+        <label data-visual-asset-filter><span data-i18n="assets.filters.tags">Etiquetas</span> <input id="assetFilterTags" type="search" list="assetTagsList" placeholder="noir, ciudad" data-i18n-placeholder="assets.filters.tagsPlaceholder"></label>
         <datalist id="assetTagsList"></datalist>
         <datalist id="visualCategoryList"></datalist>
-        <label>Desde <input id="assetFrom" type="datetime-local"></label>
-        <label>Hasta <input id="assetTo" type="datetime-local"></label>
-        <button id="btnApplyAssetRange" class="mini-btn">Aplicar rango</button>
+        <label><span data-i18n="assets.filters.from">Desde</span> <input id="assetFrom" type="datetime-local"></label>
+        <label><span data-i18n="assets.filters.to">Hasta</span> <input id="assetTo" type="datetime-local"></label>
+        <button id="btnApplyAssetRange" class="mini-btn" data-i18n="assets.filters.applyRange">Aplicar rango</button>
       </div>
       <div id="assetsGrid" class="assets-grid"></div>
     </section>
@@ -578,8 +578,8 @@
     <!-- ==================== PERSONAJES ==================== -->
     <section id="view-characters" class="view">
       <div class="chars-head">
-        <h2>Personajes</h2>
-        <div><button id="btnImportCharacter" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> Importar ZIP</button> <button id="btnNewChar" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Nuevo personaje</button></div>
+        <h2 data-i18n="characters.title">Personajes</h2>
+        <div><button id="btnImportCharacter" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> <span data-i18n="characters.import">Importar ZIP</span></button> <button id="btnNewChar" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="characters.new">Nuevo personaje</span></button></div>
       </div>
       <div id="charsGrid" class="chars-grid"></div>
     </section>
@@ -587,16 +587,16 @@
     <!-- ==================== LOCACIONES Y OBJETOS ==================== -->
     <section id="view-elements" class="view">
       <div class="chars-head">
-        <h2>Locaciones y objetos</h2>
-        <button id="btnNewElement" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Nueva locación u objeto</button>
+        <h2 data-i18n="elements.title">Locaciones y objetos</h2>
+        <button id="btnNewElement" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="elements.new">Nueva locación u objeto</span></button>
       </div>
       <div class="element-filters">
         <div class="chips" id="elementKindChips">
-          <button class="chip active" data-ekind="">Todos</button>
-          <button class="chip" data-ekind="location">Locaciones</button>
-          <button class="chip" data-ekind="object">Objetos</button>
+          <button class="chip active" data-ekind="" data-i18n="common.allMasculine">Todos</button>
+          <button class="chip" data-ekind="location" data-i18n="elements.locations">Locaciones</button>
+          <button class="chip" data-ekind="object" data-i18n="elements.objects">Objetos</button>
         </div>
-        <label>Categoría <select id="elementCategoryFilter" class="select"><option value="">Todas</option></select></label>
+        <label><span data-i18n="categories.category">Categoría</span> <select id="elementCategoryFilter" class="select"><option value="" data-i18n="common.allFeminine">Todas</option></select></label>
       </div>
       <div id="elementsGrid" class="chars-grid"></div>
     </section>
@@ -604,8 +604,8 @@
     <!-- ==================== SERIES ==================== -->
     <section id="view-series" class="view">
       <div class="chars-head">
-        <h2>Series</h2>
-        <button id="btnNewSeries" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Nueva serie</button>
+        <h2 data-i18n="series.title">Series</h2>
+        <button id="btnNewSeries" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="series.new">Nueva serie</span></button>
       </div>
       <div id="seriesGrid" class="chars-grid"></div>
     </section>
@@ -613,10 +613,10 @@
     <!-- ==================== AUTOMATIZADOR ==================== -->
     <section id="view-automatizador" class="view">
       <div class="chars-head">
-        <h2>Automatizador</h2>
+        <h2 data-i18n="automation.title">Automatizador</h2>
         <div>
-          <button id="btnImportAutomation" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> Importar guion (JSON)</button>
-          <button id="btnNewAutomation" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> Proyecto vacío</button>
+          <button id="btnImportAutomation" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> <span data-i18n="automation.importScript">Importar guion (JSON)</span></button>
+          <button id="btnNewAutomation" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="automation.newEmptyProject">Proyecto vacío</span></button>
         </div>
       </div>
       <div id="automationsGrid" class="chars-grid"></div>
@@ -626,15 +626,15 @@
     <section id="view-automation" class="view">
       <div class="chars-head script-head">
         <div class="script-head-left">
-          <button id="automationBack" class="mini-btn">← Automatizador</button>
+          <button id="automationBack" class="mini-btn">← <span data-i18n="automation.title">Automatizador</span></button>
           <div>
-            <h2 id="automationTitle">Proyecto</h2>
+            <h2 id="automationTitle" data-i18n="automation.project">Proyecto</h2>
             <span id="automationMeta" class="hint"></span>
           </div>
         </div>
         <div class="script-head-right">
-          <button id="automationSave" class="generate-btn small"><svg class="ic"><use href="#i-check"/></svg> Guardar proyecto</button>
-          <button id="automationDelete" class="mini-btn danger"><svg class="ic"><use href="#i-trash"/></svg> Borrar proyecto</button>
+          <button id="automationSave" class="generate-btn small"><svg class="ic"><use href="#i-check"/></svg> <span data-i18n="automation.saveProject">Guardar proyecto</span></button>
+          <button id="automationDelete" class="mini-btn danger"><svg class="ic"><use href="#i-trash"/></svg> <span data-i18n="automation.deleteProject">Borrar proyecto</span></button>
         </div>
       </div>
       <div id="automationRoot"></div>
@@ -656,15 +656,15 @@
     <section id="view-script" class="view">
       <div class="chars-head script-head">
         <div class="script-head-left">
-          <button id="scriptBack" class="mini-btn">← Volver a Series</button>
+          <button id="scriptBack" class="mini-btn">← <span data-i18n="scripts.backToSeries">Volver a Series</span></button>
           <div>
-            <h2 id="scriptViewTitle">Guion</h2>
+            <h2 id="scriptViewTitle" data-i18n="scripts.title">Guion</h2>
             <span id="scriptViewSeries" class="hint"></span>
           </div>
         </div>
         <div class="script-head-right">
-          <span id="scriptDirtyBadge" class="script-dirty" hidden>Cambios sin guardar</span>
-          <button id="btnSaveScript" class="generate-btn small"><svg class="ic"><use href="#i-check"/></svg> Guardar guion</button>
+          <span id="scriptDirtyBadge" class="script-dirty" hidden data-i18n="scripts.unsavedChanges">Cambios sin guardar</span>
+          <button id="btnSaveScript" class="generate-btn small"><svg class="ic"><use href="#i-check"/></svg> <span data-i18n="scripts.save">Guardar guion</span></button>
         </div>
       </div>
       <div id="scriptEditorRoot" class="script-editor"></div>
@@ -674,9 +674,9 @@
     <section id="view-scriptview" class="view">
       <div class="chars-head script-head">
         <div class="script-head-left">
-          <button id="scriptViewBack" class="mini-btn">← Volver a Series</button>
+          <button id="scriptViewBack" class="mini-btn">← <span data-i18n="scripts.backToSeries">Volver a Series</span></button>
           <div>
-            <h2 id="scriptViewTitle">Guion</h2>
+            <h2 id="scriptViewTitle" data-i18n="scripts.title">Guion</h2>
             <span id="scriptViewMeta" class="hint"></span>
           </div>
         </div>
@@ -688,9 +688,9 @@
     <section id="view-storyboard" class="view">
       <div class="chars-head script-head">
         <div class="script-head-left">
-          <button id="storyboardBack" class="mini-btn">← Volver a Series</button>
+          <button id="storyboardBack" class="mini-btn">← <span data-i18n="scripts.backToSeries">Volver a Series</span></button>
           <div>
-            <h2 id="storyboardTitle">Asignar assets</h2>
+            <h2 id="storyboardTitle" data-i18n="storyboard.assignAssets">Asignar assets</h2>
             <span id="storyboardSeries" class="hint"></span>
           </div>
         </div>
@@ -729,8 +729,18 @@
 
     <!-- ==================== CONFIG ==================== -->
     <section id="view-config" class="view">
-      <h2>Configuración</h2>
+      <h2 data-i18n="config.title">Configuración</h2>
       <form id="configForm" class="config-form">
+        <section class="config-language-card">
+          <h3 data-i18n="config.language.heading">Idioma</h3>
+          <label><span data-i18n="config.language.label">Idioma de la interfaz</span>
+            <select class="select" name="language">
+              <option value="es">Español</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+          <p class="hint" data-i18n="config.language.hint">El cambio se aplica al guardar y recarga la interfaz de forma segura. El contenido creado por vos no se traduce.</p>
+        </section>
         <h3>Contenido</h3>
         <label class="check-row nsfw-setting"><input type="checkbox" name="nsfwEnabled"> Habilitar Contenido NSFW</label>
         <label class="config-dark-field">Contraseña administrativa para cambiar esta opción
@@ -876,34 +886,34 @@
           <label>Modelo Suno por defecto <input type="text" name="sunoModelId" placeholder="V5_5"></label>
           <label>Modelo de OpenAI (precios) <input type="text" name="openaiModel" placeholder="gpt-5-mini"></label>
         </div>
-        <button type="submit" class="generate-btn">Guardar configuración</button>
+        <button type="submit" class="generate-btn" data-i18n="config.save">Guardar configuración</button>
       </form>
     </section>
   </main>
 </div>
 
 <!-- Reproductor persistente de la biblioteca de audio -->
-<section id="assetAudioPlayer" class="asset-audio-player" aria-label="Reproductor de Assets" hidden>
+<section id="assetAudioPlayer" class="asset-audio-player" data-i18n-aria-label="player.assetsLabel" aria-label="Reproductor de Assets" hidden>
   <div class="asset-player-track">
     <span class="asset-player-art"><svg class="ic ic-lg"><use href="#i-music"/></svg></span>
     <div class="asset-player-copy">
-      <span id="assetPlayerKind">Audio</span>
-      <strong id="assetPlayerName">Sin reproducción</strong>
+      <span id="assetPlayerKind" data-i18n="common.audio">Audio</span>
+      <strong id="assetPlayerName" data-i18n="player.noPlayback">Sin reproducción</strong>
     </div>
   </div>
   <div class="asset-player-controls">
-    <button type="button" id="assetPlayerPrev" class="icon-btn" title="Audio anterior" aria-label="Audio anterior"><svg class="ic"><use href="#i-left"/></svg></button>
+    <button type="button" id="assetPlayerPrev" class="icon-btn" data-i18n-title="player.previousAudio" data-i18n-aria-label="player.previousAudio" title="Audio anterior" aria-label="Audio anterior"><svg class="ic"><use href="#i-left"/></svg></button>
     <audio id="assetPlayerAudio" controls preload="metadata"></audio>
-    <button type="button" id="assetPlayerNext" class="icon-btn" title="Audio siguiente" aria-label="Audio siguiente"><svg class="ic"><use href="#i-right"/></svg></button>
+    <button type="button" id="assetPlayerNext" class="icon-btn" data-i18n-title="player.nextAudio" data-i18n-aria-label="player.nextAudio" title="Audio siguiente" aria-label="Audio siguiente"><svg class="ic"><use href="#i-right"/></svg></button>
   </div>
   <span id="assetPlayerPosition" class="asset-player-position"></span>
-  <button type="button" id="assetPlayerClose" class="icon-btn asset-player-close" title="Cerrar reproductor" aria-label="Cerrar reproductor"><svg class="ic"><use href="#i-x"/></svg></button>
+  <button type="button" id="assetPlayerClose" class="icon-btn asset-player-close" data-i18n-title="player.close" data-i18n-aria-label="player.close" title="Cerrar reproductor" aria-label="Cerrar reproductor"><svg class="ic"><use href="#i-x"/></svg></button>
 </section>
 
 <!-- Información del asset -->
 <div id="assetInfoModal" class="modal" hidden>
   <div class="modal-box asset-info-box">
-    <div class="modal-head"><div><h3>Información del asset</h3><p class="hint">Prompt y configuración de generación</p></div><button class="icon-btn" id="assetInfoClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div class="modal-head"><div><h3 data-i18n="assets.info.title">Información del asset</h3><p class="hint" data-i18n="assets.info.lead">Prompt y configuración de generación</p></div><button class="icon-btn" id="assetInfoClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
     <div id="assetInfoBody"></div>
   </div>
 </div>
@@ -912,81 +922,81 @@
 <div id="visualUploadModal" class="modal" hidden>
   <form id="visualUploadForm" class="modal-box form-modal-box visual-metadata-box">
     <div class="modal-head"><div><h3 id="visualUploadTitle">Subir imágenes</h3><p class="hint" id="visualUploadHint">Clasificá el grupo para encontrarlo rápidamente después.</p></div><button type="button" class="icon-btn" id="visualUploadClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
-    <label>Archivos<input id="visualUploadFiles" type="file" accept="image/png,image/jpeg,image/webp" multiple required></label>
-    <label>Categoría<input id="visualUploadCategory" type="text" maxlength="80" list="visualCategoryList" placeholder="Ej: Archivo histórico"></label>
-    <label>Etiquetas<input id="visualUploadTags" type="text" maxlength="500" placeholder="noir, ciudad, noche"></label>
-    <label class="check-row"><input id="visualUploadNsfw" type="checkbox"> Contenido NSFW</label>
-    <p class="hint">Separá múltiples etiquetas con comas. La misma clasificación se aplicará a todos los archivos de esta carga.</p>
+    <label><span data-i18n="assets.files">Archivos</span><input id="visualUploadFiles" type="file" accept="image/png,image/jpeg,image/webp" multiple required></label>
+    <label><span data-i18n="categories.category">Categoría</span><input id="visualUploadCategory" type="text" maxlength="80" list="visualCategoryList" placeholder="Ej: Archivo histórico" data-i18n-placeholder="assets.categoryExample"></label>
+    <label><span data-i18n="assets.filters.tags">Etiquetas</span><input id="visualUploadTags" type="text" maxlength="500" placeholder="noir, ciudad, noche" data-i18n-placeholder="assets.tagsExample"></label>
+    <label class="check-row"><input id="visualUploadNsfw" type="checkbox"> <span data-i18n="common.nsfwContent">Contenido NSFW</span></label>
+    <p class="hint" data-i18n="assets.uploadClassificationHint">Separá múltiples etiquetas con comas. La misma clasificación se aplicará a todos los archivos de esta carga.</p>
     <div id="visualUploadStatus" class="hint"></div>
-    <div class="form-modal-actions"><button type="button" class="mini-btn" id="visualUploadCancel">Cancelar</button><button type="submit" class="generate-btn small" id="visualUploadSubmit">Subir</button></div>
+    <div class="form-modal-actions"><button type="button" class="mini-btn" id="visualUploadCancel" data-i18n="common.cancel">Cancelar</button><button type="submit" class="generate-btn small" id="visualUploadSubmit" data-i18n="common.upload">Subir</button></div>
   </form>
 </div>
 
 <!-- Clasificación de imágenes y videos ya existentes -->
 <div id="visualClassifyModal" class="modal" hidden>
   <form id="visualClassifyForm" class="modal-box form-modal-box visual-metadata-box">
-    <div class="modal-head"><div><h3>Categorizar Assets</h3><p class="hint" id="visualClassifyHint">La clasificación se aplicará a la selección.</p></div><button type="button" class="icon-btn" id="visualClassifyClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
-    <label>Categoría<input id="visualClassifyCategory" type="text" maxlength="80" list="visualCategoryList" placeholder="Ej: Recursos urbanos"></label>
-    <label>Etiquetas<input id="visualClassifyTags" type="text" maxlength="500" placeholder="ciudad, exterior, noche"></label>
-    <label class="check-row"><input id="visualClassifyNsfw" type="checkbox"> Contenido NSFW</label>
-    <p class="hint">Guardá ambos campos vacíos si querés quitar la clasificación actual.</p>
-    <div class="form-modal-actions"><button type="button" class="mini-btn" id="visualClassifyCancel">Cancelar</button><button type="submit" class="generate-btn small">Guardar clasificación</button></div>
+    <div class="modal-head"><div><h3 data-i18n="assets.classify.title">Categorizar Assets</h3><p class="hint" id="visualClassifyHint" data-i18n="assets.classify.selectionHint">La clasificación se aplicará a la selección.</p></div><button type="button" class="icon-btn" id="visualClassifyClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <label><span data-i18n="categories.category">Categoría</span><input id="visualClassifyCategory" type="text" maxlength="80" list="visualCategoryList" placeholder="Ej: Recursos urbanos" data-i18n-placeholder="assets.classify.categoryExample"></label>
+    <label><span data-i18n="assets.filters.tags">Etiquetas</span><input id="visualClassifyTags" type="text" maxlength="500" placeholder="ciudad, exterior, noche" data-i18n-placeholder="assets.classify.tagsExample"></label>
+    <label class="check-row"><input id="visualClassifyNsfw" type="checkbox"> <span data-i18n="common.nsfwContent">Contenido NSFW</span></label>
+    <p class="hint" data-i18n="assets.classify.clearHint">Guardá ambos campos vacíos si querés quitar la clasificación actual.</p>
+    <div class="form-modal-actions"><button type="button" class="mini-btn" id="visualClassifyCancel" data-i18n="common.cancel">Cancelar</button><button type="submit" class="generate-btn small" data-i18n="assets.classify.save">Guardar clasificación</button></div>
   </form>
 </div>
 
 <!-- Subir y clasificar un audio -->
 <div id="audioUploadModal" class="modal" hidden>
   <form id="audioUploadForm" class="modal-box form-modal-box audio-metadata-box">
-    <div class="modal-head"><div><h3>Subir audio</h3><p class="hint">MP3 o WAV, clasificado para reutilizarlo en tus proyectos</p></div><button type="button" class="icon-btn" id="audioUploadClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
-    <label>Archivo<input id="audioUploadFile" type="file" accept=".mp3,.wav,audio/mpeg,audio/wav,audio/x-wav" required></label>
-    <label>Tipo de audio
+    <div class="modal-head"><div><h3 data-i18n="assets.audio.upload">Subir audio</h3><p class="hint" data-i18n="assets.audio.uploadLead">MP3 o WAV, clasificado para reutilizarlo en tus proyectos</p></div><button type="button" class="icon-btn" id="audioUploadClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <label><span data-i18n="assets.file">Archivo</span><input id="audioUploadFile" type="file" accept=".mp3,.wav,audio/mpeg,audio/wav,audio/x-wav" required></label>
+    <label><span data-i18n="assets.audio.type">Tipo de audio</span>
       <select id="audioUploadKind" class="select">
-        <option value="voice">Voz</option>
-        <option value="music">Música</option>
-        <option value="sound">Sonido</option>
+        <option value="voice" data-i18n="assets.audio.voice">Voz</option>
+        <option value="music" data-i18n="assets.audio.music">Música</option>
+        <option value="sound" data-i18n="assets.audio.sound">Sonido</option>
       </select>
     </label>
     <div id="audioUploadMusicTags" class="audio-music-fields" hidden>
-      <label>Género<input id="audioUploadGenres" type="text" placeholder="ambient, orchestral, dark jazz"></label>
-      <label>Instrumentos<input id="audioUploadInstruments" type="text" placeholder="piano, strings, analog synthesizer"></label>
-      <label>Sentimientos<input id="audioUploadMoods" type="text" placeholder="mysterious, tense, melancholic"></label>
-      <p class="hint">Separá múltiples etiquetas con comas.</p>
+      <label><span data-i18n="assets.audio.genre">Género</span><input id="audioUploadGenres" type="text" placeholder="ambient, orchestral, dark jazz"></label>
+      <label><span data-i18n="assets.audio.instruments">Instrumentos</span><input id="audioUploadInstruments" type="text" placeholder="piano, strings, analog synthesizer"></label>
+      <label><span data-i18n="assets.audio.moods">Sentimientos</span><input id="audioUploadMoods" type="text" placeholder="mysterious, tense, melancholic"></label>
+      <p class="hint" data-i18n="assets.separateTags">Separá múltiples etiquetas con comas.</p>
     </div>
-    <label class="check-row"><input id="audioUploadNsfw" type="checkbox"> Contenido NSFW</label>
-    <div class="form-modal-actions"><button type="button" class="mini-btn" id="audioUploadCancel">Cancelar</button><button type="submit" class="generate-btn small">Subir audio</button></div>
+    <label class="check-row"><input id="audioUploadNsfw" type="checkbox"> <span data-i18n="common.nsfwContent">Contenido NSFW</span></label>
+    <div class="form-modal-actions"><button type="button" class="mini-btn" id="audioUploadCancel" data-i18n="common.cancel">Cancelar</button><button type="submit" class="generate-btn small" data-i18n="assets.audio.upload">Subir audio</button></div>
   </form>
 </div>
 
 <!-- Crear o editar variante -->
 <div id="variantEditorModal" class="modal" hidden>
   <form id="variantEditorForm" class="modal-box form-modal-box">
-    <div class="modal-head"><div><h3 id="variantEditorTitle">Nueva variante</h3><p class="hint">Definí el outfit o aspecto alternativo</p></div><button type="button" class="icon-btn" id="variantEditorClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
-    <label>Nombre<input id="variantEditorName" type="text" maxlength="80" placeholder="Ej: Outfit de gala" required></label>
-    <label>Descripción<textarea id="variantEditorDescription" placeholder="Ropa, accesorios, peinado y detalles que distinguen esta variante"></textarea></label>
-    <div class="form-modal-actions"><button type="button" class="mini-btn" id="variantEditorCancel">Cancelar</button><button type="submit" class="generate-btn small">Guardar variante</button></div>
+    <div class="modal-head"><div><h3 id="variantEditorTitle" data-i18n="characters.variant.newTitle">Nueva variante</h3><p class="hint" data-i18n="characters.variant.lead">Definí el outfit o aspecto alternativo</p></div><button type="button" class="icon-btn" id="variantEditorClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <label><span data-i18n="assets.associate.name">Nombre</span><input id="variantEditorName" type="text" maxlength="80" placeholder="Ej: Outfit de gala" data-i18n-placeholder="characters.variant.namePlaceholder" required></label>
+    <label><span data-i18n="common.description">Descripción</span><textarea id="variantEditorDescription" placeholder="Ropa, accesorios, peinado y detalles que distinguen esta variante" data-i18n-placeholder="assets.associate.descriptionPlaceholder"></textarea></label>
+    <div class="form-modal-actions"><button type="button" class="mini-btn" id="variantEditorCancel" data-i18n="common.cancel">Cancelar</button><button type="submit" class="generate-btn small" data-i18n="characters.variant.save">Guardar variante</button></div>
   </form>
 </div>
 
 <!-- Asociar asset a personaje -->
 <div id="associateAssetModal" class="modal" hidden>
   <form id="associateAssetForm" class="modal-box form-modal-box">
-    <div class="modal-head"><div><h3>Asociar asset</h3><p class="hint">Elegí el personaje y su versión</p></div><button type="button" class="icon-btn" id="associateAssetClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div class="modal-head"><div><h3 data-i18n="assets.associate.title">Asociar asset</h3><p class="hint" data-i18n="assets.associate.lead">Elegí el personaje y su versión</p></div><button type="button" class="icon-btn" id="associateAssetClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
     <div id="associateAssetPreview" class="associate-preview"></div>
-    <label>Destino
+    <label><span data-i18n="assets.associate.destination">Destino</span>
       <select id="associateTargetType" class="select">
-        <option value="character">Personaje</option>
-        <option value="element">Locación u objeto</option>
+        <option value="character" data-i18n="assets.filters.character">Personaje</option>
+        <option value="element" data-i18n="assets.associate.element">Locación u objeto</option>
       </select>
     </label>
     <label><span id="associateOwnerLabelText">Personaje</span><select id="associateCharacter" class="select" required></select></label>
-    <label>Original o variante<select id="associateVariant" class="select"></select></label>
+    <label><span data-i18n="assets.associate.originalOrVariant">Original o variante</span><select id="associateVariant" class="select"></select></label>
     <div id="associateNewVariantFields" class="associate-new-variant" hidden>
-      <div class="associate-new-variant-head"><strong>Nueva variante</strong><span>Se creará antes de asociar el asset</span></div>
-      <label>Nombre<input id="associateNewVariantName" type="text" maxlength="80" placeholder="Ej: Vestido azul"></label>
-      <label>Descripción<textarea id="associateNewVariantDescription" maxlength="1000" placeholder="Ropa, accesorios, peinado y detalles que distinguen esta variante"></textarea></label>
+      <div class="associate-new-variant-head"><strong data-i18n="assets.associate.newVariant">Nueva variante</strong><span data-i18n="assets.associate.newVariantHint">Se creará antes de asociar el asset</span></div>
+      <label><span data-i18n="assets.associate.name">Nombre</span><input id="associateNewVariantName" type="text" maxlength="80" placeholder="Ej: Vestido azul" data-i18n-placeholder="assets.associate.namePlaceholder"></label>
+      <label><span data-i18n="assets.associate.description">Descripción</span><textarea id="associateNewVariantDescription" maxlength="1000" placeholder="Ropa, accesorios, peinado y detalles que distinguen esta variante" data-i18n-placeholder="assets.associate.descriptionPlaceholder"></textarea></label>
     </div>
-    <label class="check-row"><input type="checkbox" id="associateAsPhoto"> Agregar también como foto del original o la variante elegida (para usarla de referencia)</label>
-    <div class="form-modal-actions"><button type="button" class="mini-btn" id="associateAssetCancel">Cancelar</button><button type="submit" class="generate-btn small">Asociar</button></div>
+    <label class="check-row"><input type="checkbox" id="associateAsPhoto"> <span data-i18n="assets.associate.addAsPhoto">Agregar también como foto del original o la variante elegida (para usarla de referencia)</span></label>
+    <div class="form-modal-actions"><button type="button" class="mini-btn" id="associateAssetCancel" data-i18n="common.cancel">Cancelar</button><button type="submit" class="generate-btn small" data-i18n="assets.series.associate">Asociar</button></div>
   </form>
 </div>
 
@@ -994,32 +1004,32 @@
 <div id="seriesModal" class="modal" hidden>
   <form id="seriesForm" class="modal-box form-modal-box">
     <div class="modal-head">
-      <div><h3 id="seriesModalTitle">Nueva serie</h3><p class="hint">Título, formato, estructura y personajes</p></div>
-      <button type="button" class="icon-btn" id="seriesModalClose"><svg class="ic"><use href="#i-x"/></svg></button>
+      <div><h3 id="seriesModalTitle" data-i18n="series.new">Nueva serie</h3><p class="hint" data-i18n="series.editor.lead">Título, formato, estructura y personajes</p></div>
+      <button type="button" class="icon-btn" id="seriesModalClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
-    <label>Título<input id="seriesTitle" type="text" maxlength="120" placeholder="Ej: Las aventuras de Tonya" required></label>
-    <label>Descripción<textarea id="seriesDescription" rows="3" placeholder="De qué va la serie…"></textarea></label>
+    <label><span data-i18n="common.title">Título</span><input id="seriesTitle" type="text" maxlength="120" placeholder="Ej: Las aventuras de Tonya" data-i18n-placeholder="series.editor.titlePlaceholder" required></label>
+    <label><span data-i18n="common.description">Descripción</span><textarea id="seriesDescription" rows="3" placeholder="De qué va la serie…" data-i18n-placeholder="series.editor.descriptionPlaceholder"></textarea></label>
     <div class="series-structure-row">
-      <label>Formato
+      <label><span data-i18n="series.editor.format">Formato</span>
         <select id="seriesFormat" class="select">
           <option value="9:16">9:16 (vertical)</option>
           <option value="16:9">16:9 (horizontal)</option>
         </select>
       </label>
-      <label>Capítulos<input id="seriesChapters" type="number" min="1" max="500" value="5" required></label>
-      <label>Segundos por capítulo<input id="seriesChapterSeconds" type="number" min="1" max="36000" value="90" required></label>
+      <label><span data-i18n="series.editor.chapters">Capítulos</span><input id="seriesChapters" type="number" min="1" max="500" value="5" required></label>
+      <label><span data-i18n="series.editor.secondsPerChapter">Segundos por capítulo</span><input id="seriesChapterSeconds" type="number" min="1" max="36000" value="90" required></label>
     </div>
     <div id="seriesStructureHint" class="hint"></div>
-    <div class="series-field-label">Personajes</div>
+    <div class="series-field-label" data-i18n="characters.title">Personajes</div>
     <div id="seriesCharacterChips" class="chips"></div>
     <div id="seriesAssetsBlock" hidden>
-      <div class="series-field-label">Assets asociados</div>
+      <div class="series-field-label" data-i18n="series.editor.associatedAssets">Assets asociados</div>
       <div id="seriesAssetsList" class="series-assets-list"></div>
-      <p class="hint">Para sumar assets: en Assets, abrí un archivo y usá “Asociar a serie”.</p>
+      <p class="hint" data-i18n="series.editor.assetsHint">Para sumar assets: en Assets, abrí un archivo y usá “Asociar a serie”.</p>
     </div>
     <div class="form-modal-actions">
-      <button type="button" class="mini-btn" id="seriesModalCancel">Cancelar</button>
-      <button type="submit" class="generate-btn small">Guardar</button>
+      <button type="button" class="mini-btn" id="seriesModalCancel" data-i18n="common.cancel">Cancelar</button>
+      <button type="submit" class="generate-btn small" data-i18n="common.save">Guardar</button>
     </div>
   </form>
 </div>
@@ -1028,18 +1038,18 @@
 <div id="shotAssetsModal" class="modal" hidden>
   <div class="modal-box shot-assets-box">
     <div class="modal-head">
-      <div><h3 id="shotAssetsTitle">Assets del plano</h3><p class="hint">Clickeá para asignar o quitar; se guarda al cerrar</p></div>
-      <button class="icon-btn" id="shotAssetsClose"><svg class="ic"><use href="#i-x"/></svg></button>
+      <div><h3 id="shotAssetsTitle" data-i18n="storyboard.shotAssets">Assets del plano</h3><p class="hint" data-i18n="storyboard.shotAssetsHint">Clickeá para asignar o quitar; se guarda al cerrar</p></div>
+      <button class="icon-btn" id="shotAssetsClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
     <div class="tabs" id="shotAssetsTabs">
-      <button class="tab active" data-szone="series">De la serie</button>
-      <button class="tab" data-szone="generated">Generadas</button>
-      <button class="tab" data-szone="uploads">Subidas</button>
-      <button class="tab" data-szone="video">Videos</button>
-      <button class="tab" data-szone="audio">Audio</button>
+      <button class="tab active" data-szone="series" data-i18n="storyboard.fromSeries">De la serie</button>
+      <button class="tab" data-szone="generated" data-i18n="common.generated">Generadas</button>
+      <button class="tab" data-szone="uploads" data-i18n="common.uploaded">Subidas</button>
+      <button class="tab" data-szone="video" data-i18n="common.videos">Videos</button>
+      <button class="tab" data-szone="audio" data-i18n="common.audio">Audio</button>
     </div>
     <div id="shotAssetsGrid" class="shot-assets-grid"></div>
-    <div class="form-modal-actions"><button type="button" class="generate-btn small" id="shotAssetsDone">Listo</button></div>
+    <div class="form-modal-actions"><button type="button" class="generate-btn small" id="shotAssetsDone" data-i18n="common.done">Listo</button></div>
   </div>
 </div>
 
@@ -1047,25 +1057,25 @@
 <div id="automationAssetsModal" class="modal" hidden>
   <div class="modal-box automation-assets-picker-box">
     <div class="modal-head">
-      <div><h3 id="automationAssetsTitle">Assets del bloque</h3><p class="hint">Seleccioná imágenes o videos; el orden inferior será el orden de aparición.</p></div>
-      <button class="icon-btn" id="automationAssetsClose"><svg class="ic"><use href="#i-x"/></svg></button>
+      <div><h3 id="automationAssetsTitle" data-i18n="automation.assets.title">Assets del bloque</h3><p class="hint" data-i18n="automation.assets.orderHint">Seleccioná imágenes o videos; el orden inferior será el orden de aparición.</p></div>
+      <button class="icon-btn" id="automationAssetsClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
     <div class="automation-assets-picker-tools">
       <div class="tabs" id="automationAssetsTabs">
-        <button class="tab active" data-auto-assets-zone="all">Todos</button>
-        <button class="tab" data-auto-assets-zone="generated">Generadas</button>
-        <button class="tab" data-auto-assets-zone="uploads">Subidas</button>
-        <button class="tab" data-auto-assets-zone="video">Videos</button>
-        <button class="tab" data-auto-assets-zone="audio" id="automationAssetsAudioTab" hidden>Audio</button>
+        <button class="tab active" data-auto-assets-zone="all" data-i18n="common.all">Todos</button>
+        <button class="tab" data-auto-assets-zone="generated" data-i18n="common.generated">Generadas</button>
+        <button class="tab" data-auto-assets-zone="uploads" data-i18n="common.uploaded">Subidas</button>
+        <button class="tab" data-auto-assets-zone="video" data-i18n="common.videos">Videos</button>
+        <button class="tab" data-auto-assets-zone="audio" id="automationAssetsAudioTab" hidden data-i18n="common.audio">Audio</button>
       </div>
-      <input type="search" id="automationAssetsSearch" placeholder="Buscar por nombre…">
+      <input type="search" id="automationAssetsSearch" placeholder="Buscar por nombre…" data-i18n-placeholder="automation.assets.searchPlaceholder">
     </div>
     <div id="automationAssetsPickerGrid" class="automation-assets-picker-grid"></div>
-    <div class="automation-assets-order-head"><strong>Orden de reproducción</strong><span class="hint" id="automationAssetsCount">0 seleccionados</span></div>
+    <div class="automation-assets-order-head"><strong data-i18n="automation.assets.playbackOrder">Orden de reproducción</strong><span class="hint" id="automationAssetsCount" data-i18n="automation.assets.noneSelected">0 seleccionados</span></div>
     <div id="automationAssetsOrder" class="automation-assets-order"></div>
     <div class="form-modal-actions">
-      <button type="button" class="mini-btn" id="automationAssetsCancel">Cancelar</button>
-      <button type="button" class="generate-btn small" id="automationAssetsDone">Usar selección</button>
+      <button type="button" class="mini-btn" id="automationAssetsCancel" data-i18n="common.cancel">Cancelar</button>
+      <button type="button" class="generate-btn small" id="automationAssetsDone" data-i18n="automation.assets.useSelection">Usar selección</button>
     </div>
   </div>
 </div>
@@ -1073,10 +1083,10 @@
 <!-- Asociar asset a una serie -->
 <div id="seriesAssignModal" class="modal" hidden>
   <form id="seriesAssignForm" class="modal-box form-modal-box">
-    <div class="modal-head"><div><h3>Asociar a serie</h3><p class="hint">El archivo no se moverá ni duplicará</p></div><button type="button" class="icon-btn" id="seriesAssignClose"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div class="modal-head"><div><h3 data-i18n="common.associateSeries">Asociar a serie</h3><p class="hint" data-i18n="assets.series.noMove">El archivo no se moverá ni duplicará</p></div><button type="button" class="icon-btn" id="seriesAssignClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
     <div id="seriesAssignPreview" class="associate-preview"></div>
-    <label>Serie<select id="seriesAssignSelect" class="select" required></select></label>
-    <div class="form-modal-actions"><button type="button" class="mini-btn" id="seriesAssignCancel">Cancelar</button><button type="submit" class="generate-btn small">Asociar</button></div>
+    <label><span data-i18n="assets.filters.series">Serie</span><select id="seriesAssignSelect" class="select" required></select></label>
+    <div class="form-modal-actions"><button type="button" class="mini-btn" id="seriesAssignCancel" data-i18n="common.cancel">Cancelar</button><button type="submit" class="generate-btn small" data-i18n="assets.series.associate">Asociar</button></div>
   </form>
 </div>
 
@@ -1084,50 +1094,50 @@
 <div id="promptEditorModal" class="modal" hidden>
   <form id="promptEditorForm" class="modal-box form-modal-box prompt-editor-box">
     <div class="modal-head">
-      <div><h3 id="promptEditorTitle">Guardar prompt</h3><p class="hint">Nombre, categoría y texto reutilizable</p></div>
-      <button type="button" class="icon-btn" id="promptEditorClose"><svg class="ic"><use href="#i-x"/></svg></button>
+      <div><h3 id="promptEditorTitle" data-i18n="prompts.editor.saveTitle">Guardar prompt</h3><p class="hint" data-i18n="prompts.editor.lead">Nombre, categoría y texto reutilizable</p></div>
+      <button type="button" class="icon-btn" id="promptEditorClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
-    <label>Título<input id="promptEditorName" type="text" maxlength="120" placeholder="Ej: Retrato editorial" required></label>
-    <label>Categoría<input id="promptEditorCategory" type="text" maxlength="80" placeholder="General"></label>
-    <label class="check-row"><input id="promptEditorNsfw" type="checkbox"> Contenido NSFW</label>
+    <label><span data-i18n="common.title">Título</span><input id="promptEditorName" type="text" maxlength="120" placeholder="Ej: Retrato editorial" data-i18n-placeholder="prompts.editor.titlePlaceholder" required></label>
+    <label><span data-i18n="categories.category">Categoría</span><input id="promptEditorCategory" type="text" maxlength="80" placeholder="General"></label>
+    <label class="check-row"><input id="promptEditorNsfw" type="checkbox"> <span data-i18n="common.nsfwContent">Contenido NSFW</span></label>
     <div id="promptEditorCategoryChips" class="chips"></div>
-    <label>Tipo
+    <label><span data-i18n="assets.info.type">Tipo</span>
       <select id="promptEditorMode" class="select">
-        <option value="image">Imagen</option>
-        <option value="video">Video</option>
-        <option value="audio">Audio</option>
+        <option value="image" data-i18n="create.mode.image">Imagen</option>
+        <option value="video" data-i18n="create.mode.video">Video</option>
+        <option value="audio" data-i18n="create.mode.audio">Audio</option>
       </select>
     </label>
     <section id="promptStyleFields" class="prompt-style-fields" hidden>
       <div id="promptStylePreview" class="prompt-style-preview">
-        <div class="prompt-style-placeholder">Elegí la imagen que define la estética</div>
+        <div class="prompt-style-placeholder" data-i18n="prompts.style.chooseImage">Elegí la imagen que define la estética</div>
       </div>
       <input id="promptStyleUpload" type="file" accept="image/*,video/mp4,video/quicktime,video/webm" hidden>
       <div class="prompt-style-actions">
-        <button type="button" class="mini-btn" id="promptStyleUploadBtn"><svg class="ic"><use href="#i-upload"/></svg> Subir archivo</button>
-        <button type="button" class="mini-btn" id="promptStyleAssetsBtn"><svg class="ic"><use href="#i-image"/></svg> Elegir de Assets</button>
-        <button type="button" class="mini-btn" id="promptStyleAnalyzeBtn"><svg class="ic"><use href="#i-spark"/></svg> Escribir estilo con IA</button>
+        <button type="button" class="mini-btn" id="promptStyleUploadBtn"><svg class="ic"><use href="#i-upload"/></svg> <span data-i18n="prompts.style.uploadFile">Subir archivo</span></button>
+        <button type="button" class="mini-btn" id="promptStyleAssetsBtn"><svg class="ic"><use href="#i-image"/></svg> <span data-i18n="prompts.style.chooseAssets">Elegir de Assets</span></button>
+        <button type="button" class="mini-btn" id="promptStyleAnalyzeBtn"><svg class="ic"><use href="#i-spark"/></svg> <span data-i18n="prompts.style.analyze">Escribir estilo con IA</span></button>
       </div>
-      <span id="promptStyleStatus" class="hint">La IA describirá solo la estética, técnica, soporte, luz, color y textura; no copiará el contenido de la escena.</span>
+      <span id="promptStyleStatus" class="hint" data-i18n="prompts.style.analysisHint">La IA describirá solo la estética, técnica, soporte, luz, color y textura; no copiará el contenido de la escena.</span>
     </section>
     <section id="promptLoraFields" class="prompt-lora-fields" hidden>
-      <label>Descripción<textarea id="promptLoraDescription" maxlength="2000" placeholder="Qué representa o consigue este LoRA"></textarea></label>
-      <label>Nombre del archivo<input id="promptLoraFileName" type="text" maxlength="260" placeholder="Ej: cinematic_style_v2.safetensors"></label>
+      <label><span data-i18n="common.description">Descripción</span><textarea id="promptLoraDescription" maxlength="2000" placeholder="Qué representa o consigue este LoRA" data-i18n-placeholder="prompts.lora.descriptionPlaceholder"></textarea></label>
+      <label><span data-i18n="assets.info.fileName">Nombre del archivo</span><input id="promptLoraFileName" type="text" maxlength="260" placeholder="Ej: cinematic_style_v2.safetensors"></label>
       <div class="prompt-lora-group">
-        <div class="prompt-lora-group-head"><div><strong>Trigger words</strong><span>Se guardan como etiquetas invocables</span></div></div>
+        <div class="prompt-lora-group-head"><div><strong>Trigger words</strong><span data-i18n="prompts.lora.triggerHint">Se guardan como etiquetas invocables</span></div></div>
         <div id="promptLoraTriggerChips" class="prompt-lora-trigger-chips"></div>
-        <div class="prompt-lora-add-row"><input id="promptLoraTriggerInput" type="text" maxlength="120" placeholder="Ej: cinematic lighting"><button type="button" class="mini-btn" id="promptLoraAddTrigger"><svg class="ic"><use href="#i-plus"/></svg> Añadir</button></div>
+        <div class="prompt-lora-add-row"><input id="promptLoraTriggerInput" type="text" maxlength="120" placeholder="Ej: cinematic lighting"><button type="button" class="mini-btn" id="promptLoraAddTrigger"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="common.add">Añadir</span></button></div>
       </div>
       <div class="prompt-lora-group">
-        <div class="prompt-lora-group-head"><div><strong>Casos de uso</strong><span>Cada caso tiene un nombre y su prompt completo</span></div><button type="button" class="mini-btn" id="promptLoraAddUseCase"><svg class="ic"><use href="#i-plus"/></svg> Caso de uso</button></div>
+        <div class="prompt-lora-group-head"><div><strong data-i18n="prompts.lora.useCases">Casos de uso</strong><span data-i18n="prompts.lora.useCasesHint">Cada caso tiene un nombre y su prompt completo</span></div><button type="button" class="mini-btn" id="promptLoraAddUseCase"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="prompts.lora.useCase">Caso de uso</span></button></div>
         <div id="promptLoraUseCases" class="prompt-lora-use-cases"></div>
       </div>
-      <label>Información para un uso correcto<textarea id="promptLoraUsageInfo" maxlength="3000" placeholder="Ej: Weight recomendado 0.7. No funciona bien combinado con otros LoRA."></textarea></label>
+      <label><span data-i18n="prompts.lora.correctUse">Información para un uso correcto</span><textarea id="promptLoraUsageInfo" maxlength="3000" placeholder="Ej: Weight recomendado 0.7. No funciona bien combinado con otros LoRA." data-i18n-placeholder="prompts.lora.correctUsePlaceholder"></textarea></label>
     </section>
-    <label id="promptEditorTextField"><span id="promptEditorTextLabel">Prompt</span><textarea id="promptEditorText" rows="8" placeholder="Texto del prompt…" required></textarea></label>
+    <label id="promptEditorTextField"><span id="promptEditorTextLabel">Prompt</span><textarea id="promptEditorText" rows="8" placeholder="Texto del prompt…" data-i18n-placeholder="prompts.editor.textPlaceholder" required></textarea></label>
     <div class="form-modal-actions">
-      <button type="button" class="mini-btn" id="promptEditorCancel">Cancelar</button>
-      <button type="submit" class="generate-btn small">Guardar prompt</button>
+      <button type="button" class="mini-btn" id="promptEditorCancel" data-i18n="common.cancel">Cancelar</button>
+      <button type="submit" class="generate-btn small" data-i18n="prompts.editor.save">Guardar prompt</button>
     </div>
   </form>
 </div>
@@ -1136,33 +1146,33 @@
 <div id="vocabularyEditorModal" class="modal" hidden>
   <form id="vocabularyEditorForm" class="modal-box form-modal-box vocabulary-editor-box">
     <div class="modal-head">
-      <div><h3 id="vocabularyEditorTitle">Nueva ficha de vocabulario</h3><p class="hint">Una referencia visual y sus términos exactos</p></div>
-      <button type="button" class="icon-btn" id="vocabularyEditorClose"><svg class="ic"><use href="#i-x"/></svg></button>
+      <div><h3 id="vocabularyEditorTitle" data-i18n="vocabulary.editor.newTitle">Nueva ficha de vocabulario</h3><p class="hint" data-i18n="vocabulary.editor.lead">Una referencia visual y sus términos exactos</p></div>
+      <button type="button" class="icon-btn" id="vocabularyEditorClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
-    <label>Título<input id="vocabularyEditorName" type="text" maxlength="120" placeholder="Ej: Camisetas" required></label>
-    <label>Categoría<input id="vocabularyEditorCategory" type="text" maxlength="80" list="vocabularyCategoryList" placeholder="Ej: Prendas" required></label>
+    <label><span data-i18n="common.title">Título</span><input id="vocabularyEditorName" type="text" maxlength="120" placeholder="Ej: Camisetas" data-i18n-placeholder="vocabulary.editor.titlePlaceholder" required></label>
+    <label><span data-i18n="categories.category">Categoría</span><input id="vocabularyEditorCategory" type="text" maxlength="80" list="vocabularyCategoryList" placeholder="Ej: Prendas" data-i18n-placeholder="vocabulary.editor.categoryPlaceholder" required></label>
     <datalist id="vocabularyCategoryList"></datalist>
-    <label class="check-row"><input id="vocabularyEditorNsfw" type="checkbox"> Contenido NSFW</label>
+    <label class="check-row"><input id="vocabularyEditorNsfw" type="checkbox"> <span data-i18n="common.nsfwContent">Contenido NSFW</span></label>
     <section class="vocabulary-editor-image">
-      <div id="vocabularyEditorPreview" class="vocabulary-image-preview"><span>Elegí una imagen ilustrativa</span></div>
+      <div id="vocabularyEditorPreview" class="vocabulary-image-preview"><span data-i18n="vocabulary.editor.chooseImage">Elegí una imagen ilustrativa</span></div>
       <input id="vocabularyEditorFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
       <div class="vocabulary-image-actions">
-        <button type="button" class="mini-btn" id="vocabularyEditorUpload"><svg class="ic"><use href="#i-upload"/></svg> Subir imagen</button>
-        <button type="button" class="mini-btn" id="vocabularyEditorAnalyze" disabled><svg class="ic"><use href="#i-spark"/></svg> Detectar palabras con IA</button>
-        <span id="vocabularyEditorImageStatus" class="hint">La imagen es obligatoria.</span>
+        <button type="button" class="mini-btn" id="vocabularyEditorUpload"><svg class="ic"><use href="#i-upload"/></svg> <span data-i18n="vocabulary.editor.uploadImage">Subir imagen</span></button>
+        <button type="button" class="mini-btn" id="vocabularyEditorAnalyze" disabled><svg class="ic"><use href="#i-spark"/></svg> <span data-i18n="vocabulary.editor.analyze">Detectar palabras con IA</span></button>
+        <span id="vocabularyEditorImageStatus" class="hint" data-i18n="vocabulary.editor.imageRequired">La imagen es obligatoria.</span>
       </div>
     </section>
     <section class="vocabulary-editor-words">
-      <div><strong>Palabras</strong><span class="hint">Podés añadir varias separándolas con comas.</span></div>
+      <div><strong data-i18n="vocabulary.editor.words">Palabras</strong><span class="hint" data-i18n="vocabulary.editor.wordsHint">Podés añadir varias separándolas con comas.</span></div>
       <div id="vocabularyEditorWordChips" class="vocabulary-editor-word-chips"></div>
       <div class="vocabulary-word-add-row">
         <input id="vocabularyEditorWordInput" type="text" maxlength="1000" placeholder="crop-top, t-shirt, tank top">
-        <button type="button" class="mini-btn" id="vocabularyEditorAddWord"><svg class="ic"><use href="#i-plus"/></svg> Añadir</button>
+        <button type="button" class="mini-btn" id="vocabularyEditorAddWord"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="common.add">Añadir</span></button>
       </div>
     </section>
     <div class="form-modal-actions">
-      <button type="button" class="mini-btn" id="vocabularyEditorCancel">Cancelar</button>
-      <button type="submit" class="generate-btn small">Guardar ficha</button>
+      <button type="button" class="mini-btn" id="vocabularyEditorCancel" data-i18n="common.cancel">Cancelar</button>
+      <button type="submit" class="generate-btn small" data-i18n="vocabulary.editor.save">Guardar ficha</button>
     </div>
   </form>
 </div>
@@ -1170,24 +1180,24 @@
 <div id="snippetEditorModal" class="modal" hidden>
   <form id="snippetEditorForm" class="modal-box form-modal-box prompt-editor-box">
     <div class="modal-head">
-      <div><h3 id="snippetEditorTitle">Guardar snippet</h3><p class="hint">Título, lenguaje y código reutilizable</p></div>
-      <button type="button" class="icon-btn" id="snippetEditorClose"><svg class="ic"><use href="#i-x"/></svg></button>
+      <div><h3 id="snippetEditorTitle" data-i18n="snippets.editor.saveTitle">Guardar snippet</h3><p class="hint" data-i18n="snippets.editor.lead">Título, lenguaje y código reutilizable</p></div>
+      <button type="button" class="icon-btn" id="snippetEditorClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
-    <label>Título<input id="snippetEditorName" type="text" maxlength="120" placeholder="Ej: Loop de opacidad" required></label>
-    <label>Lenguaje
+    <label><span data-i18n="common.title">Título</span><input id="snippetEditorName" type="text" maxlength="120" placeholder="Ej: Loop de opacidad" data-i18n-placeholder="snippets.editor.titlePlaceholder" required></label>
+    <label><span data-i18n="snippets.editor.language">Lenguaje</span>
       <select id="snippetEditorLanguage" class="select">
         <option value="javascript">JavaScript / ExtendScript</option>
         <option value="python">Python</option>
         <option value="bash">Bash</option>
       </select>
     </label>
-    <label>Categoría (opcional)<input id="snippetEditorCategory" type="text" maxlength="80" placeholder="Ej: AE Expressions, Instaladores"></label>
+    <label><span data-i18n="snippets.editor.optionalCategory">Categoría (opcional)</span><input id="snippetEditorCategory" type="text" maxlength="80" placeholder="Ej: AE Expressions, Instaladores" data-i18n-placeholder="snippets.editor.categoryPlaceholder"></label>
     <div id="snippetEditorCategoryChips" class="chips"></div>
-    <label>Código<textarea id="snippetEditorCode" class="code-textarea" rows="12" placeholder="Pegá el código acá…" required></textarea></label>
-    <label>Notas (opcional)<textarea id="snippetEditorNotes" rows="3" placeholder="Cómo usarlo, dependencias, advertencias…"></textarea></label>
+    <label><span data-i18n="snippets.editor.code">Código</span><textarea id="snippetEditorCode" class="code-textarea" rows="12" placeholder="Pegá el código acá…" data-i18n-placeholder="snippets.editor.codePlaceholder" required></textarea></label>
+    <label><span data-i18n="snippets.editor.optionalNotes">Notas (opcional)</span><textarea id="snippetEditorNotes" rows="3" placeholder="Cómo usarlo, dependencias, advertencias…" data-i18n-placeholder="snippets.editor.notesPlaceholder"></textarea></label>
     <div class="form-modal-actions">
-      <button type="button" class="mini-btn" id="snippetEditorCancel">Cancelar</button>
-      <button type="submit" class="generate-btn small">Guardar snippet</button>
+      <button type="button" class="mini-btn" id="snippetEditorCancel" data-i18n="common.cancel">Cancelar</button>
+      <button type="submit" class="generate-btn small" data-i18n="snippets.editor.save">Guardar snippet</button>
     </div>
   </form>
 </div>
@@ -1196,13 +1206,13 @@
   <div class="modal-box form-modal-box snippet-view-box">
     <div class="modal-head">
       <div><h3 id="snippetViewTitle"></h3><p class="hint" id="snippetViewMeta"></p></div>
-      <button type="button" class="icon-btn" id="snippetViewClose"><svg class="ic"><use href="#i-x"/></svg></button>
+      <button type="button" class="icon-btn" id="snippetViewClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
     <pre class="snippet-code-block snippet-code-block-large"><code id="snippetViewCode"></code></pre>
     <div id="snippetViewNotes" class="prompt-library-text" hidden></div>
     <div class="form-modal-actions">
-      <button type="button" class="mini-btn" id="snippetViewCopy"><svg class="ic"><use href="#i-copy"/></svg> Copiar</button>
-      <button type="button" class="mini-btn" id="snippetViewEdit"><svg class="ic"><use href="#i-edit"/></svg> Editar</button>
+      <button type="button" class="mini-btn" id="snippetViewCopy"><svg class="ic"><use href="#i-copy"/></svg> <span data-i18n="assets.info.copy">Copiar</span></button>
+      <button type="button" class="mini-btn" id="snippetViewEdit"><svg class="ic"><use href="#i-edit"/></svg> <span data-i18n="common.edit">Editar</span></button>
     </div>
   </div>
 </div>
@@ -1211,9 +1221,9 @@
   <form id="loginForm" class="modal-box login-box">
     <div class="login-mark"><img src="brand/manifestador-isologo.png" alt=""></div>
     <h2>Manifestador</h2>
-    <p>Introduce tu clave de acceso</p>
-    <span class="key-row login-password-row"><input id="loginPassword" type="password" autocomplete="current-password" autofocus required><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button></span>
-    <button class="generate-btn" type="submit">Entrar</button>
+    <p data-i18n="login.prompt">Introduce tu clave de acceso</p>
+    <span class="key-row login-password-row"><input id="loginPassword" type="password" autocomplete="current-password" autofocus required><button type="button" class="icon-btn key-visibility-btn" data-password-toggle data-i18n-aria-label="login.showPassword" data-i18n-title="login.showPassword" aria-label="Mostrar clave" title="Mostrar clave"><svg class="ic"><use href="#i-eye"/></svg></button></span>
+    <button class="generate-btn" type="submit" data-i18n="login.submit">Entrar</button>
     <div id="loginError" class="test-result err"></div>
   </form>
 </div>
@@ -1222,19 +1232,19 @@
 <div id="pickerModal" class="modal" hidden>
   <div class="modal-box">
     <div class="modal-head">
-      <h3 id="pickerTitle">Elegir imagen de referencia</h3>
+      <h3 id="pickerTitle" data-i18n="picker.referenceImage">Elegir imagen de referencia</h3>
       <button class="icon-btn" id="pickerClose"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
     <div class="tabs" id="pickerTabs">
-      <button class="tab active" data-src="upload">Subir</button>
-      <button class="tab" data-src="uploads">Subidas</button>
-      <button class="tab" data-src="generated">Generadas</button>
-      <button class="tab" data-src="characters">Personajes</button>
-      <button class="tab" data-src="elements">Locaciones/Objetos</button>
-      <button class="tab" data-src="series">Series</button>
-      <button class="tab" data-src="poses">Poses</button>
-      <button class="tab" data-src="video" id="pickerVideoTab" hidden>Videos</button>
-      <button class="tab" data-src="audio" id="pickerAudioTab" hidden>Audio</button>
+      <button class="tab active" data-src="upload" data-i18n="common.upload">Subir</button>
+      <button class="tab" data-src="uploads" data-i18n="common.uploaded">Subidas</button>
+      <button class="tab" data-src="generated" data-i18n="common.generated">Generadas</button>
+      <button class="tab" data-src="characters" data-i18n="common.characters">Personajes</button>
+      <button class="tab" data-src="elements" data-i18n="common.elements">Locaciones/Objetos</button>
+      <button class="tab" data-src="series" data-i18n="common.series">Series</button>
+      <button class="tab" data-src="poses" data-i18n="common.poses">Poses</button>
+      <button class="tab" data-src="video" id="pickerVideoTab" data-i18n="common.videos" hidden>Videos</button>
+      <button class="tab" data-src="audio" id="pickerAudioTab" data-i18n="common.audio" hidden>Audio</button>
     </div>
     <div id="pickerBody" class="picker-body"></div>
   </div>
@@ -1244,8 +1254,8 @@
 <div id="characterGalleryModal" class="modal" hidden>
   <div class="modal-box character-gallery-box">
     <div class="modal-head">
-      <div><h3 id="characterGalleryTitle">Fotos del personaje</h3><p class="hint">Original y variantes</p></div>
-      <button class="icon-btn" id="characterGalleryClose"><svg class="ic"><use href="#i-x"/></svg></button>
+      <div><h3 id="characterGalleryTitle" data-i18n="characters.gallery.title">Fotos del personaje</h3><p class="hint" data-i18n="characters.gallery.lead">Original y variantes</p></div>
+      <button class="icon-btn" id="characterGalleryClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
     <div id="characterGalleryBody" class="character-gallery-body"></div>
   </div>
@@ -1255,10 +1265,10 @@
 <div id="lightbox" class="modal" hidden>
   <div class="lightbox-box">
     <button class="icon-btn lb-close" id="lbClose"><svg class="ic"><use href="#i-x"/></svg></button>
-    <button class="lb-nav lb-prev" id="lbPrev" title="Anterior"><svg class="ic ic-lg"><use href="#i-left"/></svg></button>
+    <button class="lb-nav lb-prev" id="lbPrev" data-i18n-title="common.previous" title="Anterior"><svg class="ic ic-lg"><use href="#i-left"/></svg></button>
     <div id="lbZoomWrap"><img id="lbImg" alt=""></div>
     <video id="lbVideo" controls loop hidden></video>
-    <button class="lb-nav lb-next" id="lbNext" title="Siguiente"><svg class="ic ic-lg"><use href="#i-right"/></svg></button>
+    <button class="lb-nav lb-next" id="lbNext" data-i18n-title="common.next" title="Siguiente"><svg class="ic ic-lg"><use href="#i-right"/></svg></button>
     <div id="lbCounter" class="lb-counter"></div>
     <div id="lbActions" class="lb-actions"></div>
   </div>
@@ -1268,12 +1278,12 @@
 <div id="shotPromptModal" class="modal" hidden>
   <div class="modal-box shot-assets-box">
     <div class="modal-head">
-      <div><h3 id="shotPromptTitle">Elegir prompt</h3><p class="hint">De tu biblioteca de Prompts; queda registrado en el plano</p></div>
-      <button class="icon-btn" id="shotPromptClose"><svg class="ic"><use href="#i-x"/></svg></button>
+      <div><h3 id="shotPromptTitle" data-i18n="storyboard.choosePrompt">Elegir prompt</h3><p class="hint" data-i18n="storyboard.choosePromptHint">De tu biblioteca de Prompts; queda registrado en el plano</p></div>
+      <button class="icon-btn" id="shotPromptClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
     <div class="shot-prompt-filters">
-      <input id="shotPromptSearch" type="text" placeholder="Buscar por título o texto…">
-      <select id="shotPromptCategory" class="select"><option value="">Todas las categorías</option></select>
+      <input id="shotPromptSearch" type="text" placeholder="Buscar por título o texto…" data-i18n-placeholder="storyboard.searchPrompt">
+      <select id="shotPromptCategory" class="select"><option value="" data-i18n="categories.all">Todas las categorías</option></select>
     </div>
     <div id="shotPromptList" class="shot-prompt-list"></div>
   </div>
@@ -1283,15 +1293,15 @@
 <div id="charAssetPickerModal" class="modal" hidden>
   <div class="modal-box shot-assets-box">
     <div class="modal-head">
-      <div><h3 id="charAssetPickerTitle">Elegir asset</h3><p class="hint">Clickeá una imagen para agregarla; volvé a clickearla para quitarla. <span id="charAssetPickerHint"></span></p></div>
-      <button class="icon-btn" id="charAssetPickerClose"><svg class="ic"><use href="#i-x"/></svg></button>
+      <div><h3 id="charAssetPickerTitle" data-i18n="characters.assetPicker.title">Elegir asset</h3><p class="hint"><span data-i18n="characters.assetPicker.lead">Clickeá una imagen para agregarla; volvé a clickearla para quitarla.</span> <span id="charAssetPickerHint"></span></p></div>
+      <button class="icon-btn" id="charAssetPickerClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
     <div class="tabs" id="charAssetPickerTabs">
-      <button class="tab active" data-czone="generated">Generadas</button>
-      <button class="tab" data-czone="uploads">Subidas</button>
+      <button class="tab active" data-czone="generated" data-i18n="common.generated">Generadas</button>
+      <button class="tab" data-czone="uploads" data-i18n="common.uploaded">Subidas</button>
     </div>
     <div id="charAssetPickerGrid" class="shot-assets-grid"></div>
-    <div class="form-modal-actions"><button type="button" class="generate-btn small" id="charAssetPickerDone">Listo</button></div>
+    <div class="form-modal-actions"><button type="button" class="generate-btn small" id="charAssetPickerDone" data-i18n="common.done">Listo</button></div>
   </div>
 </div>
 
@@ -1299,8 +1309,8 @@
 <div id="elementModal" class="modal" hidden>
   <div class="modal-head-wrap modal-box form-modal-box">
     <div class="modal-head">
-      <h3 id="elementModalTitle">Locación u objeto</h3>
-      <button class="icon-btn" id="elementModalClose"><svg class="ic"><use href="#i-x"/></svg></button>
+      <h3 id="elementModalTitle" data-i18n="assets.associate.element">Locación u objeto</h3>
+      <button class="icon-btn" id="elementModalClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
     <div id="elementModalBody" class="char-modal-body"></div>
   </div>
@@ -1310,8 +1320,8 @@
 <div id="charModal" class="modal" hidden>
   <div class="modal-head-wrap modal-box">
     <div class="modal-head">
-      <h3 id="charModalTitle">Personaje</h3>
-      <button class="icon-btn" id="charModalClose"><svg class="ic"><use href="#i-x"/></svg></button>
+      <h3 id="charModalTitle" data-i18n="assets.filters.character">Personaje</h3>
+      <button class="icon-btn" id="charModalClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
     <div id="charModalBody" class="char-modal-body"></div>
   </div>
@@ -1323,6 +1333,9 @@
 <input type="file" id="scriptImportInput" accept=".json,application/json" hidden>
 
 <script src="vendor/prism/prism.js"></script>
+<script src="i18n.js"></script>
+<script src="locales/es.js"></script>
+<script src="locales/en.js"></script>
 <script src="app-core.js"></script>
 <script src="app.js"></script>
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
