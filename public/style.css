@@ -180,6 +180,7 @@ h3 { font-size: 15px; }
   border-radius: 0;
 }
 .mode-btn {
+  display: inline-flex; align-items: center; gap: 7px;
   padding: 9px 20px; border: none; border-radius: 0;
   background: transparent; color: var(--muted);
   font-size: 14px; font-weight: 700; cursor: pointer;
