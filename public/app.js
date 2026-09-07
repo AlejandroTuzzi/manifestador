@@ -581,9 +581,7 @@ $('#loginForm').addEventListener('submit', async (e) => {
       body: JSON.stringify({ password: $('#loginPassword').value })
     });
     const body = await res.json();
-    const localizedError = body.code && i18n?.has(`errors.${body.code}`)
-      ? tr(`errors.${body.code}`, body.details || {})
-      : body.error;
+    const localizedError = i18n.errorMessage(body);
     if (!res.ok) throw new Error(localizedError || tr('login.failed', {}, 'No se pudo acceder'));
     $('#loginModal').hidden = true;
     $('#loginPassword').value = '';
@@ -897,6 +895,7 @@ function normalizeReferenceLabel(value) {
 }
 
 function renderRefs() {
+  if (referenceAudioKey && !state.refs.some((ref) => ref.key === referenceAudioKey && referenceKind(ref) === 'audio')) closeAssetAudioPlayer();
   const isVideo = state.mode === 'video';
   const m = activeRefModel();
   if (!m) return;
@@ -926,7 +925,7 @@ function renderRefs() {
     d.innerHTML = isAsset
       ? `<div class="asset-face" title="${esc(r.key)}">${IC('user', 'ic ic-lg')}<span>${esc(tr('create.refs.verified'))}</span></div>${badge}<button class="rm" title="${esc(tr('create.refs.remove'))}">×</button>`
       : `${kind === 'video' ? `<video src="${fileUrl(r.key)}" muted preload="metadata"></video>`
-        : kind === 'audio' ? `<div class="asset-face" title="${esc(r.key)}">${IC('mic', 'ic ic-lg')}<span>${esc(tr('create.refs.audio'))}</span></div>`
+        : kind === 'audio' ? `<button type="button" class="asset-face ref-audio-play" data-ref-audio-key="${esc(r.key)}" title="${esc(tr('create.refs.playAudio'))}" aria-label="${esc(tr('create.refs.playAudio'))}" aria-pressed="false">${IC('play', 'ic ic-lg')}</button>`
           : `<img src="${fileUrl(r.key)}" alt="">`}${kind === 'image' && r.label ? `<span class="ref-label-tag" title="${esc(tr('create.refs.labelVisible'))}">${esc(r.label)}</span>` : ''}${badge}<button class="rm" title="${esc(tr('create.refs.remove'))}">×</button>${kind === 'image' ? `<button class="ref-replace" title="${esc(tr('create.refs.replace'))}">${IC('refresh')}</button><button class="ref-label-btn${r.label ? ' on' : ''}" title="${esc(r.label ? tr('create.refs.label', { label: r.label }) : tr('create.refs.addLabel'))}">T</button>` : ''}`;
     d.querySelector('.rm').addEventListener('click', () => {
       state.refs.splice(i, 1);
@@ -945,6 +944,10 @@ function renderRefs() {
       renderHighlight();
     });
     d.querySelector('.ref-at')?.addEventListener('click', () => insertAtCursor(`${mention} `));
+    d.querySelector('.ref-audio-play')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleReferenceAudio(r.key);
+    });
     const refRemover = (key) => {
       const idx = state.refs.findIndex((ref) => ref.key === key);
       if (idx === -1) return false;
@@ -970,6 +973,7 @@ function renderRefs() {
     add.addEventListener('click', () => openPicker());
     strip.appendChild(add);
   }
+  syncReferenceAudioButtons();
 }
 
 function addRef(key, fromChar = false, kind = 'image') {
@@ -1051,7 +1055,7 @@ function stampLabel(key, text) {
       ctx.fillText(label, canvas.width / 2, bannerH / 2, bannerW - padding * 2);
       resolve(canvas.toDataURL('image/jpeg', 0.92));
     };
-    img.onerror = () => reject(new Error('No se pudo leer la imagen para etiquetarla'));
+    img.onerror = () => reject(new Error(tr('errors.labelImageReadFailed')));
     img.src = fileUrl(key);
   });
 }
@@ -1689,7 +1693,7 @@ async function runGenerationJob(job) {
     showEntry(entry);
     renderHistory();
     const costTxt = entry.cost ? ` — $${entry.cost.toFixed(3)}` : '';
-    if (entry.errors?.length) toast(tr('create.queue.partial', { count: entry.errors.length, error: entry.errors[0] }), 'err');
+    if (entry.errors?.length) toast(tr('create.queue.partial', { count: entry.errors.length, error: i18n.errorMessage(entry.errors[0]) }), 'err');
     else if (job.kind === 'h3-promotion') toast(tr('create.queue.promoted', { cost: costTxt }));
     else toast(tr('create.queue.generated', { cost: costTxt }));
   } catch (e) {
@@ -1725,7 +1729,7 @@ function renderGenerationQueue() {
       <div class="job-main">
         <div class="job-title">${esc(job.label)}${job.progress?.total ? ` · ${esc(tr('create.queue.step', { current: job.progress.current, total: job.progress.total }))}` : ''}</div>
         ${job.progress?.total ? `<div class="job-progress-bar"><div style="width:${Math.min(100, Math.round(job.progress.current / job.progress.total * 100))}%"></div></div>` : ''}
-        <div class="job-prompt ${job.status === 'error' ? 'job-error' : ''}">${esc(job.error || job.prompt)}</div>
+        <div class="job-prompt ${job.status === 'error' ? 'job-error' : ''}">${esc(job.error ? i18n.errorMessage(job.error) : job.prompt)}</div>
       </div>
       <div class="job-actions">${job.entry ? `<button class="mini-btn" data-job-act="view">${esc(tr('create.queue.view'))}</button>` : ''}${['done','error'].includes(job.status) ? '<button class="icon-btn" data-job-act="dismiss">×</button>' : ''}</div>
     </div>`).join('');
@@ -2162,6 +2166,8 @@ function isPromptLoraMediaPicker() {
 
 function openPicker(replaceIndex = null) {
   state.replaceRefIndex = replaceIndex;
+  state.pickerSelection = new Map();
+  state.pickerMulti = pickerAllowsMultiple();
   const multimedia = isVideoMultimediaPicker();
   const loraMedia = isPromptLoraMediaPicker();
   const multimediaAudio = multimedia && (currentVideoModel()?.mediaLimits?.audio || 0) > 0;
@@ -2178,11 +2184,96 @@ function openPicker(replaceIndex = null) {
   if (!multimediaAudio && state.pickerTab === 'audio') state.pickerTab = 'upload';
   if (loraMedia && state.pickerTab === 'audio') state.pickerTab = 'upload';
   $('#pickerModal').hidden = false;
+  syncPickerSelection();
   setPickerTab(state.pickerTab || 'upload');
 }
 
+function pickerAllowsMultiple() {
+  return state.replaceRefIndex == null && !state.comfyPickerSlot
+    && !state.promptStyleImagePick && !state.overlayBgPick && activeRefLimit() > 1;
+}
+
+function pickerSelectionError(key, kind) {
+  const refs = [...state.refs, ...state.pickerSelection.values()];
+  if (refs.some((ref) => ref.key === key)) return tr('picker.duplicateReference');
+  if (kind !== 'image' && !isVideoMultimediaPicker()) return tr('create.refs.onlyImages');
+  const model = activeRefModel();
+  if (refs.length >= activeRefLimit()) return tr('create.refs.modelLimit', { model: model.name, count: activeRefLimit() });
+  const limit = isVideoMultimediaPicker() ? model.mediaLimits?.[kind] : null;
+  if (limit != null && refs.filter((ref) => referenceKind(ref) === kind).length >= limit) {
+    return tr('create.refs.mediaLimit', { model: model.name, count: limit,
+      media: tr(kind === 'image' ? 'create.refs.images' : kind === 'video' ? 'create.refs.videos' : 'create.refs.audios') });
+  }
+  return '';
+}
+
+function selectPickerReference(key, kind = 'image') {
+  if (!state.pickerMulti) {
+    const result = pickRef(key, kind);
+    if (result !== false) $('#pickerModal').hidden = true;
+    return result;
+  }
+  if (state.pickerSelection.has(key)) state.pickerSelection.delete(key);
+  else {
+    const error = pickerSelectionError(key, kind);
+    if (error) { toast(error, 'err'); return false; }
+    state.pickerSelection.set(key, { key, kind });
+  }
+  syncPickerSelection();
+  return true;
+}
+
+function syncPickerSelection() {
+  const selected = state.pickerSelection || new Map();
+  $('#pickerSelectionBar').hidden = !state.pickerMulti;
+  $('#pickerSelectionCount').textContent = trn('picker.selectedCount', selected.size);
+  $('#pickerSelectionAdd').disabled = !selected.size;
+  $('#pickerSelectionClear').disabled = !selected.size;
+  const order = new Map([...selected.keys()].map((key, index) => [key, index + 1]));
+  $$('#pickerBody .pick[data-key]').forEach((card) => {
+    const added = state.pickerMulti && state.refs.some((ref) => ref.key === card.dataset.key);
+    const checked = selected.has(card.dataset.key);
+    card.classList.toggle('is-selected', checked);
+    card.classList.toggle('is-added', added);
+    card.setAttribute('aria-pressed', String(checked || added));
+    card.dataset.selectionMark = checked ? `✓ ${order.get(card.dataset.key)}` : added ? '✓' : '';
+  });
+}
+
+function bindPickerReferenceCards() {
+  $$('#pickerBody .pick[data-key]').forEach((card) => {
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', card.querySelector('.p-label')?.textContent || card.dataset.key);
+    card.addEventListener('click', () => selectPickerReference(card.dataset.key, card.dataset.kind || 'image'));
+    card.addEventListener('keydown', (event) => {
+      if (event.target !== card || !['Enter', ' '].includes(event.key)) return;
+      event.preventDefault();
+      selectPickerReference(card.dataset.key, card.dataset.kind || 'image');
+    });
+  });
+  syncPickerSelection();
+  bindPickerAudioButtons();
+}
+
+function confirmPickerSelection() {
+  for (const [key, ref] of state.pickerSelection) {
+    if (pickRef(key, ref.kind) !== false) state.pickerSelection.delete(key);
+  }
+  renderHighlight();
+  syncPickerSelection();
+  if (!state.pickerSelection.size) $('#pickerModal').hidden = true;
+}
+
+$('#pickerSelectionAdd').addEventListener('click', confirmPickerSelection);
+$('#pickerSelectionClear').addEventListener('click', () => {
+  state.pickerSelection.clear();
+  syncPickerSelection();
+});
+
 // una selección del picker: reemplaza si estamos en ese modo, o agrega
 function pickRef(key, kind = 'image') {
+  stopPickerAudioPreview();
   if (state.comfyPickerSlot) {
     const slot = state.comfyPickerSlot;
     state.comfyPickerSlot = null;
@@ -2223,8 +2314,8 @@ function pickRef(key, kind = 'image') {
 }
 
 function replaceRef(i, key) {
-  if (i < 0 || i >= state.refs.length) { state.replaceRefIndex = null; return; }
-  if (state.refs.some((r, j) => j !== i && r.key === key)) return toast(tr('picker.duplicateReference'), 'err');
+  if (i < 0 || i >= state.refs.length) { state.replaceRefIndex = null; return false; }
+  if (state.refs.some((r, j) => j !== i && r.key === key)) { toast(tr('picker.duplicateReference'), 'err'); return false; }
   const prev = state.refs[i];
   // conserva la etiqueta (y por lo tanto la cita @Etiqueta); si no tenía, sugiere una
   state.refs[i] = { key, fromChar: false, label: prev.label || refLabelSuggestion(key) };
@@ -2232,14 +2323,17 @@ function replaceRef(i, key) {
   renderRefs();
   renderHighlight();
   toast(tr('picker.replaced'));
+  return true;
 }
 
-$('#pickerClose').addEventListener('click', () => { $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.overlayBgPick = false; state.promptStyleImagePick = false; state.promptLoraMediaTarget = null; state.comfyPickerSlot = null; });
+$('#pickerClose').addEventListener('click', () => { stopPickerAudioPreview(); state.pickerSelection = new Map(); state.pickerMulti = false; $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.overlayBgPick = false; state.promptStyleImagePick = false; state.promptLoraMediaTarget = null; state.comfyPickerSlot = null; });
 $$('#pickerTabs .tab').forEach((t) => {
   t.addEventListener('click', () => setPickerTab(t.dataset.src));
 });
 
 async function setPickerTab(src) {
+  stopPickerAudioPreview();
+  const request = state.pickerRequest = (state.pickerRequest || 0) + 1;
   const multimedia = isVideoMultimediaPicker();
   const loraMedia = isPromptLoraMediaPicker();
   if (src === 'audio' && !multimedia) src = 'upload';
@@ -2250,6 +2344,7 @@ async function setPickerTab(src) {
 
   if (src === 'upload') {
     const input = $('#fileInput');
+    input.multiple = state.pickerMulti;
     input.accept = multimedia
       ? '.jpg,.jpeg,.png,.webp,.mp4,.mov,.mp3,.wav,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,audio/mpeg,audio/wav'
       : loraMedia ? '.jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm' : 'image/*';
@@ -2278,6 +2373,7 @@ async function setPickerTab(src) {
 
   if (src === 'poses') {
     const { poses } = await api('/api/poser');
+    if (state.pickerRequest !== request || $('#pickerModal').hidden) return;
     const withThumb = poses.filter((x) => x.thumbKey);
     body.innerHTML = withThumb.length
       ? `<div class="picker-grid">${withThumb.map((x) =>
@@ -2293,37 +2389,56 @@ async function setPickerTab(src) {
   } else if (src === 'series') {
     renderPickerSeries();
     return;
+  } else if (src === 'projects') {
+    body.textContent = tr('projects.loadingAssets');
+    try {
+      // No usar refreshAssets: reconstruye la galería principal y sus videos.
+      const assets = await api('/api/assets', { task: false });
+      if (state.pickerRequest !== request || $('#pickerModal').hidden) return;
+      state.pickerProjectAssets = assets;
+      state.pickerProjectPage = 0;
+      renderPickerProjects();
+    } catch (error) {
+      if (state.pickerRequest === request && !$('#pickerModal').hidden) body.textContent = error.message;
+    }
+    return;
   } else {
-    await refreshAssets();
-    const items = state.assets[src] || [];
+    const assets = await api('/api/assets', { task: false });
+    if (state.pickerRequest !== request || $('#pickerModal').hidden) return;
+    const items = assets[src] || [];
     const kind = src === 'video' ? 'video' : src === 'audio' ? 'audio' : 'image';
     body.innerHTML = items.length
       ? `<div class="picker-grid">${items.map((a) =>
           `<div class="pick pick-${kind}" data-key="${esc(a.key)}" data-kind="${kind}">${nsfwBadgeHtml(a, 'overlay')}${kind === 'video'
             ? `<video src="${fileUrl(a.key)}" muted preload="metadata"></video>`
-            : kind === 'audio' ? `<span class="picker-audio">${IC('mic', 'ic ic-lg')}<small>${esc(tr('common.audio'))}</small></span>`
+            : kind === 'audio' ? pickerAudioPreviewHtml(a.key)
               : `<img src="${fileUrl(a.key)}" loading="lazy" alt="">`}<div class="p-label">${esc(a.name)}</div></div>`
         ).join('')}</div>`
       : `<div class="empty-note">${esc(tr('picker.empty', {}, 'Nada por acá todavía.'))}</div>`;
   }
 
-  $$('#pickerBody .pick').forEach((p) => {
-    p.addEventListener('click', () => {
-      pickRef(p.dataset.key, p.dataset.kind || 'image');
-      $('#pickerModal').hidden = true;
-    });
-  });
+  bindPickerReferenceCards();
 }
 
 // Drill-down genérico del picker: lista de entidades → (opcional) chips de
 // versión → fotos. Lo usan Personajes, Locaciones/Objetos y Series con su
 // propia config. `render` es la función-wrapper de cada tab (para re-dibujar).
+function pickerAudioPreviewHtml(key) {
+  return `<span class="picker-audio"><button type="button" class="ref-audio-play picker-audio-play" data-ref-audio-key="${esc(key)}" title="${esc(tr('create.refs.playAudio'))}" aria-label="${esc(tr('create.refs.playAudio'))}" aria-pressed="false">${IC('play', 'ic ic-lg')}</button><small>${esc(tr('common.audio'))}</small></span>`;
+}
+
+function bindPickerAudioButtons() {
+  $$('#pickerBody .picker-audio-play').forEach((button) => button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    togglePickerAudio(button.dataset.refAudioKey);
+  }));
+  syncReferenceAudioButtons();
+}
+
 function renderEntityPicker(cfg) {
   sortEntities();
   const body = $('#pickerBody');
   const chosen = cfg.items().find((x) => x.id === state[cfg.idKey]);
-  const attachPick = () => body.querySelectorAll('.pick[data-key]').forEach((p) =>
-    p.addEventListener('click', () => { pickRef(p.dataset.key); $('#pickerModal').hidden = true; }));
 
   if (!chosen) {
     const items = cfg.items();
@@ -2340,6 +2455,7 @@ function renderEntityPicker(cfg) {
       : `<div class="empty-note">${cfg.empty}</div>`;
     body.querySelectorAll('[data-id]').forEach((n) => n.addEventListener('click', () => {
       state[cfg.idKey] = n.dataset.id;
+      if (cfg.pageKey) state[cfg.pageKey] = 0;
       if (cfg.variantKey) state[cfg.variantKey] = '';
       cfg.render();
     }));
@@ -2348,18 +2464,25 @@ function renderEntityPicker(cfg) {
 
   const groups = cfg.groups(chosen);
   const group = groups.find((g) => g.id === (cfg.variantKey ? state[cfg.variantKey] : '')) || groups[0];
+  const pages = cfg.pageSize ? Math.max(1, Math.ceil(group.photos.length / cfg.pageSize)) : 1;
+  const page = cfg.pageKey ? Math.max(0, Math.min(state[cfg.pageKey] || 0, pages - 1)) : 0;
+  const photos = cfg.pageSize ? group.photos.slice(page * cfg.pageSize, (page + 1) * cfg.pageSize) : group.photos;
   body.innerHTML = `
     <div class="picker-char-head">
       <button class="mini-btn" id="pickerBack">← ${esc(cfg.backLabel)}</button>
       <strong>${esc(cfg.title(chosen))}</strong>
       ${groups.length > 1
         ? `<div class="chips">${groups.map((g) => `<button class="chip${g.id === group.id ? ' active' : ''}" data-vg="${esc(g.id)}">${esc(g.name)} (${g.photos.length})</button>`).join('')}</div>`
-        : `<span class="hint">${esc(tr('picker.imageCount', { count: group.photos.length }))}</span>`}
+        : `<span class="hint">${esc(cfg.countLabel ? cfg.countLabel(group.photos.length) : tr('picker.imageCount', { count: group.photos.length }))}</span>`}
     </div>
     ${group.photos.length
-      ? `<div class="picker-grid">${group.photos.map((ph) =>
-          `<div class="pick" data-key="${esc(ph)}"><img src="${fileUrl(ph)}" loading="lazy" alt=""><div class="p-label">${esc(cfg.photoLabel(chosen, group))}</div></div>`).join('')}</div>`
-      : `<div class="empty-note">${cfg.emptyPhotos}</div>`}`;
+      ? `<div class="picker-grid">${photos.map((ph) =>
+          `<div class="pick" data-key="${esc(ph)}" data-kind="${cfg.kind ? cfg.kind(ph) : 'image'}">${cfg.preview ? cfg.preview(ph) : `<img src="${fileUrl(ph)}" loading="lazy" alt="">`}<div class="p-label">${esc(cfg.photoLabel(chosen, group, ph))}</div></div>`).join('')}</div>`
+      : `<div class="empty-note">${cfg.emptyPhotos}</div>`}
+    ${pages > 1 ? `<div class="picker-char-head"><button type="button" class="mini-btn" id="pickerPagePrev" ${page === 0 ? 'disabled' : ''}>${esc(tr('common.previous'))}</button><span class="hint">${esc(tr('projects.assetPage', { page: i18n.formatNumber(page + 1), pages: i18n.formatNumber(pages), count: i18n.formatNumber(group.photos.length) }))}</span><button type="button" class="mini-btn" id="pickerPageNext" ${page === pages - 1 ? 'disabled' : ''}>${esc(tr('common.next'))}</button></div>` : ''}`;
+  if (pages > 1) for (const [id, delta] of [['#pickerPagePrev', -1], ['#pickerPageNext', 1]]) {
+    $(id).addEventListener('click', () => { state[cfg.pageKey] = page + delta; cfg.render(); });
+  }
   $('#pickerBack').addEventListener('click', () => {
     state[cfg.idKey] = '';
     if (cfg.variantKey) state[cfg.variantKey] = '';
@@ -2367,7 +2490,7 @@ function renderEntityPicker(cfg) {
   });
   if (cfg.variantKey) body.querySelectorAll('[data-vg]').forEach((b) =>
     b.addEventListener('click', () => { state[cfg.variantKey] = b.dataset.vg; cfg.render(); }));
-  attachPick();
+  bindPickerReferenceCards();
 }
 
 const entityVariantGroups = (e) => [
@@ -2411,6 +2534,47 @@ function renderPickerSeries() {
   });
 }
 
+function projectReferenceAssets(project, assets = state.pickerProjectAssets || {}) {
+  const multimedia = !state.comfyPickerSlot && isVideoMultimediaPicker();
+  const loraMedia = isPromptLoraMediaPicker();
+  const visible = new Map(['uploads', 'generated', 'video', 'audio']
+    .flatMap((zone) => assets[zone] || []).filter(contentIsVisible).map((asset) => [asset.key, asset]));
+  return [...new Set(project.assetKeys || [])].map((key) => visible.get(key)).filter((asset) => {
+    if (!asset) return false;
+    const kind = referenceKind(asset);
+    if (kind === 'image') return true;
+    if (kind === 'video' && loraMedia) return true;
+    return multimedia && (currentVideoModel()?.mediaLimits?.[kind] || 0) > 0;
+  });
+}
+
+function renderPickerProjects() {
+  const projects = (state.workspaceProjects || []).filter(contentIsVisible);
+  const byProject = new Map(projects.map((project) => [project.id, projectReferenceAssets(project)]));
+  const byKey = new Map([...byProject.values()].flat().map((asset) => [asset.key, asset]));
+  const items = (project) => byProject.get(project.id) || [];
+  renderEntityPicker({
+    idKey: 'pickerProjectId', pageKey: 'pickerProjectPage', pageSize: 24, icon: 'folder',
+    items: () => projects, cover: (project) => items(project).find((asset) => referenceKind(asset) === 'image')?.key,
+    groups: (project) => [{ id: '', name: project.name, photos: items(project).map((asset) => asset.key) }],
+    label: (project) => `${project.name} · ${trn('projects.assetCount', items(project).length)}`,
+    title: (project) => project.name,
+    photoLabel: (project, group, key) => byKey.get(key)?.name || key,
+    countLabel: (count) => trn('projects.assetCount', count),
+    kind: (key) => referenceKind(byKey.get(key)),
+    preview: (key) => {
+      const asset = byKey.get(key);
+      const kind = referenceKind(asset);
+      return `${nsfwBadgeHtml(asset, 'overlay')}${kind === 'audio'
+        ? pickerAudioPreviewHtml(key)
+        : kind === 'video' ? `<video src="${fileUrl(key)}" muted playsinline preload="metadata"></video>`
+          : `<img src="${fileUrl(key)}" loading="lazy" alt="">`}`;
+    },
+    backLabel: tr('nav.projects'), empty: tr('picker.noProjects'),
+    emptyPhotos: tr('picker.noProjectReferences'), render: renderPickerProjects
+  });
+}
+
 function referenceFileKind(file) {
   const type = String(file?.type || '').toLowerCase();
   const name = String(file?.name || '').toLowerCase();
@@ -2424,11 +2588,15 @@ async function uploadFiles(files, asRefs) {
   if (!files.length) return;
   // en modo reemplazo solo tiene sentido una imagen: se usa la primera
   const replacing = asRefs && state.replaceRefIndex != null;
-  const list = replacing ? files.slice(0, 1) : files;
+  const inPicker = asRefs && !$('#pickerModal').hidden;
+  const selection = inPicker ? state.pickerSelection : null;
+  const batch = inPicker && state.pickerMulti;
+  const list = replacing || (inPicker && !batch) ? files.slice(0, 1) : files;
   const multimedia = asRefs && isVideoMultimediaPicker();
   const loraMedia = asRefs && isPromptLoraMediaPicker();
-  const initialRefTotal = state.refs.length;
-  const initialRefCounts = state.refs.reduce((counts, ref) => {
+  const initialRefs = [...state.refs, ...(batch ? selection.values() : [])];
+  const initialRefTotal = initialRefs.length;
+  const initialRefCounts = initialRefs.reduce((counts, ref) => {
     counts[referenceKind(ref)]++;
     return counts;
   }, { image: 0, video: 0, audio: 0 });
@@ -2436,12 +2604,17 @@ async function uploadFiles(files, asRefs) {
   let uploaded = 0;
   for (const f of list) {
     try {
+      if (inPicker && (state.pickerSelection !== selection || $('#pickerModal').hidden)) break;
       const kind = referenceFileKind(f);
       if (!kind || (!multimedia && !loraMedia && kind !== 'image') || (loraMedia && !['image', 'video'].includes(kind))) {
         toast(tr('picker.unsupported', { file: f.name }), 'err');
         continue;
       }
-      if (multimedia) {
+      if (batch) {
+        const error = pickerSelectionError(null, kind);
+        if (error) { toast(error, 'err'); continue; }
+      }
+      if (multimedia && !batch) {
         const totalLimit = activeRefLimit();
         if (initialRefTotal + addedCounts.image + addedCounts.video + addedCounts.audio >= totalLimit) {
           toast(tr('picker.totalLimit', { file: f.name, model: currentVideoModel()?.name || tr('picker.modelFallback'), count: totalLimit }), 'err');
@@ -2476,7 +2649,8 @@ async function uploadFiles(files, asRefs) {
           ? await api('/api/assets/audio', { method: 'POST', body: { name: f.name, dataUrl, audioKind: 'sound' } })
           : await api('/api/assets/visual', { method: 'POST', body: { name: f.name, dataUrl, category: loraMedia ? 'LORAS' : '', tags: [], nsfw: loraMedia && $('#promptEditorNsfw')?.checked } })
         : await api('/api/upload', { method: 'POST', body: { name: f.name, dataUrl } });
-      const added = asRefs ? pickRef(upload.key, kind) : true;
+      if (inPicker && (state.pickerSelection !== selection || $('#pickerModal').hidden)) break;
+      const added = asRefs ? (batch ? selectPickerReference(upload.key, kind) : pickRef(upload.key, kind)) : true;
       if (added !== false) {
         uploaded++;
         addedCounts[kind]++;
@@ -2486,12 +2660,16 @@ async function uploadFiles(files, asRefs) {
     }
   }
   if (asRefs) {
-    $('#pickerModal').hidden = true;
-    if (!replacing && uploaded) toast(tr('picker.uploadedRefs', { count: uploaded }));
+    if (batch) {
+      if (state.pickerSelection === selection) syncPickerSelection();
+    } else {
+      if (!inPicker || state.pickerSelection === selection) $('#pickerModal').hidden = true;
+      if (!replacing && uploaded) toast(tr('picker.uploadedRefs', { count: uploaded }));
+    }
   } else {
     toast(tr('picker.uploadedImages', { count: files.length }));
   }
-  refreshAssets();
+  if (!inPicker) refreshAssets();
 }
 
 function isCreateViewActive() {
@@ -4215,7 +4393,7 @@ async function downloadAssets(keys) {
     const res = await fetch('/api/assets/zip', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys })
     });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+    if (!res.ok) throw new Error(i18n.errorMessage(await res.json().catch(() => ({})), `HTTP ${res.status}`));
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -4325,6 +4503,36 @@ $('#btnApplyAssetRange').addEventListener('click', () => {
 const assetAudioPlayer = $('#assetAudioPlayer');
 const playingAudio = $('#assetPlayerAudio');
 let assetAudioKey = '';
+let referenceAudioKey = '';
+let pickerAudioKey = '';
+
+function togglePickerAudio(key) {
+  referenceAudioKey = '';
+  pickerAudioKey = key;
+  toggleAudioPlay(null, key);
+}
+
+function stopPickerAudioPreview() {
+  if (pickerAudioKey && pickerAudioKey === assetAudioKey) closeAssetAudioPlayer();
+  pickerAudioKey = '';
+}
+
+function toggleReferenceAudio(key) {
+  pickerAudioKey = '';
+  referenceAudioKey = key;
+  toggleAudioPlay(null, key);
+}
+
+function syncReferenceAudioButtons() {
+  $$('.ref-audio-play').forEach((button) => {
+    const active = button.dataset.refAudioKey === assetAudioKey && !playingAudio.paused && !playingAudio.ended;
+    const label = tr(active ? 'create.refs.pauseAudio' : 'create.refs.playAudio');
+    button.innerHTML = IC(active ? 'pause' : 'play', 'ic ic-lg');
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
 
 function assetAudioItems() {
   const all = state.assets.audio || [];
@@ -4334,6 +4542,7 @@ function assetAudioItems() {
 }
 
 function syncAssetAudioTiles() {
+  syncReferenceAudioButtons();
   const isPlaying = assetAudioKey && !playingAudio.paused && !playingAudio.ended;
   $$('.audio-tile').forEach((tile) => {
     const active = tile.dataset.audiokey === assetAudioKey && isPlaying;
@@ -4357,6 +4566,8 @@ function updateAssetAudioPlayer() {
 }
 
 function openAssetAudioPlayer(key, autoplay = true) {
+  if (pickerAudioKey !== key) pickerAudioKey = '';
+  if (referenceAudioKey !== key) referenceAudioKey = '';
   const changed = assetAudioKey !== key;
   assetAudioKey = key;
   assetAudioPlayer.hidden = false;
@@ -4388,6 +4599,8 @@ function navigateAssetAudio(direction) {
 }
 
 function closeAssetAudioPlayer() {
+  pickerAudioKey = '';
+  referenceAudioKey = '';
   playingAudio.pause();
   assetAudioKey = '';
   playingAudio.removeAttribute('src');
@@ -4876,7 +5089,8 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Escape') {
-    closeLightbox(); $('#pickerModal').hidden = true; $('#charModal').hidden = true;
+    $('#pickerClose').click();
+    closeLightbox(); $('#charModal').hidden = true;
     closeAudioUpload();
     $('#characterGalleryModal').hidden = true; $('#variantEditorModal').hidden = true; $('#associateAssetModal').hidden = true;
     $('#assetInfoModal').hidden = true;
@@ -9670,7 +9884,7 @@ function burnOverlayText(imageKey, caption, ov, { transparent = false, title = n
         resolve(up.key);
       } catch (e) { reject(e); }
     };
-    img.onerror = () => reject(new Error('No se pudo leer la imagen para sobreimprimir el texto'));
+    img.onerror = () => reject(new Error(tr('errors.overlayImageReadFailed')));
     if (imageKey) {
       img.src = fileUrl(imageKey);
     } else {
@@ -11119,7 +11333,7 @@ async function loadHeyGenOAuthStatus(showError = false) {
   if (title) title.textContent = tr(state.heygenOAuth.connected ? 'config.heygenOAuth.connected' : 'config.heygenOAuth.disconnected');
   if (status) status.textContent = state.heygenOAuth.connected
     ? [state.heygenOAuth.account?.email || state.heygenOAuth.account?.name, state.heygenOAuth.account?.billingType].filter(Boolean).join(' · ') || tr('config.heygenOAuth.activeSession')
-    : state.heygenOAuth.error || tr('config.heygenOAuth.hint');
+    : i18n.errorMessage(state.heygenOAuth) || tr('config.heygenOAuth.hint');
   if ($('#heygenOauthConnect')) $('#heygenOauthConnect').textContent = tr(state.heygenOAuth.connected ? 'config.heygenOAuth.reconnect' : 'config.heygenOAuth.connect');
   if ($('#heygenOauthDisconnect')) $('#heygenOauthDisconnect').hidden = !state.heygenOAuth.connected;
   if (state.mode === 'video' && currentVideoModel()?.provider === 'heygen') renderVideoControls();

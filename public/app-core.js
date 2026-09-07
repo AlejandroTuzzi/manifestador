@@ -104,8 +104,12 @@ const state = {
   shotAssetsZone: 'series',
   shotAssetsField: 'assetKeys',   // 'assetKeys' (imágenes/video) o 'audioKeys'
   pickerTab: 'upload',
+  pickerMulti: false,
+  pickerSelection: new Map(),
   replaceRefIndex: null,     // índice de la ref que el picker va a reemplazar (null = agregar)
   pickerCharacterId: '',     // drill-down del tab Personajes del picker
+  pickerProjectId: '',
+  pickerProjectPage: 0,
   pickerVariantId: '',
   charAssetPicker: null,     // { entity, ownerId, variantId, zone, added } al elegir un asset como foto
   shotPromptTarget: null,    // { si, hi } del plano que está eligiendo prompt de la biblioteca
@@ -165,7 +169,7 @@ function fileUrl(key) {
 let toastTimer;
 function toast(msg, kind = 'ok') {
   const t = $('#toast');
-  t.textContent = msg;
+  t.textContent = kind === 'err' ? i18n.errorMessage(msg) : msg;
   t.className = `toast ${kind}`;
   t.hidden = false;
   clearTimeout(toastTimer);
@@ -289,10 +293,7 @@ async function api(path, opts = {}) {
     });
     const json = await res.json().catch(() => ({}));
     if (res.status === 401 && json.loginRequired) showLogin();
-    const translatedError = json.code && i18n?.has(`errors.${json.code}`)
-      ? tr(`errors.${json.code}`, json.details || {})
-      : json.error;
-    if (!res.ok) throw new Error(translatedError || `HTTP ${res.status}`);
+    if (!res.ok) throw new Error(i18n.errorMessage(json, `HTTP ${res.status}`));
     if (taskId) finishUiTask(taskId);
     return json;
   } catch (error) {

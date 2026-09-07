@@ -1301,11 +1301,17 @@
       <button class="tab" data-src="characters" data-i18n="common.characters">Personajes</button>
       <button class="tab" data-src="elements" data-i18n="common.elements">Locaciones/Objetos</button>
       <button class="tab" data-src="series" data-i18n="common.series">Series</button>
+      <button class="tab" data-src="projects" data-i18n="nav.projects">Proyectos</button>
       <button class="tab" data-src="poses" data-i18n="common.poses">Poses</button>
       <button class="tab" data-src="video" id="pickerVideoTab" data-i18n="common.videos" hidden>Videos</button>
       <button class="tab" data-src="audio" id="pickerAudioTab" data-i18n="common.audio" hidden>Audio</button>
     </div>
     <div id="pickerBody" class="picker-body"></div>
+    <div id="pickerSelectionBar" class="picker-selection-bar" hidden>
+      <span id="pickerSelectionCount" class="hint" aria-live="polite"></span>
+      <button type="button" class="mini-btn" id="pickerSelectionClear" data-i18n="picker.clearSelection">Limpiar selección</button>
+      <button type="button" class="mini-btn accent" id="pickerSelectionAdd" disabled data-i18n="picker.addSelected">Añadir seleccionadas</button>
+    </div>
   </div>
 </div>
 

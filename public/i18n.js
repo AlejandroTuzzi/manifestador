@@ -3,6 +3,7 @@
   const catalogs = Object.create(null);
   const supportedLocales = ['es', 'en'];
   let currentLocale = 'es';
+  let errorMatchers = null;
 
   function normalizeLocale(value) {
     const locale = String(value || '').trim().toLowerCase().split(/[-_]/)[0];
@@ -12,6 +13,7 @@
   function register(locale, messages) {
     const normalized = normalizeLocale(locale);
     catalogs[normalized] = { ...(catalogs[normalized] || {}), ...(messages || {}) };
+    errorMatchers = null;
   }
 
   function interpolate(value, variables = {}) {
@@ -33,6 +35,44 @@
 
   function has(key, locale = currentLocale) {
     return Object.prototype.hasOwnProperty.call(catalogs[normalizeLocale(locale)] || {}, key);
+  }
+
+  // También reconoce mensajes antiguos guardados en el historial o recibidos sin
+  // código. Sólo se aplica a errores, nunca a prompts ni contenido del usuario.
+  function errorMessage(payload, fallback = '') {
+    const code = payload?.code || payload?.localizationCode;
+    if (code && has(`errors.${code}`)) {
+      return translate(`errors.${code}`, payload.details || payload.localizationDetails || {});
+    }
+    const message = typeof payload === 'string' ? payload : payload?.error || payload?.message || fallback;
+    if (typeof message !== 'string') return fallback;
+    if (!errorMatchers) {
+      errorMatchers = { exact: new Map(), templates: [] };
+      for (const catalog of Object.values(catalogs)) {
+        for (const [key, template] of Object.entries(catalog)) {
+          if (!key.startsWith('errors.')) continue;
+          const names = [];
+          let end = 0;
+          let pattern = '^';
+          const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          for (const match of template.matchAll(/\{([a-zA-Z0-9_]+)\}/g)) {
+            pattern += escape(template.slice(end, match.index)) + '([\\s\\S]*?)';
+            names.push(match[1]);
+            end = match.index + match[0].length;
+          }
+          if (!names.length) errorMatchers.exact.set(template, key);
+          else errorMatchers.templates.push({ key, names, pattern: new RegExp(pattern + escape(template.slice(end)) + '$') });
+        }
+      }
+    }
+    const exact = errorMatchers.exact.get(message);
+    if (exact) return translate(exact);
+    for (const { key, names, pattern } of errorMatchers.templates) {
+      const match = pattern.exec(message);
+      if (match) return translate(key, Object.fromEntries(names.map((name, index) => [name, match[index + 1]])));
+    }
+    // Los diagnósticos desconocidos del SO o proveedor se conservan íntegros.
+    return message;
   }
 
   function translateElement(element) {
@@ -88,6 +128,7 @@
     t: translate,
     plural,
     has,
+    errorMessage,
     apply,
     setLocale,
     getLocale: () => currentLocale,
