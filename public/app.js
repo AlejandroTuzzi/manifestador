@@ -2855,11 +2855,12 @@ function renderAssetsGrid() {
     section.querySelector('.session-select').addEventListener('click', () => {
       const every = group.every((a) => state.selectedAssets.has(a.key));
       group.forEach((a) => every ? state.selectedAssets.delete(a.key) : state.selectedAssets.add(a.key));
-      renderAssetsGrid();
+      syncAssetSelectionUi();
     });
     for (const a of group) {
       const card = document.createElement('div');
       card.className = `asset-card${state.selectedAssets.has(a.key) ? ' selected' : ''}`;
+      card.dataset.assetKey = a.key;
       card.innerHTML = `<button class="asset-check" title="${esc(tr('assets.select'))}">${state.selectedAssets.has(a.key) ? '✓' : ''}</button><button class="asset-series" title="${esc(tr('common.associateSeries'))}">${IC('layers')}</button><button class="asset-workspace-project" title="${esc(tr('common.associateProject'))}">${IC('folder')}</button><a class="asset-download" href="${fileUrl(a.key)}" download="${esc(a.name)}" title="${esc(tr('common.download'))}">${IC('download')}</a><button class="asset-info" title="${esc(tr('common.information'))}">${IC('info')}</button>${a.prompt ? `<button class="asset-copy" title="${esc(tr('common.copyPrompt'))}">${IC('copy')}</button>` : ''}<button class="asset-delete" title="${esc(tr('common.delete'))}">${IC('trash')}</button>`;
       const automationProjectLabel = automationAssetProjectLabel(a);
       if (a.nsfw) card.insertAdjacentHTML('beforeend', nsfwBadgeHtml(a, 'overlay'));
@@ -4170,7 +4171,23 @@ function visibleAssets() {
 
 function toggleAssetSelection(key) {
   state.selectedAssets.has(key) ? state.selectedAssets.delete(key) : state.selectedAssets.add(key);
-  renderAssetsGrid();
+  syncAssetSelectionUi();
+}
+
+// Seleccionar no cambia el contenido ni los filtros de la biblioteca. Actualizar
+// sólo clases y contadores conserva los nodos <video> existentes y evita que el
+// navegador vuelva a descargar/decodear todas sus miniaturas en cada clic.
+function syncAssetSelectionUi() {
+  $('#assetsGrid').querySelectorAll('.asset-card[data-asset-key]').forEach((card) => {
+    const selected = state.selectedAssets.has(card.dataset.assetKey);
+    card.classList.toggle('selected', selected);
+    const checkbox = card.querySelector('.asset-check');
+    if (checkbox) {
+      checkbox.textContent = selected ? '✓' : '';
+      checkbox.setAttribute('aria-pressed', String(selected));
+    }
+  });
+  updateAssetSelection();
 }
 
 function updateAssetSelection() {
@@ -4273,7 +4290,7 @@ $('#btnSelectVisible').addEventListener('click', () => {
   const visible = visibleAssets();
   const every = visible.length && visible.every((a) => state.selectedAssets.has(a.key));
   visible.forEach((a) => every ? state.selectedAssets.delete(a.key) : state.selectedAssets.add(a.key));
-  renderAssetsGrid();
+  syncAssetSelectionUi();
 });
 
 function localDateTimeValue(date) {
@@ -4863,7 +4880,7 @@ document.addEventListener('keydown', (e) => {
     closeAudioUpload();
     $('#characterGalleryModal').hidden = true; $('#variantEditorModal').hidden = true; $('#associateAssetModal').hidden = true;
     $('#assetInfoModal').hidden = true;
-    $('#projectModal').hidden = true; $('#projectAssignModal').hidden = true; state.editingProjectId = null; state.pendingProjectAssetKeys = null;
+    closeProjectModal(); closeProjectAssign();
     $('#seriesModal').hidden = true; $('#seriesAssignModal').hidden = true; state.editingSeriesId = null;
     $('#charAssetPickerModal').hidden = true; state.charAssetPicker = null;
     $('#shotPromptModal').hidden = true; state.shotPromptTarget = null;
@@ -4998,11 +5015,102 @@ function openProjectAssets(id) {
 }
 
 function renderProjectModalAssets() {
-  const project = state.editingProjectId ? state.workspaceProjects.find((item) => item.id === state.editingProjectId) : null;
-  $('#projectAssetsBlock').hidden = !project;
-  if (!project) return;
-  $('#projectAssetsCount').textContent = trn('projects.assetCount', (project.assetKeys || []).length);
-  renderProjectAssets(project, $('#projectAssetsList'));
+  const keys = state.projectDraftAssetKeys;
+  $('#projectAssetsCount').textContent = trn('projects.assetCount', keys.length);
+  // La selección usa nombres: no crea un reproductor adicional por cada video.
+  $('#projectAssetsList').innerHTML = keys.length ? keys.map((key) => {
+    const name = key.split('/').pop();
+    return `<span class="project-selected-asset" title="${esc(name)}">${IC(key.startsWith('audio/') ? 'mic' : isVideoKey(key) ? 'film' : 'image')}<span>${esc(name)}</span><button type="button" class="icon-btn" data-project-draft-remove="${esc(key)}" title="${esc(tr('projects.removeAsset'))}">${IC('x')}</button></span>`;
+  }).join('') : `<span class="hint">${esc(tr('projects.noAssets'))}</span>`;
+  $('#projectAssetsList').querySelectorAll('[data-project-draft-remove]').forEach((button) => button.addEventListener('click', () => {
+    state.projectDraftAssetKeys = state.projectDraftAssetKeys.filter((key) => key !== button.dataset.projectDraftRemove);
+    renderProjectModalAssets();
+    syncProjectAssetPickerSelection();
+  }));
+}
+
+function syncProjectAssetPickerSelection() {
+  const selected = new Set(state.projectDraftAssetKeys);
+  $('#projectAssetPickerGrid').querySelectorAll('[data-project-pick-key]').forEach((button) => {
+    const active = selected.has(button.dataset.projectPickKey);
+    button.classList.toggle('selected', active);
+    button.setAttribute('aria-pressed', String(active));
+    button.querySelector('b').textContent = active ? '✓' : '+';
+  });
+}
+
+function renderProjectAssetPicker() {
+  const picker = state.projectAssetPicker;
+  if (!picker?.items) return;
+  const zone = $('#projectAssetZone').value;
+  const search = normalizedAssetFilterText($('#projectAssetSearch').value);
+  const items = picker.items.filter((item) => (zone === 'all' || item.key.startsWith(`${zone}/`))
+    && (!search || normalizedAssetFilterText([item.name, item.category, ...(item.tags || [])].join(' ')).includes(search)));
+  // Limita también la cantidad de decodificadores de video activos a una página.
+  const pageSize = 24;
+  const pages = Math.max(1, Math.ceil(items.length / pageSize));
+  picker.page = Math.max(0, Math.min(picker.page, pages - 1));
+  $('#projectAssetPickerGrid').innerHTML = items.slice(picker.page * pageSize, (picker.page + 1) * pageSize).map((item) => {
+    const preview = item.key.startsWith('audio/') ? `<div class="automation-assets-audio">${IC('mic')}</div>`
+      : isVideoKey(item.key) ? `<video src="${fileUrl(item.key)}" preload="metadata" muted playsinline></video>`
+      : `<img src="${fileUrl(item.key)}" loading="lazy" alt="">`;
+    return `<button type="button" class="automation-assets-pick" data-project-pick-key="${esc(item.key)}" title="${esc(item.name || item.key)}">${preview}<span>${esc(item.name || item.key)}</span><b>+</b></button>`;
+  }).join('') || `<div class="empty-note">${esc(tr('automation.assets.noMatch'))}</div>`;
+  $('#projectAssetPage').textContent = tr('projects.assetPage', { page: i18n.formatNumber(picker.page + 1), pages: i18n.formatNumber(pages), count: i18n.formatNumber(items.length) });
+  $('#projectAssetPrev').disabled = picker.page === 0;
+  $('#projectAssetNext').disabled = picker.page === pages - 1;
+  syncProjectAssetPickerSelection();
+}
+
+$('#projectAssetPickerGrid').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-project-pick-key]');
+  if (!button) return;
+  const key = button.dataset.projectPickKey;
+  const index = state.projectDraftAssetKeys.indexOf(key);
+  if (index < 0) state.projectDraftAssetKeys.push(key);
+  else state.projectDraftAssetKeys.splice(index, 1);
+  // Mantiene intactas las miniaturas al seleccionar o deseleccionar.
+  syncProjectAssetPickerSelection();
+  renderProjectModalAssets();
+});
+$('#projectChooseAssets').addEventListener('click', async () => {
+  const panel = $('#projectAssetPicker');
+  panel.hidden = !panel.hidden;
+  $('#projectChooseAssets').setAttribute('aria-expanded', String(!panel.hidden));
+  if (panel.hidden) {
+    $('#projectAssetPickerGrid').replaceChildren();
+    return;
+  }
+  const picker = state.projectAssetPicker;
+  if (!picker) return;
+  if (picker.items) return renderProjectAssetPicker();
+  $('#projectAssetPrev').disabled = true;
+  $('#projectAssetNext').disabled = true;
+  $('#projectAssetPage').textContent = '';
+  $('#projectAssetPickerGrid').textContent = tr('projects.loadingAssets');
+  try {
+    const assets = await api('/api/assets');
+    if (state.projectAssetPicker !== picker) return;
+    picker.items = ['generated', 'uploads', 'video', 'audio'].flatMap((zone) => assets[zone] || []).filter(contentIsVisible);
+    if (!panel.hidden) renderProjectAssetPicker();
+  } catch (error) {
+    if (state.projectAssetPicker !== picker) return;
+    $('#projectAssetPickerGrid').textContent = error.message;
+  }
+});
+for (const [selector, event] of [['#projectAssetZone', 'change'], ['#projectAssetSearch', 'input']]) {
+  $(selector).addEventListener(event, () => {
+    if (!state.projectAssetPicker) return;
+    state.projectAssetPicker.page = 0;
+    renderProjectAssetPicker();
+  });
+}
+for (const [selector, delta] of [['#projectAssetPrev', -1], ['#projectAssetNext', 1]]) {
+  $(selector).addEventListener('click', () => {
+    if (!state.projectAssetPicker) return;
+    state.projectAssetPicker.page += delta;
+    renderProjectAssetPicker();
+  });
 }
 
 function renderProjectTasksEditor() {
@@ -5045,6 +5153,13 @@ function openProjectModal(id = null) {
   const project = id ? state.workspaceProjects.find((item) => item.id === id) : null;
   state.editingProjectId = project?.id || null;
   state.projectDraftTasks = cloneProjectTasks(project?.tasks || []);
+  state.projectDraftAssetKeys = [...(project?.assetKeys || [])];
+  state.projectAssetPicker = { page: 0, items: null };
+  $('#projectAssetPicker').hidden = true;
+  $('#projectChooseAssets').setAttribute('aria-expanded', 'false');
+  $('#projectAssetPickerGrid').replaceChildren();
+  $('#projectAssetZone').value = 'all';
+  $('#projectAssetSearch').value = '';
   $('#projectModalTitle').textContent = project ? tr('projects.editTitle') : tr('projects.new');
   $('#projectName').value = project?.name || '';
   $('#projectDescription').value = project?.description || '';
@@ -5060,6 +5175,10 @@ function closeProjectModal() {
   $('#projectModal').hidden = true;
   state.editingProjectId = null;
   state.projectDraftTasks = [];
+  state.projectDraftAssetKeys = [];
+  state.projectAssetPicker = null;
+  $('#projectAssetPickerGrid').replaceChildren();
+  $('#projectAssetsList').replaceChildren();
 }
 
 $('#btnNewProject').addEventListener('click', () => openProjectModal());
@@ -5076,7 +5195,7 @@ $('#projectForm').addEventListener('submit', async (event) => {
     return;
   }
   const tasks = cloneProjectTasks(state.projectDraftTasks).map((task) => ({ ...task, checklist: (task.checklist || []).filter((item) => String(item.text || '').trim()) }));
-  const body = { name: $('#projectName').value.trim(), description: $('#projectDescription').value.trim(), deadline: $('#projectDeadline').value, nsfw: $('#projectNsfw').checked, tasks };
+  const body = { name: $('#projectName').value.trim(), description: $('#projectDescription').value.trim(), deadline: $('#projectDeadline').value, nsfw: $('#projectNsfw').checked, tasks, assetKeys: [...state.projectDraftAssetKeys] };
   if (!body.name) return toast(tr('projects.nameRequired'), 'err');
   try {
     const wasEditing = Boolean(state.editingProjectId);
@@ -5123,7 +5242,7 @@ $('#projectAssignForm').addEventListener('submit', async (event) => {
     await replaceWorkspaceProject(updated);
     closeProjectAssign();
     toast(trn('assets.projects.associated', keys.length, { project: updated.name }));
-    renderAssetsGrid();
+    syncAssetSelectionUi();
   } catch (error) { toast(error.message, 'err'); }
 });
 
@@ -5372,7 +5491,7 @@ $('#seriesAssignForm').addEventListener('submit', async (e) => {
     closeSeriesAssign();
     toast(trn('assets.series.associated', keys.length, { series: updated.title }));
     renderSeries();
-    renderAssetsGrid();
+    syncAssetSelectionUi();
   } catch (err) {
     toast(err.message, 'err');
   }

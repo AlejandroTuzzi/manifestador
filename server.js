@@ -4916,6 +4916,17 @@ const server = http.createServer(async (req, res) => {
           return sendError(res, 400, 'workspaceProjectNameRequired', 'El proyecto necesita un nombre.');
         }
         if (projectTasksHaveMissingNames(body.tasks)) return sendError(res, 400, 'workspaceProjectTaskNameRequired', 'Cada tarea necesita un nombre.');
+        if (body.assetKeys !== undefined) {
+          const projects = await readJson('projects.json', []);
+          const existing = projects.find((project) => project.id === projectId);
+          if (!existing) return sendError(res, 404, 'workspaceProjectNotFound', 'Proyecto no encontrado.');
+          body.assetKeys = normalizeProjectAssetKeys(body.assetKeys);
+          const previousKeys = new Set(existing.assetKeys || []);
+          for (const key of body.assetKeys.filter((key) => !previousKeys.has(key))) {
+            const stat = await fs.stat(await resolveAssetKey(key)).catch(() => null);
+            if (!stat?.isFile()) return sendError(res, 400, 'workspaceProjectAssetMissing', `No encuentro el asset: ${key}`, { key });
+          }
+        }
         const item = await mutateProject((project) => updateWorkspaceProject(project, body));
         return item
           ? send(res, 200, item)

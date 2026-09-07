@@ -1800,6 +1800,16 @@ input[type="number"] { -moz-appearance: textfield; }
 .project-checklist-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 7px; }
 .project-checklist-row > input[type="text"] { min-width: 0; padding: 7px 9px; }
 .project-assets-block .series-asset button[data-project-gallery] { padding: 0; border: 0; background: #000; cursor: pointer; }
+.project-assets-block .project-section-head { flex-wrap: wrap; }
+.project-picker-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+.project-picker-tools label { flex: 1; min-width: 160px; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; }
+.project-picker-tools .select { min-width: 0; width: 100%; }
+#projectAssetsList { max-height: 160px; overflow-y: auto; scrollbar-color: var(--violet) var(--panel-solid); }
+.project-selected-asset { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 11px; }
+.project-selected-asset > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-selected-asset > .ic, .project-selected-asset > button { flex-shrink: 0; }
+#projectAssetPickerGrid { scrollbar-color: var(--violet) var(--panel-solid); }
+#projectAssetPickerGrid button:focus-visible { outline: 2px solid var(--violet); outline-offset: 1px; }
 @media (max-width: 680px) {
   .projects-grid { grid-template-columns: 1fr; }
   .project-card-head { flex-direction: column; }

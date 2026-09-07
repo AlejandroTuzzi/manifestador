@@ -33,3 +33,16 @@ test('las fechas de Proyectos conservan controles oscuros', async () => {
   const css = await load('public/style.css');
   assert.match(css, /project-editor-box input\[type="date"\][^{]*\{[^}]*color-scheme:\s*dark/s);
 });
+
+test('seleccionar o asociar assets no reconstruye las miniaturas de video', async () => {
+  const app = await load('public/app.js');
+  const toggleSelection = app.match(/function toggleAssetSelection\(key\) \{[\s\S]*?\n\}/)?.[0] || '';
+  assert.match(toggleSelection, /syncAssetSelectionUi\(\)/);
+  assert.doesNotMatch(toggleSelection, /renderAssetsGrid\(\)/);
+  assert.match(app, /card\.dataset\.assetKey = a\.key/);
+  assert.match(app, /function syncAssetSelectionUi\(\)/);
+
+  const projectSubmit = app.slice(app.indexOf("$('#projectAssignForm')"), app.indexOf('// ---------------------------------------------------------------------------\n// series'));
+  assert.match(projectSubmit, /syncAssetSelectionUi\(\)/);
+  assert.doesNotMatch(projectSubmit, /renderAssetsGrid\(\)/);
+});

@@ -88,6 +88,8 @@ const state = {
   workspaceProjects: [],
   editingProjectId: null,
   projectDraftTasks: [],
+  projectDraftAssetKeys: [],
+  projectAssetPicker: null,
   pendingProjectAssetKeys: null,
   series: [],
   editingSeriesId: null,

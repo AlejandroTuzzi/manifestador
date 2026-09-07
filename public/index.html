@@ -1025,10 +1025,18 @@
     <label><span data-i18n="common.description">Descripción</span><textarea id="projectDescription" rows="3" maxlength="5000" placeholder="Objetivo, entregables y contexto del proyecto…" data-i18n-placeholder="projects.editor.descriptionPlaceholder"></textarea></label>
     <label><span data-i18n="projects.deadline">Fecha límite</span><input id="projectDeadline" type="date"></label>
     <label class="check-row"><input id="projectNsfw" type="checkbox"> <span data-i18n="common.nsfwContent">Contenido NSFW</span></label>
-    <section id="projectAssetsBlock" class="project-assets-block" hidden>
-      <div class="project-section-head"><strong data-i18n="projects.associatedAssets">Assets asociados</strong><span id="projectAssetsCount" class="hint"></span></div>
+    <section id="projectAssetsBlock" class="project-assets-block">
+      <div class="project-section-head"><strong data-i18n="projects.associatedAssets">Assets asociados</strong><span id="projectAssetsCount" class="hint"></span><button type="button" id="projectChooseAssets" class="mini-btn" aria-expanded="false" aria-controls="projectAssetPicker"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="projects.chooseAssets">Añadir assets</span></button></div>
       <div id="projectAssetsList" class="series-assets-list"></div>
-      <p class="hint" data-i18n="projects.assetsHint">Para sumar assets, usá “Asociar a proyecto” desde Assets.</p>
+      <p class="hint" data-i18n="projects.draftAssetsHint">Los assets se vinculan al guardar el proyecto. Cancelar descarta los cambios.</p>
+      <div id="projectAssetPicker" hidden>
+        <div class="project-picker-tools">
+          <label><span data-i18n="assets.info.type">Tipo</span><select id="projectAssetZone" class="select"><option value="all" data-i18n="common.all">Todo</option><option value="generated" data-i18n="common.generated">Generadas</option><option value="uploads" data-i18n="common.uploaded">Subidas</option><option value="video" data-i18n="common.videos">Videos</option><option value="audio" data-i18n="common.audio">Audio</option></select></label>
+          <label><span data-i18n="common.search">Buscar</span><input id="projectAssetSearch" type="search" data-i18n-placeholder="projects.assetSearch" placeholder="Nombre, categoría o etiqueta"></label>
+        </div>
+        <div id="projectAssetPickerGrid" class="automation-assets-picker-grid"></div>
+        <div class="project-picker-tools"><button type="button" id="projectAssetPrev" class="mini-btn" data-i18n="common.previous">Anterior</button><span id="projectAssetPage" class="hint" aria-live="polite"></span><button type="button" id="projectAssetNext" class="mini-btn" data-i18n="common.next">Siguiente</button></div>
+      </div>
     </section>
     <section class="project-tasks-editor">
       <div class="project-section-head"><strong data-i18n="projects.tasks">Tareas</strong><button type="button" id="btnAddProjectTask" class="mini-btn"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="projects.addTask">Añadir tarea</span></button></div>
