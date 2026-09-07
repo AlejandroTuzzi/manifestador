@@ -52,6 +52,8 @@
     <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
     <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></symbol>
     <symbol id="i-tag" viewBox="0 0 24 24"><path d="M20.6 13.6L11 23l-9-9V2h12z"/><circle cx="8" cy="8" r="2"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 5h7l2 3h9v11a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="1"/><path d="M8 3v4M16 3v4M3 10h18"/></symbol>
   </defs>
 </svg>
 
@@ -62,6 +64,7 @@
     <nav>
       <button class="nav-btn active" data-view="create"><svg class="ic"><use href="#i-wand"/></svg><span data-i18n="nav.create">Crear</span></button>
       <button class="nav-btn" data-view="assets"><svg class="ic"><use href="#i-grid"/></svg><span data-i18n="nav.assets">Assets</span></button>
+      <button class="nav-btn" data-view="projects"><svg class="ic"><use href="#i-folder"/></svg><span data-i18n="nav.projects">Proyectos</span></button>
       <button class="nav-btn" data-view="characters"><svg class="ic"><use href="#i-user"/></svg><span data-i18n="nav.characters">Personajes</span></button>
       <button class="nav-btn" data-view="elements"><svg class="ic"><use href="#i-globe"/></svg><span data-i18n="nav.elements">Locaciones y objetos</span></button>
       <button class="nav-btn" data-view="series"><svg class="ic"><use href="#i-layers"/></svg><span data-i18n="nav.series">Series</span></button>
@@ -548,6 +551,7 @@
         <button id="btnUploadAsset" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> <span data-i18n="assets.uploadImages">Subir imágenes</span></button>
         <button id="btnSelectVisible" class="tool-btn" data-i18n="assets.selectVisible">Seleccionar visibles</button>
         <button id="btnSeriesSelected" class="tool-btn" disabled><svg class="ic"><use href="#i-layers"/></svg> <span data-i18n="common.associateSeries">Asociar a serie</span> <span id="seriesSelectedCount">0</span></button>
+        <button id="btnProjectsSelected" class="tool-btn" disabled><svg class="ic"><use href="#i-folder"/></svg> <span data-i18n="common.associateProject">Asociar a proyecto</span> <span id="projectsSelectedCount">0</span></button>
         <button id="btnClassifySelected" class="tool-btn" disabled><svg class="ic"><use href="#i-layers"/></svg> <span data-i18n="assets.categorize">Categorizar</span> <span id="classifySelectedCount">0</span></button>
         <button id="btnDownloadSelected" class="tool-btn" disabled><svg class="ic"><use href="#i-download"/></svg> <span data-i18n="common.download">Descargar</span> <span id="downloadSelectedCount">0</span></button>
         <button id="btnDuplicateSelected" class="tool-btn" disabled><svg class="ic"><use href="#i-copy"/></svg> <span data-i18n="common.duplicate">Duplicar</span> <span id="duplicateSelectedCount">0</span></button>
@@ -563,6 +567,7 @@
         </div>
         <label><span data-i18n="assets.filters.character">Personaje</span> <select id="assetFilterCharacter" class="select"><option value="" data-i18n="common.allMasculine">Todos</option></select></label>
         <label><span data-i18n="assets.filters.series">Serie</span> <select id="assetFilterSeries" class="select"><option value="" data-i18n="common.allFeminine">Todas</option></select></label>
+        <label><span data-i18n="assets.filters.project">Proyecto</span> <select id="assetFilterProject" class="select"><option value="" data-i18n="common.allMasculine">Todos</option></select></label>
         <label data-visual-asset-filter><span data-i18n="common.search">Buscar</span> <input id="assetFilterSearch" type="search" placeholder="Nombre o prompt" data-i18n-placeholder="assets.filters.searchPlaceholder"></label>
         <label data-visual-asset-filter><span data-i18n="categories.category">Categoría</span> <select id="assetFilterCategory" class="select"><option value="" data-i18n="common.allFeminine">Todas</option></select></label>
         <label data-visual-asset-filter><span data-i18n="assets.filters.tags">Etiquetas</span> <input id="assetFilterTags" type="search" list="assetTagsList" placeholder="noir, ciudad" data-i18n-placeholder="assets.filters.tagsPlaceholder"></label>
@@ -573,6 +578,15 @@
         <button id="btnApplyAssetRange" class="mini-btn" data-i18n="assets.filters.applyRange">Aplicar rango</button>
       </div>
       <div id="assetsGrid" class="assets-grid"></div>
+    </section>
+
+    <!-- ==================== PROYECTOS ==================== -->
+    <section id="view-projects" class="view">
+      <div class="chars-head">
+        <div><h2 data-i18n="projects.title">Proyectos</h2><span class="hint" data-i18n="projects.lead">Organizá assets, fechas y tareas fuera de Series.</span></div>
+        <button id="btnNewProject" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="projects.new">Nuevo proyecto</span></button>
+      </div>
+      <div id="projectsGrid" class="projects-grid"></div>
     </section>
 
     <!-- ==================== PERSONAJES ==================== -->
@@ -997,6 +1011,43 @@
     </div>
     <label class="check-row"><input type="checkbox" id="associateAsPhoto"> <span data-i18n="assets.associate.addAsPhoto">Agregar también como foto del original o la variante elegida (para usarla de referencia)</span></label>
     <div class="form-modal-actions"><button type="button" class="mini-btn" id="associateAssetCancel" data-i18n="common.cancel">Cancelar</button><button type="submit" class="generate-btn small" data-i18n="assets.series.associate">Asociar</button></div>
+  </form>
+</div>
+
+<!-- Crear o editar proyecto de trabajo -->
+<div id="projectModal" class="modal" hidden>
+  <form id="projectForm" class="modal-box form-modal-box project-editor-box">
+    <div class="modal-head">
+      <div><h3 id="projectModalTitle" data-i18n="projects.new">Nuevo proyecto</h3><p class="hint" data-i18n="projects.editor.lead">Información, fecha límite, tareas y checklist</p></div>
+      <button type="button" class="icon-btn" id="projectModalClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <label><span data-i18n="common.name">Nombre</span><input id="projectName" type="text" maxlength="180" placeholder="Ej: Campaña de lanzamiento" data-i18n-placeholder="projects.editor.namePlaceholder" required></label>
+    <label><span data-i18n="common.description">Descripción</span><textarea id="projectDescription" rows="3" maxlength="5000" placeholder="Objetivo, entregables y contexto del proyecto…" data-i18n-placeholder="projects.editor.descriptionPlaceholder"></textarea></label>
+    <label><span data-i18n="projects.deadline">Fecha límite</span><input id="projectDeadline" type="date"></label>
+    <label class="check-row"><input id="projectNsfw" type="checkbox"> <span data-i18n="common.nsfwContent">Contenido NSFW</span></label>
+    <section id="projectAssetsBlock" class="project-assets-block" hidden>
+      <div class="project-section-head"><strong data-i18n="projects.associatedAssets">Assets asociados</strong><span id="projectAssetsCount" class="hint"></span></div>
+      <div id="projectAssetsList" class="series-assets-list"></div>
+      <p class="hint" data-i18n="projects.assetsHint">Para sumar assets, usá “Asociar a proyecto” desde Assets.</p>
+    </section>
+    <section class="project-tasks-editor">
+      <div class="project-section-head"><strong data-i18n="projects.tasks">Tareas</strong><button type="button" id="btnAddProjectTask" class="mini-btn"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="projects.addTask">Añadir tarea</span></button></div>
+      <div id="projectTasksEditor" class="project-task-editor-list"></div>
+    </section>
+    <div class="form-modal-actions">
+      <button type="button" class="mini-btn" id="projectModalCancel" data-i18n="common.cancel">Cancelar</button>
+      <button type="submit" class="generate-btn small" data-i18n="common.save">Guardar</button>
+    </div>
+  </form>
+</div>
+
+<!-- Asociar uno o varios assets a un proyecto -->
+<div id="projectAssignModal" class="modal" hidden>
+  <form id="projectAssignForm" class="modal-box form-modal-box">
+    <div class="modal-head"><div><h3 data-i18n="common.associateProject">Asociar a proyecto</h3><p class="hint" data-i18n="assets.projects.noMove">El archivo no se moverá ni duplicará</p></div><button type="button" class="icon-btn" id="projectAssignClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div id="projectAssignPreview" class="associate-preview"></div>
+    <label><span data-i18n="projects.project">Proyecto</span><select id="projectAssignSelect" class="select" required></select></label>
+    <div class="form-modal-actions"><button type="button" class="mini-btn" id="projectAssignCancel" data-i18n="common.cancel">Cancelar</button><button type="submit" class="generate-btn small" data-i18n="assets.projects.associate">Asociar</button></div>
   </form>
 </div>
 

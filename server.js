@@ -1894,6 +1894,86 @@ function validateUploadedAudio(mime, buffer) {
   return isWav ? { extension: '.wav', mime: 'audio/wav' } : { extension: '.mp3', mime: 'audio/mpeg' };
 }
 
+function normalizeProjectDate(value) {
+  const date = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date ? '' : date;
+}
+
+function normalizeProjectChecklist(value) {
+  const seen = new Set();
+  return (Array.isArray(value) ? value : []).slice(0, 200).map((item) => {
+    const text = String(item?.text || '').trim().slice(0, 500);
+    if (!text) return null;
+    let id = String(item?.id || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 80);
+    if (!id || seen.has(id)) id = newId();
+    seen.add(id);
+    return { id, text, done: item?.done === true };
+  }).filter(Boolean);
+}
+
+function normalizeProjectTasks(value) {
+  const seen = new Set();
+  return (Array.isArray(value) ? value : []).slice(0, 200).map((task) => {
+    const name = String(task?.name || '').trim().slice(0, 180);
+    const description = String(task?.description || '').trim().slice(0, 3000);
+    const checklist = normalizeProjectChecklist(task?.checklist);
+    if (!name && !description && !checklist.length) return null;
+    let id = String(task?.id || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 80);
+    if (!id || seen.has(id)) id = newId();
+    seen.add(id);
+    return {
+      id,
+      name,
+      description,
+      deadline: normalizeProjectDate(task?.deadline),
+      done: task?.done === true,
+      checklist
+    };
+  }).filter(Boolean);
+}
+
+function projectTasksHaveMissingNames(value) {
+  return (Array.isArray(value) ? value : []).some((task) => {
+    const hasContent = String(task?.description || '').trim()
+      || (Array.isArray(task?.checklist) && task.checklist.some((item) => String(item?.text || '').trim()));
+    return hasContent && !String(task?.name || '').trim();
+  });
+}
+
+function normalizeProjectAssetKeys(value) {
+  return [...new Set((Array.isArray(value) ? value : []).map(String))]
+    .filter((key) => /^(generated|uploads|audio|video)\//.test(key) && key.length <= 500 && !key.includes('..') && !key.includes('\\'))
+    .slice(0, 5000);
+}
+
+function createWorkspaceProject(body = {}) {
+  const now = Date.now();
+  return {
+    id: newId(),
+    name: String(body.name || '').trim().slice(0, 180),
+    description: String(body.description || '').trim().slice(0, 5000),
+    deadline: normalizeProjectDate(body.deadline),
+    nsfw: body.nsfw === true,
+    tasks: normalizeProjectTasks(body.tasks),
+    assetKeys: normalizeProjectAssetKeys(body.assetKeys),
+    ts: now,
+    updatedAt: now
+  };
+}
+
+function updateWorkspaceProject(project, body = {}) {
+  if (body.name !== undefined) project.name = String(body.name || '').trim().slice(0, 180) || project.name;
+  if (body.description !== undefined) project.description = String(body.description || '').trim().slice(0, 5000);
+  if (body.deadline !== undefined) project.deadline = normalizeProjectDate(body.deadline);
+  if (body.nsfw !== undefined) project.nsfw = body.nsfw === true;
+  if (body.tasks !== undefined) project.tasks = normalizeProjectTasks(body.tasks);
+  if (body.assetKeys !== undefined) project.assetKeys = normalizeProjectAssetKeys(body.assetKeys);
+  project.updatedAt = Date.now();
+  return project;
+}
+
 // ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
@@ -3177,7 +3257,7 @@ function automationForClient(project) {
 }
 
 const AUTOMATION_CLEANUP_REFERENCE_FILES = [
-  'asset-links.json', 'element-links.json', 'series.json', 'scripts.json',
+  'asset-links.json', 'element-links.json', 'projects.json', 'series.json', 'scripts.json',
   'characters.json', 'elements.json', 'prompts.json', 'overlay-presets.json',
   'subtitler.json'
 ];
@@ -3997,7 +4077,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, series, scripts, elements, elementLinks, automations, fonts, overlayPresets, transitionSounds, subtitler, comfyWorkflows, assetMetadata, snippets, snippetCategories, vocabulary, vocabularyCategories] = await Promise.all([
+      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, projects, series, scripts, elements, elementLinks, automations, fonts, overlayPresets, transitionSounds, subtitler, comfyWorkflows, assetMetadata, snippets, snippetCategories, vocabulary, vocabularyCategories] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
@@ -4005,6 +4085,7 @@ const server = http.createServer(async (req, res) => {
         readJson('history.json', []),
         getPricing(),
         readJson('asset-links.json', []),
+        readJson('projects.json', []),
         readJson('series.json', []),
         readJson('scripts.json', []),
         readJson('elements.json', []),
@@ -4035,6 +4116,7 @@ const server = http.createServer(async (req, res) => {
         history: visibleHistory.slice(0, 200),
         pricing,
         assetLinks,
+        projects: cfg.nsfwEnabled ? projects : projects.filter((item) => !item.nsfw),
         series,
         scripts,
         elements: cfg.nsfwEnabled ? elements : elements.filter((item) => !item.nsfw),
@@ -4771,6 +4853,84 @@ const server = http.createServer(async (req, res) => {
       const key = url.searchParams.get('key');
       const next = await updateJson('asset-links.json', [], (links) => links.filter((link) => link.key !== key));
       return send(res, 200, { links: next });
+    }
+
+    // --- proyectos de trabajo (independientes de Series y Automatizador) ---
+    if (p === '/api/projects' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      if (projectTasksHaveMissingNames(body.tasks)) return sendError(res, 400, 'workspaceProjectTaskNameRequired', 'Cada tarea necesita un nombre.');
+      const item = createWorkspaceProject(body);
+      if (!item.name) return sendError(res, 400, 'workspaceProjectNameRequired', 'El proyecto necesita un nombre.');
+      for (const key of item.assetKeys) {
+        const stat = await fs.stat(await resolveAssetKey(key)).catch(() => null);
+        if (!stat?.isFile()) return sendError(res, 400, 'workspaceProjectAssetMissing', `No encuentro el asset: ${key}`, { key });
+      }
+      await updateJson('projects.json', [], (all) => [item, ...all]);
+      return send(res, 200, item);
+    }
+
+    const projectMatch = /^\/api\/projects\/([a-z0-9]+)(\/assets)?$/.exec(p);
+    if (projectMatch) {
+      const [, projectId, isProjectAssets] = projectMatch;
+      const mutateProject = async (fn) => {
+        let out = null;
+        await updateJson('projects.json', [], (all) => {
+          const project = all.find((item) => item.id === projectId);
+          if (project) {
+            fn(project);
+            project.updatedAt = Date.now();
+            out = project;
+          }
+          return all;
+        });
+        return out;
+      };
+
+      if (isProjectAssets && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const keys = normalizeProjectAssetKeys(Array.isArray(body.keys) ? body.keys : [body.key]);
+        if (!keys.length) return sendError(res, 400, 'workspaceProjectAssetsRequired', 'No se indicó ningún asset.');
+        for (const key of keys) {
+          const stat = await fs.stat(await resolveAssetKey(key)).catch(() => null);
+          if (!stat?.isFile()) return sendError(res, 400, 'workspaceProjectAssetMissing', `No encuentro el asset: ${key}`, { key });
+        }
+        const item = await mutateProject((project) => {
+          project.assetKeys = [...keys, ...(project.assetKeys || []).filter((key) => !keys.includes(key))];
+        });
+        return item
+          ? send(res, 200, item)
+          : sendError(res, 404, 'workspaceProjectNotFound', 'Proyecto no encontrado.');
+      }
+      if (isProjectAssets && req.method === 'DELETE') {
+        const key = String(url.searchParams.get('key') || '');
+        const item = await mutateProject((project) => {
+          project.assetKeys = (project.assetKeys || []).filter((assetKey) => assetKey !== key);
+        });
+        return item
+          ? send(res, 200, item)
+          : sendError(res, 404, 'workspaceProjectNotFound', 'Proyecto no encontrado.');
+      }
+      if (!isProjectAssets && req.method === 'PUT') {
+        const body = await readJsonBody(req);
+        if (body.name !== undefined && !String(body.name || '').trim()) {
+          return sendError(res, 400, 'workspaceProjectNameRequired', 'El proyecto necesita un nombre.');
+        }
+        if (projectTasksHaveMissingNames(body.tasks)) return sendError(res, 400, 'workspaceProjectTaskNameRequired', 'Cada tarea necesita un nombre.');
+        const item = await mutateProject((project) => updateWorkspaceProject(project, body));
+        return item
+          ? send(res, 200, item)
+          : sendError(res, 404, 'workspaceProjectNotFound', 'Proyecto no encontrado.');
+      }
+      if (!isProjectAssets && req.method === 'DELETE') {
+        let existed = false;
+        await updateJson('projects.json', [], (all) => {
+          existed = all.some((item) => item.id === projectId);
+          return all.filter((item) => item.id !== projectId);
+        });
+        return existed
+          ? send(res, 200, { ok: true })
+          : sendError(res, 404, 'workspaceProjectNotFound', 'Proyecto no encontrado.');
+      }
     }
 
     // --- series ---
@@ -7202,6 +7362,9 @@ const server = http.createServer(async (req, res) => {
       });
       await updateJson('asset-links.json', [], (links) => links.map((l) => l.key === oldKey ? { ...l, key: newKey } : l));
       await updateJson('element-links.json', [], (links) => links.map((l) => l.key === oldKey ? { ...l, key: newKey } : l));
+      await updateJson('projects.json', [], (all) => all.map((project) => ({
+        ...project, assetKeys: (project.assetKeys || []).map(swap)
+      })));
       await updateJson('series.json', [], (all) => all.map((s) => ({ ...s, assetKeys: (s.assetKeys || []).map(swap) })));
       await updateJson('scripts.json', [], (all) => all.map((sc) => ({
         ...sc,
@@ -7313,6 +7476,10 @@ const server = http.createServer(async (req, res) => {
       });
       await updateJson('asset-links.json', [], (links) => links.filter((link) => !removed.has(link.key)));
       await updateJson('element-links.json', [], (links2) => links2.filter((link) => !removed.has(link.key)));
+      await updateJson('projects.json', [], (all) => all.map((project) => ({
+        ...project,
+        assetKeys: (project.assetKeys || []).filter((key) => !removed.has(key))
+      })));
       await updateJson('series.json', [], (all) => all.map((s) => ({
         ...s,
         assetKeys: (s.assetKeys || []).filter((key) => !removed.has(key))

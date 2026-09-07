@@ -79,11 +79,16 @@ const state = {
   assetRange: { from: null, to: null },
   assetFilterCharacterId: '',
   assetFilterSeriesId: '',
+  assetFilterProjectId: '',
   assetFilterSearch: '',
   assetFilterCategory: '',
   assetFilterTags: '',
   visualUploadKind: 'image',
   visualClassifyKeys: [],
+  workspaceProjects: [],
+  editingProjectId: null,
+  projectDraftTasks: [],
+  pendingProjectAssetKeys: null,
   series: [],
   editingSeriesId: null,
   seriesDraftCharacterIds: new Set(),
@@ -336,6 +341,7 @@ const byName = (a, b) => String(a).localeCompare(String(b), i18n?.getLocale() ||
 function sortEntities() {
   state.characters.sort((a, b) => byName(a.name, b.name));
   state.elements.sort((a, b) => byName(a.name, b.name));
+  state.workspaceProjects.sort((a, b) => byName(a.name, b.name));
   state.series.sort((a, b) => byName(a.title, b.title));
 }
 

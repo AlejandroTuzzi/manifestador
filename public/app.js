@@ -11,6 +11,7 @@ $$('.nav-btn').forEach((btn) => {
     const view = btn.dataset.view;
     $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
     if (view === 'assets') refreshAssets();
+    if (view === 'projects') renderProjects();
     if (view === 'characters') renderCharacters();
     if (view === 'series') renderSeries();
     if (view === 'automatizador') renderAutomations();
@@ -2748,12 +2749,16 @@ async function refreshAssets() {
 function renderAssetFilterOptions() {
   const charSel = $('#assetFilterCharacter');
   const seriesSel = $('#assetFilterSeries');
+  const projectSel = $('#assetFilterProject');
   charSel.innerHTML = `<option value="">${esc(tr('common.allMasculine'))}</option>` + state.characters.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
   seriesSel.innerHTML = `<option value="">${esc(tr('common.allFeminine'))}</option>` + state.series.map((s) => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
+  projectSel.innerHTML = `<option value="">${esc(tr('common.allMasculine'))}</option>` + state.workspaceProjects.map((project) => `<option value="${project.id}">${esc(project.name)}</option>`).join('');
   charSel.value = state.characters.some((c) => c.id === state.assetFilterCharacterId) ? state.assetFilterCharacterId : '';
   seriesSel.value = state.series.some((s) => s.id === state.assetFilterSeriesId) ? state.assetFilterSeriesId : '';
+  projectSel.value = state.workspaceProjects.some((project) => project.id === state.assetFilterProjectId) ? state.assetFilterProjectId : '';
   state.assetFilterCharacterId = charSel.value;
   state.assetFilterSeriesId = seriesSel.value;
+  state.assetFilterProjectId = projectSel.value;
   const visualItems = state.assetsZone === 'audio' ? [] : (state.assets[state.assetsZone] || []);
   const categories = [...new Set(visualItems.map((item) => String(item.category || '').trim()).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right, i18n.localeTag()));
@@ -2773,6 +2778,10 @@ $('#assetFilterCharacter').addEventListener('change', () => {
 });
 $('#assetFilterSeries').addEventListener('change', () => {
   state.assetFilterSeriesId = $('#assetFilterSeries').value;
+  renderAssetsGrid();
+});
+$('#assetFilterProject').addEventListener('change', () => {
+  state.assetFilterProjectId = $('#assetFilterProject').value;
   renderAssetsGrid();
 });
 $('#assetFilterSearch').addEventListener('input', () => {
@@ -2851,7 +2860,7 @@ function renderAssetsGrid() {
     for (const a of group) {
       const card = document.createElement('div');
       card.className = `asset-card${state.selectedAssets.has(a.key) ? ' selected' : ''}`;
-      card.innerHTML = `<button class="asset-check" title="${esc(tr('assets.select'))}">${state.selectedAssets.has(a.key) ? '✓' : ''}</button><button class="asset-series" title="${esc(tr('common.associateSeries'))}">${IC('layers')}</button><a class="asset-download" href="${fileUrl(a.key)}" download="${esc(a.name)}" title="${esc(tr('common.download'))}">${IC('download')}</a><button class="asset-info" title="${esc(tr('common.information'))}">${IC('info')}</button>${a.prompt ? `<button class="asset-copy" title="${esc(tr('common.copyPrompt'))}">${IC('copy')}</button>` : ''}<button class="asset-delete" title="${esc(tr('common.delete'))}">${IC('trash')}</button>`;
+      card.innerHTML = `<button class="asset-check" title="${esc(tr('assets.select'))}">${state.selectedAssets.has(a.key) ? '✓' : ''}</button><button class="asset-series" title="${esc(tr('common.associateSeries'))}">${IC('layers')}</button><button class="asset-workspace-project" title="${esc(tr('common.associateProject'))}">${IC('folder')}</button><a class="asset-download" href="${fileUrl(a.key)}" download="${esc(a.name)}" title="${esc(tr('common.download'))}">${IC('download')}</a><button class="asset-info" title="${esc(tr('common.information'))}">${IC('info')}</button>${a.prompt ? `<button class="asset-copy" title="${esc(tr('common.copyPrompt'))}">${IC('copy')}</button>` : ''}<button class="asset-delete" title="${esc(tr('common.delete'))}">${IC('trash')}</button>`;
       const automationProjectLabel = automationAssetProjectLabel(a);
       if (a.nsfw) card.insertAdjacentHTML('beforeend', nsfwBadgeHtml(a, 'overlay'));
       if (automationProjectLabel) card.insertAdjacentHTML('beforeend', `<span class="asset-project-badge" title="${esc(tr('assets.generatedByAutomation', { project: automationProjectLabel }))}">${IC('spark')} ${esc(automationProjectLabel)}</span>`);
@@ -2872,6 +2881,7 @@ function renderAssetsGrid() {
       }
       card.querySelector('.asset-check').addEventListener('click', () => toggleAssetSelection(a.key));
       card.querySelector('.asset-series').addEventListener('click', () => openSeriesAssign(a.key));
+      card.querySelector('.asset-workspace-project').addEventListener('click', () => openProjectAssign(a.key));
       card.querySelector('.asset-info').addEventListener('click', () => openAssetInfo(a));
       card.querySelector('.asset-copy')?.addEventListener('click', () => copyPrompt(a.prompt));
       card.querySelector('.asset-delete').addEventListener('click', () => deleteAssets([a.key]));
@@ -4131,6 +4141,12 @@ function assetMatchesSeries(a, seriesId) {
   return Boolean(s && (s.assetKeys || []).includes(a.key));
 }
 
+function assetMatchesProject(a, projectId) {
+  if (!projectId) return true;
+  const project = state.workspaceProjects.find((item) => item.id === projectId);
+  return Boolean(project && (project.assetKeys || []).includes(a.key));
+}
+
 function normalizedAssetFilterText(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase(i18n.localeTag()).trim();
 }
@@ -4148,7 +4164,8 @@ function visibleAssets() {
     && (state.assetsZone === 'audio' || !requiredTags.length || requiredTags.every((wanted) =>
       (a.tags || []).some((tag) => normalizedAssetFilterText(tag).includes(wanted))))
     && assetMatchesCharacter(a, state.assetFilterCharacterId)
-    && assetMatchesSeries(a, state.assetFilterSeriesId));
+    && assetMatchesSeries(a, state.assetFilterSeriesId)
+    && assetMatchesProject(a, state.assetFilterProjectId));
 }
 
 function toggleAssetSelection(key) {
@@ -4162,6 +4179,8 @@ function updateAssetSelection() {
   $('#btnDeleteSelected').disabled = !n;
   $('#seriesSelectedCount').textContent = n;
   $('#btnSeriesSelected').disabled = !n;
+  $('#projectsSelectedCount').textContent = n;
+  $('#btnProjectsSelected').disabled = !n;
   $('#downloadSelectedCount').textContent = n;
   $('#btnDownloadSelected').disabled = !n;
   $('#classifySelectedCount').textContent = n;
@@ -4201,6 +4220,7 @@ async function deleteAssets(keys) {
   const result = await api('/api/assets/delete', { method: 'POST', body: { keys } });
   keys.forEach((key) => state.selectedAssets.delete(key));
   state.series.forEach((s) => { s.assetKeys = (s.assetKeys || []).filter((key) => !keys.includes(key)); });
+  state.workspaceProjects.forEach((project) => { project.assetKeys = (project.assetKeys || []).filter((key) => !keys.includes(key)); });
   state.automations.forEach((project) => {
     (project.blocks || []).forEach((block) => {
       block.assetKeys = (block.assetKeys || []).filter((key) => !keys.includes(key));
@@ -4243,6 +4263,7 @@ async function duplicateAssets(keys) {
 $('#btnDeleteSelected').addEventListener('click', () => deleteAssets([...state.selectedAssets]));
 $('#btnDuplicateSelected').addEventListener('click', () => duplicateAssets([...state.selectedAssets]));
 $('#btnSeriesSelected').addEventListener('click', () => openSeriesAssign([...state.selectedAssets]));
+$('#btnProjectsSelected').addEventListener('click', () => openProjectAssign([...state.selectedAssets]));
 $('#btnClassifySelected').addEventListener('click', () => {
   const selected = [...state.selectedAssets];
   const first = [...state.assets.generated, ...state.assets.uploads, ...state.assets.video].find((item) => item.key === selected[0]);
@@ -4466,6 +4487,7 @@ function openLightbox(key, keys = null, opts = {}) {
     ${!isVideo ? `<button class="mini-btn" id="lbRef">${IC('link')} ${esc(tr('common.useAsReference'))}</button>` : ''}
     ${!isVideo && isReusableImageKey(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} ${esc(tr('common.associateEntity'))}</button>` : ''}
     <button class="mini-btn" id="lbSeries">${IC('layers')} ${esc(tr('common.associateSeries'))}</button>
+    ${/^(generated|uploads|audio|video)\//.test(key) ? `<button class="mini-btn" id="lbProject">${IC('folder')} ${esc(tr('common.associateProject'))}</button>` : ''}
     ${!isVideo && isReusableImageKey(key) ? `<button class="mini-btn" id="lbCharacter">${IC('user')} ${esc(tr('common.convertCharacter'))}</button>` : ''}
     ${!isVideo ? `<button class="mini-btn" id="lbPhotoshop">${IC('pen')} ${esc(tr('common.openPhotoshop'))}</button>` : ''}
     ${/^(generated|uploads|audio|video)\//.test(key) ? `<button class="mini-btn" id="lbDuplicate">${IC('copy')} ${esc(tr('common.duplicate'))}</button>` : ''}
@@ -4494,6 +4516,7 @@ function openLightbox(key, keys = null, opts = {}) {
   });
   $('#lbAssociate')?.addEventListener('click', () => associateAsset(key));
   $('#lbSeries')?.addEventListener('click', () => openSeriesAssign(key));
+  $('#lbProject')?.addEventListener('click', () => openProjectAssign(key));
   $('#lbDuplicate')?.addEventListener('click', () => duplicateAssets([key]));
 }
 
@@ -4685,6 +4708,7 @@ async function renameAsset(oldKey, name) {
     const s = await api('/api/state');
     state.assetLinks = s.assetLinks || [];
     state.elementLinks = s.elementLinks || [];
+    state.workspaceProjects = s.projects || [];
     state.series = s.series || [];
     state.scripts = s.scripts || [];
     state.automations = s.automations || [];
@@ -4839,6 +4863,7 @@ document.addEventListener('keydown', (e) => {
     closeAudioUpload();
     $('#characterGalleryModal').hidden = true; $('#variantEditorModal').hidden = true; $('#associateAssetModal').hidden = true;
     $('#assetInfoModal').hidden = true;
+    $('#projectModal').hidden = true; $('#projectAssignModal').hidden = true; state.editingProjectId = null; state.pendingProjectAssetKeys = null;
     $('#seriesModal').hidden = true; $('#seriesAssignModal').hidden = true; state.editingSeriesId = null;
     $('#charAssetPickerModal').hidden = true; state.charAssetPicker = null;
     $('#shotPromptModal').hidden = true; state.shotPromptTarget = null;
@@ -4848,6 +4873,258 @@ document.addEventListener('keydown', (e) => {
     $('#snippetEditorModal').hidden = true; state.snippetEditor = null;
     $('#snippetViewModal').hidden = true;
   }
+});
+
+// ---------------------------------------------------------------------------
+// proyectos de trabajo
+// ---------------------------------------------------------------------------
+
+const newProjectTask = () => ({ id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name: '', description: '', deadline: '', done: false, checklist: [] });
+const cloneProjectTasks = (tasks) => (tasks || []).map((task) => ({ ...task, checklist: (task.checklist || []).map((item) => ({ ...item })) }));
+
+function projectDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+  return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null;
+}
+
+function formatProjectDate(value) {
+  const date = projectDate(value);
+  return date ? i18n.formatDate(date, { year: 'numeric', month: 'short', day: 'numeric' }) : tr('projects.noDeadline');
+}
+
+function projectDeadlineState(value) {
+  if (!value) return { className: 'none', label: tr('projects.noDeadline') };
+  const today = new Date();
+  const localToday = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  if (value < localToday) return { className: 'overdue', label: tr('projects.overdue', { date: formatProjectDate(value) }) };
+  if (value === localToday) return { className: 'today', label: tr('projects.dueToday') };
+  return { className: 'upcoming', label: tr('projects.dueDate', { date: formatProjectDate(value) }) };
+}
+
+function projectTaskProgress(project) {
+  const tasks = project.tasks || [];
+  return { done: tasks.filter((task) => task.done).length, total: tasks.length };
+}
+
+async function replaceWorkspaceProject(updated) {
+  const index = state.workspaceProjects.findIndex((project) => project.id === updated.id);
+  if (index >= 0) state.workspaceProjects[index] = updated;
+  else state.workspaceProjects.unshift(updated);
+  renderProjects();
+  renderAssetFilterOptions();
+}
+
+async function updateProjectTasks(project, tasks) {
+  const updated = await api(`/api/projects/${project.id}`, { method: 'PUT', body: { tasks } });
+  await replaceWorkspaceProject(updated);
+  return updated;
+}
+
+function renderProjects() {
+  sortEntities();
+  const grid = $('#projectsGrid');
+  if (!state.workspaceProjects.length) {
+    grid.innerHTML = `<div class="empty-note">${esc(tr('projects.empty'))}</div>`;
+    return;
+  }
+  grid.innerHTML = '';
+  for (const project of state.workspaceProjects) {
+    const deadline = projectDeadlineState(project.deadline);
+    const progress = projectTaskProgress(project);
+    const card = document.createElement('article');
+    card.className = 'project-card';
+    card.innerHTML = `
+      <div class="project-card-head"><div><h3>${esc(project.name)}</h3>${nsfwBadgeHtml(project)}</div><span class="project-deadline ${deadline.className}">${IC('calendar')} ${esc(deadline.label)}</span></div>
+      <p class="project-description">${esc(project.description || tr('projects.noDescription'))}</p>
+      <div class="project-progress"><span>${esc(tr('projects.taskProgress', { done: progress.done, total: progress.total }))}</span><span>${esc(trn('projects.assetCount', (project.assetKeys || []).length))}</span></div>
+      <div class="project-progress-track"><span style="width:${progress.total ? Math.round(progress.done / progress.total * 100) : 0}%"></span></div>
+      <div class="project-card-tasks">${(project.tasks || []).length ? (project.tasks || []).slice(0, 5).map((task, index) => {
+        const checklistDone = (task.checklist || []).filter((item) => item.done).length;
+        const taskDeadline = projectDeadlineState(task.deadline);
+        const taskMeta = [task.deadline ? formatProjectDate(task.deadline) : '', task.checklist?.length ? `${checklistDone}/${task.checklist.length}` : ''].filter(Boolean).join(' · ');
+        return `<label class="project-card-task${task.done ? ' done' : ''}"><input type="checkbox" data-project-task="${index}" ${task.done ? 'checked' : ''}><span>${esc(task.name || tr('projects.untitledTask'))}</span>${taskMeta ? `<small class="${taskDeadline.className}">${esc(taskMeta)}</small>` : ''}</label>`;
+      }).join('') : `<span class="hint">${esc(tr('projects.noTasks'))}</span>`}</div>
+      <div class="char-actions">
+        <button class="mini-btn" data-project-action="edit">${IC('edit')} ${esc(tr('common.edit'))}</button>
+        <button class="mini-btn" data-project-action="assets">${IC('image')} ${esc(tr('projects.assets'))}${project.assetKeys?.length ? ` (${project.assetKeys.length})` : ''}</button>
+        <button class="mini-btn danger" data-project-action="delete" title="${esc(tr('common.delete'))}">${IC('trash')}</button>
+      </div>`;
+    card.querySelectorAll('[data-project-task]').forEach((input) => input.addEventListener('change', async () => {
+      input.disabled = true;
+      const tasks = cloneProjectTasks(project.tasks);
+      tasks[Number(input.dataset.projectTask)].done = input.checked;
+      try { await updateProjectTasks(project, tasks); } catch (error) { toast(error.message, 'err'); renderProjects(); }
+    }));
+    card.querySelector('[data-project-action="edit"]').addEventListener('click', () => openProjectModal(project.id));
+    card.querySelector('[data-project-action="assets"]').addEventListener('click', () => openProjectAssets(project.id));
+    card.querySelector('[data-project-action="delete"]').addEventListener('click', async () => {
+      if (!confirm(tr('projects.deleteConfirm', { name: project.name }))) return;
+      try {
+        await api(`/api/projects/${project.id}`, { method: 'DELETE' });
+        state.workspaceProjects = state.workspaceProjects.filter((item) => item.id !== project.id);
+        renderProjects();
+        renderAssetFilterOptions();
+        toast(tr('projects.deleted'));
+      } catch (error) { toast(error.message, 'err'); }
+    });
+    grid.appendChild(card);
+  }
+}
+
+function renderProjectAssets(project, target, { modal = false } = {}) {
+  const keys = project?.assetKeys || [];
+  const viewable = keys.filter((key) => !key.startsWith('audio/'));
+  target.innerHTML = keys.length ? keys.map((key) => `<div class="${modal ? 'linked-asset' : 'series-asset'}">${key.startsWith('audio/')
+    ? `<div class="series-audio${modal ? ' big' : ''}">${IC('mic', modal ? 'ic ic-lg' : 'ic')}</div>`
+    : `<button type="button" data-project-gallery="${esc(key)}">${seriesAssetThumb(key)}</button>`}<button type="button" class="linked-remove" data-project-unlink="${esc(key)}" title="${esc(tr('projects.removeAsset'))}">×</button></div>`).join('')
+    : `<span class="hint">${esc(tr('projects.noAssets'))}</span>`;
+  target.querySelectorAll('[data-project-gallery]').forEach((button) => button.addEventListener('click', () => openLightbox(button.dataset.projectGallery, viewable)));
+  target.querySelectorAll('[data-project-unlink]').forEach((button) => button.addEventListener('click', async () => {
+    try {
+      const updated = await api(`/api/projects/${project.id}/assets?key=${encodeURIComponent(button.dataset.projectUnlink)}`, { method: 'DELETE' });
+      await replaceWorkspaceProject(updated);
+      if (modal) openProjectAssets(project.id); else renderProjectModalAssets();
+    } catch (error) { toast(error.message, 'err'); }
+  }));
+}
+
+function openProjectAssets(id) {
+  const project = state.workspaceProjects.find((item) => item.id === id);
+  if (!project) return;
+  $('#characterGalleryTitle').textContent = tr('projects.assetsTitle', { name: project.name });
+  $('#characterGalleryBody').innerHTML = `<section class="character-gallery-group"><div class="character-gallery-group-head"><h4>${esc(project.name)}</h4><span>${esc(trn('projects.assetCount', (project.assetKeys || []).length))}</span></div><div class="character-gallery-grid linked-assets" id="workspaceProjectGallery"></div></section>`;
+  renderProjectAssets(project, $('#workspaceProjectGallery'), { modal: true });
+  $('#characterGalleryModal').hidden = false;
+}
+
+function renderProjectModalAssets() {
+  const project = state.editingProjectId ? state.workspaceProjects.find((item) => item.id === state.editingProjectId) : null;
+  $('#projectAssetsBlock').hidden = !project;
+  if (!project) return;
+  $('#projectAssetsCount').textContent = trn('projects.assetCount', (project.assetKeys || []).length);
+  renderProjectAssets(project, $('#projectAssetsList'));
+}
+
+function renderProjectTasksEditor() {
+  const root = $('#projectTasksEditor');
+  if (!state.projectDraftTasks.length) {
+    root.innerHTML = `<div class="project-task-empty">${esc(tr('projects.noTasksEditor'))}</div>`;
+    return;
+  }
+  root.innerHTML = state.projectDraftTasks.map((task, taskIndex) => `<article class="project-task-editor" data-task-index="${taskIndex}">
+    <div class="project-task-editor-head"><label class="project-task-done"><input type="checkbox" data-task-field="done" ${task.done ? 'checked' : ''}> <span data-i18n="projects.completed">${esc(tr('projects.completed'))}</span></label><button type="button" class="icon-btn danger" data-remove-task title="${esc(tr('projects.removeTask'))}">${IC('trash')}</button></div>
+    <label><span>${esc(tr('projects.taskName'))}</span><input type="text" maxlength="180" data-task-field="name" value="${esc(task.name || '')}" placeholder="${esc(tr('projects.taskNamePlaceholder'))}" required></label>
+    <label><span>${esc(tr('common.description'))}</span><textarea maxlength="3000" rows="2" data-task-field="description" placeholder="${esc(tr('projects.taskDescriptionPlaceholder'))}">${esc(task.description || '')}</textarea></label>
+    <label><span>${esc(tr('projects.taskDeadline'))}</span><input type="date" data-task-field="deadline" value="${esc(task.deadline || '')}"></label>
+    <div class="project-checklist-head"><strong>${esc(tr('projects.checklist'))}</strong><button type="button" class="mini-btn" data-add-checklist>${IC('plus')} ${esc(tr('projects.addChecklistItem'))}</button></div>
+    <div class="project-checklist">${(task.checklist || []).length ? task.checklist.map((item, itemIndex) => `<div class="project-checklist-row"><input type="checkbox" data-check-field="done" data-check-index="${itemIndex}" ${item.done ? 'checked' : ''}><input type="text" maxlength="500" data-check-field="text" data-check-index="${itemIndex}" value="${esc(item.text || '')}" placeholder="${esc(tr('projects.checklistPlaceholder'))}"><button type="button" class="icon-btn danger" data-remove-check="${itemIndex}" title="${esc(tr('common.remove'))}">${IC('x')}</button></div>`).join('') : `<span class="hint">${esc(tr('projects.noChecklist'))}</span>`}</div>
+  </article>`).join('');
+  root.querySelectorAll('[data-task-index]').forEach((article) => {
+    const taskIndex = Number(article.dataset.taskIndex);
+    article.querySelectorAll('[data-task-field]').forEach((input) => input.addEventListener('input', () => {
+      state.projectDraftTasks[taskIndex][input.dataset.taskField] = input.type === 'checkbox' ? input.checked : input.value;
+    }));
+    article.querySelector('[data-remove-task]').addEventListener('click', () => { state.projectDraftTasks.splice(taskIndex, 1); renderProjectTasksEditor(); });
+    article.querySelector('[data-add-checklist]').addEventListener('click', () => {
+      state.projectDraftTasks[taskIndex].checklist ||= [];
+      state.projectDraftTasks[taskIndex].checklist.push({ id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, text: '', done: false });
+      renderProjectTasksEditor();
+    });
+    article.querySelectorAll('[data-check-field]').forEach((input) => input.addEventListener('input', () => {
+      const item = state.projectDraftTasks[taskIndex].checklist[Number(input.dataset.checkIndex)];
+      item[input.dataset.checkField] = input.type === 'checkbox' ? input.checked : input.value;
+    }));
+    article.querySelectorAll('[data-remove-check]').forEach((button) => button.addEventListener('click', () => {
+      state.projectDraftTasks[taskIndex].checklist.splice(Number(button.dataset.removeCheck), 1);
+      renderProjectTasksEditor();
+    }));
+  });
+}
+
+function openProjectModal(id = null) {
+  const project = id ? state.workspaceProjects.find((item) => item.id === id) : null;
+  state.editingProjectId = project?.id || null;
+  state.projectDraftTasks = cloneProjectTasks(project?.tasks || []);
+  $('#projectModalTitle').textContent = project ? tr('projects.editTitle') : tr('projects.new');
+  $('#projectName').value = project?.name || '';
+  $('#projectDescription').value = project?.description || '';
+  $('#projectDeadline').value = project?.deadline || '';
+  $('#projectNsfw').checked = Boolean(project?.nsfw);
+  renderProjectModalAssets();
+  renderProjectTasksEditor();
+  $('#projectModal').hidden = false;
+  setTimeout(() => $('#projectName').focus(), 0);
+}
+
+function closeProjectModal() {
+  $('#projectModal').hidden = true;
+  state.editingProjectId = null;
+  state.projectDraftTasks = [];
+}
+
+$('#btnNewProject').addEventListener('click', () => openProjectModal());
+$('#btnAddProjectTask').addEventListener('click', () => { state.projectDraftTasks.push(newProjectTask()); renderProjectTasksEditor(); });
+$('#projectModalClose').addEventListener('click', closeProjectModal);
+$('#projectModalCancel').addEventListener('click', closeProjectModal);
+$('#projectModal').addEventListener('click', (event) => { if (event.target.id === 'projectModal') closeProjectModal(); });
+$('#projectForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const emptyTaskIndex = state.projectDraftTasks.findIndex((task) => !String(task.name || '').trim());
+  if (emptyTaskIndex >= 0) {
+    toast(tr('projects.taskNameRequired'), 'err');
+    $('#projectTasksEditor').querySelector(`[data-task-index="${emptyTaskIndex}"] [data-task-field="name"]`)?.focus();
+    return;
+  }
+  const tasks = cloneProjectTasks(state.projectDraftTasks).map((task) => ({ ...task, checklist: (task.checklist || []).filter((item) => String(item.text || '').trim()) }));
+  const body = { name: $('#projectName').value.trim(), description: $('#projectDescription').value.trim(), deadline: $('#projectDeadline').value, nsfw: $('#projectNsfw').checked, tasks };
+  if (!body.name) return toast(tr('projects.nameRequired'), 'err');
+  try {
+    const wasEditing = Boolean(state.editingProjectId);
+    const updated = wasEditing
+      ? await api(`/api/projects/${state.editingProjectId}`, { method: 'PUT', body })
+      : await api('/api/projects', { method: 'POST', body });
+    await replaceWorkspaceProject(updated);
+    closeProjectModal();
+    toast(tr(wasEditing ? 'projects.updated' : 'projects.created', { name: updated.name }));
+  } catch (error) { toast(error.message, 'err'); }
+});
+
+function openProjectAssign(keyOrKeys) {
+  const keys = [...new Set(Array.isArray(keyOrKeys) ? keyOrKeys : [keyOrKeys])].filter(Boolean);
+  if (!keys.length) return;
+  if (!state.workspaceProjects.length) return toast(tr('assets.projects.createFirst'), 'err');
+  state.pendingProjectAssetKeys = keys;
+  closeLightbox();
+  const select = $('#projectAssignSelect');
+  select.innerHTML = state.workspaceProjects.map((project) => `<option value="${project.id}">${esc(project.name)}</option>`).join('');
+  if (keys.length === 1) {
+    const current = state.workspaceProjects.filter((project) => (project.assetKeys || []).includes(keys[0]));
+    if (current.length) select.value = current[0].id;
+    $('#projectAssignPreview').innerHTML = `${seriesAssetThumb(keys[0])}<div><strong>${current.length ? esc(tr('assets.projects.alreadyIn', { projects: current.map((project) => `“${project.name}”`).join(', ') })) : esc(tr('assets.projects.newLink'))}</strong><div class="hint">${esc(tr('assets.projects.multipleHint'))}</div></div>`;
+  } else {
+    $('#projectAssignPreview').innerHTML = `<div class="series-assign-batch">${keys.slice(0, 4).map(seriesAssetThumb).join('')}${keys.length > 4 ? `<div class="series-audio">+${keys.length - 4}</div>` : ''}</div><div><strong>${esc(trn('assets.projects.selected', keys.length))}</strong><div class="hint">${esc(tr('assets.projects.allAssociatedHint'))}</div></div>`;
+  }
+  $('#projectAssignModal').hidden = false;
+}
+
+function closeProjectAssign() {
+  $('#projectAssignModal').hidden = true;
+  state.pendingProjectAssetKeys = null;
+}
+
+$('#projectAssignClose').addEventListener('click', closeProjectAssign);
+$('#projectAssignCancel').addEventListener('click', closeProjectAssign);
+$('#projectAssignModal').addEventListener('click', (event) => { if (event.target.id === 'projectAssignModal') closeProjectAssign(); });
+$('#projectAssignForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const keys = state.pendingProjectAssetKeys || [];
+  try {
+    const updated = await api(`/api/projects/${$('#projectAssignSelect').value}/assets`, { method: 'POST', body: { keys } });
+    await replaceWorkspaceProject(updated);
+    closeProjectAssign();
+    toast(trn('assets.projects.associated', keys.length, { project: updated.name }));
+    renderAssetsGrid();
+  } catch (error) { toast(error.message, 'err'); }
 });
 
 // ---------------------------------------------------------------------------
@@ -10913,6 +11190,7 @@ async function init() {
     state.snippets = s.snippets || [];
     state.snippetCategoriesExtra = s.snippetCategories || [];
     state.assetLinks = s.assetLinks || [];
+    state.workspaceProjects = s.projects || [];
     state.series = s.series || [];
     state.scripts = s.scripts || [];
     state.elements = s.elements || [];
@@ -10947,7 +11225,7 @@ async function init() {
   // deep-links: #audio, #assets, #characters, #series, #subtitler, #prompts, #vocabulary, #costs, #config
   const h = location.hash.slice(1);
   if (h === 'audio') setMode('audio');
-  else if (['assets', 'characters', 'series', 'subtitler', 'prompts', 'vocabulary', 'snippets', 'costs', 'config'].includes(h)) {
+  else if (['assets', 'projects', 'characters', 'series', 'subtitler', 'prompts', 'vocabulary', 'snippets', 'costs', 'config'].includes(h)) {
     $(`.nav-btn[data-view="${h}"]`)?.click();
   }
 }
