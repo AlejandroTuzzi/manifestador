@@ -86,6 +86,7 @@ const state = {
   visualUploadKind: 'image',
   visualClassifyKeys: [],
   workspaceProjects: [],
+  projectArchiveView: false,
   editingProjectId: null,
   projectDraftTasks: [],
   projectDraftAssetKeys: [],

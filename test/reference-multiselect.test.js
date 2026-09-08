@@ -26,6 +26,7 @@ function setup({ limit = 12, multimedia = true, mediaLimits = { image: 9, video:
     pickRef: (key, kind) => { state.refs.push({ key, kind }); added.push({ key, kind }); return true; }
   });
   vm.runInContext(source.slice(source.indexOf('function pickerAllowsMultiple('), source.indexOf("$('#pickerSelectionAdd').addEventListener")), context);
+  context.renderPickerSelectionPreviews = () => {};
   return { context, state, added, errors, node, showCards(keys) {
     cards = keys.map((key) => Object.assign(element(), { dataset: { key, kind: key.startsWith('audio/') ? 'audio' : 'image' } }));
     context.bindPickerReferenceCards();
@@ -130,6 +131,7 @@ test('newly uploaded files join the draft selection until confirmation', async (
   vm.runInContext(source.slice(source.indexOf('async function uploadFiles('), source.indexOf('function isCreateViewActive(')), context);
   await context.uploadFiles([{ name: 'one.png', size: 10 }, { name: 'two.png', size: 10 }], true);
   assert.equal(state.pickerSelection.size, 2);
+  assert.equal(state.pickerSelection.get('uploads/1.png').name, 'one.png');
   assert.equal(added.length, 0);
   assert.equal(node('#pickerModal').hidden, false);
   context.confirmPickerSelection();

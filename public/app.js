@@ -2207,7 +2207,7 @@ function pickerSelectionError(key, kind) {
   return '';
 }
 
-function selectPickerReference(key, kind = 'image') {
+function selectPickerReference(key, kind = 'image', name = '') {
   if (!state.pickerMulti) {
     const result = pickRef(key, kind);
     if (result !== false) $('#pickerModal').hidden = true;
@@ -2217,7 +2217,7 @@ function selectPickerReference(key, kind = 'image') {
   else {
     const error = pickerSelectionError(key, kind);
     if (error) { toast(error, 'err'); return false; }
-    state.pickerSelection.set(key, { key, kind });
+    state.pickerSelection.set(key, { key, kind, name: name || key.split('/').pop() });
   }
   syncPickerSelection();
   return true;
@@ -2238,6 +2238,46 @@ function syncPickerSelection() {
     card.setAttribute('aria-pressed', String(checked || added));
     card.dataset.selectionMark = checked ? `✓ ${order.get(card.dataset.key)}` : added ? '✓' : '';
   });
+  renderPickerSelectionPreviews();
+}
+
+function renderPickerSelectionPreviews() {
+  const root = $('#pickerSelectedPreviews');
+  const selected = state.pickerSelection || new Map();
+  root.hidden = !state.pickerMulti || !selected.size;
+  // Conserva las miniaturas existentes: seleccionar otro archivo no debe
+  // volver a cargar sus imágenes ni abrir nuevos decodificadores de video.
+  for (const card of [...root.children]) {
+    if (!selected.has(card.dataset.selectionKey)) card.remove();
+  }
+  const cards = new Map([...root.children].map((card) => [card.dataset.selectionKey, card]));
+  let index = 0;
+  for (const [key, ref] of selected) {
+    let card = cards.get(key);
+    if (!card) {
+      card = document.createElement('div');
+      card.className = 'picker-selected-item';
+      card.dataset.selectionKey = key;
+      const preview = ref.kind === 'audio'
+        ? `<button type="button" class="ref-audio-play" data-ref-audio-key="${esc(key)}">${IC('play', 'ic ic-lg')}</button>`
+        : ref.kind === 'video' ? `<video src="${fileUrl(key)}" preload="metadata" muted playsinline></video>`
+          : `<img src="${fileUrl(key)}" loading="lazy" alt="">`;
+      card.innerHTML = `<div class="picker-selected-preview">${preview}<span class="picker-selected-order"></span><button type="button" class="picker-selected-remove">${IC('x')}</button></div><span class="picker-selected-name">${esc(ref.name || key.split('/').pop())}</span>`;
+      card.title = ref.name || key.split('/').pop();
+      card.querySelector('.picker-selected-remove').addEventListener('click', () => {
+        if (pickerAudioKey === key) stopPickerAudioPreview();
+        selectPickerReference(key, ref.kind);
+      });
+      card.querySelector('.ref-audio-play')?.addEventListener('click', () => togglePickerAudio(key));
+    }
+    card.querySelector('.picker-selected-order').textContent = i18n.formatNumber(index + 1);
+    const remove = card.querySelector('.picker-selected-remove');
+    remove.title = tr('picker.removeSelected', { name: ref.name || key.split('/').pop() });
+    remove.setAttribute('aria-label', remove.title);
+    if (root.children[index] !== card) root.insertBefore(card, root.children[index] || null);
+    index++;
+  }
+  syncReferenceAudioButtons();
 }
 
 function bindPickerReferenceCards() {
@@ -2245,11 +2285,11 @@ function bindPickerReferenceCards() {
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
     card.setAttribute('aria-label', card.querySelector('.p-label')?.textContent || card.dataset.key);
-    card.addEventListener('click', () => selectPickerReference(card.dataset.key, card.dataset.kind || 'image'));
+    card.addEventListener('click', () => selectPickerReference(card.dataset.key, card.dataset.kind || 'image', card.querySelector('.p-label')?.textContent));
     card.addEventListener('keydown', (event) => {
       if (event.target !== card || !['Enter', ' '].includes(event.key)) return;
       event.preventDefault();
-      selectPickerReference(card.dataset.key, card.dataset.kind || 'image');
+      selectPickerReference(card.dataset.key, card.dataset.kind || 'image', card.querySelector('.p-label')?.textContent);
     });
   });
   syncPickerSelection();
@@ -2557,8 +2597,8 @@ function renderPickerProjects() {
     idKey: 'pickerProjectId', pageKey: 'pickerProjectPage', pageSize: 24, icon: 'folder',
     items: () => projects, cover: (project) => items(project).find((asset) => referenceKind(asset) === 'image')?.key,
     groups: (project) => [{ id: '', name: project.name, photos: items(project).map((asset) => asset.key) }],
-    label: (project) => `${project.name} · ${trn('projects.assetCount', items(project).length)}`,
-    title: (project) => project.name,
+    label: (project) => `${workspaceProjectDisplayName(project)} · ${trn('projects.assetCount', items(project).length)}`,
+    title: (project) => workspaceProjectDisplayName(project),
     photoLabel: (project, group, key) => byKey.get(key)?.name || key,
     countLabel: (count) => trn('projects.assetCount', count),
     kind: (key) => referenceKind(byKey.get(key)),
@@ -2650,7 +2690,7 @@ async function uploadFiles(files, asRefs) {
           : await api('/api/assets/visual', { method: 'POST', body: { name: f.name, dataUrl, category: loraMedia ? 'LORAS' : '', tags: [], nsfw: loraMedia && $('#promptEditorNsfw')?.checked } })
         : await api('/api/upload', { method: 'POST', body: { name: f.name, dataUrl } });
       if (inPicker && (state.pickerSelection !== selection || $('#pickerModal').hidden)) break;
-      const added = asRefs ? (batch ? selectPickerReference(upload.key, kind) : pickRef(upload.key, kind)) : true;
+      const added = asRefs ? (batch ? selectPickerReference(upload.key, kind, f.name) : pickRef(upload.key, kind)) : true;
       if (added !== false) {
         uploaded++;
         addedCounts[kind]++;
@@ -2930,7 +2970,7 @@ function renderAssetFilterOptions() {
   const projectSel = $('#assetFilterProject');
   charSel.innerHTML = `<option value="">${esc(tr('common.allMasculine'))}</option>` + state.characters.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
   seriesSel.innerHTML = `<option value="">${esc(tr('common.allFeminine'))}</option>` + state.series.map((s) => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
-  projectSel.innerHTML = `<option value="">${esc(tr('common.allMasculine'))}</option>` + state.workspaceProjects.map((project) => `<option value="${project.id}">${esc(project.name)}</option>`).join('');
+  projectSel.innerHTML = `<option value="">${esc(tr('common.allMasculine'))}</option>` + state.workspaceProjects.map((project) => `<option value="${project.id}">${esc(workspaceProjectDisplayName(project))}</option>`).join('');
   charSel.value = state.characters.some((c) => c.id === state.assetFilterCharacterId) ? state.assetFilterCharacterId : '';
   seriesSel.value = state.series.some((s) => s.id === state.assetFilterSeriesId) ? state.assetFilterSeriesId : '';
   projectSel.value = state.workspaceProjects.some((project) => project.id === state.assetFilterProjectId) ? state.assetFilterProjectId : '';
@@ -5151,16 +5191,45 @@ async function updateProjectTasks(project, tasks) {
   return updated;
 }
 
+function workspaceProjectDisplayName(project) {
+  return project.archived ? `${project.name} · ${tr('projects.archived')}` : project.name;
+}
+
+function visibleWorkspaceProjects() {
+  return state.workspaceProjects.filter((project) => contentIsVisible(project)
+    && Boolean(project.archived) === Boolean(state.projectArchiveView));
+}
+
+async function setWorkspaceProjectArchived(project, archived) {
+  const updated = await api(`/api/projects/${project.id}`, { method: 'PUT', body: { archived } });
+  await replaceWorkspaceProject(updated);
+  toast(tr(archived ? 'projects.archiveSuccess' : 'projects.reopenSuccess', { name: updated.name }));
+  return updated;
+}
+
+$$('#projectArchiveTabs [data-project-archive]').forEach((button) => button.addEventListener('click', () => {
+  state.projectArchiveView = button.dataset.projectArchive === 'archived';
+  renderProjects();
+}));
+
 function renderProjects() {
   sortEntities();
+  $$('#projectArchiveTabs [data-project-archive]').forEach((button) => {
+    const active = (button.dataset.projectArchive === 'archived') === Boolean(state.projectArchiveView);
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
   const grid = $('#projectsGrid');
-  if (!state.workspaceProjects.length) {
-    grid.innerHTML = `<div class="empty-note">${esc(tr('projects.empty'))}</div>`;
+  const projects = visibleWorkspaceProjects();
+  if (!projects.length) {
+    grid.innerHTML = `<div class="empty-note">${esc(tr(state.projectArchiveView ? 'projects.archiveEmpty' : 'projects.activeEmpty'))}</div>`;
     return;
   }
   grid.innerHTML = '';
-  for (const project of state.workspaceProjects) {
-    const deadline = projectDeadlineState(project.deadline);
+  for (const project of projects) {
+    const deadline = project.archived ? { className: 'none', label: project.archivedAt
+      ? tr('projects.closedOn', { date: i18n.formatDate(project.archivedAt, { year: 'numeric', month: 'short', day: 'numeric' }) })
+      : tr('projects.archived') } : projectDeadlineState(project.deadline);
     const progress = projectTaskProgress(project);
     const card = document.createElement('article');
     card.className = 'project-card';
@@ -5178,6 +5247,7 @@ function renderProjects() {
       <div class="char-actions">
         <button class="mini-btn" data-project-action="edit">${IC('edit')} ${esc(tr('common.edit'))}</button>
         <button class="mini-btn" data-project-action="assets">${IC('image')} ${esc(tr('projects.assets'))}${project.assetKeys?.length ? ` (${project.assetKeys.length})` : ''}</button>
+        <button class="mini-btn" data-project-action="archive">${IC(project.archived ? 'refresh' : 'folder')} ${esc(tr(project.archived ? 'projects.reopen' : 'projects.close'))}</button>
         <button class="mini-btn danger" data-project-action="delete" title="${esc(tr('common.delete'))}">${IC('trash')}</button>
       </div>`;
     card.querySelectorAll('[data-project-task]').forEach((input) => input.addEventListener('change', async () => {
@@ -5188,6 +5258,13 @@ function renderProjects() {
     }));
     card.querySelector('[data-project-action="edit"]').addEventListener('click', () => openProjectModal(project.id));
     card.querySelector('[data-project-action="assets"]').addEventListener('click', () => openProjectAssets(project.id));
+    card.querySelector('[data-project-action="archive"]').addEventListener('click', async (event) => {
+      const archived = !project.archived;
+      if (archived && !confirm(tr('projects.archiveConfirm', { name: project.name }))) return;
+      event.currentTarget.disabled = true;
+      try { await setWorkspaceProjectArchived(project, archived); }
+      catch (error) { toast(error.message, 'err'); renderProjects(); }
+    });
     card.querySelector('[data-project-action="delete"]').addEventListener('click', async () => {
       if (!confirm(tr('projects.deleteConfirm', { name: project.name }))) return;
       try {
@@ -5416,6 +5493,7 @@ $('#projectForm').addEventListener('submit', async (event) => {
     const updated = wasEditing
       ? await api(`/api/projects/${state.editingProjectId}`, { method: 'PUT', body })
       : await api('/api/projects', { method: 'POST', body });
+    if (!wasEditing) state.projectArchiveView = false;
     await replaceWorkspaceProject(updated);
     closeProjectModal();
     toast(tr(wasEditing ? 'projects.updated' : 'projects.created', { name: updated.name }));
@@ -5429,7 +5507,7 @@ function openProjectAssign(keyOrKeys) {
   state.pendingProjectAssetKeys = keys;
   closeLightbox();
   const select = $('#projectAssignSelect');
-  select.innerHTML = state.workspaceProjects.map((project) => `<option value="${project.id}">${esc(project.name)}</option>`).join('');
+  select.innerHTML = state.workspaceProjects.map((project) => `<option value="${project.id}">${esc(workspaceProjectDisplayName(project))}</option>`).join('');
   if (keys.length === 1) {
     const current = state.workspaceProjects.filter((project) => (project.assetKeys || []).includes(keys[0]));
     if (current.length) select.value = current[0].id;

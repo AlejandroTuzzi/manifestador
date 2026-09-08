@@ -1958,12 +1958,19 @@ function createWorkspaceProject(body = {}) {
     nsfw: body.nsfw === true,
     tasks: normalizeProjectTasks(body.tasks),
     assetKeys: normalizeProjectAssetKeys(body.assetKeys),
+    archived: false,
+    archivedAt: null,
     ts: now,
     updatedAt: now
   };
 }
 
 function updateWorkspaceProject(project, body = {}) {
+  if (typeof body.archived === 'boolean') {
+    if (body.archived && !project.archived) project.archivedAt = Date.now();
+    if (!body.archived) project.archivedAt = null;
+    project.archived = body.archived;
+  }
   if (body.name !== undefined) project.name = String(body.name || '').trim().slice(0, 180) || project.name;
   if (body.description !== undefined) project.description = String(body.description || '').trim().slice(0, 5000);
   if (body.deadline !== undefined) project.deadline = normalizeProjectDate(body.deadline);
