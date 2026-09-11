@@ -1256,7 +1256,8 @@ audio::-webkit-media-controls-volume-slider {
 .character-gallery-group-head span { color: var(--muted); font-size: 11px; }
 .character-gallery-group > p { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
 .character-gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 9px; }
-.character-gallery-grid button { border: 1px solid var(--border-soft); background: var(--panel); padding: 0; aspect-ratio: 1; overflow: hidden; cursor: zoom-in; }
+.character-gallery-grid button { position: relative; border: 1px solid var(--border-soft); background: var(--panel); padding: 0; aspect-ratio: 1; overflow: hidden; cursor: zoom-in; }
+.gallery-photo-memberships { position: absolute; inset: auto 0 0; padding: 5px; background: var(--panel-solid); color: var(--text); font-size: 10px; overflow-wrap: anywhere; }
 .character-gallery-grid button:hover { border-color: var(--pink); }
 .character-gallery-grid img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .linked-asset { position: relative; aspect-ratio: 1; }
@@ -1464,6 +1465,14 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 #variantEditorModal, #associateAssetModal { z-index: 140; }
 #charAssetPickerModal { z-index: 165; }
 #assetInfoModal { z-index: 160; }
+#charModal { z-index: 110; }
+.project-character-links, .series-character-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.project-character-links:empty { display: none; }
+.project-character-choices { display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; }
+.project-character-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--border); padding: 8px; background: var(--panel-solid); }
+.project-character-choice { display: flex; min-width: 0; color: var(--text); }
+.project-character-choice img { width: 34px; height: 34px; object-fit: cover; }
+.series-character-link { display: inline-flex; align-items: center; gap: 6px; }
 #assetEditorConfirm { z-index: 180; }
 #assetEditorConfirm .form-modal-actions { flex-wrap: wrap; }
 .heygen-character-card > summary { cursor: pointer; color: var(--text); font-weight: 700; }

@@ -1114,6 +1114,11 @@
     <label><span data-i18n="common.description">Descripción</span><textarea id="projectDescription" rows="3" maxlength="5000" placeholder="Objetivo, entregables y contexto del proyecto…" data-i18n-placeholder="projects.editor.descriptionPlaceholder"></textarea></label>
     <label><span data-i18n="projects.deadline">Fecha límite</span><input id="projectDeadline" type="date"></label>
     <label class="check-row"><input id="projectNsfw" type="checkbox"> <span data-i18n="common.nsfwContent">Contenido NSFW</span></label>
+    <section class="project-assets-block">
+      <div class="project-section-head"><strong data-i18n="projects.characters">Personajes</strong></div>
+      <p class="hint" data-i18n="projects.charactersHint">Seleccioná los personajes del proyecto. Desmarcarlos solo quita su asociación al guardar.</p>
+      <div id="projectCharacterChoices" class="project-character-choices"></div>
+    </section>
     <section id="projectAssetsBlock" class="project-assets-block">
       <div class="project-section-head"><strong data-i18n="projects.associatedAssets">Assets asociados</strong><span id="projectAssetsCount" class="hint"></span><button type="button" id="projectChooseAssets" class="mini-btn" aria-expanded="false" aria-controls="projectAssetPicker"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="projects.chooseAssets">Añadir assets</span></button></div>
       <div id="projectAssetsList" class="series-assets-list"></div>
@@ -1141,7 +1146,7 @@
 <!-- Asociar uno o varios assets a un proyecto -->
 <div id="projectAssignModal" class="modal" hidden>
   <form id="projectAssignForm" class="modal-box form-modal-box">
-    <div class="modal-head"><div><h3 data-i18n="common.associateProject">Asociar a proyecto</h3><p class="hint" data-i18n="assets.projects.noMove">El archivo no se moverá ni duplicará</p></div><button type="button" class="icon-btn" id="projectAssignClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div class="modal-head"><div><h3 data-i18n="common.associateProject">Asociar a proyecto</h3><p class="hint" data-i18n="projects.linkHint">Se creará una asociación, sin mover ni duplicar contenido.</p></div><button type="button" class="icon-btn" id="projectAssignClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
     <div id="projectAssignPreview" class="associate-preview"></div>
     <label><span data-i18n="projects.project">Proyecto</span><select id="projectAssignSelect" class="select" required></select></label>
     <div class="form-modal-actions"><button type="button" class="mini-btn" id="projectAssignCancel" data-i18n="common.cancel">Cancelar</button><button type="submit" class="generate-btn small" data-i18n="assets.projects.associate">Asociar</button></div>

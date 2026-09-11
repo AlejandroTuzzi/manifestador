@@ -2616,7 +2616,16 @@ function projectReferenceAssets(project, assets = state.pickerProjectAssets || {
   const loraMedia = isPromptLoraMediaPicker();
   const visible = new Map(['uploads', 'generated', 'video', 'audio']
     .flatMap((zone) => assets[zone] || []).filter(contentIsVisible).map((asset) => [asset.key, asset]));
-  return [...new Set(project.assetKeys || [])].map((key) => visible.get(key)).filter((asset) => {
+  const characterKeys = [];
+  for (const character of (state.characters || []).filter((c) => contentIsVisible(c) && (project.characterIds || []).includes(c.id))) {
+    const groups = [{ name: '', photos: character.photos || [] }, ...(character.variants || []).filter(contentIsVisible)];
+    for (const group of groups) for (const key of group.photos || []) {
+      if (!/\.(png|jpe?g|webp)$/i.test(key)) continue;
+      characterKeys.push(key);
+      if (!visible.has(key)) visible.set(key, { key, kind: 'image', name: [character.name, group.name].filter(Boolean).join(' · ') });
+    }
+  }
+  return [...new Set([...(project.assetKeys || []), ...characterKeys])].map((key) => visible.get(key)).filter((asset) => {
     if (!asset) return false;
     const kind = referenceKind(asset);
     if (kind === 'image') return true;
@@ -5251,6 +5260,29 @@ $$('#projectArchiveTabs [data-project-archive]').forEach((button) => button.addE
   renderProjects();
 }));
 
+function workspaceProjectCharacters(project) {
+  return (state.characters || []).filter((character) => contentIsVisible(character) && (project.characterIds || []).includes(character.id));
+}
+
+function bindLinkedCharacterButtons(root) {
+  root.querySelectorAll('[data-open-linked-character]').forEach((button) => button.addEventListener('click', (event) => {
+    event.preventDefault(); event.stopPropagation();
+    const character = state.characters.find((item) => item.id === button.dataset.openLinkedCharacter && contentIsVisible(item));
+    if (character) openCharModal(character.id);
+  }));
+}
+
+function renderProjectCharacterChoices() {
+  const characters = (state.characters || []).filter(contentIsVisible);
+  $('#projectCharacterChoices').innerHTML = characters.map((character) => `<div class="project-character-row"><label class="check-row project-character-choice"><input type="checkbox" data-project-character="${esc(character.id)}"${state.projectDraftCharacterIds.includes(character.id) ? ' checked' : ''}>${character.photos?.[0] ? `<img src="${fileUrl(character.photos[0])}" alt="" loading="lazy">` : IC('user')}<span>${esc(character.name)}</span>${nsfwBadgeHtml(character)}</label><button type="button" class="mini-btn" data-open-linked-character="${esc(character.id)}">${IC('eye')} ${esc(tr('characters.viewProfile'))}</button></div>`).join('') || `<p class="hint">${esc(tr('characters.empty'))}</p>`;
+  bindLinkedCharacterButtons($('#projectCharacterChoices'));
+  $$('#projectCharacterChoices [data-project-character]').forEach((input) => input.addEventListener('change', () => {
+    state.projectDraftCharacterIds = input.checked
+      ? [...new Set([...state.projectDraftCharacterIds, input.dataset.projectCharacter])]
+      : state.projectDraftCharacterIds.filter((id) => id !== input.dataset.projectCharacter);
+  }));
+}
+
 function renderProjects() {
   sortEntities();
   $$('#projectArchiveTabs [data-project-archive]').forEach((button) => {
@@ -5275,6 +5307,7 @@ function renderProjects() {
     card.innerHTML = `
       <div class="project-card-head"><div><h3>${esc(project.name)}</h3>${nsfwBadgeHtml(project)}</div><span class="project-deadline ${deadline.className}">${IC('calendar')} ${esc(deadline.label)}</span></div>
       <p class="project-description">${esc(project.description || tr('projects.noDescription'))}</p>
+      <div class="project-character-links">${workspaceProjectCharacters(project).map((character) => `<button type="button" class="mini-btn" data-open-linked-character="${esc(character.id)}" title="${esc(tr('characters.viewProfile'))}">${IC('user')} ${esc(character.name)}${nsfwBadgeHtml(character)}</button>`).join('')}</div>
       <div class="project-progress"><span>${esc(tr('projects.taskProgress', { done: progress.done, total: progress.total }))}</span><span>${esc(trn('projects.assetCount', (project.assetKeys || []).length))}</span></div>
       <div class="project-progress-track"><span style="width:${progress.total ? Math.round(progress.done / progress.total * 100) : 0}%"></span></div>
       <div class="project-card-tasks">${(project.tasks || []).length ? (project.tasks || []).slice(0, 5).map((task, index) => {
@@ -5289,6 +5322,7 @@ function renderProjects() {
         <button class="mini-btn" data-project-action="archive">${IC(project.archived ? 'refresh' : 'folder')} ${esc(tr(project.archived ? 'projects.reopen' : 'projects.close'))}</button>
         <button class="mini-btn danger" data-project-action="delete" title="${esc(tr('common.delete'))}">${IC('trash')}</button>
       </div>`;
+    bindLinkedCharacterButtons(card);
     card.querySelectorAll('[data-project-task]').forEach((input) => input.addEventListener('change', async () => {
       input.disabled = true;
       const tasks = cloneProjectTasks(project.tasks);
@@ -5484,6 +5518,8 @@ function openProjectModal(id = null) {
   state.editingProjectId = project?.id || null;
   state.projectDraftTasks = cloneProjectTasks(project?.tasks || []);
   state.projectDraftAssetKeys = [...(project?.assetKeys || [])];
+  state.projectDraftCharacterIds = [...(project?.characterIds || [])];
+  renderProjectCharacterChoices();
   state.projectAssetPicker = { page: 0, items: null };
   $('#projectAssetPicker').hidden = true;
   $('#projectChooseAssets').setAttribute('aria-expanded', 'false');
@@ -5506,6 +5542,7 @@ function closeProjectModal() {
   state.editingProjectId = null;
   state.projectDraftTasks = [];
   state.projectDraftAssetKeys = [];
+  state.projectDraftCharacterIds = [];
   state.projectAssetPicker = null;
   $('#projectAssetPickerGrid').replaceChildren();
   $('#projectAssetsList').replaceChildren();
@@ -5525,7 +5562,7 @@ $('#projectForm').addEventListener('submit', async (event) => {
     return;
   }
   const tasks = cloneProjectTasks(state.projectDraftTasks).map((task) => ({ ...task, checklist: (task.checklist || []).filter((item) => String(item.text || '').trim()) }));
-  const body = { name: $('#projectName').value.trim(), description: $('#projectDescription').value.trim(), deadline: $('#projectDeadline').value, nsfw: $('#projectNsfw').checked, tasks, assetKeys: [...state.projectDraftAssetKeys] };
+  const body = { name: $('#projectName').value.trim(), description: $('#projectDescription').value.trim(), deadline: $('#projectDeadline').value, nsfw: $('#projectNsfw').checked, tasks, assetKeys: [...state.projectDraftAssetKeys], characterIds: [...state.projectDraftCharacterIds] };
   if (!body.name) return toast(tr('projects.nameRequired'), 'err');
   try {
     const wasEditing = Boolean(state.editingProjectId);
@@ -5539,7 +5576,22 @@ $('#projectForm').addEventListener('submit', async (event) => {
   } catch (error) { toast(error.message, 'err'); }
 });
 
+function openCharacterProjectAssign(characterId) {
+  const character = state.characters.find((c) => c.id === characterId && contentIsVisible(c));
+  if (!character) return;
+  const projects = state.workspaceProjects.filter(contentIsVisible);
+  if (!projects.length) return toast(tr('assets.projects.createFirst'), 'err');
+  state.pendingProjectCharacterId = characterId;
+  state.pendingProjectAssetKeys = null;
+  $('#projectAssignSelect').innerHTML = projects.map((project) => `<option value="${esc(project.id)}">${esc(workspaceProjectDisplayName(project))}</option>`).join('');
+  const current = projects.filter((project) => (project.characterIds || []).includes(characterId));
+  if (current.length) $('#projectAssignSelect').value = current[0].id;
+  $('#projectAssignPreview').innerHTML = `${avatarHtml(character, 'user')}<div><strong>${esc(character.name)}</strong><p class="hint">${esc(current.length ? tr('assets.projects.alreadyIn', { projects: current.map((p) => p.name).join(', ') }) : tr('projects.characterLinkHint'))}</p></div>`;
+  $('#projectAssignModal').hidden = false;
+}
+
 function openProjectAssign(keyOrKeys) {
+  state.pendingProjectCharacterId = null;
   const keys = [...new Set(Array.isArray(keyOrKeys) ? keyOrKeys : [keyOrKeys])].filter(Boolean);
   if (!keys.length) return;
   if (!state.workspaceProjects.length) return toast(tr('assets.projects.createFirst'), 'err');
@@ -5560,6 +5612,7 @@ function openProjectAssign(keyOrKeys) {
 function closeProjectAssign() {
   $('#projectAssignModal').hidden = true;
   state.pendingProjectAssetKeys = null;
+  state.pendingProjectCharacterId = null;
 }
 
 $('#projectAssignClose').addEventListener('click', closeProjectAssign);
@@ -5568,11 +5621,13 @@ $('#projectAssignModal').addEventListener('click', (event) => { if (event.target
 $('#projectAssignForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const keys = state.pendingProjectAssetKeys || [];
+  const characterId = state.pendingProjectCharacterId;
+  if (!characterId && !keys.length) return;
   try {
-    const updated = await api(`/api/projects/${$('#projectAssignSelect').value}/assets`, { method: 'POST', body: { keys } });
+    const updated = await api(`/api/projects/${$('#projectAssignSelect').value}/${characterId ? 'characters' : 'assets'}`, { method: 'POST', body: characterId ? { characterId } : { keys } });
     await replaceWorkspaceProject(updated);
     closeProjectAssign();
-    toast(trn('assets.projects.associated', keys.length, { project: updated.name }));
+    toast(characterId ? tr('projects.characterAssociated', { project: updated.name }) : trn('assets.projects.associated', keys.length, { project: updated.name }));
     syncAssetSelectionUi();
   } catch (error) { toast(error.message, 'err'); }
 });
@@ -5606,7 +5661,7 @@ function renderSeries() {
   }
   grid.innerHTML = '';
   for (const s of state.series) {
-    const characters = (s.characterIds || []).map((id) => state.characters.find((c) => c.id === id)).filter(Boolean);
+    const characters = (s.characterIds || []).map((id) => state.characters.find((c) => c.id === id)).filter((c) => c && contentIsVisible(c));
     const assetCount = (s.assetKeys || []).length;
     const card = document.createElement('div');
     card.className = 'char-card';
@@ -5618,9 +5673,7 @@ function renderSeries() {
       <div class="hint" style="margin-bottom:8px">${esc(fmtSeriesStructure(s))}</div>
       <div class="char-desc">${esc(s.description || '')}</div>
       <div class="series-chars">${characters.length
-        ? characters.map((c) => c.photos[0]
-          ? `<img src="${fileUrl(c.photos[0])}" title="${esc(c.name)}" alt="">`
-          : `<span class="series-char-ph" title="${esc(c.name)}">${IC('user')}</span>`).join('')
+        ? characters.map((c) => `<button type="button" class="mini-btn series-character-link" data-open-linked-character="${esc(c.id)}" title="${esc(tr('characters.viewProfile'))}">${c.photos[0] ? `<img src="${fileUrl(c.photos[0])}" alt="">` : IC('user')}<span>${esc(c.name)}</span>${nsfwBadgeHtml(c)}</button>`).join('')
         : `<span class="hint">${esc(tr('series.noCharacters'))}</span>`}</div>
       <div class="char-actions">
         <button class="mini-btn accent" data-act="view">${IC('eye')} ${esc(tr('series.viewScript'))}</button>
@@ -5629,6 +5682,7 @@ function renderSeries() {
         <button class="mini-btn" data-act="assets">${IC('image')} Assets${assetCount ? ` (${assetCount})` : ''}</button>
         <button class="mini-btn danger" data-act="del" title="${esc(tr('common.delete'))}">${IC('trash')}</button>
       </div>`;
+    bindLinkedCharacterButtons(card);
     card.querySelectorAll('[data-act]').forEach((b) => {
       b.addEventListener('click', async () => {
         const act = b.dataset.act;
@@ -5706,7 +5760,16 @@ function renderSeriesCharacterChips() {
       state.seriesDraftCharacterIds.has(c.id) ? state.seriesDraftCharacterIds.delete(c.id) : state.seriesDraftCharacterIds.add(c.id);
       renderSeriesCharacterChips();
     });
-    wrap.appendChild(btn);
+    const pair = document.createElement('span');
+    pair.className = 'series-character-choice';
+    pair.appendChild(btn);
+    const view = document.createElement('button');
+    view.type = 'button'; view.className = 'mini-btn';
+    view.dataset.openLinkedCharacter = c.id;
+    view.innerHTML = `${IC('eye')} ${esc(tr('characters.viewProfile'))}`;
+    pair.appendChild(view);
+    bindLinkedCharacterButtons(pair);
+    wrap.appendChild(pair);
   }
 }
 
@@ -6637,6 +6700,7 @@ function renderCharacters() {
         <button class="mini-btn" data-act="variants">${esc(tr('characters.variants'))}</button>
         <button class="mini-btn" data-act="gallery">${IC('eye')} ${esc(tr('characters.viewPhotos'))}</button>
         <button class="mini-btn" data-act="assets">${IC('image')} Assets${linkedCount ? ` (${linkedCount})` : ''}</button>
+        <button class="mini-btn" data-act="project">${IC('folder')} ${esc(tr('common.associateProject'))}</button>
         <a class="mini-btn" href="/api/characters/${c.id}/export" download>${IC('download')} ${esc(tr('characters.export'))}</a>
         <button class="mini-btn danger" data-act="del" title="${esc(tr('common.delete'))}">${IC('trash')}</button>
       </div>`;
@@ -6654,10 +6718,12 @@ function renderCharacters() {
         if (act === 'variants') openCharModal(c.id);
         if (act === 'gallery') openCharacterGallery(c.id);
         if (act === 'assets') openCharacterAssets(c.id);
+        if (act === 'project') openCharacterProjectAssign(c.id);
         if (act === 'del') {
           if (!confirm(tr('characters.deleteConfirm', { name: c.name }))) return;
           await api(`/api/characters/${c.id}`, { method: 'DELETE' });
           state.characters = state.characters.filter((x) => x.id !== c.id);
+          state.workspaceProjects.forEach((project) => { project.characterIds = (project.characterIds || []).filter((id) => id !== c.id); });
           state.series.forEach((s) => { s.characterIds = (s.characterIds || []).filter((cid) => cid !== c.id); });
           if (state.pinnedId === c.id) setPinned('');
           renderCharacters();
@@ -6668,26 +6734,36 @@ function renderCharacters() {
   }
 }
 
-function openCharacterGallery(id) {
+let characterGalleryRequest = 0;
+
+async function openCharacterGallery(id) {
   const c = state.characters.find((x) => x.id === id);
   if (!c) return;
+  const request = ++characterGalleryRequest;
   $('#characterGalleryTitle').textContent = c.name;
-  const groups = [{ name: tr('picker.original'), description: c.description || '', photos: c.photos || [] }, ...(c.variants || [])];
+  $('#characterGalleryBody').innerHTML = `<p class="hint">${esc(tr('characters.galleryLoading'))}</p>`;
+  $('#characterGalleryModal').hidden = false;
+  try {
+  const { groups } = await api(`/api/characters/${id}/gallery`, { task: false });
+  if (request !== characterGalleryRequest || $('#characterGalleryModal').hidden) return;
   $('#characterGalleryBody').innerHTML = groups.map((group) => `
     <section class="character-gallery-group">
-      <div class="character-gallery-group-head"><h4>${esc(group.name)}</h4><span>${esc(trn('characters.photoCount', group.photos.length))}</span></div>
+      <div class="character-gallery-group-head"><h4>${esc(group.id === null ? tr('picker.original') : group.name)}</h4><span>${esc(trn('characters.photoCount', group.photos.length))}</span></div>
       ${group.description ? `<p>${esc(group.description)}</p>` : ''}
       <div class="character-gallery-grid">${group.photos.length
-        ? group.photos.map((photo) => `<button data-gallery-photo="${esc(photo)}"><img src="${fileUrl(photo)}" loading="lazy" alt=""></button>`).join('')
+        ? group.photos.map((photo) => `<button data-gallery-photo="${esc(photo.key)}"><img src="${fileUrl(photo.key)}" loading="lazy" alt="">${photo.groups.length > 1 ? `<span class="gallery-photo-memberships">${photo.groups.map((owner) => esc(owner.id === null ? tr('picker.original') : owner.name)).join(' · ')}</span>` : ''}</button>`).join('')
         : `<div class="hint">${esc(tr('characters.noVariantPhotos'))}</div>`}</div>
     </section>`).join('');
   $('#characterGalleryBody').querySelectorAll('[data-gallery-photo]').forEach((button) => {
-    button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto, groups.flatMap((group) => group.photos || [])));
+    button.addEventListener('click', () => openLightbox(button.dataset.galleryPhoto, groups.flatMap((group) => group.photos.map((photo) => photo.key))));
   });
-  $('#characterGalleryModal').hidden = false;
+  } catch (error) {
+    if (request === characterGalleryRequest && !$('#characterGalleryModal').hidden) $('#characterGalleryBody').innerHTML = `<p class="hint">${esc(error.message)}</p>`;
+  }
 }
 
 function openCharacterAssets(id) {
+  ++characterGalleryRequest;
   const c = state.characters.find((x) => x.id === id);
   if (!c) return;
   $('#characterGalleryTitle').textContent = tr('characters.associatedAssetsTitle', { name: c.name });
@@ -6735,6 +6811,11 @@ $('#charModalClose').addEventListener('click', () => {
   $('#charModal').hidden = true;
   state.editingCharId = null;
   state.pendingCharacterAsset = null;
+});
+// Close the character sheet alone when it was opened over a project/series editor.
+$('#charModal').addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault(); event.stopPropagation(); $('#charModalClose').click();
 });
 
 function openCharModal(id, assetKey = null) {

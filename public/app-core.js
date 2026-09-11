@@ -91,6 +91,8 @@ const state = {
   editingProjectId: null,
   projectDraftTasks: [],
   projectDraftAssetKeys: [],
+  projectDraftCharacterIds: [],
+  pendingProjectCharacterId: null,
   projectAssetPicker: null,
   pendingProjectAssetKeys: null,
   series: [],

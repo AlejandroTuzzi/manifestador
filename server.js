@@ -30,6 +30,7 @@ import {
 } from './lib/categories.js';
 import { normalizeVocabularyImageKey, normalizeVocabularyWords, sanitizeVocabularyEntry } from './lib/vocabulary.js';
 import { normalizeDistinctiveElements } from './lib/distinctive-elements.js';
+import { createPhotoIdentityCache, uniqueCharacterGallery } from './lib/character-gallery.js';
 import { renderDynamicTextOverlay } from './lib/remotion-renderer.js';
 import { POSER_BODY_PARTS } from './public/poser-bodyparts.js';
 import {
@@ -61,6 +62,7 @@ const automationAssemblyJobs = new Set();
 const heygenOAuthStates = new Map();
 const comfyProgress = new Map(); // genId -> { current, total }
 const h3PromotionCoordinator = createH3PromotionCoordinator();
+const characterPhotoIdentity = createPhotoIdentityCache((key) => resolveAssetKey(key));
 
 // Se agrega automáticamente (sin mostrarse en la caja) cuando alguna
 // referencia viene del Poser, para que el modelo la tome solo como pose.
@@ -1949,6 +1951,11 @@ function normalizeProjectAssetKeys(value) {
     .slice(0, 5000);
 }
 
+function normalizeProjectCharacterIds(value) {
+  return [...new Set((Array.isArray(value) ? value : []).map(String))]
+    .filter((id) => /^[a-z0-9]+$/.test(id)).slice(0, 1000);
+}
+
 function createWorkspaceProject(body = {}) {
   const now = Date.now();
   return {
@@ -1959,6 +1966,7 @@ function createWorkspaceProject(body = {}) {
     nsfw: body.nsfw === true,
     tasks: normalizeProjectTasks(body.tasks),
     assetKeys: normalizeProjectAssetKeys(body.assetKeys),
+    characterIds: normalizeProjectCharacterIds(body.characterIds),
     archived: false,
     archivedAt: null,
     ts: now,
@@ -1978,6 +1986,7 @@ function updateWorkspaceProject(project, body = {}) {
   if (body.nsfw !== undefined) project.nsfw = body.nsfw === true;
   if (body.tasks !== undefined) project.tasks = normalizeProjectTasks(body.tasks);
   if (body.assetKeys !== undefined) project.assetKeys = normalizeProjectAssetKeys(body.assetKeys);
+  if (body.characterIds !== undefined) project.characterIds = normalizeProjectCharacterIds(body.characterIds);
   project.updatedAt = Date.now();
   return project;
 }
@@ -3797,6 +3806,8 @@ const ENTITY_META = {
     },
     onDelete: async (id) => {
       await updateJson('asset-links.json', [], (links) => links.filter((l) => l.characterId !== id));
+      await updateJson('projects.json', [], (all) => all.map((project) => ({ ...project,
+        characterIds: (project.characterIds || []).filter((characterId) => characterId !== id) })));
       await updateJson('series.json', [], (all) => all.map((s) => ({
         ...s, characterIds: (s.characterIds || []).filter((cid) => cid !== id)
       })));
@@ -5049,6 +5060,8 @@ const server = http.createServer(async (req, res) => {
       if (projectTasksHaveMissingNames(body.tasks)) return sendError(res, 400, 'workspaceProjectTaskNameRequired', 'Cada tarea necesita un nombre.');
       const item = createWorkspaceProject(body);
       if (!item.name) return sendError(res, 400, 'workspaceProjectNameRequired', 'El proyecto necesita un nombre.');
+      const characters = await readJson('characters.json', []);
+      if (item.characterIds.some((id) => !characters.some((c) => c.id === id))) return sendError(res, 400, 'workspaceProjectCharacterMissing', 'Personaje no encontrado.');
       for (const key of item.assetKeys) {
         const stat = await fs.stat(await resolveAssetKey(key)).catch(() => null);
         if (!stat?.isFile()) return sendError(res, 400, 'workspaceProjectAssetMissing', `No encuentro el asset: ${key}`, { key });
@@ -5057,9 +5070,10 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, item);
     }
 
-    const projectMatch = /^\/api\/projects\/([a-z0-9]+)(\/assets)?$/.exec(p);
+    const projectMatch = /^\/api\/projects\/([a-z0-9]+)(\/(?:assets|characters))?$/.exec(p);
     if (projectMatch) {
-      const [, projectId, isProjectAssets] = projectMatch;
+      const [, projectId, section] = projectMatch;
+      const isProjectAssets = section === '/assets', isProjectCharacters = section === '/characters';
       const mutateProject = async (fn) => {
         let out = null;
         await updateJson('projects.json', [], (all) => {
@@ -5074,6 +5088,19 @@ const server = http.createServer(async (req, res) => {
         return out;
       };
 
+      if (isProjectCharacters && ['POST', 'DELETE'].includes(req.method)) {
+        const body = req.method === 'POST' ? await readJsonBody(req) : {};
+        const characterId = String(body.characterId || url.searchParams.get('characterId') || '');
+        if (req.method === 'POST' && !(await readJson('characters.json', [])).some((c) => c.id === characterId)) {
+          return sendError(res, 400, 'workspaceProjectCharacterMissing', 'Personaje no encontrado.');
+        }
+        const item = await mutateProject((project) => {
+          project.characterIds = req.method === 'POST'
+            ? [...new Set([...(project.characterIds || []), characterId])]
+            : (project.characterIds || []).filter((id) => id !== characterId);
+        });
+        return item ? send(res, 200, item) : sendError(res, 404, 'workspaceProjectNotFound', 'Proyecto no encontrado.');
+      }
       if (isProjectAssets && req.method === 'POST') {
         const body = await readJsonBody(req);
         const keys = normalizeProjectAssetKeys(Array.isArray(body.keys) ? body.keys : [body.key]);
@@ -5098,8 +5125,13 @@ const server = http.createServer(async (req, res) => {
           ? send(res, 200, item)
           : sendError(res, 404, 'workspaceProjectNotFound', 'Proyecto no encontrado.');
       }
-      if (!isProjectAssets && req.method === 'PUT') {
+      if (!section && req.method === 'PUT') {
         const body = await readJsonBody(req);
+        if (body.characterIds !== undefined) {
+          body.characterIds = normalizeProjectCharacterIds(body.characterIds);
+          const characters = await readJson('characters.json', []);
+          if (body.characterIds.some((id) => !characters.some((c) => c.id === id))) return sendError(res, 400, 'workspaceProjectCharacterMissing', 'Personaje no encontrado.');
+        }
         if (body.name !== undefined && !String(body.name || '').trim()) {
           return sendError(res, 400, 'workspaceProjectNameRequired', 'El proyecto necesita un nombre.');
         }
@@ -5120,7 +5152,7 @@ const server = http.createServer(async (req, res) => {
           ? send(res, 200, item)
           : sendError(res, 404, 'workspaceProjectNotFound', 'Proyecto no encontrado.');
       }
-      if (!isProjectAssets && req.method === 'DELETE') {
+      if (!section && req.method === 'DELETE') {
         let existed = false;
         await updateJson('projects.json', [], (all) => {
           existed = all.some((item) => item.id === projectId);
@@ -7794,6 +7826,15 @@ const server = http.createServer(async (req, res) => {
       }));
       if (previous && previous !== imageKey) await fs.unlink(await resolveAssetKey(previous)).catch(() => {});
       return send(res, 200, updated);
+    }
+
+    const characterGalleryMatch = /^\/api\/characters\/([a-z0-9]+)\/gallery$/.exec(p);
+    if (characterGalleryMatch && req.method === 'GET') {
+      const character = (await readJson('characters.json', [])).find((item) => item.id === characterGalleryMatch[1]);
+      const cfg = await getConfig();
+      if (!character || (!cfg.nsfwEnabled && character.nsfw)) return send(res, 404, { error: 'Personaje no encontrado' });
+      const groups = await uniqueCharacterGallery(character, characterPhotoIdentity, { nsfwEnabled: Boolean(cfg.nsfwEnabled) });
+      return send(res, 200, { groups });
     }
 
     // --- personajes y elementos: fotos, variantes, vínculos y CRUD compartidos ---
