@@ -29,6 +29,7 @@ import {
   sameCategory
 } from './lib/categories.js';
 import { normalizeVocabularyImageKey, normalizeVocabularyWords, sanitizeVocabularyEntry } from './lib/vocabulary.js';
+import { normalizeDistinctiveElements } from './lib/distinctive-elements.js';
 import { renderDynamicTextOverlay } from './lib/remotion-renderer.js';
 import { POSER_BODY_PARTS } from './public/poser-bodyparts.js';
 import {
@@ -2219,6 +2220,7 @@ const SERVER_ERROR_CODE_BY_MESSAGE = new Map([
   ['Los LoRA necesitan al menos una trigger word o un caso de uso.', 'loraTriggerOrUseCaseRequired'],
   ['Los LoRA necesitan el nombre del archivo.', 'loraFileNameRequired'],
   ['No encontré Photoshop instalado. Cargá la ruta a mano.', 'photoshopNotDetected'],
+  ['Cada elemento distintivo requiere una imagen válida y un texto.', 'distinctiveElementInvalid'],
   ['Variante no encontrada', 'variantNotFound'],
   ['Variante no encontrada.', 'variantNotFound'],
   ['Solo se pueden usar imágenes como foto.', 'photoImageOnly'],
@@ -3919,6 +3921,12 @@ async function serveEntityRoutes(meta, { p, req, res, url }) {
 
     if (variantId && !isPhotos && req.method === 'PUT') {
       const body = await readJsonBody(req);
+      const distinctiveElements = base === 'characters' && body.distinctiveElements !== undefined
+        ? normalizeDistinctiveElements(body.distinctiveElements) : undefined;
+      if (distinctiveElements) for (const element of distinctiveElements) {
+        try { await fs.access(await resolveAssetKey(element.imageKey)); }
+        catch { throw new Error('Cada elemento distintivo requiere una imagen válida y un texto.'); }
+      }
       let out = null, bad = null;
       await updateJson(file, [], (all) => {
         const e = all.find((x) => x.id === id);
@@ -3926,6 +3934,7 @@ async function serveEntityRoutes(meta, { p, req, res, url }) {
         if (!v) { bad = e ? 'Variante no encontrada' : notFound; return all; }
         if (body.name !== undefined) v.name = String(body.name).trim() || v.name;
         if (body.description !== undefined) v.description = String(body.description);
+        if (distinctiveElements !== undefined) v.distinctiveElements = distinctiveElements;
         // ficha de personaje: una foto de la variante como imagen canónica
         if (body.sheet !== undefined) v.sheet = (v.photos || []).includes(body.sheet) ? body.sheet : '';
         out = e; return all;
@@ -7835,6 +7844,17 @@ const server = http.createServer(async (req, res) => {
           const name = `import-${index + 1}${ext}`; await fs.writeFile(path.join(dir, name), data);
           variant.photos.push(`characters/${id}/variants/${variantId}/${name}`);
         }
+        variant.distinctiveElements = [];
+        for (const [index, element] of (sourceVariant.distinctiveElements || []).entries()) {
+          const data = files.get(element.image);
+          const ext = path.extname(String(element.image || '')).toLowerCase();
+          if (!data || !['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) continue;
+          const name = `distinctive-${index + 1}${ext}`;
+          const [detail] = normalizeDistinctiveElements([{ text: element.text, nsfw: element.nsfw,
+            imageKey: `characters/${id}/variants/${variantId}/${name}` }]);
+          await fs.writeFile(path.join(dir, name), data);
+          variant.distinctiveElements.push(detail);
+        }
         item.variants.push(variant);
       }
       if (source.heygen?.image) {
@@ -7867,7 +7887,14 @@ const server = http.createServer(async (req, res) => {
           const ext = path.extname(key).toLowerCase(); const file = `variants/${variantIndex + 1}/${index + 1}${ext}`;
           entries.push({ name: file, data: await fs.readFile(await resolveAssetKey(key)) }); variantPhotos.push(file);
         }
-        variants.push({ name: variant.name, description: variant.description || '', photos: variantPhotos });
+        const distinctiveElements = [];
+        for (const [index, element] of (variant.distinctiveElements || []).entries()) {
+          const ext = path.extname(element.imageKey).toLowerCase();
+          const image = `variants/${variantIndex + 1}/distinctive/${index + 1}${ext}`;
+          entries.push({ name: image, data: await fs.readFile(await resolveAssetKey(element.imageKey)) });
+          distinctiveElements.push({ text: element.text, nsfw: Boolean(element.nsfw), image });
+        }
+        variants.push({ name: variant.name, description: variant.description || '', photos: variantPhotos, distinctiveElements });
       }
       let heygen = {
         avatarId: character.heygen?.wideAvatarId || character.heygen?.avatarId || '',

@@ -150,6 +150,7 @@
             <button id="btnSavePrompt" class="tool-btn" data-i18n-title="create.savePromptTitle" title="Archivar este prompt"><svg class="ic"><use href="#i-save"/></svg><span data-i18n="create.savePrompt">Guardar</span></button>
             <button id="btnPrompts" class="tool-btn" data-i18n-title="create.savedPromptsTitle" title="Prompts archivados"><svg class="ic"><use href="#i-book"/></svg><span data-i18n="nav.prompts">Prompts</span></button>
             <button id="btnVocabulary" class="tool-btn" data-i18n-title="create.vocabularyTitle" title="Consultar vocabulario visual"><svg class="ic"><use href="#i-tag"/></svg><span data-i18n="nav.vocabulary">Vocabulario</span></button>
+            <button id="btnDistinctive" type="button" class="tool-btn"><svg class="ic"><use href="#i-star"/></svg><span data-i18n="distinctive.title">Elementos distintivos</span></button>
             <button id="btnShotList" class="tool-btn" data-i18n-title="create.shotsTitle" title="Insertar una lista de tomas con sus tiempos" hidden><svg class="ic"><use href="#i-clapper"/></svg><span data-i18n="create.shots">Tomas</span></button>
           </div>
           <div class="gen-side">
@@ -988,6 +989,30 @@
   </div>
 </div>
 
+<div id="distinctiveEditorModal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="distinctiveEditorTitle">
+  <form id="distinctiveEditorForm" class="modal-box form-modal-box">
+    <div class="modal-head"><h3 id="distinctiveEditorTitle" data-i18n="distinctive.add">Añadir elemento distintivo</h3><button id="distinctiveEditorClose" type="button" class="icon-btn" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <fieldset id="distinctiveEditorFields" class="distinctive-fields">
+      <label><span data-i18n="distinctive.photo">Foto del elemento</span><input id="distinctiveFile" type="file" accept="image/png,image/jpeg,image/webp"></label>
+      <label><span data-i18n="characters.editor.fromAssets">Desde Assets</span><select id="distinctiveAsset" class="select"></select></label>
+      <img id="distinctivePreview" class="distinctive-preview" alt="" hidden>
+      <label><span data-i18n="distinctive.text">Texto para el prompt</span><textarea id="distinctiveText" required maxlength="4000" rows="4" data-i18n-placeholder="distinctive.example" placeholder="Lleva un anillo dorado en el dedo índice de su mano izquierda."></textarea></label>
+      <label class="check-row"><input id="distinctiveNsfw" type="checkbox"><span data-i18n="common.nsfwContent">Contenido NSFW</span></label>
+    </fieldset>
+    <p id="distinctiveEditorStatus" class="hint" role="status"></p>
+    <div class="form-modal-actions"><button id="distinctiveEditorCancel" type="button" class="mini-btn" data-i18n="common.cancel">Cancelar</button><button id="distinctiveEditorSave" type="submit" class="mini-btn accent" data-i18n="categories.saveChanges">Guardar cambios</button></div>
+  </form>
+</div>
+<div id="distinctiveQuickModal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="distinctiveQuickTitle">
+  <div class="modal-box form-modal-box">
+    <div class="modal-head"><h3 id="distinctiveQuickTitle" data-i18n="distinctive.title">Elementos distintivos</h3><button id="distinctiveQuickClose" type="button" class="icon-btn" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <p class="hint" data-i18n="distinctive.quickHint">Elegí un elemento para adjuntar su foto e insertar su texto donde dejaste el cursor.</p>
+    <label><span data-i18n="assets.filters.character">Personaje</span><select id="distinctiveQuickCharacter" class="select"></select></label>
+    <label><span data-i18n="distinctive.wardrobe">Variante de vestuario</span><select id="distinctiveQuickVariant" class="select"></select></label>
+    <div id="distinctiveQuickList" class="distinctive-list"></div>
+  </div>
+</div>
+
 <!-- Información del asset -->
 <div id="assetInfoModal" class="modal" hidden>
   <div class="modal-box asset-info-box">
@@ -1468,6 +1493,7 @@
 <script src="locales/en.js"></script>
 <script src="app-core.js"></script>
 <script src="asset-editor.js"></script>
+<script src="distinctive-elements.js"></script>
 <script src="dictation.js"></script>
 <script src="app.js"></script>
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>

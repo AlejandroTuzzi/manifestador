@@ -41,6 +41,7 @@ function setMode(mode) {
   state.mode = mode;
   $('#referenceTagsControl').hidden = mode !== 'image' && mode !== 'video';
   $('#referenceTagsEnabled').checked = state.referenceTagsEnabled === true;
+  $('#btnDistinctive').hidden = mode !== 'image' && mode !== 'video';
   // el personaje anclado aporta refs distintas según el modo
   // (asset:// verificado en video, fotos en imagen)
   if (state.pinnedId) applyPinnedCharacterPhotos();
@@ -6766,8 +6767,8 @@ function renderCharModal() {
       <input type="text" id="chArkAsset" value="${esc(c.arkAssetId || '')}" placeholder="ej: asset-20260222234430-mxpgh">
       <div class="hint" style="margin-top:4px">${esc(tr('characters.editor.seedanceHint'))}</div>
     </div>
-    <div class="heygen-character-card">
-      <div class="variant-manager-head"><label>${esc(tr('characters.editor.heygenVariant'))}</label>${heygenCharacterReady(c) ? `<span class="heygen-ready">${esc(tr('characters.editor.videoReady'))}</span>` : ''}</div>
+    <details class="heygen-character-card">
+      <summary>${esc(tr('characters.editor.heygenVariant'))} ${heygenCharacterReady(c) ? `<span class="heygen-ready">${esc(tr('characters.editor.videoReady'))}</span>` : ''}</summary>
       <label class="heygen-character-field"><span>${esc(tr('characters.editor.wideAvatar'))}</span><input type="text" id="chHeyGenWideAvatar" value="${esc(heygenWideAvatarId(c))}" placeholder="91bd75d9e4414cc58043c82bcfc340f4"></label>
       <label class="heygen-character-field"><span>${esc(tr('characters.editor.closeAvatar'))}</span><input type="text" id="chHeyGenCloseAvatar" value="${esc(c.heygen?.closeAvatarId || '')}" placeholder="6f85c7941c594c94ae8594e17337bef0"></label>
       <label class="heygen-character-field"><span>${esc(tr('characters.editor.widePrompt'))}</span><textarea id="chHeyGenWideMotionPrompt" maxlength="1000" rows="3" placeholder="${esc(tr('characters.editor.widePromptPlaceholder'))}">${esc(heygenMotionPromptFor(c, 'wide'))}</textarea></label>
@@ -6780,7 +6781,7 @@ function renderCharModal() {
         ${c.photos?.[0] ? `<button type="button" class="mini-btn" id="chHeyGenUseCover">${esc(tr('characters.editor.useCover'))}</button>` : ''}
         ${c.heygen?.imageKey ? `<button type="button" class="mini-btn danger" id="chHeyGenRemove">${esc(tr('common.remove'))}</button>` : ''}</div>
       </div>` : `<p class="hint">${esc(tr('characters.editor.createBeforeMirror'))}</p>`}
-    </div>
+    </details>
     ${id ? `
     ${c.photos.length ? `<div><label>${esc(tr('characters.editor.cover'))}</label><div id="chCover"></div></div>` : ''}
     <div>
@@ -6804,6 +6805,7 @@ function renderCharModal() {
             <button type="button" class="mini-btn danger" data-vact="delete">${IC('trash')}</button>
           </div></div>
           ${v.description ? `<div class="hint">${esc(v.description)}</div>` : ''}
+          <div data-distinctive-variant="${esc(v.id)}"></div>
           <div class="variant-photos">${v.photos.map((p) => `<span class="ref-thumb${p === v.sheet ? ' is-sheet' : ''}"><img src="${fileUrl(p)}" alt=""><button class="ficha-btn" data-vficha="${esc(p)}" title="${esc(p === v.sheet ? tr('characters.editor.removeVariantSheet') : tr('characters.editor.markVariantSheet'))}">${IC('star')}</button><button class="rm" data-vphoto="${esc(p)}">×</button></span>`).join('') || `<span class="hint">${esc(tr('characters.editor.noPhotos'))}</span>`}</div>
         </div>`).join('')}</div>
     </div>` : `<p class="hint">${esc(tr('characters.editor.saveBeforePhotos'))}</p>`}
@@ -7006,6 +7008,7 @@ function renderCharModal() {
     });
   });
 
+  renderDistinctiveSections(c);
   setupCharPhotoDrag(id);
 }
 
