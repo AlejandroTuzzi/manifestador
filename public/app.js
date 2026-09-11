@@ -2157,6 +2157,7 @@ function isVideoMultimediaPicker() {
     && videoModeAllowsMultimedia()
     && state.replaceRefIndex == null
     && !state.promptStyleImagePick
+    && !state.assetEditorImagePick
     && !state.overlayBgPick;
 }
 
@@ -2190,7 +2191,7 @@ function openPicker(replaceIndex = null) {
 
 function pickerAllowsMultiple() {
   return state.replaceRefIndex == null && !state.comfyPickerSlot
-    && !state.promptStyleImagePick && !state.overlayBgPick && activeRefLimit() > 1;
+    && !state.promptStyleImagePick && !state.assetEditorImagePick && !state.overlayBgPick && activeRefLimit() > 1;
 }
 
 function pickerSelectionError(key, kind) {
@@ -2314,6 +2315,12 @@ $('#pickerSelectionClear').addEventListener('click', () => {
 // una selección del picker: reemplaza si estamos en ese modo, o agrega
 function pickRef(key, kind = 'image') {
   stopPickerAudioPreview();
+  if (state.assetEditorImagePick) {
+    state.assetEditorImagePick = false;
+    $('#pickerModal').hidden = true;
+    openAssetEditor(key);
+    return;
+  }
   if (state.comfyPickerSlot) {
     const slot = state.comfyPickerSlot;
     state.comfyPickerSlot = null;
@@ -2366,7 +2373,7 @@ function replaceRef(i, key) {
   return true;
 }
 
-$('#pickerClose').addEventListener('click', () => { stopPickerAudioPreview(); state.pickerSelection = new Map(); state.pickerMulti = false; $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.overlayBgPick = false; state.promptStyleImagePick = false; state.promptLoraMediaTarget = null; state.comfyPickerSlot = null; });
+$('#pickerClose').addEventListener('click', () => { stopPickerAudioPreview(); state.assetEditorImagePick = false; state.pickerSelection = new Map(); state.pickerMulti = false; $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.overlayBgPick = false; state.promptStyleImagePick = false; state.promptLoraMediaTarget = null; state.comfyPickerSlot = null; });
 $$('#pickerTabs .tab').forEach((t) => {
   t.addEventListener('click', () => setPickerTab(t.dataset.src));
 });
@@ -4755,6 +4762,7 @@ function openLightbox(key, keys = null, opts = {}) {
     ${info ? `<button class="mini-btn" id="lbInfo">${IC('info')} ${esc(tr('common.information'))}</button>` : ''}
     ${info?.prompt ? `<button class="mini-btn" id="lbCopyPrompt">${IC('copy')} ${esc(tr('common.copyPrompt'))}</button>` : ''}
     ${!isVideo ? `<button class="mini-btn" id="lbRef">${IC('link')} ${esc(tr('common.useAsReference'))}</button>` : ''}
+    ${!isVideo && isReusableImageKey(key) ? `<button class="mini-btn" id="lbEditAsset">${IC('edit')} ${esc(tr('assetEditor.title'))}</button>` : ''}
     ${!isVideo && isReusableImageKey(key) ? `<button class="mini-btn" id="lbAssociate">${IC('user')} ${esc(tr('common.associateEntity'))}</button>` : ''}
     <button class="mini-btn" id="lbSeries">${IC('layers')} ${esc(tr('common.associateSeries'))}</button>
     ${/^(generated|uploads|audio|video)\//.test(key) ? `<button class="mini-btn" id="lbProject">${IC('folder')} ${esc(tr('common.associateProject'))}</button>` : ''}
@@ -4787,6 +4795,7 @@ function openLightbox(key, keys = null, opts = {}) {
   $('#lbAssociate')?.addEventListener('click', () => associateAsset(key));
   $('#lbSeries')?.addEventListener('click', () => openSeriesAssign(key));
   $('#lbProject')?.addEventListener('click', () => openProjectAssign(key));
+  $('#lbEditAsset')?.addEventListener('click', () => openAssetEditor(key));
   $('#lbDuplicate')?.addEventListener('click', () => duplicateAssets([key]));
 }
 
@@ -11636,7 +11645,7 @@ async function init() {
   // deep-links: #audio, #assets, #characters, #series, #subtitler, #prompts, #vocabulary, #costs, #config
   const h = location.hash.slice(1);
   if (h === 'audio') setMode('audio');
-  else if (['assets', 'projects', 'characters', 'series', 'subtitler', 'prompts', 'vocabulary', 'snippets', 'costs', 'config'].includes(h)) {
+  else if (['assets', 'asset-editor', 'projects', 'characters', 'series', 'subtitler', 'prompts', 'vocabulary', 'snippets', 'costs', 'config'].includes(h)) {
     $(`.nav-btn[data-view="${h}"]`)?.click();
   }
 }

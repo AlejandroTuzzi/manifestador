@@ -1595,6 +1595,24 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
   background: var(--panel-solid); border-top: 1px solid var(--border); z-index: 2;
 }
 .picker-selection-bar .hint { margin-right: auto; }
+.asset-editor-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; align-items: start; }
+.asset-editor-stage, .asset-editor-tools, .dictation-panel { background: var(--panel-solid); border: 1px solid var(--border); padding: 16px; min-width: 0; }
+.asset-editor-stage canvas { display: block; max-width: 100%; height: auto; margin: auto; touch-action: none; cursor: crosshair; }
+.asset-editor-tools fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.asset-editor-tools label, .dictation-controls label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; }
+.asset-editor-tools .select, .dictation-controls .select { min-width: 0; width: 100%; }
+.asset-editor-numbers { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.asset-editor-numbers input { min-width: 0; width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 9px; font: inherit; color-scheme: dark; }
+.asset-editor-numbers input:focus-visible { outline: 2px solid var(--pink); outline-offset: 1px; }
+.asset-editor-tools fieldset:disabled { opacity: .55; }
+#assetEditorName { overflow-wrap: anywhere; }
+#assetEditorResult { margin-top: 14px; }
+.dictation-panel { margin-top: 12px; }
+.dictation-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.dictation-controls label { min-width: 150px; }
+#btnDictation.listening { color: var(--pink); border-color: var(--pink); background: var(--panel-solid); }
+#dictationInterim { font-style: italic; overflow-wrap: anywhere; }
+@media (max-width: 800px) { .asset-editor-layout { grid-template-columns: 1fr; } }
 .picker-selected-previews {
   display: flex; gap: 8px; width: 100%; overflow-x: auto; padding: 3px 0 7px;
   scrollbar-color: var(--violet) var(--panel-solid);

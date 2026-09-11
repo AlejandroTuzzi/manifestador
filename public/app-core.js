@@ -106,6 +106,7 @@ const state = {
   shotAssetsField: 'assetKeys',   // 'assetKeys' (imágenes/video) o 'audioKeys'
   pickerTab: 'upload',
   pickerMulti: false,
+  assetEditorImagePick: false,
   pickerSelection: new Map(),
   replaceRefIndex: null,     // índice de la ref que el picker va a reemplazar (null = agregar)
   pickerCharacterId: '',     // drill-down del tab Personajes del picker

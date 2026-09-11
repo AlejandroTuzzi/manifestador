@@ -83,7 +83,7 @@ test('image-only models reject audio and start/end models allow two ordered sele
 test('replacement, ComfyUI slots, style media and overlay images retain single selection', () => {
   const { context, state, added, node } = setup();
   assert.equal(context.pickerAllowsMultiple(), true);
-  for (const [field, value] of [['replaceRefIndex', 0], ['comfyPickerSlot', 'slot'], ['promptStyleImagePick', true], ['overlayBgPick', true]]) {
+  for (const [field, value] of [['replaceRefIndex', 0], ['comfyPickerSlot', 'slot'], ['promptStyleImagePick', true], ['assetEditorImagePick', true], ['overlayBgPick', true]]) {
     state[field] = value;
     assert.equal(context.pickerAllowsMultiple(), false, field);
     delete state[field];

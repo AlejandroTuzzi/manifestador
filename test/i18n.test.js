@@ -58,7 +58,7 @@ describe('infraestructura multilenguaje', () => {
   });
 
   test('todas las claves literales usadas desde JavaScript existen en ambos catálogos', () => {
-    const source = `${read('public/app-core.js')}\n${read('public/app.js')}\n${read('public/poser.js')}`;
+    const source = ['public/app-core.js', 'public/app.js', 'public/poser.js', 'public/asset-editor.js', 'public/dictation.js'].map(read).join('\n');
     const used = [...source.matchAll(/\btr\(\s*['"]([^'"]+)['"]/g)].map((match) => match[1]);
     assert.ok(used.length > 0);
     for (const key of used) {
@@ -122,7 +122,7 @@ describe('infraestructura multilenguaje', () => {
 
   test('los archivos visibles permanecen en UTF-8 sin mojibake', () => {
     const files = [
-      'public/index.html', 'public/app-core.js', 'public/app.js', 'public/poser.js',
+      'public/index.html', 'public/app-core.js', 'public/app.js', 'public/poser.js', 'public/asset-editor.js', 'public/dictation.js',
       'public/locales/es.js', 'public/locales/en.js', 'I18N_TASKS.md'
     ];
     const mojibake = /(?:Ã[\x80-\xBF]|Â[\x80-\xBF]|â(?:€|†|€¦)|ï¿½|\uFFFD)/u;

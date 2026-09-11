@@ -64,6 +64,7 @@
     <nav>
       <button class="nav-btn active" data-view="create"><svg class="ic"><use href="#i-wand"/></svg><span data-i18n="nav.create">Crear</span></button>
       <button class="nav-btn" data-view="assets"><svg class="ic"><use href="#i-grid"/></svg><span data-i18n="nav.assets">Assets</span></button>
+      <button class="nav-btn" data-view="asset-editor"><svg class="ic"><use href="#i-edit"/></svg><span data-i18n="assetEditor.title">Editar assets</span></button>
       <button class="nav-btn" data-view="projects"><svg class="ic"><use href="#i-folder"/></svg><span data-i18n="nav.projects">Proyectos</span></button>
       <button class="nav-btn" data-view="characters"><svg class="ic"><use href="#i-user"/></svg><span data-i18n="nav.characters">Personajes</span></button>
       <button class="nav-btn" data-view="elements"><svg class="ic"><use href="#i-globe"/></svg><span data-i18n="nav.elements">Locaciones y objetos</span></button>
@@ -139,6 +140,7 @@
           <div class="tools-left">
             <button id="btnToEn" class="tool-btn" data-i18n-title="create.translateEnglish" title="Traducir el prompt al inglés">ES → EN</button>
             <button id="btnToEs" class="tool-btn" data-i18n-title="create.translateSpanish" title="Traducir el prompt al castellano">EN → ES</button>
+            <button id="btnDictation" type="button" class="tool-btn" aria-expanded="false"><svg class="ic"><use href="#i-mic"/></svg><span data-i18n="dictation.title">Dictado</span></button>
             <span class="tool-sep"></span>
             <button id="btnSavePrompt" class="tool-btn" data-i18n-title="create.savePromptTitle" title="Archivar este prompt"><svg class="ic"><use href="#i-save"/></svg><span data-i18n="create.savePrompt">Guardar</span></button>
             <button id="btnPrompts" class="tool-btn" data-i18n-title="create.savedPromptsTitle" title="Prompts archivados"><svg class="ic"><use href="#i-book"/></svg><span data-i18n="nav.prompts">Prompts</span></button>
@@ -151,6 +153,16 @@
           </div>
         </div>
 
+        <div id="dictationPanel" class="dictation-panel" hidden>
+          <p class="hint" data-i18n="dictation.privacy">Sin claves ni APIs de pago. El navegador puede enviar el audio a su servicio de reconocimiento y necesitar conexión. No se traduce: se transcribe lo que decís.</p>
+          <div class="dictation-controls">
+            <label><span data-i18n="dictation.language">Idioma hablado</span><select id="dictationLanguage" class="select"><option value="es-AR" data-i18n="dictation.spanish">Español</option><option value="en-US" data-i18n="dictation.english">Inglés</option></select></label>
+            <button id="dictationStart" type="button" class="mini-btn accent" data-i18n="dictation.start">Iniciar dictado</button>
+            <button id="dictationStop" type="button" class="mini-btn" disabled data-i18n="dictation.stop">Detener</button>
+          </div>
+          <p id="dictationStatus" class="hint" role="status" aria-live="polite"></p>
+          <p id="dictationInterim" class="hint"></p>
+        </div>
         <div id="shotListPanel" class="shot-list-panel" hidden>
           <div class="shot-list-head">
             <strong data-i18n="create.shotList.title">Lista de tomas</strong>
@@ -580,6 +592,33 @@
       <div id="assetsGrid" class="assets-grid"></div>
     </section>
 
+    <section id="view-asset-editor" class="view">
+      <div class="chars-head"><div><h2 data-i18n="assetEditor.title">Editar assets</h2><p class="hint" data-i18n="assetEditor.lead">Recortá imágenes sin modificar el original. El resultado se guarda como un nuevo asset.</p></div><button id="assetEditorChoose" type="button" class="mini-btn accent" data-i18n="assetEditor.choose">Elegir imagen</button></div>
+      <div class="asset-editor-layout">
+        <div class="asset-editor-stage">
+          <p id="assetEditorEmpty" class="empty-note" data-i18n="assetEditor.empty">Elegí una imagen o abrí Editar assets desde su visor.</p>
+          <canvas id="assetEditorCanvas" hidden data-i18n-aria-label="assetEditor.canvas" aria-label="Área de recorte"></canvas>
+          <p id="assetEditorStatus" class="hint" role="status"></p>
+        </div>
+        <div class="asset-editor-tools">
+          <h3 data-i18n="assetEditor.crop">Recortar imagen</h3>
+          <p id="assetEditorName" class="hint"></p>
+          <p class="hint" data-i18n="assetEditor.drag">Arrastrá sobre la imagen para marcar el recorte. También podés ajustar los valores en píxeles.</p>
+          <fieldset id="assetEditorFields" disabled>
+            <label><span data-i18n="assetEditor.ratio">Proporción</span><select id="assetEditorRatio" class="select"><option value="0" data-i18n="assetEditor.free">Libre</option><option value="1">1:1</option><option value="1.7777777778">16:9</option><option value="0.5625">9:16</option><option value="1.3333333333">4:3</option></select></label>
+            <div class="asset-editor-numbers">
+              <label><span data-i18n="assetEditor.x">X (px)</span><input id="assetCropX" type="number" min="0" step="1"></label>
+              <label><span data-i18n="assetEditor.y">Y (px)</span><input id="assetCropY" type="number" min="0" step="1"></label>
+              <label><span data-i18n="assetEditor.width">Ancho (px)</span><input id="assetCropWidth" type="number" min="1" step="1"></label>
+              <label><span data-i18n="assetEditor.height">Alto (px)</span><input id="assetCropHeight" type="number" min="1" step="1"></label>
+            </div>
+            <button id="assetEditorReset" type="button" class="mini-btn" data-i18n="assetEditor.reset">Restablecer recorte</button>
+            <button id="assetEditorSave" type="button" class="mini-btn accent" data-i18n="assetEditor.save">Guardar copia recortada</button>
+          </fieldset>
+          <button id="assetEditorResult" type="button" class="mini-btn" hidden data-i18n="assetEditor.viewResult">Ver resultado</button>
+        </div>
+      </div>
+    </section>
     <!-- ==================== PROYECTOS ==================== -->
     <section id="view-projects" class="view">
       <div class="chars-head">
@@ -1407,6 +1446,8 @@
 <script src="locales/es.js"></script>
 <script src="locales/en.js"></script>
 <script src="app-core.js"></script>
+<script src="asset-editor.js"></script>
+<script src="dictation.js"></script>
 <script src="app.js"></script>
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
 <script type="module" src="poser.js"></script>
