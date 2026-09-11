@@ -290,7 +290,9 @@ h3 { font-size: 15px; }
 }
 
 /* contador de caracteres bajo la caja de prompt */
-.prompt-meta { display: flex; justify-content: flex-end; margin-top: 4px; }
+.prompt-meta { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-top: 4px; }
+#referenceTagsControl { display: flex; margin-right: auto; color: var(--muted); }
+#referenceTagsControl[hidden] { display: none; }
 .char-count { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; user-select: none; }
 
 /* ---------- paleta de tags ---------- */

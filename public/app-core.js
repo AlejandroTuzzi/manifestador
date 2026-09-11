@@ -69,6 +69,7 @@ const state = {
   comfyPickerSlot: null,    // slot de state.comfyui.refs que el picker va a llenar (null = flujo genérico)
   transitionSounds: [],   // catálogo local, agrupado por las carpetas de public/sounds
   refs: [],              // [{ key, fromChar, label }]
+  referenceTagsEnabled: (() => { try { return localStorage.getItem('manifestadorReferenceTags') === 'true'; } catch { return false; } })(),
   voiceId: '',
   currentEntry: null,
   currentOutput: 0,

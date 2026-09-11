@@ -1,5 +1,7 @@
 window.ManifestadorI18n.register('es', {
   'app.title': 'Manifestador',
+  'create.refs.tagsEnabled': 'Etiquetas de referencias',
+  'create.refs.tagsHint': 'Añadir etiquetas con nombre a las imágenes de referencia. Desactivado por defecto; las referencias siguen disponibles sin etiquetas.',
   'assetEditor.title': 'Editar assets',
   'assetEditor.lead': 'Recortá imágenes sin modificar el original. El resultado se guarda como un nuevo asset.',
   'assetEditor.choose': 'Elegir imagen',

@@ -1,5 +1,7 @@
 window.ManifestadorI18n.register('en', {
   'app.title': 'Manifestador',
+  'create.refs.tagsEnabled': 'Reference labels',
+  'create.refs.tagsHint': 'Add name labels to reference images. Off by default; references remain available without labels.',
   'assetEditor.title': 'Edit assets',
   'assetEditor.lead': 'Crop images without changing the original. The result is saved as a new asset.',
   'assetEditor.choose': 'Choose image',

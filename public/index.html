@@ -132,7 +132,12 @@
           <div id="highlighter" class="highlighter" aria-hidden="true"></div>
           <textarea id="promptBox" data-i18n-placeholder="create.placeholder.image" placeholder="Escribí lo que querés manifestar…" spellcheck="false"></textarea>
         </div>
-        <div class="prompt-meta"><span id="promptCharCount" class="char-count" data-i18n="create.characters.zero">0 caracteres</span></div>
+        <div class="prompt-meta">
+          <label id="referenceTagsControl" class="check-row" data-i18n-title="create.refs.tagsHint" title="Añadir etiquetas con nombre a las imágenes de referencia. Desactivado por defecto; las referencias siguen disponibles sin etiquetas.">
+            <input id="referenceTagsEnabled" type="checkbox"><span data-i18n="create.refs.tagsEnabled">Etiquetas de referencias</span>
+          </label>
+          <span id="promptCharCount" class="char-count" data-i18n="create.characters.zero">0 caracteres</span>
+        </div>
 
         <div id="tagPalette" class="tag-palette" hidden></div>
 

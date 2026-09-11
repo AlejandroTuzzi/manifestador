@@ -39,6 +39,8 @@ function goToCreate() {
 
 function setMode(mode) {
   state.mode = mode;
+  $('#referenceTagsControl').hidden = mode !== 'image' && mode !== 'video';
+  $('#referenceTagsEnabled').checked = state.referenceTagsEnabled === true;
   // el personaje anclado aporta refs distintas según el modo
   // (asset:// verificado en video, fotos en imagen)
   if (state.pinnedId) applyPinnedCharacterPhotos();
@@ -489,7 +491,7 @@ function renderHighlight() {
     highlighter.innerHTML = esc(text).replace(/\[([^\]\n]{1,60})\]/g, '<span class="tag">[$1]</span>') + '\n';
   } else if (state.mode === 'image') {
     const mentions = state.refs.map((ref, index) => {
-      const label = normalizeReferenceLabel(ref.label);
+      const label = state.referenceTagsEnabled ? normalizeReferenceLabel(ref.label) : '';
       return label ? `@${label}` : `@image${index + 1}`;
     });
     highlighter.innerHTML = highlightReferenceMentions(text, mentions) + '\n';
@@ -894,6 +896,33 @@ function normalizeReferenceLabel(value) {
   return String(value || '').trim().replace(/^@+/, '').replace(/\s+/g, ' ').slice(0, 100);
 }
 
+$('#referenceTagsEnabled').addEventListener('change', (event) => {
+  state.referenceTagsEnabled = event.target.checked;
+  try { localStorage.setItem('manifestadorReferenceTags', String(state.referenceTagsEnabled)); } catch { /* Keep the choice for this session if storage is unavailable. */ }
+  renderRefs();
+  renderHighlight();
+});
+
+function creationReferencePrompt(text) {
+  if (state.mode !== 'image' || state.referenceTagsEnabled) return text;
+  // Existing/saved prompts may still cite names. Resolve those citations without
+  // changing the user's text or stamping labels onto the reference images.
+  const mentions = new Map();
+  state.refs.forEach((ref, index) => {
+    const label = normalizeReferenceLabel(ref.label);
+    if (label && !mentions.has(`@${label}`.toLowerCase())) mentions.set(`@${label}`.toLowerCase(), `@image${index + 1}`);
+  });
+  if (!mentions.size) return text;
+  const pattern = [...mentions.keys()].sort((a, b) => b.length - a.length)
+    .map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  return text.replace(new RegExp(`(?<![\\p{L}\\p{N}_@])(?:${pattern})(?![\\p{L}\\p{N}_])`, 'giu'), (match) => mentions.get(match.toLowerCase()));
+}
+
+async function buildCreationLabeledRefs(refs, model, isVideo) {
+  if (!state.referenceTagsEnabled || supportsMultimediaVideoRefs(model) || (isVideo && state.video.mode === 'frames')) return {};
+  return buildLabeledRefs(refs);
+}
+
 function renderRefs() {
   if (referenceAudioKey && !state.refs.some((ref) => ref.key === referenceAudioKey && referenceKind(ref) === 'audio')) closeAssetAudioPlayer();
   const isVideo = state.mode === 'video';
@@ -906,6 +935,7 @@ function renderRefs() {
   const refMode = isVideo ? state.video.mode : null;
   state.refs.forEach((r, i) => {
     r.label = normalizeReferenceLabel(r.label);
+    const label = state.referenceTagsEnabled ? r.label : '';
     const isAsset = r.key.startsWith('asset://');
     const kind = referenceKind(r);
     const videoModel = isVideo ? currentVideoModel() : null;
@@ -916,7 +946,7 @@ function renderRefs() {
     // cómo se cita esta ref en el prompt: en video Seedance exige @imageN;
     // en imagen se cita por su etiqueta (si tiene) para decirle quién es quién
     const typedMention = typedVideoReferenceMention(videoModel, kind, typeNumber);
-    const mention = typedMultimedia && refMode === 'reference' ? typedMention : refMode === 'reference' || !r.label ? `@image${i + 1}` : `@${r.label}`;
+    const mention = typedMultimedia && refMode === 'reference' ? typedMention : refMode === 'reference' || !label ? `@image${i + 1}` : `@${label}`;
     const badge = typedMultimedia && refMode === 'reference' ? `<button class="ref-at" title="${esc(tr('create.refs.insert', { mention: typedMention }))}">${kind === 'image' ? 'IMG' : kind === 'video' ? 'VID' : 'AUD'} ${typeNumber}</button>`
       : refMode === 'reference' ? `<button class="ref-at" title="${esc(tr('create.refs.insert', { mention: `@image${i + 1}` }))}">@${i + 1}</button>`
       : refMode === 'frames' ? `<span class="ref-badge">${esc(tr(i === 0 ? 'create.refs.start' : 'create.refs.end'))}</span>`
@@ -926,7 +956,7 @@ function renderRefs() {
       ? `<div class="asset-face" title="${esc(r.key)}">${IC('user', 'ic ic-lg')}<span>${esc(tr('create.refs.verified'))}</span></div>${badge}<button class="rm" title="${esc(tr('create.refs.remove'))}">×</button>`
       : `${kind === 'video' ? `<video src="${fileUrl(r.key)}" muted preload="metadata"></video>`
         : kind === 'audio' ? `<button type="button" class="asset-face ref-audio-play" data-ref-audio-key="${esc(r.key)}" title="${esc(tr('create.refs.playAudio'))}" aria-label="${esc(tr('create.refs.playAudio'))}" aria-pressed="false">${IC('play', 'ic ic-lg')}</button>`
-          : `<img src="${fileUrl(r.key)}" alt="">`}${kind === 'image' && r.label ? `<span class="ref-label-tag" title="${esc(tr('create.refs.labelVisible'))}">${esc(r.label)}</span>` : ''}${badge}<button class="rm" title="${esc(tr('create.refs.remove'))}">×</button>${kind === 'image' ? `<button class="ref-replace" title="${esc(tr('create.refs.replace'))}">${IC('refresh')}</button><button class="ref-label-btn${r.label ? ' on' : ''}" title="${esc(r.label ? tr('create.refs.label', { label: r.label }) : tr('create.refs.addLabel'))}">T</button>` : ''}`;
+          : `<img src="${fileUrl(r.key)}" alt="">`}${kind === 'image' && label ? `<span class="ref-label-tag" title="${esc(tr('create.refs.labelVisible'))}">${esc(label)}</span>` : ''}${badge}<button class="rm" title="${esc(tr('create.refs.remove'))}">×</button>${kind === 'image' ? `<button class="ref-replace" title="${esc(tr('create.refs.replace'))}">${IC('refresh')}</button>${state.referenceTagsEnabled ? `<button class="ref-label-btn${label ? ' on' : ''}" title="${esc(label ? tr('create.refs.label', { label }) : tr('create.refs.addLabel'))}">T</button>` : ''}` : ''}`;
     d.querySelector('.rm').addEventListener('click', () => {
       state.refs.splice(i, 1);
       renderRefs();
@@ -1518,7 +1548,7 @@ $('#shotPanelNext').addEventListener('click', () => moveShotPanel(1));
 // ---------------------------------------------------------------------------
 
 async function generate() {
-  const prompt = promptBox.value.trim();
+  const prompt = creationReferencePrompt(promptBox.value.trim());
   const isImage = state.mode === 'image';
   const isVideo = state.mode === 'video';
   const isMusic = state.mode === 'music';
@@ -1603,8 +1633,7 @@ async function generate() {
   }
   // las etiquetas se estampan acá, sobre copias: el asset guardado queda limpio
   const refsUsed = isImage ? state.refs : isVideo ? state.refs.slice(0, activeRefLimit()) : [];
-  const labeledRefs = !supportsMultimediaVideoRefs(model) && !(isVideo && state.video.mode === 'frames') && refsUsed.some((r) => r.label)
-    ? await buildLabeledRefs(refsUsed) : {};
+  const labeledRefs = await buildCreationLabeledRefs(refsUsed, model, isVideo);
   const comfyBuild = isComfy ? buildComfyGenerationBody(prompt) : null;
   const job = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
