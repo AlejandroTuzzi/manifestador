@@ -603,7 +603,8 @@
         <div class="asset-editor-tools">
           <h3 data-i18n="assetEditor.crop">Recortar imagen</h3>
           <p id="assetEditorName" class="hint"></p>
-          <p class="hint" data-i18n="assetEditor.drag">Arrastrá sobre la imagen para marcar el recorte. También podés ajustar los valores en píxeles.</p>
+          <p id="assetEditorDirty" class="hint" hidden data-i18n="assetEditor.unsaved">Cambios sin guardar</p>
+          <p class="hint" data-i18n="assetEditor.drag">Arrastrá el interior para mover el recorte y los tiradores de los bordes o esquinas para ajustar su tamaño. La proporción elegida se conserva. Arrastrá fuera del recorte o con Mayús para dibujar otro. También podés ajustar los valores en píxeles.</p>
           <fieldset id="assetEditorFields" disabled>
             <label><span data-i18n="assetEditor.ratio">Proporción</span><select id="assetEditorRatio" class="select"><option value="0" data-i18n="assetEditor.free">Libre</option><option value="1">1:1</option><option value="1.7777777778">16:9</option><option value="0.5625">9:16</option><option value="1.3333333333">4:3</option></select></label>
             <div class="asset-editor-numbers">
@@ -614,7 +615,9 @@
             </div>
             <button id="assetEditorReset" type="button" class="mini-btn" data-i18n="assetEditor.reset">Restablecer recorte</button>
             <button id="assetEditorSave" type="button" class="mini-btn accent" data-i18n="assetEditor.save">Guardar copia recortada</button>
+            <button id="assetEditorSaveClose" type="button" class="mini-btn" data-i18n="assetEditor.saveClose">Guardar y cerrar</button>
           </fieldset>
+          <button id="assetEditorClose" type="button" class="mini-btn" hidden data-i18n="assetEditor.close">Cerrar asset</button>
           <button id="assetEditorResult" type="button" class="mini-btn" hidden data-i18n="assetEditor.viewResult">Ver resultado</button>
         </div>
       </div>
@@ -966,6 +969,19 @@
   <span id="assetPlayerPosition" class="asset-player-position"></span>
   <button type="button" id="assetPlayerClose" class="icon-btn asset-player-close" data-i18n-title="player.close" data-i18n-aria-label="player.close" title="Cerrar reproductor" aria-label="Cerrar reproductor"><svg class="ic"><use href="#i-x"/></svg></button>
 </section>
+
+<div id="assetEditorConfirm" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="assetEditorConfirmTitle" aria-describedby="assetEditorConfirmMessage">
+  <div class="modal-box form-modal-box">
+    <h3 id="assetEditorConfirmTitle" data-i18n="assetEditor.unsaved">Cambios sin guardar</h3>
+    <p id="assetEditorConfirmMessage" class="hint" data-i18n="assetEditor.confirmLeave">¿Querés guardar el recorte antes de continuar? Se guardará una copia; el original no se modificará.</p>
+    <p id="assetEditorConfirmError" class="hint" role="status"></p>
+    <div class="form-modal-actions">
+      <button id="assetEditorKeepEditing" type="button" class="mini-btn" data-i18n="common.cancel">Cancelar</button>
+      <button id="assetEditorDiscard" type="button" class="mini-btn" data-i18n="assetEditor.discard">No guardar</button>
+      <button id="assetEditorConfirmSave" type="button" class="mini-btn accent" data-i18n="assetEditor.saveContinue">Guardar y continuar</button>
+    </div>
+  </div>
+</div>
 
 <!-- Información del asset -->
 <div id="assetInfoModal" class="modal" hidden>

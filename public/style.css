@@ -1462,6 +1462,8 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 #variantEditorModal, #associateAssetModal { z-index: 140; }
 #charAssetPickerModal { z-index: 165; }
 #assetInfoModal { z-index: 160; }
+#assetEditorConfirm { z-index: 180; }
+#assetEditorConfirm .form-modal-actions { flex-wrap: wrap; }
 .form-modal-box > label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .form-modal-box input, .form-modal-box textarea { width: 100%; background: rgba(10,5,18,.7); border: 1px solid var(--border); color: var(--text); padding: 11px 12px; font: inherit; }
 .form-modal-box textarea { min-height: 110px; resize: vertical; }
@@ -1606,7 +1608,7 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .asset-editor-numbers input:focus-visible { outline: 2px solid var(--pink); outline-offset: 1px; }
 .asset-editor-tools fieldset:disabled { opacity: .55; }
 #assetEditorName { overflow-wrap: anywhere; }
-#assetEditorResult { margin-top: 14px; }
+#assetEditorResult, #assetEditorClose { margin-top: 14px; }
 .dictation-panel { margin-top: 12px; }
 .dictation-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
 .dictation-controls label { min-width: 150px; }
