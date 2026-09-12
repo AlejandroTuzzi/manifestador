@@ -51,6 +51,20 @@ test('project image references exclude unrelated, deleted, hidden and duplicate 
   assert.deepEqual(keys(setup({ nsfw: true })), ['uploads/top.png', 'uploads/hidden.png']);
 });
 
+test('project references include linked character and wardrobe photos without exposing hidden characters', () => {
+  const context = setup();
+  context.state.characters = [
+    { id: 'c1', name: 'Observer', photos: ['characters/c1/a.png'], variants: [
+      { name: 'Gala', photos: ['characters/c1/a.png', 'characters/c1/gala.png'] },
+      { name: 'Hidden', nsfw: true, photos: ['characters/c1/hidden.png'] }
+    ] },
+    { id: 'c2', name: 'Hidden', nsfw: true, photos: ['characters/c2/a.png'] }
+  ];
+  const result = context.projectReferenceAssets({ assetKeys: [], characterIds: ['c1', 'c2', 'missing'] }, {});
+  assert.deepEqual(Array.from(result, (asset) => asset.key), ['characters/c1/a.png', 'characters/c1/gala.png']);
+  assert.equal(result[1].name, 'Observer · Gala');
+});
+
 test('project references respect multimedia, audio support, LoRA and image-only slots', () => {
   assert.deepEqual(keys(setup({ multimedia: true })), ['uploads/top.png', 'video/clip.mp4', 'audio/voice.mp3']);
   assert.deepEqual(keys(setup({ multimedia: true, audio: 0 })), ['uploads/top.png', 'video/clip.mp4']);

@@ -1486,6 +1486,12 @@
     <div id="charModalBody" class="char-modal-body"></div>
   </div>
 </div>
+<div id="characterProfileModal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="characterProfileTitle">
+  <div class="modal-box">
+    <div class="modal-head"><h3 id="characterProfileTitle" data-i18n="characters.viewProfile">Ver ficha</h3><button id="characterProfileClose" type="button" class="icon-btn" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div id="characterProfileBody" class="char-modal-body"></div>
+  </div>
+</div>
 
 <div id="toast" class="toast" hidden></div>
 <input type="file" id="fileInput" accept="image/*" multiple hidden>
@@ -1499,6 +1505,7 @@
 <script src="app-core.js"></script>
 <script src="asset-editor.js"></script>
 <script src="distinctive-elements.js"></script>
+<script src="character-profile.js"></script>
 <script src="dictation.js"></script>
 <script src="app.js"></script>
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>

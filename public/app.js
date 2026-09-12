@@ -5046,6 +5046,7 @@ function associationIsElement() {
 }
 
 const NEW_ASSOCIATION_VARIANT = '__new__';
+let assetAssociationBusy = false;
 
 function toggleAssociationNewVariant() {
   const creating = $('#associateVariant').value === NEW_ASSOCIATION_VARIANT;
@@ -5060,6 +5061,7 @@ function resetAssociationNewVariant() {
 }
 
 async function associateAsset(key) {
+  if (assetAssociationBusy) return toast(tr('characters.assetPicker.saving'), 'err');
   if (!state.characters.length && !state.elements.length) return toast(tr('assets.associate.createDestinationFirst'), 'err');
   state.pendingAssociationKey = key;
   closeLightbox();
@@ -5102,9 +5104,13 @@ $('#associateVariant').addEventListener('change', toggleAssociationNewVariant);
 $('#associateAssetForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const key = state.pendingAssociationKey;
+  if (assetAssociationBusy || !key) return;
   const isElement = associationIsElement();
   const ownerId = $('#associateCharacter').value;
   let variantId = $('#associateVariant').value || null;
+  const asPhotoRequested = $('#associateAsPhoto').checked;
+  if (!ownerId) return;
+  assetAssociationBusy = true;
   try {
     if (variantId === NEW_ASSOCIATION_VARIANT) {
       const name = $('#associateNewVariantName').value.trim();
@@ -5132,7 +5138,7 @@ $('#associateAssetForm').addEventListener('submit', async (e) => {
       state.assetLinks = result.links;
     }
     let asPhoto = false;
-    if ($('#associateAsPhoto').checked) {
+    if (asPhotoRequested) {
       const base = isElement ? `/api/elements/${ownerId}` : `/api/characters/${ownerId}`;
       const endpoint = variantId ? `${base}/variants/${variantId}/photos` : `${base}/photos`;
       const updated = await api(endpoint, { method: 'POST', body: { assetKey: key } });
@@ -5155,6 +5161,8 @@ $('#associateAssetForm').addEventListener('submit', async (e) => {
     if (isElement) renderElements(); else { renderCharacters(); renderPinned(); }
   } catch (err) {
     toast(err.message, 'err');
+  } finally {
+    assetAssociationBusy = false;
   }
 });
 function closeAssociateAsset() {
@@ -5168,6 +5176,16 @@ $('#associateAssetModal').addEventListener('click', (e) => { if (e.target.id ===
 $('#lbClose').addEventListener('click', () => { closeLightbox(); });
 $('#lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox') closeLightbox(); });
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const topLayers = [
+      ['#charAssetPickerModal', closeCharAssetPicker], ['#assetInfoModal', () => { $('#assetInfoModal').hidden = true; }],
+      ['#seriesAssignModal', closeSeriesAssign], ['#projectAssignModal', closeProjectAssign],
+      ['#associateAssetModal', closeAssociateAsset], ['#lightbox', closeLightbox],
+      ['#characterGalleryModal', () => { $('#characterGalleryModal').hidden = true; }]
+    ];
+    const top = topLayers.find(([selector]) => !$(selector).hidden);
+    if (top) { e.preventDefault(); top[1](); return; }
+  }
   if (!$('#lightbox').hidden && e.key === 'ArrowLeft') { e.preventDefault(); navigateLightbox(-1); return; }
   if (!$('#lightbox').hidden && e.key === 'ArrowRight') { e.preventDefault(); navigateLightbox(1); return; }
   if (!$('#lightbox').hidden && e.key === 'Delete') {
@@ -5268,7 +5286,7 @@ function bindLinkedCharacterButtons(root) {
   root.querySelectorAll('[data-open-linked-character]').forEach((button) => button.addEventListener('click', (event) => {
     event.preventDefault(); event.stopPropagation();
     const character = state.characters.find((item) => item.id === button.dataset.openLinkedCharacter && contentIsVisible(item));
-    if (character) openCharModal(character.id);
+    if (character) openCharacterProfile(character.id);
   }));
 }
 
@@ -5577,6 +5595,7 @@ $('#projectForm').addEventListener('submit', async (event) => {
 });
 
 function openCharacterProjectAssign(characterId) {
+  if (assetAssociationBusy) return toast(tr('characters.assetPicker.saving'), 'err');
   const character = state.characters.find((c) => c.id === characterId && contentIsVisible(c));
   if (!character) return;
   const projects = state.workspaceProjects.filter(contentIsVisible);
@@ -5591,6 +5610,7 @@ function openCharacterProjectAssign(characterId) {
 }
 
 function openProjectAssign(keyOrKeys) {
+  if (assetAssociationBusy) return toast(tr('characters.assetPicker.saving'), 'err');
   state.pendingProjectCharacterId = null;
   const keys = [...new Set(Array.isArray(keyOrKeys) ? keyOrKeys : [keyOrKeys])].filter(Boolean);
   if (!keys.length) return;
@@ -5622,7 +5642,8 @@ $('#projectAssignForm').addEventListener('submit', async (event) => {
   event.preventDefault();
   const keys = state.pendingProjectAssetKeys || [];
   const characterId = state.pendingProjectCharacterId;
-  if (!characterId && !keys.length) return;
+  if (assetAssociationBusy || (!characterId && !keys.length)) return;
+  assetAssociationBusy = true;
   try {
     const updated = await api(`/api/projects/${$('#projectAssignSelect').value}/${characterId ? 'characters' : 'assets'}`, { method: 'POST', body: characterId ? { characterId } : { keys } });
     await replaceWorkspaceProject(updated);
@@ -5630,6 +5651,7 @@ $('#projectAssignForm').addEventListener('submit', async (event) => {
     toast(characterId ? tr('projects.characterAssociated', { project: updated.name }) : trn('assets.projects.associated', keys.length, { project: updated.name }));
     syncAssetSelectionUi();
   } catch (error) { toast(error.message, 'err'); }
+  finally { assetAssociationBusy = false; }
 });
 
 // ---------------------------------------------------------------------------
@@ -5678,6 +5700,7 @@ function renderSeries() {
       <div class="char-actions">
         <button class="mini-btn accent" data-act="view">${IC('eye')} ${esc(tr('series.viewScript'))}</button>
         <button class="mini-btn" data-act="edit">${IC('edit')} ${esc(tr('common.edit'))}</button>
+        <button class="mini-btn" data-act="profile">${IC('eye')} ${esc(tr('characters.viewProfile'))}</button>
         <button class="mini-btn" data-act="scripts">${IC('clapper')} ${esc(tr('series.scripts'))}${state.scripts.filter((sc) => sc.seriesId === s.id).length ? ` (${state.scripts.filter((sc) => sc.seriesId === s.id).length})` : ''}</button>
         <button class="mini-btn" data-act="assets">${IC('image')} Assets${assetCount ? ` (${assetCount})` : ''}</button>
         <button class="mini-btn danger" data-act="del" title="${esc(tr('common.delete'))}">${IC('trash')}</button>
@@ -5850,6 +5873,7 @@ $('#seriesForm').addEventListener('submit', async (e) => {
 });
 
 function openSeriesAssign(keyOrKeys) {
+  if (assetAssociationBusy) return toast(tr('characters.assetPicker.saving'), 'err');
   const keys = [...new Set(Array.isArray(keyOrKeys) ? keyOrKeys : [keyOrKeys])];
   if (!keys.length) return;
   if (!state.series.length) return toast(tr('assets.series.createFirst'), 'err');
@@ -5879,6 +5903,8 @@ $('#seriesAssignForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const seriesId = $('#seriesAssignSelect').value;
   const keys = state.pendingSeriesAssetKey || [];
+  if (assetAssociationBusy || !seriesId || !keys.length) return;
+  assetAssociationBusy = true;
   try {
     const updated = await api(`/api/series/${seriesId}/assets`, { method: 'POST', body: { keys } });
     state.series[state.series.findIndex((x) => x.id === updated.id)] = updated;
@@ -5888,6 +5914,8 @@ $('#seriesAssignForm').addEventListener('submit', async (e) => {
     syncAssetSelectionUi();
   } catch (err) {
     toast(err.message, 'err');
+  } finally {
+    assetAssociationBusy = false;
   }
 });
 
@@ -6715,6 +6743,7 @@ function renderCharacters() {
           toast(tr('characters.photosAdded', { name: c.name }));
         }
         if (act === 'edit') openCharModal(c.id);
+        if (act === 'profile') openCharacterProfile(c.id);
         if (act === 'variants') openCharModal(c.id);
         if (act === 'gallery') openCharacterGallery(c.id);
         if (act === 'assets') openCharacterAssets(c.id);
@@ -7163,23 +7192,23 @@ async function openCharAssetPicker(target) {
   $('#charAssetPickerModal').hidden = false;
 }
 
-function pickerTargetPhotos(entity) {
-  const cp = state.charAssetPicker;
+function pickerTargetPhotos(entity, cp = state.charAssetPicker) {
+  if (!cp) return [];
   const owner = entity || (cp.entity === 'element' ? state.elements : state.characters).find((x) => x.id === cp.ownerId);
   if (!owner) return [];
   return cp.variantId ? ((owner.variants || []).find((v) => v.id === cp.variantId)?.photos || []) : (owner.photos || []);
 }
 
-function refreshPickerEntity(updated) {
-  const cp = state.charAssetPicker;
+function refreshPickerEntity(updated, cp = state.charAssetPicker) {
+  if (!cp) return;
   if (cp.entity === 'element') {
     state.elements[state.elements.findIndex((x) => x.id === cp.ownerId)] = updated;
-    renderElementModal();
+    if (state.editingElementId === cp.ownerId) renderElementModal();
     renderElements();
   } else {
     state.characters[state.characters.findIndex((x) => x.id === cp.ownerId)] = updated;
     if (state.pinnedId === cp.ownerId) { applyPinnedCharacterPhotos(); renderRefs(); renderCharacterVariantControl(); }
-    renderCharModal();
+    if (state.editingCharId === cp.ownerId) renderCharModal();
     renderCharacters();
     renderPinned();
   }
@@ -7191,16 +7220,21 @@ function renderCharAssetPickerGrid() {
   $$('#charAssetPickerTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.czone === cp.zone));
   const items = (state.assets[cp.zone] || []).filter((a) => /\.(png|jpe?g|webp)$/i.test(a.key));
   const added = cp.added.size;
-  $('#charAssetPickerHint').textContent = added ? trn('characters.assetPicker.addedBatch', added) : '';
+  $('#charAssetPickerHint').textContent = cp.pending?.size ? tr('characters.assetPicker.saving') : added ? trn('characters.assetPicker.addedBatch', added) : '';
   $('#charAssetPickerGrid').innerHTML = items.length ? items.map((a) => {
     const on = cp.added.has(a.key);
-    return `<button class="shot-asset-cell${on ? ' selected' : ''}" data-k="${esc(a.key)}" title="${esc(a.name)}">
+    return `<button class="shot-asset-cell${on ? ' selected' : ''}" data-k="${esc(a.key)}" title="${esc(a.name)}"${cp.pending?.has(a.key) ? ' disabled' : ''}>
       <img src="${fileUrl(a.key)}" loading="lazy" alt="">${on ? `<span class="shot-asset-check">${IC('check')}</span>` : ''}</button>`;
   }).join('') : `<div class="hint">${esc(tr('characters.assetPicker.empty'))}</div>`;
   $('#charAssetPickerGrid').querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', async () => {
     const key = b.dataset.k;
-    if (!cp.ownerId) return;
+    if (!cp.ownerId || cp.pending?.has(key)) return;
+    cp.pending ||= new Set();
+    cp.pending.add(key);
     b.disabled = true;
+    $('#charAssetPickerHint').textContent = tr('characters.assetPicker.saving');
+    // Serialize writes and capture their destination even if this picker closes.
+    cp.queue = (cp.queue || Promise.resolve()).then(async () => {
     const base = cp.entity === 'element' ? `/api/elements/${cp.ownerId}` : `/api/characters/${cp.ownerId}`;
     const endpoint = cp.variantId ? `${base}/variants/${cp.variantId}/photos` : `${base}/photos`;
     try {
@@ -7208,21 +7242,24 @@ function renderCharAssetPickerGrid() {
         const photoKey = cp.added.get(key);
         const updated = await api(`${endpoint}?key=${encodeURIComponent(photoKey)}`, { method: 'DELETE' });
         cp.added.delete(key);
-        refreshPickerEntity(updated);
+        refreshPickerEntity(updated, cp);
         toast(tr('characters.photoRemoved'));
       } else {
-        const before = pickerTargetPhotos();
+        const before = pickerTargetPhotos(undefined, cp);
         const updated = await api(endpoint, { method: 'POST', body: { assetKey: key } });
-        const newKey = pickerTargetPhotos(updated).find((k) => !before.includes(k));
+        const newKey = pickerTargetPhotos(updated, cp).find((k) => !before.includes(k));
         if (newKey) cp.added.set(key, newKey);
-        refreshPickerEntity(updated);
+        refreshPickerEntity(updated, cp);
         toast(tr('characters.photoAdded'));
       }
-      renderCharAssetPickerGrid();
     } catch (err) {
       toast(err.message, 'err');
-      b.disabled = false;
+    } finally {
+      cp.pending.delete(key);
+      if (state.charAssetPicker === cp) renderCharAssetPickerGrid();
     }
+    });
+    await cp.queue;
   }));
 }
 

@@ -7,6 +7,7 @@ window.ManifestadorI18n.register('en', {
   'projects.characterLinkHint': "A character can belong to multiple projects.",
   'projects.characterAssociated': "Character linked to “{project}”.",
   'characters.viewProfile': "View profile",
+  'characters.assetPicker.saving': 'Saving assignments…',
   'errors.workspaceProjectCharacterMissing': "One of the selected characters could not be found.",
   'characters.galleryLoading': 'Loading photos…',
   'distinctive.title': "Distinctive elements",

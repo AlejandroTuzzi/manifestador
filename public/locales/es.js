@@ -7,6 +7,7 @@ window.ManifestadorI18n.register('es', {
   'projects.characterLinkHint': "El personaje puede pertenecer a varios proyectos.",
   'projects.characterAssociated': "Personaje asociado a «{project}».",
   'characters.viewProfile': "Ver ficha",
+  'characters.assetPicker.saving': 'Guardando asignaciones…',
   'errors.workspaceProjectCharacterMissing': "No se encontró uno de los personajes seleccionados.",
   'characters.galleryLoading': 'Cargando fotos…',
   'distinctive.title': "Elementos distintivos",

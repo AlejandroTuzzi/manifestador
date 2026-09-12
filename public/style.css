@@ -1466,6 +1466,15 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 #charAssetPickerModal { z-index: 165; }
 #assetInfoModal { z-index: 160; }
 #charModal { z-index: 110; }
+#characterProfileModal { z-index: 105; }
+#characterGalleryModal { z-index: 120; }
+#lightbox { z-index: 130; }
+#seriesAssignModal, #projectAssignModal { z-index: 145; }
+.toast { z-index: 250; }
+.profile-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.profile-photos { display: flex; flex-wrap: wrap; gap: 8px; }
+.profile-photo { width: 90px; height: 100px; flex-shrink: 0; padding: 0; border: 1px solid var(--border); background: var(--panel-solid); cursor: zoom-in; }
+.profile-photo img { width: 100%; height: 100%; object-fit: contain; }
 .project-character-links, .series-character-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .project-character-links:empty { display: none; }
 .project-character-choices { display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; }
@@ -1692,7 +1701,7 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 /* ---------- toast ---------- */
 .toast {
   position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
-  z-index: 100;
+  z-index: 250;
   background: var(--panel-solid);
   border: 1px solid var(--border);
   border-radius: 0;
