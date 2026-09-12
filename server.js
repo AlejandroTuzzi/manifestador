@@ -2,6 +2,9 @@
 // Ejecutar con: npm start   (luego abrir http://localhost:7777)
 
 import http from 'node:http';
+import { changeInspiration, visibleInspiration, inspirationError } from './lib/series-inspiration.js';
+import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
+import { exportInspirationArchive, importInspirationArchive, parseLibraryManifest } from './lib/inspiration-transfer.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -16,6 +19,7 @@ import {
   listVoices, generateSpeech, generateMusic, translateText, searchUpdatedPricing, testService
 } from './lib/providers.js';
 import { mergePricing, imagePrice, videoPrice, audioPrice, musicPrice, translatePrice, scriptPrice } from './lib/pricing.js';
+import { generateQwenImage, normalizeQwenOptions, qwenEndpoint, QWEN_ENDPOINT } from './lib/qwen-image.js';
 import { createH3PromotionCoordinator, findExistingH3Promotion } from './lib/h3Promotion.js';
 import {
   categoryExists,
@@ -85,7 +89,7 @@ const DEFAULT_CONFIG = {
   poserPrompt: DEFAULT_POSER_PROMPT,
   photoshopPath: '',
   ffmpegPath: '',
-  keys: { gemini: '', googleTranslate: '', ark: '', wavespeed: '', minimax: '', elevenlabs: '', openai: '', suno: '', heygen: '' },
+  keys: { gemini: '', googleTranslate: '', ark: '', wavespeed: '', qwen: '', minimax: '', elevenlabs: '', openai: '', suno: '', heygen: '' },
   openaiModel: 'gpt-5-mini',
   audioModelId: AUDIO_MODEL.id,
   heygenAuthMode: 'key',
@@ -97,6 +101,7 @@ const DEFAULT_CONFIG = {
     audio: 'assets/audio'
   },
   endpoints: {
+    qwen: QWEN_ENDPOINT,
     ark: 'https://ark.ap-southeast.bytepluses.com/api/v3',
     wavespeed: 'https://api.wavespeed.ai/api/v3',
     minimax: 'https://api.minimax.io',
@@ -315,6 +320,7 @@ function metadataFromEntry(entry, cfg) {
     characterVariantId: entry.characterVariantId || null, ts: entry.ts,
     aspectRatio: entry.aspectRatio || null, resolution: entry.resolution || null,
     batch: entry.batch || 1, refs: entry.refs || [], voiceId: entry.voiceId || null,
+    ...(entry.qwenImage ? { qwenImage: entry.qwenImage } : {}),
     voiceName: entry.voiceName || null, cost: entry.cost || 0,
     audioKind: entry.audioKind || (entry.modelId === MUSIC_MODEL.id ? 'music' : entry.type === 'audio' ? 'voice' : null),
     musicTags: normalizeMusicTags(entry.musicTags),
@@ -429,9 +435,11 @@ function readStoredZip(buffer) {
     if (name.includes('..') || name.startsWith('/')) throw new Error('Ruta insegura dentro del ZIP.');
     const start = offset + 30 + nameLen + extraLen; const end = start + size;
     if (end > buffer.length) throw new Error('ZIP incompleto.');
+    if (files.has(name) || crc32(buffer.subarray(start, end)) !== buffer.readUInt32LE(offset + 14)) throw localizedServerError('transferArchive', 'Invalid ZIP checksum or duplicate archive path.');
     files.set(name, buffer.subarray(start, end)); offset = end;
-    if (files.size > 500) throw new Error('El ZIP contiene demasiados archivos.');
+    if (files.size > 5000) throw new Error('El ZIP contiene demasiados archivos.');
   }
+  if (!files.size || buffer.length < 22 || buffer.readUInt32LE(buffer.length - 22) !== 0x06054b50) throw localizedServerError('transferArchive', 'Incomplete ZIP archive.');
   return files;
 }
 
@@ -1013,6 +1021,9 @@ async function runImageGeneration(req) {
   const prompt = String(req.prompt || '').trim();
   if (!prompt) throw new Error('El prompt está vacío.');
 
+  if (model.provider === 'qwen' && (req.refs || []).length > model.maxRefs) {
+    throw localizedServerError('qwenReferences', 'Qwen: maximum 3 reference images.');
+  }
   const refs = (req.refs || []).slice(0, model.maxRefs);
   if (refs.length < model.minRefs) {
     throw new Error(`${model.name} necesita al menos ${model.minRefs} imagen(es) de referencia.`);
@@ -1031,7 +1042,8 @@ async function runImageGeneration(req) {
     ? { characterId: characterRefs[0][1], variantId: characterRefs.every((match) => (match[2] || null) === (characterRefs[0][2] || null)) ? (characterRefs[0][2] || null) : null }
     : null;
 
-  const batch = Math.max(1, Math.min(4, Number(req.batch) || 1));
+  const batch = Math.max(1, Math.min(model.maxBatch || 4, Math.floor(Number(req.batch) || 1)));
+  const qwenImage = model.provider === 'qwen' ? normalizeQwenOptions(req.qwenImage) : null;
   const apiModel = model.configModelKey ? (cfg[model.configModelKey] || model.apiModel) : model.apiModel;
 
   // Si alguna referencia viene del Poser, se anexa el prompt de pose
@@ -1047,6 +1059,12 @@ async function runImageGeneration(req) {
 
   const call = async () => {
     switch (model.provider) {
+      case 'qwen':
+        return generateQwenImage({
+          apiKey: cfg.keys.qwen, endpoint: cfg.endpoints.qwen,
+          prompt: sentPrompt, preface, refPaths, aspectRatio: req.aspectRatio,
+          resolution: req.resolution, count: batch, options: qwenImage
+        });
       case 'gemini':
         return generateGemini({
           apiKey: cfg.keys.gemini, apiModel, prompt: sentPrompt, preface, refPaths,
@@ -1074,7 +1092,7 @@ async function runImageGeneration(req) {
     }
   };
 
-  const results = await Promise.allSettled(Array.from({ length: batch }, call));
+  const results = await Promise.allSettled(Array.from({ length: model.nativeBatch ? 1 : batch }, call));
   const outputs = [];
   const errors = [];
   for (const r of results) {
@@ -1087,11 +1105,13 @@ async function runImageGeneration(req) {
       errors.push(r.reason?.message || String(r.reason));
     }
   }
-  if (!outputs.length) throw new Error(errors[0] || 'La generación falló sin detalle.');
+  if (!outputs.length) throw results.find((result) => result.status === 'rejected')?.reason || new Error('La generación falló sin detalle.');
 
   const pricing = await getPricing();
   const unit = imagePrice(pricing, model.id, req.resolution || 'auto');
-  const cost = unit * outputs.length;
+  const inputCost = (pricing.image[model.id]?.inputPerImage || 0) * refs.length
+    * results.filter((result) => result.status === 'fulfilled').length;
+  const cost = unit * outputs.length + inputCost;
   await recordCost({
     type: 'image', modelId: model.id, label: model.name,
     units: outputs.length, unitLabel: 'imagen(es)', cost
@@ -1107,6 +1127,7 @@ async function runImageGeneration(req) {
     aspectRatio: req.aspectRatio || 'auto',
     resolution: req.resolution || 'auto',
     batch,
+    ...(qwenImage ? { qwenImage } : {}),
     refs,
     characterId: req.characterId || inferredCharacter?.characterId || null,
     characterVariantId: req.characterVariantId || inferredCharacter?.variantId || null,
@@ -2310,8 +2331,8 @@ function readBody(req, limit = 150 * 1024 * 1024) {
   });
 }
 
-async function readJsonBody(req) {
-  const buf = await readBody(req);
+async function readJsonBody(req, limit) {
+  const buf = await readBody(req, limit);
   try {
     return JSON.parse(buf.toString('utf8') || '{}');
   } catch {
@@ -4503,7 +4524,7 @@ const server = http.createServer(async (req, res) => {
           }
           imageNames.set(item.imageKey, image);
         }
-        manifestEntries.push({ title: item.title, category: item.category, words: item.words, nsfw: Boolean(item.nsfw), image });
+        manifestEntries.push({ id: item.id, importIds: importIds(item), title: item.title, category: item.category, words: item.words, nsfw: Boolean(item.nsfw), image });
       }
       const categories = [...new Set([...storedCategories, ...items.map((i) => i.category)].filter(Boolean))];
       const manifest = { format: 'manifestador-vocabulary', version: 1, exportedAt: Date.now(), categories, entries: manifestEntries };
@@ -4514,9 +4535,9 @@ const server = http.createServer(async (req, res) => {
 
     // Importa un ZIP de vocabulario: escribe las imágenes en uploads (con su
     // metadata visual, igual que al crear una ficha), crea las fichas y suma las
-    // categorías. No pisa lo existente: agrega.
+    // categorías. Conserva las fichas locales coincidentes, sin volver a escribir imágenes.
     if (p === '/api/vocabulary/import' && req.method === 'POST') {
-      const body = await readJsonBody(req);
+      const body = await readJsonBody(req, 201 * 1024 * 1024); // 150 MB ZIP + base64 overhead.
       const zipBuffer = Buffer.from(String(body.zipBase64 || ''), 'base64');
       if (!zipBuffer.length || zipBuffer.length > 150 * 1024 * 1024) throw new Error('ZIP vacío o demasiado grande.');
       const files = readStoredZip(zipBuffer);
@@ -4533,33 +4554,45 @@ const server = http.createServer(async (req, res) => {
       const metadataPatch = {};
       const now = Date.now();
       const newItems = [];
-      for (const src of manifest.entries) {
-        const title = String(src.title || '').trim();
-        const category = String(src.category || '').trim();
-        const words = normalizeVocabularyWords(src.words);
-        if (!title || !category || !words.length || !src.image) continue;
-        let imageKey = written.get(src.image);
-        if (!imageKey) {
-          const data = files.get(src.image);
-          if (!data) continue;
-          const ext = path.extname(src.image).toLowerCase();
-          if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) continue;
-          const base = baseName(title, 'vocabulario');
-          let name = `${ts()}-${base}${ext}`;
-          for (let i = 2; existing.has(name); i++) name = `${ts()}-${base}-${i}${ext}`;
-          existing.add(name);
-          imageKey = await saveBuffer('uploads', name, data);
-          written.set(src.image, imageKey);
-          const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
-          metadataPatch[imageKey] = {
-            type: 'image', modelId: 'upload', modelName: 'Archivo subido', ts: now,
-            prompt: '', cost: 0, category: 'Vocabulario', tags: [category, ...words], mime, nsfw: Boolean(src.nsfw)
-          };
+      let skipped = 0, hidden = 0;
+      await updateJson('vocabulary.json', [], async current => {
+        const next = [...current];
+        for (const src of manifest.entries) {
+          if (!src || typeof src !== 'object') { skipped++; continue; }
+          if (src.nsfw && !cfg.nsfwEnabled) { hidden++; continue; }
+          const title = String(src.title || '').trim();
+          const category = String(src.category || '').trim();
+          const words = normalizeVocabularyWords(src.words);
+          if (!title || !category || !words.length || !src.image) continue;
+          const duplicate = importMatch(next, { ...src, title, category }, 'vocabulary');
+          if (duplicate) {
+            next[next.indexOf(duplicate)] = rememberImport(duplicate, src);
+            skipped++; continue;
+          }
+          let imageKey = written.get(src.image);
+          if (!imageKey) {
+            const data = files.get(src.image);
+            if (!data) continue;
+            const ext = path.extname(src.image).toLowerCase();
+            if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) continue;
+            const base = baseName(title, 'vocabulario');
+            let name = `${ts()}-${base}${ext}`;
+            for (let i = 2; existing.has(name); i++) name = `${ts()}-${base}-${i}${ext}`;
+            existing.add(name);
+            imageKey = await saveBuffer('uploads', name, data);
+            written.set(src.image, imageKey);
+            const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+            metadataPatch[imageKey] = {
+              type: 'image', modelId: 'upload', modelName: 'Archivo subido', ts: now,
+              prompt: '', cost: 0, category: 'Vocabulario', tags: [category, ...words], mime, nsfw: Boolean(src.nsfw)
+            };
+          }
+          const item = rememberImport(sanitizeVocabularyEntry({ title, category, imageKey, words, nsfw: Boolean(src.nsfw) }, {}, { id: newId(), now }), src);
+          newItems.push(item); next.unshift(item);
         }
-        newItems.push(sanitizeVocabularyEntry({ title, category, imageKey, words, nsfw: Boolean(src.nsfw) }, {}, { id: newId(), now }));
-      }
-      if (Object.keys(metadataPatch).length) await updateJson('asset-metadata.json', {}, (all) => ({ ...all, ...metadataPatch }));
-      if (newItems.length) await updateJson('vocabulary.json', [], (all) => [...newItems, ...all].slice(0, 2000));
+        if (Object.keys(metadataPatch).length) await updateJson('asset-metadata.json', {}, (all) => ({ ...all, ...metadataPatch }));
+        return next;
+      });
       let vocabularyCategories = await readJson('vocabulary-categories.json', []);
       const manifestCategories = Array.isArray(manifest.categories) ? manifest.categories : [];
       const wanted = [...new Set([...manifestCategories, ...newItems.map((i) => i.category)].filter(Boolean))];
@@ -4573,7 +4606,7 @@ const server = http.createServer(async (req, res) => {
           return next;
         });
       }
-      return send(res, 200, { imported: newItems.length, entries: newItems, vocabularyCategories });
+      return send(res, 200, { imported: newItems.length, skipped, hidden, entries: newItems, vocabularyCategories });
     }
 
     if (p === '/api/vocabulary-categories' && req.method === 'POST') {
@@ -4920,7 +4953,7 @@ const server = http.createServer(async (req, res) => {
         language: body.language !== undefined ? normalizeInterfaceLanguage(body.language) : normalizeInterfaceLanguage(cfg.language),
         keys: { ...cfg.keys, ...(body.keys || {}) },
         paths: { ...cfg.paths, ...(body.paths || {}) },
-        endpoints: { ...cfg.endpoints, ...(body.endpoints || {}) },
+        endpoints: { ...cfg.endpoints, ...(body.endpoints || {}), qwen: qwenEndpoint(body.endpoints?.qwen ?? cfg.endpoints.qwen) },
         seedreamModelId: body.seedreamModelId ?? cfg.seedreamModelId,
         seedreamProModelId: body.seedreamProModelId ?? cfg.seedreamProModelId,
         fireRedModelId: body.fireRedModelId ?? cfg.fireRedModelId,
@@ -5165,6 +5198,66 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- series ---
+    if (p === '/api/series-inspiration/export' && req.method === 'GET') {
+      const [collection, cfg, metadata] = await Promise.all([readJson('series-inspiration.json', {}), getConfig(), readJson('asset-metadata.json', {})]);
+      const files = await exportInspirationArchive(visibleInspiration(collection, cfg.nsfwEnabled, metadata), async key => fs.readFile(await resolveAssetKey(key)));
+      return send(res, 200, createZip(files), { mime: 'application/zip', extra: { 'Content-Disposition': 'attachment; filename="inspiration.manifestador.zip"' } });
+    }
+    if (p === '/api/series-inspiration/import' && req.method === 'POST') {
+      const body = await readJsonBody(req, 201 * 1024 * 1024);
+      const buffer = Buffer.from(String(body.zipBase64 || ''), 'base64');
+      if (!buffer.length || buffer.length > 150 * 1024 * 1024) throw inspirationError('transferSize');
+      const files = readStoredZip(buffer);
+      const manifest = parseLibraryManifest(files, 'inspiration.json', 'manifestador-inspiration');
+      const cfg = await getConfig();
+      let stats;
+      const metadata = {};
+      const collection = await updateJson('series-inspiration.json', {}, async current => {
+        const imported = await importInspirationArchive(current, manifest, {
+          files, newId, nsfwEnabled: cfg.nsfwEnabled,
+          validateImage: async (name, data) => {
+            const ext = path.extname(name).toLowerCase();
+            validateUploadedVisual(ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg', data, name);
+          },
+          saveImage: async (source, data) => {
+            const extension = path.extname(source.image).toLowerCase();
+            const key = await saveBuffer('uploads', `inspiration-${newId()}${extension}`, data);
+            metadata[key] = { type: 'image', modelId: 'upload', ts: Date.now(), nsfw: Boolean(source.nsfw), tags: source.tags || [] };
+            return key;
+          }
+        });
+        stats = imported.stats;
+        if (Object.keys(metadata).length) await updateJson('asset-metadata.json', {}, all => ({ ...all, ...metadata }));
+        return imported.collection;
+      });
+      return send(res, 200, { ...visibleInspiration(collection, cfg.nsfwEnabled, await readJson('asset-metadata.json', {})), ...stats });
+    }
+
+    if (p === '/api/series-inspiration' && req.method === 'GET') {
+      const [collection, cfg, metadata] = await Promise.all([readJson('series-inspiration.json', {}), getConfig(), readJson('asset-metadata.json', {})]);
+      return send(res, 200, visibleInspiration(collection, cfg.nsfwEnabled, metadata));
+    }
+    const inspirationMatch = p.match(/^\/api\/series-inspiration\/(entries|producers)(?:\/([a-z0-9]+))?$/);
+    if (inspirationMatch && ['POST', 'PUT', 'DELETE'].includes(req.method)) {
+      const [, kind, existingId] = inspirationMatch;
+      if ((req.method === 'POST') === Boolean(existingId)) throw inspirationError('inspirationNotFound', 404);
+      const body = req.method === 'DELETE' ? {} : await readJsonBody(req);
+      const cfg = await getConfig();
+      const id = existingId || newId();
+      const metadata = await readJson('asset-metadata.json', {});
+      const collection = await updateJson('series-inspiration.json', {}, async current => {
+        if (existingId && !visibleInspiration(current, cfg.nsfwEnabled, metadata)[kind].some(item => item.id === existingId)) throw inspirationError('inspirationNotFound', 404);
+        const next = changeInspiration(current, kind, req.method, id, body, { nsfwEnabled: cfg.nsfwEnabled });
+        const item = next[kind].find(item => item.id === id);
+        if (kind === 'entries' && item?.imageKey) {
+          const stat = await fs.stat(await resolveAssetKey(item.imageKey)).catch(() => null);
+          if (!stat?.isFile() || (!cfg.nsfwEnabled && metadata[item.imageKey]?.nsfw)) throw inspirationError('inspirationImage');
+        }
+        return next;
+      });
+      return send(res, 200, { ...visibleInspiration(collection, cfg.nsfwEnabled, metadata), id });
+    }
+
     if (p === '/api/series' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const characters = await readJson('characters.json', []);
@@ -5290,7 +5383,13 @@ const server = http.createServer(async (req, res) => {
         ts: Date.now(),
         updatedAt: Date.now()
       };
-      await updateJson('scripts.json', [], (all) => [item, ...all]);
+      let duplicateScript;
+      await updateJson('scripts.json', [], all => {
+        duplicateScript = importMatch(all.filter(script => script.seriesId === serie.id), { ...source, title: item.title }, 'scripts');
+        if (duplicateScript) return all.map(script => script.id === duplicateScript.id ? rememberImport(script, source) : script);
+        return [rememberImport(item, source), ...all];
+      });
+      if (duplicateScript) return send(res, 200, { script: duplicateScript, serie, importSkipped: true });
       const matched = item.characters.map((c) => c.characterId).filter(Boolean);
       if (matched.length) {
         await updateJson('series.json', [], (all) => all.map((s) =>
@@ -5392,7 +5491,13 @@ const server = http.createServer(async (req, res) => {
         }
       }
       const item = sanitizeAutomation(source);
-      await updateJson('automations.json', [], (all) => [item, ...all]);
+      let duplicateAutomation;
+      await updateJson('automations.json', [], all => {
+        if (body.data) duplicateAutomation = importMatch(all, { ...source, name: item.name }, 'automations');
+        if (duplicateAutomation) return all.map(project => project.id === duplicateAutomation.id ? rememberImport(project, source) : project);
+        return [body.data ? rememberImport(item, source) : item, ...all];
+      });
+      if (duplicateAutomation) return send(res, 200, { ...automationForClient(duplicateAutomation), importSkipped: true });
       return send(res, 200, item);
     }
 
@@ -7447,6 +7552,7 @@ const server = http.createServer(async (req, res) => {
         });
       }
       const endpoint = body.endpoint || (service === 'ark' ? cfg.endpoints.ark
+        : service === 'qwen' ? cfg.endpoints.qwen
         : service === 'wavespeed' ? cfg.endpoints.wavespeed
         : service === 'minimax' ? cfg.endpoints.minimax
           : service === 'suno' ? cfg.endpoints.suno : '');
@@ -7597,6 +7703,7 @@ const server = http.createServer(async (req, res) => {
         ...project, assetKeys: (project.assetKeys || []).map(swap)
       })));
       await updateJson('series.json', [], (all) => all.map((s) => ({ ...s, assetKeys: (s.assetKeys || []).map(swap) })));
+      await updateJson('series-inspiration.json', {}, (all) => ({ ...all, entries: (all.entries || []).map(item => ({ ...item, imageKey: swap(item.imageKey) })) }));
       await updateJson('scripts.json', [], (all) => all.map((sc) => ({
         ...sc,
         scenes: (sc.scenes || []).map((scene) => ({
@@ -7725,6 +7832,7 @@ const server = http.createServer(async (req, res) => {
           }))
         }))
       })));
+      await updateJson('series-inspiration.json', {}, (all) => ({ ...all, entries: (all.entries || []).map(item => removed.has(item.imageKey) ? { ...item, imageKey: '' } : item) }));
       const cleaned = await updateJson('history.json', [], (all) => all.map((entry) => ({
         ...entry,
         outputs: (entry.outputs || []).filter((key) => !removed.has(key)),
@@ -7843,7 +7951,7 @@ const server = http.createServer(async (req, res) => {
 
     // import/export son exclusivos de personajes (ZIP con manifest)
     if (p === '/api/characters/import' && req.method === 'POST') {
-      const body = await readJsonBody(req);
+      const body = await readJsonBody(req, 201 * 1024 * 1024);
       const zipBuffer = Buffer.from(String(body.zipBase64 || ''), 'base64');
       if (!zipBuffer.length || zipBuffer.length > 150 * 1024 * 1024) throw new Error('ZIP vacío o demasiado grande.');
       const files = readStoredZip(zipBuffer);
@@ -7852,70 +7960,84 @@ const server = http.createServer(async (req, res) => {
       const manifest = JSON.parse(manifestBuffer.toString('utf8'));
       if (manifest.format !== 'manifestador-character' || !manifest.character) throw new Error('Este ZIP no es un personaje de Manifestador.');
       const source = manifest.character;
-      const id = newId();
-      const characterDir = path.join(DATA_DIR, 'characters', id);
-      const item = {
-        id, name: String(source.name || 'Personaje importado'), description: String(source.description || ''), nsfw: Boolean(source.nsfw),
-        voiceId: String(source.voiceId || ''), voiceName: String(source.voiceName || ''),
-        heygen: {
-          avatarId: String(source.heygen?.wideAvatarId || source.heygen?.avatarId || ''),
-          wideAvatarId: String(source.heygen?.wideAvatarId || source.heygen?.avatarId || ''),
-          closeAvatarId: String(source.heygen?.closeAvatarId || ''),
-          motionPrompt: heyGenMotionPromptValue(source.heygen, 'wideMotionPrompt'),
-          wideMotionPrompt: heyGenMotionPromptValue(source.heygen, 'wideMotionPrompt'),
-          closeMotionPrompt: heyGenMotionPromptValue(source.heygen, 'closeMotionPrompt'),
-          imageKey: ''
-        },
-        photos: [], variants: [], ts: Date.now()
-      };
-      await fs.mkdir(characterDir, { recursive: true });
-      for (const [index, file] of (source.photos || []).entries()) {
-        const data = files.get(file); if (!data) continue;
-        const ext = path.extname(file).toLowerCase(); if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) continue;
-        const name = `import-original-${index + 1}${ext}`; await fs.writeFile(path.join(characterDir, name), data);
-        item.photos.push(`characters/${id}/${name}`);
-      }
-      for (const sourceVariant of source.variants || []) {
-        const variantId = newId();
-        const variant = { id: variantId, name: String(sourceVariant.name || 'Variante'), description: String(sourceVariant.description || ''), photos: [], ts: Date.now() };
-        const dir = path.join(characterDir, 'variants', variantId); await fs.mkdir(dir, { recursive: true });
-        for (const [index, file] of (sourceVariant.photos || []).entries()) {
+      const cfg = await getConfig();
+      if (source.nsfw && !cfg.nsfwEnabled) return send(res, 200, { importSkipped: true, hidden: true });
+      let result;
+      await updateJson('characters.json', [], async characters => {
+        const duplicate = importMatch(characters, source, 'characters');
+        if (duplicate) {
+          result = { importSkipped: true };
+          return characters.map(item => item.id === duplicate.id ? rememberImport(item, source) : item);
+        }
+        const id = newId();
+        const characterDir = path.join(DATA_DIR, 'characters', id);
+        const item = {
+          id, name: String(source.name || 'Personaje importado'), description: String(source.description || ''), nsfw: Boolean(source.nsfw),
+          voiceId: String(source.voiceId || ''), voiceName: String(source.voiceName || ''),
+          heygen: {
+            avatarId: String(source.heygen?.wideAvatarId || source.heygen?.avatarId || ''),
+            wideAvatarId: String(source.heygen?.wideAvatarId || source.heygen?.avatarId || ''),
+            closeAvatarId: String(source.heygen?.closeAvatarId || ''),
+            motionPrompt: heyGenMotionPromptValue(source.heygen, 'wideMotionPrompt'),
+            wideMotionPrompt: heyGenMotionPromptValue(source.heygen, 'wideMotionPrompt'),
+            closeMotionPrompt: heyGenMotionPromptValue(source.heygen, 'closeMotionPrompt'),
+            imageKey: ''
+          },
+          photos: [], variants: [], ts: Date.now()
+        };
+        await fs.mkdir(characterDir, { recursive: true });
+        for (const [index, file] of (source.photos || []).entries()) {
           const data = files.get(file); if (!data) continue;
           const ext = path.extname(file).toLowerCase(); if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) continue;
-          const name = `import-${index + 1}${ext}`; await fs.writeFile(path.join(dir, name), data);
-          variant.photos.push(`characters/${id}/variants/${variantId}/${name}`);
+          const name = `import-original-${index + 1}${ext}`; await fs.writeFile(path.join(characterDir, name), data);
+          item.photos.push(`characters/${id}/${name}`);
         }
-        variant.distinctiveElements = [];
-        for (const [index, element] of (sourceVariant.distinctiveElements || []).entries()) {
-          const data = files.get(element.image);
-          const ext = path.extname(String(element.image || '')).toLowerCase();
-          if (!data || !['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) continue;
-          const name = `distinctive-${index + 1}${ext}`;
-          const [detail] = normalizeDistinctiveElements([{ text: element.text, nsfw: element.nsfw,
-            imageKey: `characters/${id}/variants/${variantId}/${name}` }]);
-          await fs.writeFile(path.join(dir, name), data);
-          variant.distinctiveElements.push(detail);
+        for (const sourceVariant of source.variants || []) {
+          if (sourceVariant.nsfw && !cfg.nsfwEnabled) continue;
+          const variantId = newId();
+          const variant = { id: variantId, name: String(sourceVariant.name || 'Variante'), description: String(sourceVariant.description || ''), nsfw: Boolean(sourceVariant.nsfw), photos: [], ts: Date.now() };
+          const dir = path.join(characterDir, 'variants', variantId); await fs.mkdir(dir, { recursive: true });
+          for (const [index, file] of (sourceVariant.photos || []).entries()) {
+            const data = files.get(file); if (!data) continue;
+            const ext = path.extname(file).toLowerCase(); if (!['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) continue;
+            const name = `import-${index + 1}${ext}`; await fs.writeFile(path.join(dir, name), data);
+            variant.photos.push(`characters/${id}/variants/${variantId}/${name}`);
+          }
+          variant.distinctiveElements = [];
+          for (const [index, element] of (sourceVariant.distinctiveElements || []).entries()) {
+            if (element.nsfw && !cfg.nsfwEnabled) continue;
+            const data = files.get(element.image);
+            const ext = path.extname(String(element.image || '')).toLowerCase();
+            if (!data || !['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) continue;
+            const name = `distinctive-${index + 1}${ext}`;
+            const [detail] = normalizeDistinctiveElements([{ text: element.text, nsfw: element.nsfw,
+              imageKey: `characters/${id}/variants/${variantId}/${name}` }]);
+            await fs.writeFile(path.join(dir, name), data);
+            variant.distinctiveElements.push(detail);
+          }
+          item.variants.push(variant);
         }
-        item.variants.push(variant);
-      }
-      if (source.heygen?.image) {
-        const data = files.get(source.heygen.image);
-        const ext = path.extname(source.heygen.image).toLowerCase();
-        if (data && ['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) {
-          const dir = path.join(characterDir, 'heygen'); await fs.mkdir(dir, { recursive: true });
-          const name = `mirror${ext}`; await fs.writeFile(path.join(dir, name), data);
-          item.heygen.imageKey = `characters/${id}/heygen/${name}`;
+        if (source.heygen?.image) {
+          const data = files.get(source.heygen.image);
+          const ext = path.extname(source.heygen.image).toLowerCase();
+          if (data && ['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) {
+            const dir = path.join(characterDir, 'heygen'); await fs.mkdir(dir, { recursive: true });
+            const name = `mirror${ext}`; await fs.writeFile(path.join(dir, name), data);
+            item.heygen.imageKey = `characters/${id}/heygen/${name}`;
+          }
         }
-      }
-      await updateJson('characters.json', [], (characters) => [item, ...characters]);
-      return send(res, 200, item);
+        result = rememberImport(item, source);
+        return [result, ...characters];
+      });
+      return send(res, 200, result);
     }
 
     const exportMatch = /^\/api\/characters\/([a-z0-9]+)\/export$/.exec(p);
     if (exportMatch && req.method === 'GET') {
       const characters = await readJson('characters.json', []);
       const character = characters.find((c) => c.id === exportMatch[1]);
-      if (!character) return send(res, 404, { error: 'Personaje no encontrado' });
+      const cfg = await getConfig();
+      if (!character || (character.nsfw && !cfg.nsfwEnabled)) return send(res, 404, { error: 'Personaje no encontrado' });
       const entries = []; const photos = [];
       for (const [index, key] of (character.photos || []).entries()) {
         const ext = path.extname(key).toLowerCase(); const file = `original/${index + 1}${ext}`;
@@ -7923,6 +8045,7 @@ const server = http.createServer(async (req, res) => {
       }
       const variants = [];
       for (const [variantIndex, variant] of (character.variants || []).entries()) {
+        if (variant.nsfw && !cfg.nsfwEnabled) continue;
         const variantPhotos = [];
         for (const [index, key] of (variant.photos || []).entries()) {
           const ext = path.extname(key).toLowerCase(); const file = `variants/${variantIndex + 1}/${index + 1}${ext}`;
@@ -7930,12 +8053,13 @@ const server = http.createServer(async (req, res) => {
         }
         const distinctiveElements = [];
         for (const [index, element] of (variant.distinctiveElements || []).entries()) {
+          if (element.nsfw && !cfg.nsfwEnabled) continue;
           const ext = path.extname(element.imageKey).toLowerCase();
           const image = `variants/${variantIndex + 1}/distinctive/${index + 1}${ext}`;
           entries.push({ name: image, data: await fs.readFile(await resolveAssetKey(element.imageKey)) });
           distinctiveElements.push({ text: element.text, nsfw: Boolean(element.nsfw), image });
         }
-        variants.push({ name: variant.name, description: variant.description || '', photos: variantPhotos, distinctiveElements });
+        variants.push({ name: variant.name, description: variant.description || '', nsfw: Boolean(variant.nsfw), photos: variantPhotos, distinctiveElements });
       }
       let heygen = {
         avatarId: character.heygen?.wideAvatarId || character.heygen?.avatarId || '',
@@ -7951,7 +8075,7 @@ const server = http.createServer(async (req, res) => {
         heygen.image = `heygen/mirror${ext}`;
         entries.push({ name: heygen.image, data: await fs.readFile(await resolveAssetKey(character.heygen.imageKey)) });
       }
-      const manifest = { format: 'manifestador-character', version: 3, exportedAt: Date.now(), character: { name: character.name, description: character.description || '', nsfw: Boolean(character.nsfw), voiceId: character.voiceId || '', voiceName: character.voiceName || '', photos, variants, heygen } };
+      const manifest = { format: 'manifestador-character', version: 3, exportedAt: Date.now(), character: { id: character.id, importIds: importIds(character), name: character.name, description: character.description || '', nsfw: Boolean(character.nsfw), voiceId: character.voiceId || '', voiceName: character.voiceName || '', photos, variants, heygen } };
       entries.unshift({ name: 'character.json', data: Buffer.from(JSON.stringify(manifest, null, 2), 'utf8') });
       const zip = createZip(entries);
       const filename = `${baseName(character.name || 'personaje', 'personaje')}.manifestador.zip`;

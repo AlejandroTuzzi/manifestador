@@ -31,6 +31,7 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
 | Nano Banana 2 Lite | Google Gemini (`gemini-3.1-flash-lite-image`) | rápido y barato, 1K |
 | Seedream 5.0 Lite | BytePlus ModelArk | el ID exacto del modelo se ajusta en Configuración |
 | Seedream 5.0 Pro | BytePlus ModelArk | principal de alta precisión; reutiliza la key de Seedream |
+| Qwen Image 3.0 Pro | Alibaba Model Studio (directo) | 1K/2K, hasta 3 referencias y 6 imágenes por solicitud |
 | FireRed Image Edit 1.1 | WaveSpeed | editor de 1–3 referencias y respaldo ante rechazos |
 | Eleven v3 | ElevenLabs | TTS expresivo con indicaciones entre corchetes |
 | Eleven Multilingual v2 | ElevenLabs | TTS estable para narraciones y voces compatibles con v2 |
@@ -42,6 +43,7 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
 - Google Cloud Translation: para traducir prompts ES ↔ EN desde la caja.
 - BytePlus ModelArk: para Seedream.
 - WaveSpeed: para FireRed Image Edit 1.1.
+- Qwen / Alibaba Model Studio: para Qwen Image 3.0 Pro (no usar una clave de Coding Plan).
 - ElevenLabs: para voces.
 - OpenAI: solo para actualizar precios estimados con búsqueda web.
 

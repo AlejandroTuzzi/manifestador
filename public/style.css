@@ -324,6 +324,13 @@ h3 { font-size: 15px; }
 .tool-btn:hover { border-color: var(--violet); color: white; background: rgba(139, 92, 246, 0.18); }
 .tool-btn:disabled { opacity: 0.45; cursor: wait; }
 
+.prompt-tools .tool-btn, .prompt-tools .generate-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
 .generate-btn {
   padding: 12px 28px;
   border: none; border-radius: 0;
@@ -1321,6 +1328,14 @@ audio::-webkit-media-controls-volume-slider {
 .comfy-cv-item input[type="number"] { width: 90px; }
 .comfy-req-tag { color: #fb7185; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 .comfy-loop-row { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+.qwen-options { border: 1px solid var(--border); background: var(--panel-solid); color: var(--text); padding: 12px; margin: 12px 0; color-scheme: dark; }
+.qwen-options summary { cursor: pointer; color: var(--muted); }
+.qwen-options[open] summary { margin-bottom: 12px; }
+.qwen-options textarea { width: 100%; min-width: 0; resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 9px; font: inherit; }
+.qwen-options textarea:focus { outline: 1px solid var(--violet); }
+.qwen-options .cfg-grid .check-row { flex-direction: row; align-items: center; }
+.qwen-options input[type=checkbox] { width: auto; accent-color: var(--pink-strong); }
+.qwen-options :disabled { opacity: .5; cursor: not-allowed; }
 .cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .cfg-grid label { font-size: 12px; font-weight: 700; color: var(--muted); display: flex; flex-direction: column; gap: 5px; }
 .cfg-grid input, .audio-tag-add input {
@@ -1436,6 +1451,50 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 }
 
 /* ---------- modales ---------- */
+.inspiration-tabs, .inspiration-actions, .inspiration-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.inspiration-tabs { margin-bottom: 20px; }
+.inspiration-tabs .active { background: var(--pink-strong); color: var(--text); border-color: var(--pink-strong); }
+#seriesInspirationPanel { display: flex; flex-direction: column; gap: 18px; }
+.inspiration-actions .tool-btn, .inspiration-form .tool-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; }
+.inspiration-filters { display: grid; grid-template-columns: 2fr repeat(3, 1fr); gap: 12px; }
+.inspiration-form { max-width: 640px; }
+.inspiration-producer-form { display: flex; flex-direction: column; gap: 14px; }
+.inspiration-form label, .inspiration-filters label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.inspiration-form input, .inspiration-form textarea, .inspiration-form select, .inspiration-filters input, .inspiration-filters select { width: 100%; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 11px 12px; font: inherit; color-scheme: dark; }
+.inspiration-form input::file-selector-button { background: var(--panel-solid); color: var(--text); border: 1px solid var(--border); padding: 8px; margin-right: 10px; cursor: pointer; }
+.inspiration-form input::file-selector-button:hover { border-color: var(--pink-strong); }
+.inspiration-form textarea { min-height: 100px; resize: vertical; }
+.inspiration-form .inspiration-nsfw { flex-direction: row; align-items: center; }
+.inspiration-form input[type="checkbox"] { width: auto; accent-color: var(--pink-strong); }
+.inspiration-form :is(button, input, textarea, select):focus-visible, .inspiration-filters :is(input, select):focus-visible, .inspiration-cover:focus-visible { outline: 2px solid var(--pink-strong); outline-offset: 2px; }
+.inspiration-form :disabled { opacity: .5; cursor: wait; }
+.inspiration-preview { width: 100%; max-height: 280px; object-fit: contain; background: var(--bg); border: 1px solid var(--border); }
+.inspiration-tag-input { display: flex; gap: 8px; }
+.inspiration-tag-input input { flex: 1; }
+.inspiration-tag-input button { flex-shrink: 0; }
+.inspiration-card { display: flex; flex-direction: column; gap: 14px; padding: 16px; min-width: 0; }
+.inspiration-card h3, .inspiration-card p { margin: 0; }
+.inspiration-card h3, .inspiration-producer h4 { overflow-wrap: anywhere; }
+.inspiration-card .inspiration-actions { margin-top: auto; }
+.inspiration-card summary { cursor: pointer; color: var(--muted); }
+.inspiration-card details p { padding-top: 10px; }
+.inspiration-cover { width: 100%; height: 220px; background: var(--bg); border: 1px solid var(--border); padding: 0; cursor: zoom-in; }
+.inspiration-cover img { width: 100%; height: 100%; object-fit: contain; }
+.inspiration-ratings { display: flex; flex-direction: column; gap: 8px; }
+.inspiration-rating { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; }
+.inspiration-stars { display: inline-flex; gap: 3px; flex-shrink: 0; }
+.inspiration-stars button { background: var(--bg); color: var(--muted); border: 1px solid var(--border); width: 36px; height: 36px; font-size: 24px; cursor: pointer; }
+.inspiration-stars button.filled, .inspiration-stars button:hover { color: var(--pink-strong); border-color: var(--pink-strong); }
+.inspiration-stars-read { color: var(--pink-strong); letter-spacing: 2px; white-space: nowrap; }
+.inspiration-stars-read span { color: var(--muted); }
+.inspiration-producer { border-top: 1px solid var(--border); padding: 14px 0; }
+.inspiration-producer .inspiration-actions { margin-top: 16px; gap: 10px; }
+.inspiration-producer .inspiration-actions .tool-btn { padding: 8px 12px; }
+#inspirationEditor { z-index: 100; }
+#inspirationProducers { z-index: 110; }
+@media (max-width: 720px) { .inspiration-filters { grid-template-columns: 1fr 1fr; } .inspiration-rating { flex-wrap: wrap; } }
+@media (max-width: 440px) { .inspiration-filters { grid-template-columns: 1fr; } .inspiration-tag-input { flex-wrap: wrap; } }
+
 .modal {
   position: fixed; inset: 0; z-index: 50;
   display: flex; align-items: center; justify-content: center;

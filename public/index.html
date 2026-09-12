@@ -218,6 +218,7 @@
           <select id="characterVariantSelect" class="select"></select>
           <span class="hint" data-i18n="create.controls.variantHint">Elegí el original o un outfit variante</span>
         </div>
+        <div id="qwenImageOptions" hidden></div>
         <div id="modelNote" class="model-note"></div>
       </div>
 
@@ -673,7 +674,12 @@
         <h2 data-i18n="series.title">Series</h2>
         <button id="btnNewSeries" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="series.new">Nueva serie</span></button>
       </div>
-      <div id="seriesGrid" class="chars-grid"></div>
+      <div class="inspiration-tabs" role="tablist" data-i18n-aria-label="series.title">
+        <button id="seriesOwnTab" class="tool-btn active" type="button" role="tab" aria-selected="true" aria-controls="seriesGrid" data-i18n="inspiration.own"></button>
+        <button id="seriesInspirationTab" class="tool-btn" type="button" role="tab" aria-selected="false" aria-controls="seriesInspirationPanel" data-i18n="inspiration.title"></button>
+      </div>
+      <div id="seriesGrid" class="chars-grid" role="tabpanel" aria-labelledby="seriesOwnTab"></div>
+      <div id="seriesInspirationPanel" role="tabpanel" aria-labelledby="seriesInspirationTab" hidden></div>
     </section>
 
     <!-- ==================== AUTOMATIZADOR ==================== -->
@@ -829,6 +835,11 @@
           <span class="key-row"><input type="password" name="key_ark" placeholder="Key de Ark" data-i18n-placeholder="config.placeholders.arkKey"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="ark" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="ark"></span>
           </label>
+          <label>Qwen Image (Alibaba Model Studio)
+            <span class="key-row"><input type="password" name="key_qwen" placeholder="sk-…" autocomplete="off"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="qwen" data-i18n="config.test" data-i18n-title="qwen.testHint">Probar</button></span>
+            <span class="test-result" data-result="qwen" role="status" aria-live="polite"></span>
+            <span class="hint" data-i18n="qwen.keyHint"></span>
+          </label>
           <label>WaveSpeed (FireRed)
           <span class="key-row"><input type="password" name="key_wavespeed" placeholder="Key de WaveSpeed" data-i18n-placeholder="config.placeholders.wavespeedKey"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="wavespeed" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="wavespeed"></span>
@@ -947,6 +958,7 @@
           <label><span data-i18n="config.advanced.seedanceMiniId">ID de modelo Seedance 2.0 Mini</span> <input type="text" name="seedanceMiniModelId" placeholder="dreamina-seedance-2-0-mini-260615"></label>
           <label>Endpoint Ark <input type="text" name="endpoint_ark"></label>
           <label>Endpoint WaveSpeed <input type="text" name="endpoint_wavespeed" placeholder="https://api.wavespeed.ai/api/v3"></label>
+          <label><span data-i18n="qwen.endpoint"></span><input type="text" name="endpoint_qwen" placeholder="https://dashscope-intl.aliyuncs.com"><span class="hint" data-i18n="qwen.endpointHint"></span></label>
           <label>Endpoint MiniMax <input type="text" name="endpoint_minimax" placeholder="https://api.minimax.io"></label>
           <label>Endpoint Suno <input type="text" name="endpoint_suno" placeholder="https://api.sunoapi.org"></label>
           <label><span data-i18n="config.advanced.defaultSunoModel">Modelo Suno por defecto</span> <input type="text" name="sunoModelId" placeholder="V5_5"></label>
@@ -1508,5 +1520,6 @@
 <script src="character-profile.js"></script>
 <script src="dictation.js"></script>
 <script src="app.js"></script>
+<script src="series-inspiration.js"></script>
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
 <script type="module" src="poser.js"></script>

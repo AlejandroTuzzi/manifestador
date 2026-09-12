@@ -15,7 +15,7 @@ function setup() {
   const context = vm.createContext({
     state: { mode: 'image', referenceTagsEnabled: false, refs: [{ key: 'uploads/one.png', label: 'Penelope' }], video: { mode: 'reference' } },
     $: node, localStorage: { setItem: (key, value) => stored.set(key, value) },
-    renderHighlight() {}, supportsMultimediaVideoRefs: (model) => model?.multimedia,
+    renderHighlight() {}, updateEstimate() {}, supportsMultimediaVideoRefs: (model) => model?.multimedia,
     stampLabel: async (key, label) => { stamps.push({ key, label }); return 'data:image/jpeg;base64,AAA'; },
     referenceKind: (ref) => ref.kind || 'image', toast() {}, tr: (key) => key,
     activeRefModel: () => ({}), activeRefLimit: () => 1, currentVideoModel: () => ({}),

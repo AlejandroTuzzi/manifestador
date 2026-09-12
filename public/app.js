@@ -696,6 +696,30 @@ function localizedModelNote(model) {
   return model ? tr(`models.${model.id}.notes`, {}, model.notes || '') : '';
 }
 
+// Shared options UI: Creation and Automation use the same fields and defaults.
+function qwenOptionsMarkup(value = {}) {
+  return `<details class="qwen-options"><summary>${esc(tr('qwen.options'))}</summary>
+    <div class="cfg-grid">
+      <label><span>${esc(tr('qwen.negativePrompt'))}</span><textarea data-qwen="negativePrompt" rows="2">${esc(value?.negativePrompt || '')}</textarea></label>
+      <label><span>${esc(tr('qwen.seed'))}</span><input data-qwen="seed" type="number" min="0" max="2147483647" step="1" value="${esc(value?.seed ?? '')}" placeholder="${esc(tr('qwen.random'))}"></label>
+      <label class="check-row"><input data-qwen="promptExtend" type="checkbox"${value?.promptExtend !== false ? ' checked' : ''}> ${esc(tr('qwen.promptExtend'))}</label>
+      <label class="check-row"><input data-qwen="thinking" type="checkbox"${value?.thinking !== false ? ' checked' : ''}> ${esc(tr('qwen.thinking'))}</label>
+      <label><span>${esc(tr('qwen.enhancement'))}</span><select class="select" data-qwen="promptExtendMode"><option value="direct">${esc(tr('qwen.direct'))}</option><option value="agent"${value?.promptExtendMode === 'agent' ? ' selected' : ''}>${esc(tr('qwen.agent'))}</option></select></label>
+    </div><p class="hint">${esc(tr('qwen.optionsHint'))}</p>
+  </details>`;
+}
+
+function readQwenOptions(root) {
+  if (!root) return {};
+  return Object.fromEntries([...root.querySelectorAll('[data-qwen]')].map((input) => [input.dataset.qwen, input.type === 'checkbox' ? input.checked : input.value]));
+}
+
+function syncQwenOptions(root) {
+  const enabled = root.querySelector('[data-qwen="promptExtend"]').checked;
+  root.querySelector('[data-qwen="thinking"]').disabled = !enabled;
+  root.querySelector('[data-qwen="promptExtendMode"]').disabled = !enabled;
+}
+
 function renderImageControls() {
   const m = currentModel();
   if (!m) return;
@@ -711,10 +735,19 @@ function renderImageControls() {
     (v) => { state.aspectRatio = v; renderImageControls(); });
   chipRow($('#resChips'), m.resolutions, state.resolution,
     (v) => { state.resolution = v; renderImageControls(); });
-  chipRow($('#batchChips'), [1, 2, 3, 4], state.batch,
+  state.batch = Math.min(state.batch, m.maxBatch || 4);
+  chipRow($('#batchChips'), Array.from({ length: m.maxBatch || 4 }, (_, index) => index + 1), state.batch,
     (v) => { state.batch = v; renderImageControls(); },
     (v) => `×${v}`);
 
+  const qwenRoot = $('#qwenImageOptions');
+  qwenRoot.hidden = m.provider !== 'qwen';
+  qwenRoot.innerHTML = qwenOptionsMarkup(state.qwenImage);
+  syncQwenOptions(qwenRoot);
+  qwenRoot.oninput = () => { state.qwenImage = readQwenOptions(qwenRoot); syncQwenOptions(qwenRoot); };
+  const batchHint = $('#batchChips').nextElementSibling;
+  batchHint.dataset.i18n = m.nativeBatch ? 'qwen.nativeBatch' : 'create.controls.parallel';
+  batchHint.textContent = tr(batchHint.dataset.i18n);
   $('#modelNote').textContent = localizedModelNote(m);
   renderRefs();
   renderCharacterVariantControl();
@@ -1005,6 +1038,7 @@ function renderRefs() {
     strip.appendChild(add);
   }
   syncReferenceAudioButtons();
+  if (state.mode === 'image') updateEstimate();
 }
 
 function addRef(key, fromChar = false, kind = 'image') {
@@ -1649,7 +1683,8 @@ async function generate() {
       modelId: state.modelId, prompt, aspectRatio: state.aspectRatio,
       resolution: state.resolution, batch: state.batch,
       refs: state.refs.map((r) => r.key), labeledRefs, characterId: state.pinnedId || null,
-      characterVariantId: state.characterVariantId || null
+      characterVariantId: state.characterVariantId || null,
+      ...(model.provider === 'qwen' ? { qwenImage: readQwenOptions($('#qwenImageOptions')) } : {})
     } : isVideo ? {
       modelId: state.video.modelId, prompt, mode: state.video.mode,
       aspectRatio: state.video.aspectRatio, resolution: state.video.resolution,
@@ -1996,6 +2031,7 @@ async function regenerate(entry) {
     state.aspectRatio = entry.aspectRatio;
     state.resolution = entry.resolution;
     state.batch = entry.batch || 1;
+    state.qwenImage = entry.qwenImage || {};
     state.video.h3ContextIr = entry.h3ContextIr === true;
     state.refs = (entry.refs || []).map((k, index) => ({ key: k, fromChar: false, kind: entry.refKinds?.[index] }));
     renderImageControls();
@@ -2033,6 +2069,7 @@ function editEntry(entry) {
     state.aspectRatio = entry.aspectRatio;
     state.resolution = entry.resolution;
     state.batch = entry.batch || 1;
+    state.qwenImage = entry.qwenImage || {};
     state.refs = (entry.refs || []).map((k) => ({ key: k, fromChar: false }));
     renderImageControls();
   }
@@ -3992,14 +4029,15 @@ $('#vocabularyImportInput').addEventListener('change', async (event) => {
   if (!file) return;
   try {
     const dataUrl = await readFileAsDataUrl(file);
-    const { imported = 0, entries = [], vocabularyCategories = [] } = await api('/api/vocabulary/import', {
+    const { imported = 0, skipped = 0, hidden = 0, entries = [], vocabularyCategories = [] } = await api('/api/vocabulary/import', {
       method: 'POST', body: { zipBase64: dataUrl.split(',')[1] }
     });
     state.vocabularyCategoriesExtra = vocabularyCategories;
-    state.vocabulary = [...entries.filter((item) => contentIsVisible(item)), ...state.vocabulary];
+    const incoming = new Set(entries.map(item => item.id));
+    state.vocabulary = [...entries.filter((item) => contentIsVisible(item)), ...state.vocabulary.filter(item => !incoming.has(item.id))];
     renderVocabularyLibrary();
     renderVocabularyQuickPanel();
-    toast(imported ? trn('vocabulary.imported', imported) : tr('vocabulary.nothingToImport'), imported ? 'ok' : 'err');
+    toast(tr('transfer.summary', { imported: i18n.formatNumber(imported), skipped: i18n.formatNumber(skipped), hidden: i18n.formatNumber(hidden) }));
   } catch (err) { toast(tr('vocabulary.importFailed', { error: err.message }), 'err'); }
 });
 $('#vocabularySearch').addEventListener('input', (event) => { state.vocabularySearch = event.target.value; renderVocabularyLibrary(); });
@@ -5989,9 +6027,10 @@ function openSeriesScripts(seriesId) {
       try {
         const data = JSON.parse(await file.text());
         const result = await api('/api/scripts/import', { method: 'POST', body: { seriesId, data } });
-        state.scripts.unshift(result.script);
+        state.scripts = [result.script, ...state.scripts.filter(item => item.id !== result.script.id)];
         const idx = state.series.findIndex((x) => x.id === seriesId);
         if (idx !== -1) state.series[idx] = result.serie;
+        if (result.importSkipped) { toast(tr('transfer.duplicate')); openSeriesScripts(seriesId); return; }
         const matched = result.script.characters.filter((ch) => ch.characterId).length;
         toast(tr('scripts.imported', {
           title: result.script.title,
@@ -6832,7 +6871,8 @@ $('#characterImportInput').addEventListener('change', async (e) => {
   try {
     const dataUrl = await readFileAsDataUrl(file);
     const created = await api('/api/characters/import', { method: 'POST', body: { zipBase64: dataUrl.split(',')[1] } });
-    state.characters.unshift(created); renderCharacters();
+    if (created.importSkipped) { toast(tr(created.hidden ? 'transfer.hidden' : 'transfer.duplicate')); return; }
+    state.characters = [created, ...state.characters.filter(item => item.id !== created.id)]; renderCharacters();
     toast(tr('characters.imported', { name: created.name, photos: created.photos.length, variants: created.variants.length }));
   } catch (err) { toast(tr('characters.importFailed', { error: err.message }), 'err'); }
 });
@@ -7729,7 +7769,8 @@ $('#automationImportInput').addEventListener('change', async (e) => {
   try {
     const data = JSON.parse(await file.text());
     const created = await api('/api/automations', { method: 'POST', body: { data } });
-    state.automations.unshift(created);
+    state.automations = [created, ...state.automations.filter(item => item.id !== created.id)];
+    if (created.importSkipped) { toast(tr('transfer.duplicate')); openAutomation(created.id); return; }
     toast(tr('automation.imported', { name: created.name, blocks: trn('automation.blockCount', created.blocks.length) }));
     openAutomation(created.id);
   } catch (err) { toast(tr('automation.importFailed', { error: err.message }), 'err'); }
@@ -8181,6 +8222,7 @@ async function createAutomationResource({ projectId, kind, role, modelId, prompt
       method: 'POST',
       body: {
         modelId: model.id,
+        ...(model.provider === 'qwen' ? { qwenImage: pr.config.qwenImage || {} } : {}),
         prompt: automationStyledPrompt(pr, prompt),
         refs: styleRefs.map((ref) => ref.key),
         labeledRefs,
@@ -8706,6 +8748,7 @@ function renderAutomationProject() {
         </select>
         <span class="hint">${esc(tr('automation.config.fallbackHint'))}</span>
       </div>
+      <div id="autoQwenOptions">${qwenOptionsMarkup(pr.config.qwenImage)}</div>
       <div class="control-row"><label>${esc(tr('automation.config.aspectRatio'))}</label>
         <select class="select" id="autoAr">${(model?.aspectRatios || []).map((a) => `<option${a === pr.config.aspectRatio ? ' selected' : ''}>${a}</option>`).join('')}</select>
         <label>${esc(tr('automation.config.resolution'))}</label>
@@ -9191,6 +9234,7 @@ function renderAutomationProject() {
   let artStyleImageKey = pr.config.artStyleImageKey || '';
   const saveAll = () => saveAutomation({ name: $('#autoProjectName').value, config: {
     imageModelId: $('#autoModel').value,
+    qwenImage: readQwenOptions($('#autoQwenOptions')),
     fallbackImageModelId: $('#autoFallbackModel').value === $('#autoModel').value ? '' : $('#autoFallbackModel').value,
     artStyle: $('#autoArtStyle').value.trim() || DEFAULT_AUTOMATION_ART_STYLE,
     artStylePromptId,
@@ -9253,6 +9297,14 @@ function renderAutomationProject() {
       toast(tr('automation.textStyles.deleted'));
     } catch (error) { toast(error.message, 'err'); }
   });
+  const syncAutoQwen = () => {
+    const root = $('#autoQwenOptions');
+    root.hidden = ![$('#autoModel').value, $('#autoFallbackModel').value].includes('qwen-image-3.0-pro');
+    syncQwenOptions(root);
+  };
+  syncAutoQwen();
+  $('#autoQwenOptions').addEventListener('change', async () => { syncAutoQwen(); await saveAll(); });
+  $('#autoFallbackModel').addEventListener('change', syncAutoQwen);
   $('#autoModel').addEventListener('change', async () => { await saveAll(); renderAutomationProject(); });
   $('#autoAr').addEventListener('change', async () => { await saveAll(); renderAutomationProject(); });
   ['autoRes', 'autoVoice', 'autoAudioModel', 'autoHeyGenAuth', 'autoFallbackModel', 'autoArtStyle'].forEach((id) => $('#' + id).addEventListener('change', async () => {
@@ -10200,6 +10252,7 @@ async function generateAutomationImage(pr, request, setStatus) {
     body: {
       ...request,
       modelId: model.id,
+      ...(model.provider === 'qwen' ? { qwenImage: pr.config.qwenImage || {} } : {}),
       ...automationImageSettings(model, pr.config),
       batch: 1
     }
@@ -11231,7 +11284,8 @@ function updateEstimate() {
   const el = $('#costEstimate');
   if (!state.pricing) { el.textContent = ''; return; }
   if (state.mode === 'image') {
-    const p = imgPrice(state.modelId, state.resolution) * state.batch;
+    const referenceCost = (state.pricing.image?.[state.modelId]?.inputPerImage || 0) * state.refs.length;
+    const p = imgPrice(state.modelId, state.resolution) * state.batch + referenceCost * (currentModel()?.nativeBatch ? 1 : state.batch);
     el.textContent = p ? `≈ $${p.toFixed(3)}` : '';
   } else if (state.mode === 'video') {
     const model = currentVideoModel();
@@ -11417,7 +11471,7 @@ async function loadCosts() {
     const name = state.models.find((x) => x.id === modelId)?.name || modelId;
     rows += `<div class="pricing-row"><span class="pr-name">${esc(name)}</span>` +
       Object.entries(table).map(([res, val]) =>
-        `<label class="pr-unit">${res} <input type="number" step="0.001" min="0" data-model="${esc(modelId)}" data-res="${esc(res)}" value="${val}"></label>`
+        `<label class="pr-unit">${res === 'inputPerImage' ? esc(tr('qwen.inputPrice')) : esc(res)} <input type="number" step="0.001" min="0" data-model="${esc(modelId)}" data-res="${esc(res)}" value="${val}"></label>`
       ).join('') + `<span class="pr-unit">${esc(tr('costs.usdPerImage'))}</span></div>`;
   }
   for (const [modelId, table] of Object.entries(data.pricing.video || {})) {
@@ -11522,6 +11576,7 @@ function fillConfigForm() {
   f.key_googleTranslate.value = c.keys.googleTranslate || '';
   f.key_ark.value = c.keys.ark || '';
   f.key_wavespeed.value = c.keys.wavespeed || '';
+  f.key_qwen.value = c.keys.qwen || '';
   f.key_elevenlabs.value = c.keys.elevenlabs || '';
   f.key_openai.value = c.keys.openai || '';
   f.key_minimax.value = c.keys.minimax || '';
@@ -11541,6 +11596,7 @@ function fillConfigForm() {
   f.sunoModelId.value = c.sunoModelId || 'V5_5';
   f.endpoint_ark.value = c.endpoints.ark || '';
   f.endpoint_wavespeed.value = c.endpoints.wavespeed || '';
+  f.endpoint_qwen.value = c.endpoints.qwen || '';
   f.endpoint_suno.value = c.endpoints.suno || '';
   f.endpoint_minimax.value = c.endpoints.minimax || '';
   f.poserPrompt.value = c.poserPrompt || '';
@@ -11615,6 +11671,7 @@ $$('.test-btn').forEach((btn) => {
         body.seedreamModelId = f.seedreamModelId.value.trim();
       }
       if (service === 'wavespeed') body.endpoint = f.endpoint_wavespeed.value.trim();
+      if (service === 'qwen') body.endpoint = f.endpoint_qwen.value.trim();
       if (service === 'suno') body.endpoint = f.endpoint_suno.value.trim();
       if (service === 'minimax') body.endpoint = f.endpoint_minimax.value.trim();
       const r = await api('/api/test', { method: 'POST', body });
@@ -11674,6 +11731,7 @@ $('#configForm').addEventListener('submit', async (e) => {
           googleTranslate: f.key_googleTranslate.value.trim(),
           ark: f.key_ark.value.trim(),
           wavespeed: f.key_wavespeed.value.trim(),
+          qwen: f.key_qwen.value.trim(),
           elevenlabs: f.key_elevenlabs.value.trim(),
           openai: f.key_openai.value.trim(),
           minimax: f.key_minimax.value.trim(),
@@ -11690,6 +11748,7 @@ $('#configForm').addEventListener('submit', async (e) => {
         endpoints: {
           ark: f.endpoint_ark.value.trim(),
           wavespeed: f.endpoint_wavespeed.value.trim(),
+          qwen: f.endpoint_qwen.value.trim(),
           suno: f.endpoint_suno.value.trim(),
           minimax: f.endpoint_minimax.value.trim()
         },
