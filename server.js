@@ -2,7 +2,7 @@
 // Ejecutar con: npm start   (luego abrir http://localhost:7777)
 
 import http from 'node:http';
-import { protectedAssetKeys } from './lib/asset-deletion-guard.js';
+import { protectedAssetKeys, protectedAssetAssociations } from './lib/asset-deletion-guard.js';
 import { changeInspiration, visibleInspiration, inspirationError } from './lib/series-inspiration.js';
 import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
 import { exportInspirationArchive, importInspirationArchive, parseLibraryManifest } from './lib/inspiration-transfer.js';
@@ -163,17 +163,20 @@ async function writeJson(file, value) {
 }
 
 const jsonLocks = new Map();
-async function assetDeletionConflicts(keys) {
+async function assetDeletionConflicts(keys, detailed = false) {
   const [characters, elements, characterLinks, elementLinks] = await Promise.all([
     readJson('characters.json', []), readJson('elements.json', []),
     readJson('asset-links.json', []), readJson('element-links.json', [])
   ]);
-  return protectedAssetKeys(keys, { characters, elements, characterLinks, elementLinks });
+  const data = { characters, elements, characterLinks, elementLinks };
+  if (detailed) return protectedAssetAssociations(keys, { ...data, nsfwEnabled: (await getConfig()).nsfwEnabled });
+  return protectedAssetKeys(keys, data);
 }
 
 async function assertAssetsDeletable(keys) {
-  if ((await assetDeletionConflicts(keys)).length) {
-    const error = localizedServerError('assetAssociatedDeletion', 'Asset deletion blocked by character or location associations.');
+  const conflicts = await assetDeletionConflicts(keys, true);
+  if (conflicts.length) {
+    const error = localizedServerError('assetAssociatedDeletion', 'Asset deletion blocked by character or location associations.', { assets: conflicts });
     error.status = 409;
     throw error;
   }

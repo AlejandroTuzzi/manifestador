@@ -1,4 +1,10 @@
 window.ManifestadorI18n.register('en', {
+  "assets.deletionBlockedTitle": "Cannot delete",
+  "assets.blockedCharacter": "This asset cannot be deleted because it is associated with the character {name}.",
+  "assets.blockedLocation": "This asset cannot be deleted because it is associated with the location {name}.",
+  "assets.blockedHidden": "(hidden NSFW content)",
+  "assets.blockedUnknown": "(unnamed association)",
+  "assets.blockedVariant": "Variant",
   'errors.assetAssociatedDeletion': "No assets were deleted: one or more are associated with a character or location (including variants, photos or distinctive elements). Remove those associations before deleting them.",
   'inspiration.reuseTags': "Reuse saved tags (type to filter)",
   'inspiration.noTagSuggestions': "No matching tags available. You can create a new one.",

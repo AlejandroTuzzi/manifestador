@@ -4533,10 +4533,38 @@ async function downloadAssets(keys) {
 }
 $('#btnDownloadSelected').addEventListener('click', () => downloadAssets([...state.selectedAssets]));
 
+function showAssetDeletionWarning(error) {
+  let modal = $('#assetDeletionWarning');
+  if (!modal) {
+    modal = document.createElement('div'); modal.id = 'assetDeletionWarning'; modal.className = 'modal';
+    modal.setAttribute('role', 'alertdialog'); modal.setAttribute('aria-modal', 'true'); modal.setAttribute('aria-labelledby', 'assetDeletionWarningTitle');
+    document.body.appendChild(modal);
+  }
+  const previousFocus = document.activeElement;
+  const assets = Array.isArray(error.details?.assets) ? error.details.assets : [];
+  modal.innerHTML = `<div class="modal-box form-modal-box"><h3 id="assetDeletionWarningTitle">${esc(tr('assets.deletionBlockedTitle'))}</h3><p>${esc(error.message)}</p><div class="asset-deletion-conflicts">${assets.map(asset => `<section><h4>${esc(String(asset.key || '').split('/').pop())}</h4><ul>${(asset.associations || []).map(link => `<li>${esc(tr(link.kind === 'character' ? 'assets.blockedCharacter' : 'assets.blockedLocation', { name: link.hidden ? tr('assets.blockedHidden') : link.name || tr('assets.blockedUnknown') }))}${link.variantName ? ` — ${esc(tr('assets.blockedVariant'))}: ${esc(link.variantName)}` : ''}</li>`).join('')}</ul></section>`).join('')}</div><button type="button" class="tool-btn" data-close>${esc(tr('common.close'))}</button></div>`;
+  modal.hidden = false;
+  const button = modal.querySelector('[data-close]');
+  const close = () => { modal.hidden = true; previousFocus?.focus(); };
+  button.onclick = close;
+  modal.onkeydown = event => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
+    if (event.key === 'Tab') { event.preventDefault(); button.focus(); }
+  };
+  button.focus();
+}
+
 async function deleteAssets(keys) {
   if (!keys.length) return;
   if (!confirm(trn('assets.deleteConfirm', keys.length))) return;
-  const result = await api('/api/assets/delete', { method: 'POST', body: { keys } });
+  let result;
+  try {
+    result = await api('/api/assets/delete', { method: 'POST', body: { keys } });
+  } catch (error) {
+    if (error.code === 'assetAssociatedDeletion') showAssetDeletionWarning(error);
+    else toast(error.message, 'err');
+    return false;
+  }
   keys.forEach((key) => state.selectedAssets.delete(key));
   state.series.forEach((s) => { s.assetKeys = (s.assetKeys || []).filter((key) => !keys.includes(key)); });
   state.workspaceProjects.forEach((project) => { project.assetKeys = (project.assetKeys || []).filter((key) => !keys.includes(key)); });

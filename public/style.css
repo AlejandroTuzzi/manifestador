@@ -1495,6 +1495,13 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 @media (max-width: 720px) { .inspiration-filters { grid-template-columns: 1fr 1fr; } .inspiration-rating { flex-wrap: wrap; } }
 @media (max-width: 440px) { .inspiration-filters { grid-template-columns: 1fr; } .inspiration-tag-input { flex-wrap: wrap; } }
 
+#assetDeletionWarning { z-index: 300; }
+.asset-deletion-conflicts { overflow-wrap: anywhere; }
+.asset-deletion-conflicts section { border-top: 1px solid var(--border); padding: 12px 0; }
+.asset-deletion-conflicts h4 { margin: 0 0 8px; }
+.asset-deletion-conflicts ul { margin: 0; padding-left: 20px; color: var(--muted); }
+.asset-deletion-conflicts li + li { margin-top: 6px; }
+
 .modal {
   position: fixed; inset: 0; z-index: 50;
   display: flex; align-items: center; justify-content: center;

@@ -298,7 +298,7 @@ async function api(path, opts = {}) {
     });
     const json = await res.json().catch(() => ({}));
     if (res.status === 401 && json.loginRequired) showLogin();
-    if (!res.ok) throw new Error(i18n.errorMessage(json, `HTTP ${res.status}`));
+    if (!res.ok) throw Object.assign(new Error(i18n.errorMessage(json, `HTTP ${res.status}`)), { code: json.code, details: json.details, status: res.status });
     if (taskId) finishUiTask(taskId);
     return json;
   } catch (error) {

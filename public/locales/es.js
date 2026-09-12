@@ -1,4 +1,10 @@
 window.ManifestadorI18n.register('es', {
+  "assets.deletionBlockedTitle": "No se puede eliminar",
+  "assets.blockedCharacter": "Este asset no se puede eliminar porque está asociado al personaje {name}.",
+  "assets.blockedLocation": "Este asset no se puede eliminar porque está asociado a la locación {name}.",
+  "assets.blockedHidden": "(contenido NSFW oculto)",
+  "assets.blockedUnknown": "(asociación sin nombre)",
+  "assets.blockedVariant": "Variante",
   'errors.assetAssociatedDeletion': "No se eliminó ningún asset: uno o más están asociados a un personaje o una locación (incluidas sus variantes, fotos o elementos distintivos). Quitá esas asociaciones antes de borrarlos.",
   'inspiration.reuseTags': "Reutilizar etiquetas guardadas (escribí para filtrar)",
   'inspiration.noTagSuggestions': "No hay etiquetas disponibles que coincidan. Podés crear una nueva.",
