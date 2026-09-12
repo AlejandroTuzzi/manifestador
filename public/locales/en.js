@@ -1,4 +1,5 @@
 window.ManifestadorI18n.register('en', {
+  'errors.assetAssociatedDeletion': "No assets were deleted: one or more are associated with a character or location (including variants, photos or distinctive elements). Remove those associations before deleting them.",
   'inspiration.reuseTags': "Reuse saved tags (type to filter)",
   'inspiration.noTagSuggestions': "No matching tags available. You can create a new one.",
   "inspiration.episodeCount": "Number of episodes",

@@ -1,4 +1,5 @@
 window.ManifestadorI18n.register('es', {
+  'errors.assetAssociatedDeletion': "No se eliminó ningún asset: uno o más están asociados a un personaje o una locación (incluidas sus variantes, fotos o elementos distintivos). Quitá esas asociaciones antes de borrarlos.",
   'inspiration.reuseTags': "Reutilizar etiquetas guardadas (escribí para filtrar)",
   'inspiration.noTagSuggestions': "No hay etiquetas disponibles que coincidan. Podés crear una nueva.",
   "inspiration.episodeCount": "Cantidad de episodios",
