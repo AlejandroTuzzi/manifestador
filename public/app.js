@@ -857,13 +857,12 @@ function renderVideoControls() {
     (v) => `${v}s`);
 
   if (isH3) state.video.audio = true;
-  $('#videoAudioRow').hidden = !m.audio;
+  $('#videoGenerateAudioOption').hidden = !m.audio;
   $('#videoAudio').checked = m.audio && state.video.audio;
   $('#videoAudio').disabled = isH3;
   $('#videoDurationRow').hidden = isHeyGen;
   $('#videoModeRow').hidden = isHeyGen;
-  $('#videoAudioRow').hidden = isHeyGen || !m.audio;
-  $('#videoAvoidMusicRow').hidden = isHeyGen;
+  $('#videoAudioRow').hidden = isHeyGen;
   $('#videoAvoidMusic').checked = state.video.avoidMusic !== false;
   $('#heygenVideoControls').hidden = !isHeyGen;
   $('#h3VideoControls').hidden = !isH3;

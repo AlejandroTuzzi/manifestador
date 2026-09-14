@@ -838,6 +838,9 @@ pre[class*="language-"] { background: rgba(10,5,18,.65); border: 1px solid var(-
 }
 #musicControls .text-input:focus { outline: none; border-color: var(--violet); }
 #musicControls .text-input::placeholder { color: #6b5a87; }
+.video-audio-options { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; gap: 12px 24px; }
+.video-audio-options .poser-toggle { gap: 8px; }
+.video-audio-options input { flex-shrink: 0; accent-color: var(--pink-strong); color-scheme: dark; }
 .control-row > label {
   width: 92px; flex-shrink: 0;
   font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
