@@ -75,7 +75,8 @@
       <button class="nav-btn" data-view="prompts"><svg class="ic"><use href="#i-book"/></svg><span data-i18n="nav.prompts">Prompts</span></button>
       <button class="nav-btn" data-view="vocabulary"><svg class="ic"><use href="#i-tag"/></svg><span data-i18n="nav.vocabulary">Vocabulario</span></button>
       <button class="nav-btn" data-view="snippets"><svg class="ic"><use href="#i-code"/></svg><span data-i18n="nav.snippets">Snippets</span></button>
-      <button class="nav-btn" data-view="costs"><svg class="ic"><use href="#i-dollar"/></svg><span data-i18n="nav.costs">Consumo</span></button>
+      <button class="nav-btn" data-view="budgets"><svg class="ic"><use href="#i-dollar"/></svg><span data-i18n="budget.title"></span></button>
+      <button class="nav-btn" data-view="costs"><svg class="ic"><use href="#i-dollar"/></svg><span data-i18n="nav.costs">Consumo e ingresos</span></button>
       <button class="nav-btn" data-view="config"><svg class="ic"><use href="#i-gear"/></svg><span data-i18n="nav.config">Configuración</span></button>
     </nav>
 
@@ -95,7 +96,6 @@
       <div id="taskMonitorList" class="task-monitor-list"><span class="task-monitor-empty" data-i18n="tasks.empty">La actividad aparecerá aquí.</span></div>
     </section>
 
-    <div class="sidebar-footer" data-i18n="sidebar.local">local · sin nubes de más</div>
   </aside>
 
   <main>
@@ -772,6 +772,8 @@
 
     <!-- ==================== CONSUMO ==================== -->
     <section id="view-costs" class="view">
+      <div class="budget-tabs"><button id="usageTab" type="button" class="tool-btn active" data-i18n="budget.usage"></button><button id="earningsTab" type="button" class="tool-btn" data-i18n="budget.earnings"></button></div>
+      <div id="usagePanel">
       <div class="chars-head">
         <h2 data-i18n="costs.title">Consumo</h2>
         <button id="btnRefreshPricing" class="generate-btn small"><svg class="ic"><use href="#i-search"/></svg> <span data-i18n="costs.refreshPrices">Actualizar precios con OpenAI</span></button>
@@ -797,6 +799,14 @@
         <h3 data-i18n="costs.latestOperations">Últimas operaciones</h3>
         <div id="costsLedger"></div>
       </div>
+      </div>
+      <div id="earningsPanel" class="budget-ui" hidden></div>
+    </section>
+
+    <section id="view-budgets" class="view">
+      <div class="chars-head"><h2 data-i18n="budget.title"></h2></div>
+      <div id="budgetTabs" class="budget-tabs"></div>
+      <div id="budgetPanel" class="budget-ui"></div>
     </section>
 
     <!-- ==================== CONFIG ==================== -->
@@ -1521,5 +1531,6 @@
 <script src="dictation.js"></script>
 <script src="app.js"></script>
 <script src="series-inspiration.js"></script>
+<script type="module" src="budgets.js"></script>
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
 <script type="module" src="poser.js"></script>

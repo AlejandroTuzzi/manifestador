@@ -17,6 +17,7 @@ assets/**
 .env.*
 !.env.example
 node_modules/
+tmp/pdfs/
 npm-debug.log*
 .DS_Store
 Thumbs.db

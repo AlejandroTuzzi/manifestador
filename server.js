@@ -2,6 +2,8 @@
 // Ejecutar con: npm start   (luego abrir http://localhost:7777)
 
 import http from 'node:http';
+import { budgetSettings, defaultBudgetSettings, saveBudget, setBudgetStatus, budgetEarnings, budgetError } from './public/budget-model.js';
+import { budgetHtml, budgetCatalog, renderBudgetPdf, budgetPdfFilename } from './lib/budget-pdf.js';
 import { protectedAssetKeys, protectedAssetAssociations } from './lib/asset-deletion-guard.js';
 import { changeInspiration, visibleInspiration, inspirationError } from './lib/series-inspiration.js';
 import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
@@ -5220,6 +5222,59 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- series ---
+    if (p === '/api/budgets' && req.method === 'GET') {
+      const data = await readJson('budgets.json', {});
+      return send(res, 200, { settings: data.settings || defaultBudgetSettings(), quotes: data.quotes || [], earnings: budgetEarnings(data.quotes || []) });
+    }
+    if (p === '/api/budgets/settings' && req.method === 'PUT') {
+      const settings = budgetSettings(await readJsonBody(req));
+      if (settings.headerImage) {
+        const stat = await fs.stat(await resolveAssetKey(settings.headerImage)).catch(() => null);
+        if (!stat?.isFile()) throw budgetError('budgetImage');
+      }
+      await updateJson('budgets.json', {}, data => ({ ...data, settings }));
+      return send(res, 200, { settings });
+    }
+    if (p === '/api/budgets' && req.method === 'POST') {
+      const body = await readJsonBody(req); let quote;
+      await updateJson('budgets.json', {}, data => {
+        quote = saveBudget(body, data.settings || defaultBudgetSettings(), null, { id:newId() });
+        return { ...data, quotes:[quote, ...(data.quotes || [])] };
+      });
+      return send(res, 200, quote);
+    }
+    const budgetMatch = /^\/api\/budgets\/([a-z0-9]+)(\/pdf)?$/.exec(p);
+    if (budgetMatch && req.method === 'PUT' && !budgetMatch[2]) {
+      const body = await readJsonBody(req); let quote;
+      await updateJson('budgets.json', {}, data => {
+        const previous = (data.quotes || []).find(item => item.id === budgetMatch[1]);
+        if (!previous) throw budgetError('budgetNotFound', 404);
+        quote = body.action === 'status' ? setBudgetStatus(previous, body.status, body.revision) : saveBudget(body, data.settings, previous);
+        return { ...data, quotes:data.quotes.map(item => item.id === quote.id ? quote : item) };
+      });
+      return send(res, 200, quote);
+    }
+    if (budgetMatch && req.method === 'GET' && budgetMatch[2]) {
+      const data = await readJson('budgets.json', {});
+      const quote = (data.quotes || []).find(item => item.id === budgetMatch[1]);
+      if (!quote) throw budgetError('budgetNotFound', 404);
+      let header = '';
+      if (quote.snapshot.headerImage) {
+        const image = await fs.readFile(await resolveAssetKey(quote.snapshot.headerImage)).catch(() => null);
+        if (!image) throw budgetError('budgetImage');
+        const extension = path.extname(quote.snapshot.headerImage).toLowerCase();
+        header = `data:${extension === '.png' ? 'image/png' : extension === '.webp' ? 'image/webp' : 'image/jpeg'};base64,${image.toString('base64')}`;
+      }
+      const locale = url.searchParams.get('lang') === 'en' ? 'en' : 'es';
+      const html = budgetHtml(quote, await budgetCatalog(locale), locale, header, data.settings || {});
+      let pdf;
+      try { pdf = await renderBudgetPdf(html); }
+      catch { throw budgetError('budgetPdf', 500); }
+      const filename = budgetPdfFilename(quote);
+      const encodedFilename = encodeURIComponent(filename).replace(/['()*]/g, char => '%' + char.charCodeAt(0).toString(16).toUpperCase());
+      return send(res, 200, pdf, { mime:'application/pdf', extra:{ 'Content-Disposition':`attachment; filename="${filename.replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encodedFilename}` } });
+    }
+
     if (p === '/api/series-inspiration/export' && req.method === 'GET') {
       const [collection, cfg, metadata] = await Promise.all([readJson('series-inspiration.json', {}), getConfig(), readJson('asset-metadata.json', {})]);
       const files = await exportInspirationArchive(visibleInspiration(collection, cfg.nsfwEnabled, metadata), async key => fs.readFile(await resolveAssetKey(key)));
