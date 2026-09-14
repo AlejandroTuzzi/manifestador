@@ -51,7 +51,7 @@ const state = {
   videoModels: [],
   video: {
     modelId: null, mode: 'reference', aspectRatio: '16:9', resolution: '720p', duration: 5, audio: false,
-    h3ContextIr: false,
+    h3ContextIr: false, avoidMusic: true,
     omniPreviousInteractionId: '', omniSourceHistoryId: '', omniChainDepth: 0, omniCumulativeDuration: 0,
     heygenAuthMode: 'oauth', heygenCharacterId: '', heygenVoiceId: '', heygenMotionPrompt: '', heygenExpressiveness: 'low'
   },

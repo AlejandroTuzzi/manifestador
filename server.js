@@ -4,6 +4,7 @@
 import http from 'node:http';
 import { budgetSettings, defaultBudgetSettings, saveBudget, setBudgetStatus, budgetEarnings, budgetError } from './public/budget-model.js';
 import { budgetHtml, budgetCatalog, renderBudgetPdf, budgetPdfFilename } from './lib/budget-pdf.js';
+import { videoAudioPolicy } from './lib/video-audio-policy.js';
 import { protectedAssetKeys, protectedAssetAssociations } from './lib/asset-deletion-guard.js';
 import { changeInspiration, visibleInspiration, inspirationError } from './lib/series-inspiration.js';
 import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
@@ -1419,7 +1420,7 @@ async function runVideoGeneration(req) {
   const hasPoserRef = refs.some((key) => String(key).startsWith('poser/'));
   const preface = refs.some((key) => validStamp(labeledRefs[key])) ? LABELED_REFS_PROMPT : '';
   const suffix = hasPoserRef && cfg.poserPrompt?.trim() ? cfg.poserPrompt.trim() : '';
-  const sentPrompt = [preface, prompt, suffix].filter(Boolean).join('\n\n');
+  const sentPrompt = [preface, prompt, suffix, videoAudioPolicy(req.avoidMusic)].filter(Boolean).join('\n\n');
 
   if (model.provider === 'omni') {
     if (mediaRefs.some((ref) => String(ref.path || '').startsWith('asset://'))) {
@@ -1467,7 +1468,7 @@ async function runVideoGeneration(req) {
     });
     const entry = {
       id: newId(), ts: Date.now(), type: 'video', modelId: model.id, modelName: model.name,
-      prompt, sentPrompt: video.finalPrompt, mode, aspectRatio, resolution, duration,
+      avoidMusic: req.avoidMusic !== false, prompt, sentPrompt: video.finalPrompt, mode, aspectRatio, resolution, duration,
       audio: Boolean(audio), refs, refKinds: mediaRefs.map((ref) => ref.kind),
       characterId: req.characterId || null, outputs: [key], errors: [], cost: Number(cost.toFixed(6)),
       omniInteractionId: video.interactionId,
@@ -1520,7 +1521,7 @@ async function runVideoGeneration(req) {
     });
     const entry = {
       id: newId(), ts: Date.now(), type: 'video', modelId: model.id, modelName: model.name,
-      prompt, sentPrompt, mode, aspectRatio, resolution, duration, audio: Boolean(audio), refs,
+      avoidMusic: req.avoidMusic !== false, prompt, sentPrompt, mode, aspectRatio, resolution, duration, audio: Boolean(audio), refs,
       refKinds: mediaRefs.map((ref) => ref.kind), characterId: req.characterId || null,
       outputs: [key], errors: [], cost: Number(cost.toFixed(6)), seedanceTaskId: video.taskId,
       seed: video.seed
@@ -1572,7 +1573,7 @@ async function runVideoGeneration(req) {
     });
     const entry = {
       id: newId(), ts: Date.now(), type: 'video', modelId: model.id, modelName: model.name,
-      prompt, sentPrompt: video.finalPrompt, mode, aspectRatio: video.ratio || aspectRatio,
+      avoidMusic: req.avoidMusic !== false, prompt, sentPrompt: video.finalPrompt, mode, aspectRatio: video.ratio || aspectRatio,
       resolution, duration: outputSeconds, audio: true, refs, refKinds: mediaRefs.map((ref) => ref.kind),
       characterId: req.characterId || null, outputs: [key], errors: [], cost: Number(cost.toFixed(6)),
       h3TaskId: video.taskId, h3ContextTaskId: video.contextTaskId || '', h3ContextIr: req.h3ContextIr === true
@@ -1613,6 +1614,7 @@ async function runVideoGeneration(req) {
     resolution,
     duration,
     audio: Boolean(audio),
+    avoidMusic: req.avoidMusic !== false,
     refs,
     characterId: req.characterId || null,
     outputs: [key],

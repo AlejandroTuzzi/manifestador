@@ -863,6 +863,8 @@ function renderVideoControls() {
   $('#videoDurationRow').hidden = isHeyGen;
   $('#videoModeRow').hidden = isHeyGen;
   $('#videoAudioRow').hidden = isHeyGen || !m.audio;
+  $('#videoAvoidMusicRow').hidden = isHeyGen;
+  $('#videoAvoidMusic').checked = state.video.avoidMusic !== false;
   $('#heygenVideoControls').hidden = !isHeyGen;
   $('#h3VideoControls').hidden = !isH3;
   $('#omniVideoControls').hidden = !isOmni;
@@ -912,6 +914,7 @@ function renderVideoControls() {
 }
 
 $('#videoAudio').addEventListener('change', (e) => { state.video.audio = e.target.checked; });
+$('#videoAvoidMusic').addEventListener('change', (e) => { state.video.avoidMusic = e.target.checked; });
 $('#h3ContextIr').addEventListener('change', (e) => { state.video.h3ContextIr = e.target.checked; });
 $('#omniClearConversation').addEventListener('click', () => {
   state.video.omniPreviousInteractionId = '';
@@ -1689,6 +1692,7 @@ async function generate() {
       modelId: state.video.modelId, prompt, mode: state.video.mode,
       aspectRatio: state.video.aspectRatio, resolution: state.video.resolution,
       duration: state.video.duration, audio: state.video.audio,
+      avoidMusic: state.video.avoidMusic !== false,
       refs: state.refs.slice(0, activeRefLimit()).map((r) => r.key), labeledRefs,
       refKinds: state.refs.slice(0, activeRefLimit()).map(referenceKind),
       h3ContextIr: isH3 && state.video.h3ContextIr,
@@ -2016,6 +2020,7 @@ async function regenerate(entry) {
     state.video.mode = entry.mode || 'reference';
     state.video.duration = entry.duration || 5;
     state.video.audio = Boolean(entry.audio);
+    state.video.avoidMusic = entry.avoidMusic !== false;
     state.video.h3ContextIr = entry.h3ContextIr === true;
     state.video.omniPreviousInteractionId = entry.omniPreviousInteractionId || '';
     state.video.omniSourceHistoryId = entry.omniSourceHistoryId || '';
@@ -2054,6 +2059,7 @@ function editEntry(entry) {
     state.video.mode = entry.mode || 'reference';
     state.video.duration = entry.duration || 5;
     state.video.audio = Boolean(entry.audio);
+    state.video.avoidMusic = entry.avoidMusic !== false;
     state.video.h3ContextIr = entry.h3ContextIr === true;
     state.video.omniPreviousInteractionId = entry.omniPreviousInteractionId || '';
     state.video.omniSourceHistoryId = entry.omniSourceHistoryId || '';

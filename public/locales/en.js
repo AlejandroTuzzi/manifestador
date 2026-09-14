@@ -887,6 +887,7 @@ window.ManifestadorI18n.register('en', {
   'create.controls.secondsCost': 'seconds — cost scales with duration',
   'create.controls.audio': 'Audio',
   'create.controls.generateAudio': 'generate audio (voices, ambience, effects)',
+  'create.controls.avoidMusic': 'Avoid music',
   'create.controls.mode': 'Mode',
   'create.controls.images': 'Images',
   'create.h3.analyze': 'analyze all references and enrich the prompt before generating',
