@@ -2,7 +2,7 @@
 // Ejecutar con: npm start   (luego abrir http://localhost:7777)
 
 import http from 'node:http';
-import { budgetSettings, defaultBudgetSettings, saveBudget, setBudgetStatus, budgetEarnings, budgetError } from './public/budget-model.js';
+import { budgetSettings, defaultBudgetSettings, saveBudget, refreshBudgetPrices, setBudgetStatus, budgetEarnings, budgetError } from './public/budget-model.js';
 import { budgetHtml, budgetCatalog, renderBudgetPdf, budgetPdfFilename } from './lib/budget-pdf.js';
 import { videoAudioPolicy } from './lib/video-audio-policy.js';
 import { protectedAssetKeys, protectedAssetAssociations } from './lib/asset-deletion-guard.js';
@@ -5254,7 +5254,7 @@ const server = http.createServer(async (req, res) => {
       await updateJson('budgets.json', {}, data => {
         const previous = (data.quotes || []).find(item => item.id === budgetMatch[1]);
         if (!previous) throw budgetError('budgetNotFound', 404);
-        quote = body.action === 'status' ? setBudgetStatus(previous, body.status, body.revision) : saveBudget(body, data.settings, previous);
+        quote = body.action === 'status' ? setBudgetStatus(previous, body.status, body.revision) : body.action === 'refresh-prices' ? refreshBudgetPrices(previous, data.settings, body.revision) : saveBudget(body, data.settings, previous);
         return { ...data, quotes:data.quotes.map(item => item.id === quote.id ? quote : item) };
       });
       return send(res, 200, quote);

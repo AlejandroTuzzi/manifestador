@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { BUDGET_GROUPS, defaultBudgetSettings, budgetSettings, newBudgetDraft, saveBudget, setBudgetStatus, budgetEarnings, budgetError, calculateBudget } from '../public/budget-model.js';
+import { BUDGET_GROUPS, defaultBudgetSettings, budgetSettings, newBudgetDraft, saveBudget,refreshBudgetPrices, setBudgetStatus, budgetEarnings, budgetError, calculateBudget } from '../public/budget-model.js';
 import { safeBudgetFooter, budgetHtml, budgetCatalog, budgetPdfFilename } from '../lib/budget-pdf.js';
 
 test('PDF filenames include creation date, client and drama with safe underscores',()=>{
@@ -45,6 +45,21 @@ test('voices charge once per character, independent of runtime, with discounts a
   assert.equal(cost(legacy),3500);
 });
 
+test('refresh prices recalculates drafts without changing FX, discounts, terms or original data',()=>{
+  const {quote,settings}=fixture('EUR');const original=JSON.stringify(quote);
+  settings.rates.characters.create=180;settings.rates.characters.revisions=99;settings.usdPerEuro=9;
+  const updated=refreshBudgetPrices(quote,settings,quote.revision,20);
+  assert.equal(JSON.stringify(quote),original);
+  assert.equal(updated.totals.totalUsdCents,quote.totals.totalUsdCents+9000);
+  assert.equal(updated.totals.totalCents,quote.totals.totalCents+7200);
+  assert.equal(updated.snapshot.usdPerEuro,1.25);
+  assert.equal(updated.snapshot.rates.characters.revisions,3);
+  assert.deepEqual(updated.discounts,quote.discounts);
+  assert.equal(updated.revision,quote.revision+1);
+  assert.throws(()=>refreshBudgetPrices(updated,settings,quote.revision),{localizationCode:'budgetConflict'});
+  for(const status of ['sent','paid','cancelled'])assert.throws(()=>refreshBudgetPrices({...quote,status},settings,quote.revision),{localizationCode:'budgetRefreshDraftOnly'});
+});
+
 test('EUR conversion snapshots the manually configured rate and prices, ignoring subsequent settings and client totals',()=>{
   const {quote,body,settings}=fixture('EUR');
   assert.equal(quote.totals.totalCents,64000);
@@ -85,6 +100,9 @@ test('PDF HTML uses escaped user text, the saved prices, both languages and all 
     assert.match(html,/&lt;img src=x onerror=alert\(1\)&gt;/);assert.match(html,/episode-grid/);
     assert.doesNotMatch(html,/>budget\.[a-zA-Z]/);assert.match(html,/Content-Security-Policy/);
     assert.match(html,/1 EUR = 1[.,]25 USD/);
+    const average=new Intl.NumberFormat(locale,{style:'currency',currency:quote.currency}).format(quote.totals.totalCents/100/quote.episodes.length);
+    assert.ok(html.includes(average));
+    assert.match(html,/class="per-episode"/);
     assert.match(html,/@page\s*\{[^}]*background:\s*#100a19;/);
   }
 });
@@ -109,7 +127,7 @@ test('budget routes persist quotes and status changes atomically without creatin
   const server=fs.readFileSync(new URL('../server.js',import.meta.url),'utf8');
   const source=server.slice(server.indexOf("    if (p === '/api/budgets'"),server.indexOf("    if (p === '/api/series-inspiration/export'"));
   const {body,settings}=fixture();let data={settings,quotes:[]};let serial=0;
-  const run=(p,method,payload={})=>vm.runInNewContext(`(async()=>{${source}})()`,{p,req:{method},res:{},readJsonBody:async()=>payload,readJson:async(file)=>{assert.equal(file,'budgets.json');return structuredClone(data);},updateJson:async(file,fallback,fn)=>{assert.equal(file,'budgets.json');data=await fn(structuredClone(data));return data;},send:(_,status,value)=>value,newId:()=>`q${++serial}`,budgetSettings,defaultBudgetSettings,saveBudget,setBudgetStatus,budgetEarnings,budgetError});
+  const run=(p,method,payload={})=>vm.runInNewContext(`(async()=>{${source}})()`,{p,req:{method},res:{},readJsonBody:async()=>payload,readJson:async(file)=>{assert.equal(file,'budgets.json');return structuredClone(data);},updateJson:async(file,fallback,fn)=>{assert.equal(file,'budgets.json');data=await fn(structuredClone(data));return data;},send:(_,status,value)=>value,newId:()=>`q${++serial}`,budgetSettings,defaultBudgetSettings,saveBudget,refreshBudgetPrices,setBudgetStatus,budgetEarnings,budgetError});
   const saved=await run('/api/budgets','POST',body);assert.equal(saved.totals.totalCents,80000);
   const sent=await run('/api/budgets/'+saved.id,'PUT',{action:'status',status:'sent',revision:1});
   await run('/api/budgets/'+saved.id,'PUT',{action:'status',status:'paid',revision:sent.revision});

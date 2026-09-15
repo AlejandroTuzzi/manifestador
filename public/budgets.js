@@ -66,7 +66,7 @@ function drawTotals() {
     const totals = draftTotals();
     if (!Number.isFinite(totals.totalCents)) throw 0;
     $('#budgetDurationTotal').textContent = bt('totalDuration', {minutes:i18n.formatNumber(totals.minutes, {maximumFractionDigits:3}), clock:budgetDurationClock(totals.minutes)});
-    $('#budgetTotals').innerHTML = `<h3>${h('breakdown')}</h3><div class="budget-table-wrap"><table><thead><tr>${['group','base','discount','subtotal','revisions'].map(key => `<th>${h(key)}</th>`).join('')}</tr></thead><tbody>${totals.groups.map(row => `<tr><td>${h(row.group)}</td><td>${money(row.baseCents,draft.currency)}</td><td>${money(row.discountCents,draft.currency)}</td><td>${money(row.totalCents,draft.currency)}</td><td>${i18n.formatNumber((draft.snapshot || library.settings).rates[row.group].revisions)}</td></tr>`).join('')}</tbody></table></div><h2>${h('total')}: ${money(totals.totalCents,draft.currency)}</h2>${draft.currency === 'EUR' ? `<p>1 EUR = ${i18n.formatNumber((draft.snapshot || library.settings).usdPerEuro)} USD</p>` : ''}${totals.groups.some(row => row.baseUsdCents === 0) ? `<p class="hint">${h('zeroHint')}</p>` : ''}`;
+    $('#budgetTotals').innerHTML = `<h3>${h('breakdown')}</h3><div class="budget-table-wrap"><table><thead><tr>${['group','base','discount','subtotal','revisions'].map(key => `<th>${h(key)}</th>`).join('')}</tr></thead><tbody>${totals.groups.map(row => `<tr><td>${h(row.group)}</td><td>${money(row.baseCents,draft.currency)}</td><td>${money(row.discountCents,draft.currency)}</td><td>${money(row.totalCents,draft.currency)}</td><td>${i18n.formatNumber((draft.snapshot || library.settings).rates[row.group].revisions)}</td></tr>`).join('')}</tbody></table></div><h2>${h('total')}: ${money(totals.totalCents,draft.currency)}</h2><p class="budget-per-episode">${h('perEpisode')}: <strong>${money(totals.totalCents / draft.episodes.length,draft.currency)}</strong></p>${draft.currency === 'EUR' ? `<p>1 EUR = ${i18n.formatNumber((draft.snapshot || library.settings).usdPerEuro)} USD</p>` : ''}${totals.groups.some(row => row.baseUsdCents === 0) ? `<p class="hint">${h('zeroHint')}</p>` : ''}`;
     for (const row of totals.groups) panel.querySelector(`[data-group-price="${row.group}"]`).textContent = money(row.totalCents,draft.currency);
     panel.querySelectorAll('.budget-episodes small').forEach((node,index) => { node.textContent = i18n.formatNumber(index === 0 ? draft.pilotMinutes : draft.episodeMinutes) + ' min'; });
   } catch { $('#budgetTotals').innerHTML = `<p class="hint">${h('checkValues')}</p>`; }
@@ -76,7 +76,7 @@ function drawList() {
   panel.innerHTML = `${field('search','search','','search')}<div id="budgetQuoteList" class="budget-tiles"></div>`;
   const render = query => {
     const quotes = library.quotes.filter(quote => (archived ? ['paid','cancelled'] : ['draft','sent']).includes(quote.status) && `${quote.client} ${quote.title}`.toLocaleLowerCase(i18n.localeTag()).includes(query.toLocaleLowerCase(i18n.localeTag())));
-    $('#budgetQuoteList').innerHTML = quotes.map(quote => `<article class="budget-tile"><h3>${esc(quote.title)}</h3><p>${esc(quote.client)}</p><span class="budget-status ${quote.status}">${h(quote.status)}</span><h3>${money(quote.totals.totalCents,quote.currency)}</h3><p class="hint">${h('deadline')}: ${quote.deadline ? esc(i18n.formatDate(new Date(quote.deadline + 'T12:00:00'),{dateStyle:'medium'})) : h('notSet')}</p><div class="budget-actions">${button('edit',archived?'view':'edit',`data-id="${quote.id}"`)}${button('pdf','pdf',`data-id="${quote.id}"`)}${quote.status === 'draft' ? button('status','markSent',`data-id="${quote.id}" data-status="sent"`) : ''}${quote.status === 'sent' ? button('status','markPaid',`data-id="${quote.id}" data-status="paid"`) : ''}${!archived ? button('status','cancelQuote',`data-id="${quote.id}" data-status="cancelled"`) : ''}</div></article>`).join('') || `<p class="hint">${h('empty')}</p>`;
+    $('#budgetQuoteList').innerHTML = quotes.map(quote => `<article class="budget-tile"><h3>${esc(quote.title)}</h3><p>${esc(quote.client)}</p><span class="budget-status ${quote.status}">${h(quote.status)}</span><h3>${money(quote.totals.totalCents,quote.currency)}</h3><p class="hint">${h('deadline')}: ${quote.deadline ? esc(i18n.formatDate(new Date(quote.deadline + 'T12:00:00'),{dateStyle:'medium'})) : h('notSet')}</p><div class="budget-actions">${button('edit',archived?'view':'edit',`data-id="${quote.id}"`)}${button('pdf','pdf',`data-id="${quote.id}"`)}${quote.status === 'draft' ? button('refresh-prices','refreshPrices',`data-id="${quote.id}"`) : ''}${quote.status === 'draft' ? button('status','markSent',`data-id="${quote.id}" data-status="sent"`) : ''}${quote.status === 'sent' ? button('status','markPaid',`data-id="${quote.id}" data-status="paid"`) : ''}${!archived ? button('status','cancelQuote',`data-id="${quote.id}" data-status="cancelled"`) : ''}</div></article>`).join('') || `<p class="hint">${h('empty')}</p>`;
   };
   panel.querySelector('[data-bind="search"]').oninput = event => render(event.target.value);
   render('');
@@ -151,6 +151,15 @@ panel.addEventListener('click',async event=>{
     if(action==='remove-header'){configDraft.headerImage='';dirty=true;drawSettings();return;}
     if(action==='edit'){draft=structuredClone(library.quotes.find(quote=>quote.id===target.dataset.id));tab='new';dirty=false;draw();return;}
     if(action==='pdf'){if(dirty && !confirm(bt('pdfSavedHint')))return;setBusy(true);await downloadPdf(target.dataset.id);return;}
+    if(action==='refresh-prices') {
+      if(dirty){toast(bt('saveFirst'),'err');return;}
+      const quote=library.quotes.find(item=>item.id===target.dataset.id);
+      if(!quote || quote.status!=='draft')return;
+      if(!confirm(bt('confirmRefreshPrices',{title:quote.title})))return;
+      setBusy(true);
+      const result=await api('/api/budgets/'+quote.id,{method:'PUT',body:{action:'refresh-prices',revision:quote.revision}});
+      await refresh();if(draft?.id===result.id)draft=structuredClone(result);draw();toast(bt('saved'));return;
+    }
     if(action==='status') {
       if(dirty){toast(bt('saveFirst'),'err');return;}
       const quote=library.quotes.find(item=>item.id===target.dataset.id);

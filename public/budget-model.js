@@ -103,6 +103,18 @@ export function setBudgetStatus(previous, status, revision, now = Date.now()) {
   if (!allowed[previous.status]?.includes(status)) throw budgetError('budgetStatus', 409);
   return { ...previous, status, updatedAt: now, revision: previous.revision + 1, [status + 'At']: now };
 }
+export function refreshBudgetPrices(previous, settings, revision, now = Date.now()) {
+  if (!previous) throw budgetError('budgetNotFound', 404);
+  if (revision !== previous.revision) throw budgetError('budgetConflict', 409);
+  if (previous.status !== 'draft') throw budgetError('budgetRefreshDraftOnly', 409);
+  const current = budgetSettings(settings);
+  const rates = Object.fromEntries(BUDGET_GROUPS.map(group => [group, {
+    ...current.rates[group], revisions: previous.snapshot.rates[group].revisions
+  }]));
+  const quote = { ...previous, snapshot: { ...previous.snapshot, rates }, updatedAt: now, revision: previous.revision + 1 };
+  quote.totals = calculateBudget(quote);
+  return quote;
+}
 export function budgetEarnings(quotes) {
   const result = { active: { count: 0, usdCents: 0 }, potential: { count: 0, usdCents: 0 }, earned: { count: 0, usdCents: 0 } };
   for (const quote of quotes) {
