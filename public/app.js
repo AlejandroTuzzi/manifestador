@@ -679,6 +679,19 @@ $('#btnToEs').addEventListener('click', () => translate('es'));
 // controles de imagen
 // ---------------------------------------------------------------------------
 
+document.addEventListener('pointerdown', event => {
+  document.querySelectorAll('.model-family[open]').forEach(menu => {
+    if (!menu.contains(event.target)) menu.open = false;
+  });
+});
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  document.querySelectorAll('.model-family[open]').forEach(menu => {
+    menu.open = false;
+    if (menu.contains(document.activeElement)) menu.querySelector('summary').focus();
+  });
+});
+
 function chipRow(container, values, active, onPick, labelFn = (v) => v) {
   const models = container.id === 'modelChips' ? state.models : container.id === 'videoModelChips' ? state.videoModels : container.id === 'audioModelChips' ? state.audioModels : container.id === 'musicModelChips' ? values.map(id => ({ id, name: id.replaceAll('_', '.'), provider: 'suno' })) : null;
   if (models) {
@@ -689,12 +702,15 @@ function chipRow(container, values, active, onPick, labelFn = (v) => v) {
       const details = document.createElement('details');
       details.className = 'model-family'; details.dataset.family = family.name;
       const selected = family.models.find(model => model.id === active);
-      details.open = opened.get(family.name) ?? Boolean(selected);
+      details.open = opened.get(family.name) ?? false;
       const summary = document.createElement('summary');
+      summary.addEventListener('click', () => {
+        document.querySelectorAll('.model-family[open]').forEach(menu => { if (menu !== details) menu.open = false; });
+      });
       summary.textContent = family.name + ' · ' + (selected || family.models[0]).name;
       details.classList.toggle('selected', Boolean(selected));
       const list = document.createElement('div'); list.className = 'chips';
-      chipRow(list, family.models.map(model => model.id), active, onPick, labelFn);
+      chipRow(list, family.models.map(model => model.id), active, id => { details.open = false; onPick(id); }, labelFn);
       details.append(summary, list); container.appendChild(details);
     }
     return;
