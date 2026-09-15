@@ -42,6 +42,17 @@ test('quote editor adds/removes episode and entity tiles and persists their fiel
   assert.equal(h.data.quotes[0].episodes.length,3);
   assert.match(h.node('#budgetPanel').innerHTML,/budget-tile pilot/);assert.match(h.node('#budgetPanel').innerHTML,/budget-tile final/);
 });
+test('duration summary updates for episode counts, pilot duration and fractional minutes',async()=>{
+  const h=harness();await h.testing.changeTab('new');
+  h.input('pilotMinutes','3',true);h.input('episodeMinutes','1.5',true);h.input('episodeCount','41',true);
+  assert.match(h.node('#budgetDurationTotal').textContent,/"minutes":"63"/);
+  assert.match(h.node('#budgetDurationTotal').textContent,/01:03:00/);
+  await h.click('remove-episode',{index:'40'});
+  assert.match(h.node('#budgetDurationTotal').textContent,/01:01:30/);
+  h.input('episodeCount','1',true);
+  assert.match(h.node('#budgetDurationTotal').textContent,/00:03:00/);
+});
+
 test('quote editor status transitions feed earnings without double-counting',async()=>{
   const h=harness();await h.testing.changeTab('new');h.input('client','Client');h.input('title','Drama');
   await h.testing.saveCurrent({preventDefault(){}});const id=h.data.quotes[0].id;

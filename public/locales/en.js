@@ -33,6 +33,7 @@ window.ManifestadorI18n.register('en', {
   "budget.objects": "Anchor objects",
   "budget.script": "Script",
   "budget.voices": "Voices",
+  "budget.totalDuration": "Total duration: {minutes} min ({clock})",
   "budget.character": "Character",
   "budget.voicePerCharacter": "One voice per character, charged once for the entire production. The quantity updates when characters are added or removed.",
   "budget.music": "Music",

@@ -33,6 +33,7 @@ window.ManifestadorI18n.register('es', {
   "budget.objects": "Objetos ancla",
   "budget.script": "Guion",
   "budget.voices": "Voces",
+  "budget.totalDuration": "Duración total: {minutes} min ({clock})",
   "budget.character": "Personaje",
   "budget.voicePerCharacter": "Una voz por personaje, cobrada una sola vez para toda la obra. La cantidad se actualiza al añadir o quitar personajes.",
   "budget.music": "Música",

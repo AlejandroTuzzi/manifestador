@@ -31,6 +31,11 @@ async function changeTab(next) {
 function draftTotals() {
   return calculateBudget({ ...draft, snapshot:draft.snapshot || library.settings });
 }
+function budgetDurationClock(minutes) {
+  const seconds = Math.round(minutes * 60);
+  return [Math.floor(seconds / 3600), Math.floor(seconds % 3600 / 60), seconds % 60]
+    .map(value => i18n.formatNumber(value, {minimumIntegerDigits:2, maximumFractionDigits:0, useGrouping:false})).join(':');
+}
 function discount(group) { return field('discountPercent', 'discounts.' + group, draft.discounts[group], 'number', 'max="100"'); }
 function groupSection(group, body) {
   return `<section class="budget-section ${group}"><h3>${h(group)}</h3>${body}<div class="budget-group-foot">${discount(group)}<span class="hint" data-group-price="${group}"></span></div></section>`;
@@ -50,7 +55,7 @@ function drawEditor() {
     ${select('currency','currency',draft.currency,['USD','EUR'],draft.id ? 'disabled' : '')}${field('deadline','deadline',draft.deadline,'date')}
     </div>${area('description','description',draft.description)}<p class="hint">${h('snapshotHint')}</p>
     ${groupSection('episodes',`<div class="budget-fields">${field('episodeCount','episodeCount',draft.episodes.length,'number','max="500" required')}${field('pilotMinutes','pilotMinutes',draft.pilotMinutes,'number','max="1440" required')}${field('episodeMinutes','episodeMinutes',draft.episodeMinutes,'number','max="1440" required')}</div>
-      <div class="budget-episodes">${episodeTiles(frozen)}</div>${!frozen ? button('add-episode','addEpisode') : ''}<p class="hint">${h('episodeHint')}</p>`)}
+      <div class="budget-episodes">${episodeTiles(frozen)}</div><p id="budgetDurationTotal" aria-live="polite"></p>${!frozen ? button('add-episode','addEpisode') : ''}<p class="hint">${h('episodeHint')}</p>`)}
     ${entities}${['script','voices','music'].map(group => groupSection(group, select('source',group,draft[group],['provided','create']) + (group === 'voices' && (draft.snapshot || library.settings).rates.voices.unit === 'character' ? `<p class="hint">${h('voicePerCharacter')}</p>` : ''))).join('')}
     </fieldset><div id="budgetTotals" class="budget-section"></div><p class="hint">${h('taxHint')}</p><div class="budget-actions">${!frozen ? '<button type="submit" class="generate-btn small">' + h('save') + '</button>' : ''}${draft.id && draft.status === 'draft' ? button('status','markSent',`data-id="${draft.id}" data-status="sent"`) : ''}${draft.id && draft.status === 'sent' ? button('status','markPaid',`data-id="${draft.id}" data-status="paid"`) : ''}${draft.id && !frozen ? button('status','cancelQuote',`data-id="${draft.id}" data-status="cancelled"`) : ''}</div></form>`;
   $('#budgetForm').onsubmit = saveCurrent;
@@ -60,6 +65,7 @@ function drawTotals() {
   try {
     const totals = draftTotals();
     if (!Number.isFinite(totals.totalCents)) throw 0;
+    $('#budgetDurationTotal').textContent = bt('totalDuration', {minutes:i18n.formatNumber(totals.minutes, {maximumFractionDigits:3}), clock:budgetDurationClock(totals.minutes)});
     $('#budgetTotals').innerHTML = `<h3>${h('breakdown')}</h3><div class="budget-table-wrap"><table><thead><tr>${['group','base','discount','subtotal','revisions'].map(key => `<th>${h(key)}</th>`).join('')}</tr></thead><tbody>${totals.groups.map(row => `<tr><td>${h(row.group)}</td><td>${money(row.baseCents,draft.currency)}</td><td>${money(row.discountCents,draft.currency)}</td><td>${money(row.totalCents,draft.currency)}</td><td>${i18n.formatNumber((draft.snapshot || library.settings).rates[row.group].revisions)}</td></tr>`).join('')}</tbody></table></div><h2>${h('total')}: ${money(totals.totalCents,draft.currency)}</h2>${draft.currency === 'EUR' ? `<p>1 EUR = ${i18n.formatNumber((draft.snapshot || library.settings).usdPerEuro)} USD</p>` : ''}${totals.groups.some(row => row.baseUsdCents === 0) ? `<p class="hint">${h('zeroHint')}</p>` : ''}`;
     for (const row of totals.groups) panel.querySelector(`[data-group-price="${row.group}"]`).textContent = money(row.totalCents,draft.currency);
     panel.querySelectorAll('.budget-episodes small').forEach((node,index) => { node.textContent = i18n.formatNumber(index === 0 ? draft.pilotMinutes : draft.episodeMinutes) + ' min'; });
