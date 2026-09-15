@@ -344,6 +344,7 @@ function metadataFromEntry(entry, cfg) {
     aspectRatio: entry.aspectRatio || null, resolution: entry.resolution || null,
     batch: entry.batch || 1, refs: entry.refs || [], voiceId: entry.voiceId || null,
     ...(entry.qwenImage ? { qwenImage: entry.qwenImage } : {}),
+    ...(entry.openaiImage ? { openaiImage: entry.openaiImage } : {}),
     voiceName: entry.voiceName || null, cost: entry.cost || 0,
     audioKind: entry.audioKind || (entry.modelId === MUSIC_MODEL.id ? 'music' : entry.type === 'audio' ? 'voice' : null),
     musicTags: normalizeMusicTags(entry.musicTags),
@@ -1108,7 +1109,7 @@ async function runImageGeneration(req) {
       case 'openai':
         return generateOpenAIImage({
           apiKey: cfg.keys.openai, apiModel, prompt: sentPrompt, preface, refPaths,
-          aspectRatio: req.aspectRatio, resolution: req.resolution
+          aspectRatio: req.aspectRatio, resolution: req.resolution, options: req.openaiImage
         });
       default:
         throw new Error(`Proveedor no implementado: ${model.provider}`);
@@ -1134,7 +1135,8 @@ async function runImageGeneration(req) {
   const unit = imagePrice(pricing, model.id, req.resolution || 'auto');
   const inputCost = (pricing.image[model.id]?.inputPerImage || 0) * refs.length
     * results.filter((result) => result.status === 'fulfilled').length;
-  const cost = unit * outputs.length + inputCost;
+  const measured = results.filter(result => result.status === 'fulfilled').map(result => result.value.usageCost);
+  const cost = measured.length && measured.every(value => Number.isFinite(value)) ? measured.reduce((sum, value) => sum + value, 0) : unit * outputs.length + inputCost;
   await recordCost({
     type: 'image', modelId: model.id, label: model.name,
     units: outputs.length, unitLabel: 'imagen(es)', cost
@@ -1151,6 +1153,7 @@ async function runImageGeneration(req) {
     resolution: req.resolution || 'auto',
     batch,
     ...(qwenImage ? { qwenImage } : {}),
+    ...(model.provider === 'openai' ? { openaiImage: req.openaiImage || {} } : {}),
     refs,
     characterId: req.characterId || inferredCharacter?.characterId || null,
     characterVariantId: req.characterVariantId || inferredCharacter?.variantId || null,

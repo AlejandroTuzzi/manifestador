@@ -680,6 +680,25 @@ $('#btnToEs').addEventListener('click', () => translate('es'));
 // ---------------------------------------------------------------------------
 
 function chipRow(container, values, active, onPick, labelFn = (v) => v) {
+  const models = container.id === 'modelChips' ? state.models : container.id === 'videoModelChips' ? state.videoModels : container.id === 'audioModelChips' ? state.audioModels : container.id === 'musicModelChips' ? values.map(id => ({ id, name: id.replaceAll('_', '.'), provider: 'suno' })) : null;
+  if (models) {
+    const opened = new Map([...container.querySelectorAll('details')].map(node => [node.dataset.family, node.open]));
+    container.innerHTML = '';
+    container.classList.add('model-families');
+    for (const family of ManifestadorModelFamilies(models)) {
+      const details = document.createElement('details');
+      details.className = 'model-family'; details.dataset.family = family.name;
+      const selected = family.models.find(model => model.id === active);
+      details.open = opened.get(family.name) ?? Boolean(selected);
+      const summary = document.createElement('summary');
+      summary.textContent = family.name + ' · ' + (selected || family.models[0]).name;
+      details.classList.toggle('selected', Boolean(selected));
+      const list = document.createElement('div'); list.className = 'chips';
+      chipRow(list, family.models.map(model => model.id), active, onPick, labelFn);
+      details.append(summary, list); container.appendChild(details);
+    }
+    return;
+  }
   container.innerHTML = '';
   for (const v of values) {
     const b = document.createElement('button');
@@ -714,6 +733,16 @@ function readQwenOptions(root) {
   return Object.fromEntries([...root.querySelectorAll('[data-qwen]')].map((input) => [input.dataset.qwen, input.type === 'checkbox' ? input.checked : input.value]));
 }
 
+function openaiOptionsMarkup(value = {}) {
+  return `<details class="qwen-options"><summary>${esc(tr('openaiImage.options'))}</summary><div class="cfg-grid">
+    <label><span>${esc(tr('openaiImage.quality'))}</span><select class="select" data-openai="quality">${['auto','low','medium','high','xhigh','max'].map(option => `<option value="${option}"${(value.quality || 'auto') === option ? ' selected' : ''}>${esc(tr(`openaiImage.${option}`))}</option>`).join('')}</select></label>
+    <label class="poser-toggle"><input type="checkbox" data-openai="transparent"${value.background === 'transparent' ? ' checked' : ''}>${esc(tr('openaiImage.transparent'))}</label>
+    </div><p class="hint">${esc(tr('openaiImage.hint'))}</p></details>`;
+}
+function readOpenaiOptions(root) {
+  return { quality: root?.querySelector('[data-openai="quality"]')?.value || 'auto', background: root?.querySelector('[data-openai="transparent"]')?.checked ? 'transparent' : 'opaque' };
+}
+
 function syncQwenOptions(root) {
   const enabled = root.querySelector('[data-qwen="promptExtend"]').checked;
   root.querySelector('[data-qwen="thinking"]').disabled = !enabled;
@@ -741,6 +770,10 @@ function renderImageControls() {
     (v) => `×${v}`);
 
   const qwenRoot = $('#qwenImageOptions');
+  const openaiRoot = $('#openaiImageOptions');
+  openaiRoot.hidden = !m.id.startsWith('gpt-image-2.5-');
+  openaiRoot.innerHTML = openaiOptionsMarkup(state.openaiImage);
+  openaiRoot.oninput = () => { state.openaiImage = readOpenaiOptions(openaiRoot); };
   qwenRoot.hidden = m.provider !== 'qwen';
   qwenRoot.innerHTML = qwenOptionsMarkup(state.qwenImage);
   syncQwenOptions(qwenRoot);
@@ -1185,6 +1218,9 @@ function renderAudioModelSelect() {
     `<option value="${esc(model.id)}"${model.id === state.audioModelId ? ' selected' : ''}>${esc(model.name)}</option>`
   ).join('');
   $('#audioModelHint').textContent = localizedModelNote(selected);
+  chipRow($('#audioModelChips'), models.map(model => model.id), state.audioModelId, id => {
+    select.value = id; select.dispatchEvent(new Event('change'));
+  }, id => models.find(model => model.id === id).name);
 }
 
 $('#voiceSelect').addEventListener('change', (e) => { state.voiceId = e.target.value; });
@@ -1686,7 +1722,7 @@ async function generate() {
       resolution: state.resolution, batch: state.batch,
       refs: state.refs.map((r) => r.key), labeledRefs, characterId: state.pinnedId || null,
       characterVariantId: state.characterVariantId || null,
-      ...(model.provider === 'qwen' ? { qwenImage: readQwenOptions($('#qwenImageOptions')) } : {})
+      ...(model.id.startsWith('gpt-image-2.5-') ? { openaiImage: readOpenaiOptions($('#openaiImageOptions')) } : {}), ...(model.provider === 'qwen' ? { qwenImage: readQwenOptions($('#qwenImageOptions')) } : {})
     } : isVideo ? {
       modelId: state.video.modelId, prompt, mode: state.video.mode,
       aspectRatio: state.video.aspectRatio, resolution: state.video.resolution,
@@ -2035,7 +2071,7 @@ async function regenerate(entry) {
     state.aspectRatio = entry.aspectRatio;
     state.resolution = entry.resolution;
     state.batch = entry.batch || 1;
-    state.qwenImage = entry.qwenImage || {};
+    state.qwenImage = entry.qwenImage || {}; state.openaiImage = entry.openaiImage || {};
     state.video.h3ContextIr = entry.h3ContextIr === true;
     state.refs = (entry.refs || []).map((k, index) => ({ key: k, fromChar: false, kind: entry.refKinds?.[index] }));
     renderImageControls();
@@ -2074,7 +2110,7 @@ function editEntry(entry) {
     state.aspectRatio = entry.aspectRatio;
     state.resolution = entry.resolution;
     state.batch = entry.batch || 1;
-    state.qwenImage = entry.qwenImage || {};
+    state.qwenImage = entry.qwenImage || {}; state.openaiImage = entry.openaiImage || {};
     state.refs = (entry.refs || []).map((k) => ({ key: k, fromChar: false }));
     renderImageControls();
   }
@@ -8255,7 +8291,7 @@ async function createAutomationResource({ projectId, kind, role, modelId, prompt
       method: 'POST',
       body: {
         modelId: model.id,
-        ...(model.provider === 'qwen' ? { qwenImage: pr.config.qwenImage || {} } : {}),
+        ...(model.id.startsWith('gpt-image-2.5-') ? { openaiImage: pr.config.openaiImage || {} } : {}), ...(model.provider === 'qwen' ? { qwenImage: pr.config.qwenImage || {} } : {}),
         prompt: automationStyledPrompt(pr, prompt),
         refs: styleRefs.map((ref) => ref.key),
         labeledRefs,
@@ -8782,6 +8818,7 @@ function renderAutomationProject() {
         <span class="hint">${esc(tr('automation.config.fallbackHint'))}</span>
       </div>
       <div id="autoQwenOptions">${qwenOptionsMarkup(pr.config.qwenImage)}</div>
+      <div id="autoOpenaiOptions">${openaiOptionsMarkup(pr.config.openaiImage)}</div>
       <div class="control-row"><label>${esc(tr('automation.config.aspectRatio'))}</label>
         <select class="select" id="autoAr">${(model?.aspectRatios || []).map((a) => `<option${a === pr.config.aspectRatio ? ' selected' : ''}>${a}</option>`).join('')}</select>
         <label>${esc(tr('automation.config.resolution'))}</label>
@@ -9268,6 +9305,7 @@ function renderAutomationProject() {
   const saveAll = () => saveAutomation({ name: $('#autoProjectName').value, config: {
     imageModelId: $('#autoModel').value,
     qwenImage: readQwenOptions($('#autoQwenOptions')),
+    openaiImage: readOpenaiOptions($('#autoOpenaiOptions')),
     fallbackImageModelId: $('#autoFallbackModel').value === $('#autoModel').value ? '' : $('#autoFallbackModel').value,
     artStyle: $('#autoArtStyle').value.trim() || DEFAULT_AUTOMATION_ART_STYLE,
     artStylePromptId,
@@ -9331,11 +9369,13 @@ function renderAutomationProject() {
     } catch (error) { toast(error.message, 'err'); }
   });
   const syncAutoQwen = () => {
+    $('#autoOpenaiOptions').hidden = ![$('#autoModel').value, $('#autoFallbackModel').value].some(id => id.startsWith('gpt-image-2.5-'));
     const root = $('#autoQwenOptions');
     root.hidden = ![$('#autoModel').value, $('#autoFallbackModel').value].includes('qwen-image-3.0-pro');
     syncQwenOptions(root);
   };
   syncAutoQwen();
+  $('#autoOpenaiOptions').addEventListener('change', saveAll);
   $('#autoQwenOptions').addEventListener('change', async () => { syncAutoQwen(); await saveAll(); });
   $('#autoFallbackModel').addEventListener('change', syncAutoQwen);
   $('#autoModel').addEventListener('change', async () => { await saveAll(); renderAutomationProject(); });
@@ -10285,7 +10325,7 @@ async function generateAutomationImage(pr, request, setStatus) {
     body: {
       ...request,
       modelId: model.id,
-      ...(model.provider === 'qwen' ? { qwenImage: pr.config.qwenImage || {} } : {}),
+      ...(model.id.startsWith('gpt-image-2.5-') ? { openaiImage: pr.config.openaiImage || {} } : {}), ...(model.provider === 'qwen' ? { qwenImage: pr.config.qwenImage || {} } : {}),
       ...automationImageSettings(model, pr.config),
       batch: 1
     }

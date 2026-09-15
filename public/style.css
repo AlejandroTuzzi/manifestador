@@ -850,6 +850,13 @@ pre[class*="language-"] { background: rgba(10,5,18,.65); border: 1px solid var(-
 .static-value { font-size: 13px; color: #cbb8ec; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.model-families { flex: 1; min-width: 0; align-items: flex-start; }
+.model-family { min-width: 0; max-width: 100%; border: 1px solid var(--border); background: var(--bg2); color: var(--muted); }
+.model-family.selected { border-color: var(--violet); }
+.model-family summary { padding: 10px 12px; cursor: pointer; font-size: 12px; overflow-wrap: anywhere; }
+.model-family summary:hover, .model-family summary:focus-visible { color: var(--text); background: var(--grad-soft); }
+.model-family summary:focus-visible { outline: 2px solid var(--pink); outline-offset: -2px; }
+.model-family > .chips { padding: 0 10px 10px; }
 .chip {
   padding: 7px 13px;
   border: 1px solid var(--border);

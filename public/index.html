@@ -219,6 +219,7 @@
           <span class="hint" data-i18n="create.controls.variantHint">Elegí el original o un outfit variante</span>
         </div>
         <div id="qwenImageOptions" hidden></div>
+        <div id="openaiImageOptions" hidden></div>
         <div id="modelNote" class="model-note"></div>
       </div>
 
@@ -292,7 +293,8 @@
         </div>
         <div class="control-row">
           <label data-i18n="create.controls.model">Modelo</label>
-          <select id="audioModelSelect" class="select"></select>
+          <select id="audioModelSelect" class="select" hidden></select>
+          <div id="audioModelChips" class="chips"></div>
           <span id="audioModelHint" class="hint"></span>
         </div>
       </div>
@@ -1532,6 +1534,7 @@
 <script src="distinctive-elements.js"></script>
 <script src="character-profile.js"></script>
 <script src="dictation.js"></script>
+<script src="model-families.js"></script>
 <script src="app.js"></script>
 <script src="series-inspiration.js"></script>
 <script type="module" src="budgets.js"></script>
