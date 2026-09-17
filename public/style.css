@@ -313,6 +313,7 @@ h3 { font-size: 15px; }
 
 /* ---------- herramientas del prompt ---------- */
 .prompt-tools { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; gap: 10px; flex-wrap: wrap; }
+.prompt-tools > .gen-side { flex-basis: 100%; justify-content: flex-end; margin-top: 6px; }
 .tools-left { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .tool-sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
 
