@@ -151,6 +151,7 @@
             <button id="btnPrompts" class="tool-btn" data-i18n-title="create.savedPromptsTitle" title="Prompts archivados"><svg class="ic"><use href="#i-book"/></svg><span data-i18n="nav.prompts">Prompts</span></button>
             <button id="btnVocabulary" class="tool-btn" data-i18n-title="create.vocabularyTitle" title="Consultar vocabulario visual"><svg class="ic"><use href="#i-tag"/></svg><span data-i18n="nav.vocabulary">Vocabulario</span></button>
             <button id="btnDistinctive" type="button" class="tool-btn"><svg class="ic"><use href="#i-star"/></svg><span data-i18n="distinctive.title">Elementos distintivos</span></button>
+            <button id="btnCamera" type="button" class="tool-btn" aria-haspopup="dialog" aria-controls="cameraDialog"><svg class="ic"><use href="#i-camera"/></svg><span data-i18n="camera.title">Cámara</span></button>
             <button id="btnShotList" class="tool-btn" data-i18n-title="create.shotsTitle" title="Insertar una lista de tomas con sus tiempos" hidden><svg class="ic"><use href="#i-clapper"/></svg><span data-i18n="create.shots">Tomas</span></button>
           </div>
           <div class="gen-side">
@@ -1536,6 +1537,18 @@
 <script src="dictation.js"></script>
 <script src="model-families.js"></script>
 <script src="app.js"></script>
+<dialog id="cameraDialog" class="camera-dialog" aria-labelledby="cameraTitle" aria-describedby="cameraHelp">
+  <form id="cameraForm">
+    <div class="modal-head"><h3 id="cameraTitle" data-i18n="camera.heading">Configuración de cámara</h3><button id="cameraClose" type="button" class="icon-btn" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <p id="cameraHelp" class="hint" data-i18n="camera.hint">Elegí solo los ajustes que necesitás. No se reemplaza tu prompt ni se adjuntan referencias. Las instrucciones se insertan en inglés, seguidas de una coma.</p>
+    <div id="cameraFields" class="camera-fields"></div>
+    <p class="hint" data-i18n="camera.optics">La distancia focal controla el campo de visión; no equivale al desenfoque. La profundidad de campo depende también de la apertura y las distancias. Los valores f/ son orientativos. Las referencias y cada modelo pueden limitar el resultado.</p>
+    <label class="camera-preview"><span data-i18n="camera.preview">Texto que se añadirá al principio (en inglés)</span><textarea id="cameraPreview" rows="5" readonly></textarea></label>
+    <p class="hint" data-i18n="camera.conflict">Revisá si tu prompt ya contiene indicaciones de cámara contradictorias: se conservarán sin modificarlas.</p>
+    <div class="camera-actions"><button id="cameraReset" type="button" class="tool-btn" data-i18n="camera.reset">Limpiar selección</button><button id="cameraInsert" type="submit" class="generate-btn small" data-i18n="camera.insert" disabled>Insertar al principio</button></div>
+  </form>
+</dialog>
+<script type="module" src="camera.js"></script>
 <script src="series-inspiration.js"></script>
 <script type="module" src="budgets.js"></script>
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>

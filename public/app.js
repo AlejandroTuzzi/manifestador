@@ -42,6 +42,7 @@ function setMode(mode) {
   $('#referenceTagsControl').hidden = mode !== 'image' && mode !== 'video';
   $('#referenceTagsEnabled').checked = state.referenceTagsEnabled === true;
   $('#btnDistinctive').hidden = mode !== 'image' && mode !== 'video';
+  $('#btnCamera').hidden = !['image', 'video', 'comfyui'].includes(mode);
   // el personaje anclado aporta refs distintas según el modo
   // (asset:// verificado en video, fotos en imagen)
   if (state.pinnedId) applyPinnedCharacterPhotos();
