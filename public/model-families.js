@@ -1,5 +1,5 @@
 (function (root) {
-  const names = { gemini: 'Nano Banana', openai: 'GPT Image', seedream: 'Seedream', qwen: 'Qwen', wavespeed: 'FireRed', seedance: 'Seedance', minimax: 'MiniMax', omni: 'Gemini Omni', heygen: 'HeyGen', elevenlabs: 'ElevenLabs', suno: 'Suno' };
+  const names = { wan: 'Wan', gemini: 'Nano Banana', openai: 'GPT Image', seedream: 'Seedream', qwen: 'Qwen', wavespeed: 'FireRed', seedance: 'Seedance', minimax: 'MiniMax', omni: 'Gemini Omni', heygen: 'HeyGen', elevenlabs: 'ElevenLabs', suno: 'Suno' };
   const priority = { 'gpt-image-2.5-sunburst': 250, 'gpt-image-2.5-flare': 250, 'gpt-image-2': 200, 'nano-banana-2': 310, 'nano-banana-2-lite': 310, 'nano-banana-pro': 300 };
   function rank(model) {
     if (priority[model.id] != null) return priority[model.id];

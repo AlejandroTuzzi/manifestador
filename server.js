@@ -5,6 +5,7 @@ import http from 'node:http';
 import { budgetSettings, defaultBudgetSettings, saveBudget, refreshBudgetPrices, setBudgetStatus, budgetEarnings, budgetError } from './public/budget-model.js';
 import { budgetHtml, budgetCatalog, renderBudgetPdf, budgetPdfFilename } from './lib/budget-pdf.js';
 import { videoAudioPolicy } from './lib/video-audio-policy.js';
+import { generateWanVideo, validateWanMedia, wanError } from './lib/wan-video.js';
 import { protectedAssetKeys, protectedAssetAssociations } from './lib/asset-deletion-guard.js';
 import { changeInspiration, visibleInspiration, inspirationError } from './lib/series-inspiration.js';
 import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
@@ -70,6 +71,8 @@ const automationAssemblyJobs = new Set();
 const heygenOAuthStates = new Map();
 const comfyProgress = new Map(); // genId -> { current, total }
 const h3PromotionCoordinator = createH3PromotionCoordinator();
+const wanActiveJobs = new Set();
+const wanBlockJobs = new Set();
 const characterPhotoIdentity = createPhotoIdentityCache((key) => resolveAssetKey(key));
 
 // Se agrega automáticamente (sin mostrarse en la caja) cuando alguna
@@ -1391,8 +1394,10 @@ async function runVideoGeneration(req) {
   const requestedMode = String(req.mode || 'reference');
   const mode = model.provider === 'omni' && ['reference', 'frames', 'edit', 'extend'].includes(requestedMode)
     ? requestedMode
+    : model.provider === 'wan' && requestedMode === 'first' ? 'first'
     : requestedMode === 'frames' ? 'frames' : 'reference';
   const refLimit = model.refLimits?.[mode] ?? model.maxRefs;
+  if (model.provider === 'wan' && (req.refs?.length || 0) > refLimit) throw wanError('wanReferences');
   const refs = Array.isArray(req.refs) ? req.refs.slice(0, refLimit) : [];
   const labeledRefs = req.labeledRefs && typeof req.labeledRefs === 'object' ? req.labeledRefs : {};
   const validStamp = (v) => typeof v === 'string' && v.startsWith('data:image/') && v.length < 40 * 1024 * 1024;
@@ -1405,7 +1410,7 @@ async function runVideoGeneration(req) {
     if (/^asset:\/\/[A-Za-z0-9._-]+$/.test(key)) resolved = key;
     // Los fotogramas deben llegar limpios: una etiqueta estampada cambia el
     // frame exacto y puede hacer que el proveedor degrade el control del final.
-    else if (mode !== 'frames' && validStamp(labeledRefs[key])) resolved = labeledRefs[key];
+    else if (mode !== 'frames' && mode !== 'first' && validStamp(labeledRefs[key])) resolved = labeledRefs[key];
     else resolved = await resolveAssetKey(key);
     refPaths.push(resolved);
     const inferredKind = key.startsWith('video/') ? 'video' : key.startsWith('audio/') ? 'audio' : 'image';
@@ -1424,6 +1429,39 @@ async function runVideoGeneration(req) {
   const preface = refs.some((key) => validStamp(labeledRefs[key])) ? LABELED_REFS_PROMPT : '';
   const suffix = hasPoserRef && cfg.poserPrompt?.trim() ? cfg.poserPrompt.trim() : '';
   const sentPrompt = [preface, prompt, suffix, videoAudioPolicy(req.avoidMusic)].filter(Boolean).join('\n\n');
+
+  if (model.provider === 'wan') {
+    const ffmpeg = !req.wanTaskId && mediaRefs.some(ref => ref.kind !== 'image') ? await resolveFfmpegExecutable(cfg.ffmpegPath) : null;
+    const wanInput = req.wanTaskId ? { video: Number(req.wanInputVideoSeconds) || 0 } : await validateWanMedia(mediaRefs, { mode, duration,
+      probeDuration: file => probeMediaDuration(ffmpeg, file), probeDimensions: file => probeVideoDimensions(ffmpeg, file) });
+    const recoveryId = req.wanRecoveryId || newId();
+    const video = await generateWanVideo({ apiKey: cfg.keys.qwen, endpoint: cfg.endpoints.qwen,
+      apiModel: model.apiModel, prompt: req.wanSentPrompt || sentPrompt, mediaRefs, mode, aspectRatio, resolution, duration, audio,
+      options: req.wanOptions || {}, taskId: req.wanTaskId,
+      onFailed: async () => updateJson('wan-tasks.json', [], jobs => jobs.map(job => job.id === recoveryId ? { ...job, failed: true } : job)),
+      onTask: async taskId => updateJson('wan-tasks.json', [], jobs => [...jobs.filter(j => j.id !== recoveryId),
+        { id: recoveryId, taskId, request: { ...req, labeledRefs: {}, wanTaskId: taskId, wanRecoveryId: recoveryId, wanInputVideoSeconds: wanInput.video, wanSentPrompt: sentPrompt }, createdAt: Date.now() }]) });
+    const history = await readJson('history.json', []);
+    const existing = history.find(entry => entry.wanTaskId === video.taskId);
+    if (existing) {
+      await updateJson('wan-tasks.json', [], jobs => jobs.filter(j => j.id !== recoveryId));
+      return existing;
+    }
+    const key = await saveBuffer('video', `${ts()}-${model.id}-${newId()}.mp4`, video.buffer);
+    const outputSeconds = Number(video.usage.output_video_duration || video.usage.duration) || (duration > 0 ? duration : 0);
+    const billedSeconds = outputSeconds + (Number(video.usage.input_video_duration) || wanInput.video || 0);
+    const cost = videoPrice(await getPricing(), model.id, resolution) * billedSeconds;
+    const entry = { id: newId(), ts: Date.now(), type: 'video', modelId: model.id, modelName: model.name,
+      prompt, sentPrompt: video.finalPrompt, mode, aspectRatio, resolution, duration: outputSeconds, audio: Boolean(audio),
+      avoidMusic: req.avoidMusic !== false, refs, refKinds: mediaRefs.map(ref => ref.kind), characterId: req.characterId || null,
+      outputs: [key], errors: [], cost: Number(cost.toFixed(6)), wanTaskId: video.taskId,
+      wanOptions: req.wanOptions || {}, requestedDuration: duration, wanUsage: video.usage };
+    await updateJson('history.json', [], entries => [entry, ...entries].slice(0, 1000));
+    await recordAssetMetadata(entry);
+    await recordCost({ type: 'video', modelId: model.id, label: `${model.name} ${resolution}`, units: billedSeconds, unitLabel: 'segundo(s)', cost });
+    await updateJson('wan-tasks.json', [], jobs => jobs.filter(j => j.id !== recoveryId));
+    return entry;
+  }
 
   if (model.provider === 'omni') {
     if (mediaRefs.some((ref) => String(ref.path || '').startsWith('asset://'))) {
@@ -3210,7 +3248,7 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
     (project.requirements?.locations?.length || 0) +
     (project.requirements?.objects?.length || 0);
   const blockImages = (project.blocks || []).filter((block) => block.generator === 'image'
-    || (block.generator === 'h3' && block.h3Mode !== 'frames')
+    || (['h3', 'wan', 'wan-prime'].includes(block.generator) && block.h3Mode !== 'frames')
     || (block.generator === 'seedance25' && block.seedance25Mode !== 'frames')
     || (block.generator === 'omni' && block.omniMode !== 'frames')).length;
   const audioModel = getAudioModel(project.config?.audioModelId);
@@ -3274,7 +3312,17 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
     const resolution = ['360p', '720p', '1080p', '4K'].includes(block.omniResolution) ? block.omniResolution : '720p';
     return sum + billedSeconds * videoPrice(pricing, 'gemini-omni-1-1-flash', resolution);
   }, 0);
-  const estimatedTotal = resourceImageCost + blockImageCost + audioCost + generatedMusicCost
+  const wanBlocks = (project.blocks || []).filter(block => ['wan', 'wan-prime'].includes(block.generator));
+  let wanEstimatedSeconds = 0;
+  const wanVideoCost = wanBlocks.reduce((sum, block) => {
+    const approximate = Number(block.estimatedDuration) || Math.max(1, (block.items || []).reduce((n, item) => n + String(item.text || '').length, 0) / 14);
+    let seconds = 0;
+    const estimatedInput = (block.h3ReferenceKeys || []).some(key => key.startsWith('video/')) ? 15 : 0;
+    for (let left = approximate; left > 0.001; left -= Math.min(15, left)) seconds += Math.max(2, Math.ceil(Math.min(15, left))) + estimatedInput;
+    wanEstimatedSeconds += seconds;
+    return sum + seconds * videoPrice(pricing, block.generator === 'wan-prime' ? 'wan-3-prime' : 'wan-3', block.h3Resolution || '720P');
+  }, 0);
+  const estimatedTotal = wanVideoCost + resourceImageCost + blockImageCost + audioCost + generatedMusicCost
     + h3ResolutionCosts + seedance25VideoCost + omniVideoCost;
 
   const linkedMetadata = Object.values(assetMetadata || {}).filter((metadata) =>
@@ -3299,6 +3347,7 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
       blockImages,
       blockResolution,
       blockImageCost: Number(blockImageCost.toFixed(6)),
+      wanBlocks: wanBlocks.length, wanEstimatedSeconds, wanVideoCost: Number(wanVideoCost.toFixed(6)),
       h3Blocks: h3Blocks.length,
       h3EstimatedSeconds,
       h3VideoCost: Number(h3ResolutionCosts.toFixed(6)),
@@ -3402,17 +3451,17 @@ function sanitizeAutomation(src, prev = {}) {
       sourceQuote: String(b.sourceQuote || '').slice(0, 4000),
       quoteReference: String(b.quoteReference || '').slice(0, 80),
       estimatedDuration: Math.max(0, Math.min(3600, Number(b.estimatedDuration) || 0)),
-      generator: ['image', 'heygen', 'assets', 'h3', 'seedance25', 'omni'].includes(b.generator) ? b.generator : 'image',
+      generator: ['image', 'heygen', 'assets', 'h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(b.generator) ? b.generator : 'image',
       heygenCharacterId: /^[a-z0-9]+$/.test(String(b.heygenCharacterId || '')) ? String(b.heygenCharacterId) : '',
       heygenFraming: ['wide', 'close', 'split'].includes(b.heygenFraming) ? b.heygenFraming : 'wide',
       assetKeys: normalizeAutomationAssetKeys(b.assetKeys),
       assetMuteOriginal: b.assetMuteOriginal !== false,
       h3Mode: b.h3Mode === 'frames' ? 'frames' : 'reference',
-      h3Resolution: b.h3Resolution === '2K' ? '2K' : '768P',
+      h3Resolution: ['wan', 'wan-prime'].includes(b.generator) ? (['480P', '720P', '1080P'].includes(b.h3Resolution) ? b.h3Resolution : '720P') : b.h3Resolution === '2K' ? '2K' : '768P',
       h3ContextIr: b.h3ContextIr === true,
       h3UseNarrationReference: b.h3UseNarrationReference !== false,
       h3KeepGeneratedAudio: b.h3KeepGeneratedAudio === true,
-      h3ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.h3ReferenceKeys),
+      h3ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.h3ReferenceKeys, ['wan', 'wan-prime'].includes(b.generator) ? 20 : 12),
       seedance25Mode: b.seedance25Mode === 'frames' ? 'frames' : 'reference',
       seedance25Resolution: b.seedance25Resolution === '480p' ? '480p' : '720p',
       seedance25UseNarrationReference: b.seedance25UseNarrationReference !== false,
@@ -3702,14 +3751,14 @@ function normalizeAutomationAssetKeys(value) {
   }).slice(0, 60);
 }
 
-function normalizeAutomationH3ReferenceKeys(value) {
+function normalizeAutomationH3ReferenceKeys(value, limit = 12) {
   const seen = new Set();
   return (Array.isArray(value) ? value : []).map((item) => String(item || '').trim()).filter((key) => {
     if (!/^(generated|uploads|video|audio)\//i.test(key) || key.length > 500 || key.includes('..')
       || key.includes('\\') || /[\x00-\x1f]/.test(key) || seen.has(key)) return false;
     seen.add(key);
     return true;
-  }).slice(0, 12);
+  }).slice(0, limit);
 }
 
 function validateAutomationSource(src) {
@@ -5703,7 +5752,7 @@ const server = http.createServer(async (req, res) => {
               } else {
                 const promptChanged = previousBlock.imagePrompt !== block.imagePrompt
                   || previousBlock.negativePrompt !== block.negativePrompt;
-                const h3IsRelevant = previousBlock.generator === 'h3' || block.generator === 'h3';
+                const h3IsRelevant = [previousBlock.generator, block.generator].some(g => ['h3', 'wan', 'wan-prime'].includes(g));
                 const h3GenerationChanged = h3IsRelevant && (
                   previousBlock.h3Mode !== block.h3Mode
                   || previousBlock.h3Resolution !== block.h3Resolution
@@ -6191,18 +6240,20 @@ const server = http.createServer(async (req, res) => {
       if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
       const block = project.blocks?.find((item) => item.id === String(body.blockId || ''));
       if (!block) return send(res, 404, { error: 'Bloque no encontrado.' });
-      if (!['h3', 'seedance25', 'omni'].includes(block.generator)) return send(res, 400, { error: 'Este bloque no está configurado para video generativo.' });
+      if (!['h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(block.generator)) return send(res, 400, { error: 'Este bloque no está configurado para video generativo.' });
 
+      const isWan = ['wan', 'wan-prime'].includes(block.generator);
       const isSeedance25 = block.generator === 'seedance25';
       const isOmni = block.generator === 'omni';
-      const model = getVideoModel(isOmni ? 'gemini-omni-1-1-flash' : isSeedance25 ? 'seedance-2-5' : 'minimax-h3');
+      const model = getVideoModel(isWan ? (block.generator === 'wan-prime' ? 'wan-3-prime' : 'wan-3') : isOmni ? 'gemini-omni-1-1-flash' : isSeedance25 ? 'seedance-2-5' : 'minimax-h3');
       const serviceName = model.name;
-      const serviceSlug = isOmni ? 'omni' : isSeedance25 ? 'seedance25' : 'h3';
+      const serviceSlug = isWan ? block.generator : isOmni ? 'omni' : isSeedance25 ? 'seedance25' : 'h3';
 
       const cfg = await getConfig();
       if (isSeedance25 && !cfg.keys.ark) return send(res, 400, { error: 'Falta la API key de BytePlus ModelArk en Configuración.' });
       if (isOmni && !cfg.keys.gemini) return send(res, 400, { error: 'Falta la API key de Gemini en Configuración.' });
-      if (!isSeedance25 && !isOmni && !cfg.keys.minimax) return send(res, 400, { error: 'Falta la API key de MiniMax en Configuración.' });
+      if (isWan && !cfg.keys.qwen) throw wanError('qwenKey');
+      if (!isWan && !isSeedance25 && !isOmni && !cfg.keys.minimax) return send(res, 400, { error: 'Falta la API key de MiniMax en Configuración.' });
       const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
       const audioKeys = (Array.isArray(body.audioKeys) ? body.audioKeys : []).map(String).filter((key) => /^audio\//.test(key));
       if (!audioKeys.length) return send(res, 400, { error: 'Falta la narración del bloque.' });
@@ -6214,7 +6265,7 @@ const server = http.createServer(async (req, res) => {
 
       const configuredMode = isOmni ? block.omniMode : isSeedance25 ? block.seedance25Mode : block.h3Mode;
       const mode = configuredMode === 'frames' ? 'frames' : 'reference';
-      const configuredKeys = normalizeAutomationH3ReferenceKeys(isOmni ? block.omniReferenceKeys : isSeedance25 ? block.seedance25ReferenceKeys : block.h3ReferenceKeys);
+      const configuredKeys = normalizeAutomationH3ReferenceKeys(isOmni ? block.omniReferenceKeys : isSeedance25 ? block.seedance25ReferenceKeys : block.h3ReferenceKeys, isWan ? 20 : 12);
       const imageKey = String(body.imageKey || '');
       let referenceKeys;
       if (mode === 'frames') {
@@ -6236,13 +6287,13 @@ const server = http.createServer(async (req, res) => {
         let start = 0;
         while (start < audioDuration - 0.001) {
           const duration = Math.min(maxChunkDuration, audioDuration - start);
-          chunks.push({ audioIndex, start, duration, requestDuration: Math.max(isOmni ? 3 : 4, Math.min(maxChunkDuration, Math.ceil(duration))) });
+          chunks.push({ audioIndex, start, duration, requestDuration: Math.max(isWan ? 2 : isOmni ? 3 : 4, Math.min(maxChunkDuration, Math.ceil(duration))) });
           start += duration;
         }
       }
       if (!chunks.length) return send(res, 400, { error: 'La narración no contiene audio utilizable.' });
 
-      const resolution = isOmni
+      const resolution = isWan ? (model.resolutions.includes(block.h3Resolution) ? block.h3Resolution : '720P') : isOmni
         ? (['360p', '720p', '1080p', '4K'].includes(block.omniResolution) ? block.omniResolution : '720p')
         : isSeedance25
         ? (block.seedance25Resolution === '480p' ? '480p' : '720p')
@@ -6263,6 +6314,9 @@ const server = http.createServer(async (req, res) => {
         clipResults[index] = { key, reused: true };
       }
 
+      const wanBlockJobId = `${projectId}:${block.id}`;
+      if (isWan && wanBlockJobs.has(wanBlockJobId)) throw wanError('wanBlockBusy');
+      if (isWan) wanBlockJobs.add(wanBlockJobId);
       try {
         for (const [index, chunk] of chunks.entries()) {
           if (clipResults[index]) continue;
@@ -6297,7 +6351,9 @@ const server = http.createServer(async (req, res) => {
               model: serviceName, images: limits.image, videos: limits.video, audios: limits.audio, total: limits.total
             });
           }
-          const mediaDurations = isOmni
+          const mediaDurations = isWan
+            ? await validateWanMedia(refs, { mode, duration: chunk.requestDuration, probeDuration: file => probeMediaDuration(ffmpegExecutable, file), probeDimensions: file => probeVideoDimensions(ffmpegExecutable, file) })
+            : isOmni
             ? (await validateGeminiOmniMedia(refs, ffmpegExecutable, mode, false), { video: 0, audio: 0 })
             : isSeedance25 ? await validateSeedance25Media(refs, ffmpegExecutable)
               : await validateMiniMaxH3Media(refs, ffmpegExecutable);
@@ -6316,7 +6372,15 @@ const server = http.createServer(async (req, res) => {
               ? `${isSeedance25 ? `Use @Audio${narrationAudioNumber}` : 'Use the supplied voice audio'} as the exact performance and timing reference. Preserve speaker identity and synchronize visible speech when a person is on screen.`
               : ''
           ].filter(Boolean).join('\n\n').slice(0, 7000);
-          const generated = isOmni
+          const wanFingerprint = isWan ? crypto.createHash('sha256').update(JSON.stringify({ model: model.id, prompt, referenceKeys, audioKeys, chunk, mode, aspectRatio, resolution, audio: block.h3KeepGeneratedAudio })).digest('hex') : '';
+          const wanPending = isWan ? (await readJson('wan-block-tasks.json', {}))[wanFingerprint] : null;
+          const generated = isWan
+            ? await generateWanVideo({ apiKey: cfg.keys.qwen, endpoint: cfg.endpoints.qwen, apiModel: model.apiModel,
+              prompt: [prompt, videoAudioPolicy(true)].join('\n\n'), mediaRefs: refs, mode, aspectRatio, resolution,
+              duration: chunk.requestDuration, audio: block.h3KeepGeneratedAudio === true, taskId: wanPending?.taskId,
+              onFailed: async () => updateJson('wan-block-tasks.json', {}, jobs => { delete jobs[wanFingerprint]; return jobs; }),
+              onTask: async taskId => updateJson('wan-block-tasks.json', {}, jobs => ({ ...jobs, [wanFingerprint]: { taskId, projectId, blockId: block.id, createdAt: Date.now() } })) })
+            : isOmni
             ? await generateGeminiOmniVideo({
               apiKey: cfg.keys.gemini, apiModel: model.apiModel,
               prompt, mediaRefs: refs, mode, aspectRatio, resolution,
@@ -6336,7 +6400,7 @@ const server = http.createServer(async (req, res) => {
             });
           const key = await saveBuffer('video', `${ts()}-auto-${serviceSlug}-${index + 1}-${newId()}.mp4`, generated.buffer);
           const pricing = await getPricing();
-          const outputSeconds = Number(generated.usage?.output_seconds) || chunk.requestDuration;
+          const outputSeconds = Number(generated.usage?.output_video_duration || generated.usage?.output_seconds) || chunk.requestDuration;
           const inputSeconds = Number(generated.usage?.input_seconds) || (isSeedance25 ? mediaDurations.video : 0) || 0;
           const inputImages = Number(generated.usage?.input_image_count) || counts.image;
           const contextCost = generated.contextUsage
@@ -6344,7 +6408,7 @@ const server = http.createServer(async (req, res) => {
               + (Number(generated.contextUsage.completion_tokens) || 0) * 3.6 / 1_000_000
             : 0;
           const omniInputTokens = Number(generated.usage?.input_tokens || generated.usage?.inputTokenCount || generated.usage?.prompt_token_count) || 0;
-          const cost = isOmni
+          const cost = isWan ? videoPrice(pricing, model.id, resolution) * (outputSeconds + (Number(generated.usage?.input_video_duration) || mediaDurations.video || 0)) : isOmni
             ? videoPrice(pricing, model.id, resolution) * outputSeconds
               + omniInputTokens * (model.inputPricePerMillionTokens || 0) / 1_000_000
             : isSeedance25
@@ -6368,10 +6432,11 @@ const server = http.createServer(async (req, res) => {
             metadata[key] = {
               type: 'video', modelId: model.id, modelName: model.name, ts: Date.now(),
               category: `Auto: ${project.name}`.slice(0, 80), automationId: projectId, blockId: block.id,
-              h3TaskId: isSeedance25 || isOmni ? '' : generated.taskId,
+              wanTaskId: isWan ? generated.taskId : '',
+              h3TaskId: isWan || isSeedance25 || isOmni ? '' : generated.taskId,
               seedanceTaskId: isSeedance25 ? generated.taskId : '',
               omniInteractionId: isOmni ? generated.interactionId : '',
-              h3ContextIr: !isSeedance25 && !isOmni && block.h3ContextIr === true,
+              h3ContextIr: !isWan && !isSeedance25 && !isOmni && block.h3ContextIr === true,
               h3ChunkIndex: index, h3Resolution: resolution, generator: block.generator, duration: chunk.duration,
               cost: Number(cost.toFixed(6))
             };
@@ -6381,6 +6446,7 @@ const server = http.createServer(async (req, res) => {
 
         const segmentVideoKeys = clipResults.map((item) => item.key);
         const segmentPaths = await Promise.all(segmentVideoKeys.map((key) => resolveAssetKey(key)));
+        if (isWan) await updateJson('wan-block-tasks.json', {}, jobs => Object.fromEntries(Object.entries(jobs).filter(([, job]) => job.projectId !== projectId || job.blockId !== block.id)));
         const exactDuration = chunks.reduce((sum, chunk) => sum + chunk.duration, 0);
         const motionOverlay = await renderAutomationMotionOverlay({
           project, block, audioKeys, audioPaths, ffmpegExecutable, width, height, outDir,
@@ -6462,6 +6528,7 @@ const server = http.createServer(async (req, res) => {
           keptGeneratedAudio: useGeneratedAudio
         });
       } finally {
+        if (isWan) wanBlockJobs.delete(wanBlockJobId);
         await Promise.all(temporaryPaths.map((filePath) => fs.unlink(filePath).catch(() => {})));
       }
     }
@@ -7104,7 +7171,7 @@ const server = http.createServer(async (req, res) => {
         const motionOverlayKey = String(output.motionOverlayKey || '');
         const blockVideoKey = String(output.videoKey || '');
         const isHeyGen = block.generator === 'heygen' || output.generator === 'heygen';
-        const isH3 = ['h3', 'seedance25', 'omni'].includes(block.generator) || ['h3', 'seedance25', 'omni'].includes(output.generator);
+        const isH3 = ['h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(block.generator) || ['h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(output.generator);
         const isAssetBlock = block.generator === 'assets' || output.generator === 'assets';
         const selectedAssetKeys = normalizeAutomationAssetKeys(block.assetKeys);
         const heygenSegmentKeys = (Array.isArray(output.heygenSegmentVideoKeys) ? output.heygenSegmentVideoKeys : [])
@@ -7123,7 +7190,7 @@ const server = http.createServer(async (req, res) => {
           return sendError(res, 400, 'automationHeygenOriginalShotsMissing', `Faltan los planos originales de HeyGen de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.`, { title: block.title || block.id });
         }
         if (isH3 && !h3SegmentKeys.length) {
-          const modelName = block.generator === 'seedance25' || output.generator === 'seedance25' ? 'Seedance 2.5'
+          const modelName = ['wan', 'wan-prime'].includes(block.generator) ? (block.generator === 'wan-prime' ? 'Wan 3.0 Prime' : 'Wan 3.0') : block.generator === 'seedance25' || output.generator === 'seedance25' ? 'Seedance 2.5'
             : block.generator === 'omni' || output.generator === 'omni' ? 'Gemini Omni' : 'MiniMax H3';
           return sendError(res, 400, 'automationGenerativeSegmentsMissing', `Faltan los tramos originales de ${modelName} de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.`, { model: modelName, title: block.title || block.id });
         }
@@ -7457,10 +7524,31 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, entry);
     }
 
+    if (p === '/api/generate/wan/status' && req.method === 'GET') {
+      const [jobs, history, cfg, metadata] = await Promise.all([readJson('wan-tasks.json', []), readJson('history.json', []), getConfig(), readJson('asset-metadata.json', {})]);
+      const visible = filterNsfwHistory(history, cfg, metadata).filter(entry => getVideoModel(entry.modelId)?.provider === 'wan').slice(0, 30);
+      return send(res, 200, {
+        entries: visible,
+        jobs: jobs.filter(job => cfg.nsfwEnabled || !(job.request.refs || []).some(key => metadata[key]?.nsfw)).map(job => ({
+          id: job.id, clientId: job.request.wanClientId || '', taskId: job.taskId, modelId: job.request.modelId,
+          prompt: job.request.prompt, createdAt: job.createdAt,
+          failed: Boolean(job.failed || Date.now() - job.createdAt > 23 * 60 * 60 * 1000)
+        }))
+      });
+    }
+
     if (p === '/api/generate/video' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const entry = await timedGeneration(() => runVideoGeneration(body));
-      return send(res, 200, entry);
+      delete body.wanSentPrompt;
+      delete body.wanTaskId;
+      delete body.wanRecoveryId;
+      const recoveryId = newId();
+      body.wanRecoveryId = recoveryId;
+      wanActiveJobs.add(recoveryId);
+      try {
+        const entry = await timedGeneration(() => runVideoGeneration(body));
+        return send(res, 200, entry);
+      } finally { wanActiveJobs.delete(recoveryId); }
     }
 
     if (p === '/api/generate/video/h3-regenerate-2k' && req.method === 'POST') {
@@ -7636,12 +7724,13 @@ const server = http.createServer(async (req, res) => {
       }
       const endpoint = body.endpoint || (service === 'ark' ? cfg.endpoints.ark
         : service === 'qwen' ? cfg.endpoints.qwen
+        : service === 'wan' ? cfg.endpoints.qwen
         : service === 'wavespeed' ? cfg.endpoints.wavespeed
         : service === 'minimax' ? cfg.endpoints.minimax
           : service === 'suno' ? cfg.endpoints.suno : '');
       const result = await testService({
         service,
-        key: body.key || cfg.keys[service] || '',
+        key: body.key || cfg.keys[service === 'wan' ? 'qwen' : service] || '',
         endpoint
       });
       return send(res, 200, result);
@@ -8403,7 +8492,22 @@ setInterval(() => {
   for (const [state, entry] of heygenOAuthStates) if (entry.expiresAt <= now) heygenOAuthStates.delete(state);
 }, 10 * 60 * 1000).unref();
 
+async function recoverWanTasks() {
+  const jobs = await readJson('wan-tasks.json', []);
+  for (const job of jobs) {
+    if (wanActiveJobs.size >= 3) break;
+    if (wanActiveJobs.has(job.id) || job.failed || !job.taskId || Date.now() - job.createdAt > 23 * 60 * 60 * 1000) continue;
+    wanActiveJobs.add(job.id);
+    runVideoGeneration(job.request).catch(async error => {
+      console.warn('Wan recovery:', error.localizationCode || error.name);
+      if (error.localizationCode === 'wanFailed') await updateJson('wan-tasks.json', [], entries => entries.map(item => item.id === job.id ? { ...item, failed: true } : item));
+    }).finally(() => wanActiveJobs.delete(job.id)).catch(error => console.warn('Wan recovery persistence:', error.name));
+  }
+}
+setInterval(() => recoverWanTasks().catch(error => console.warn('Wan recovery:', error.name)), 60000).unref();
+
 server.listen(PORT, () => {
+  recoverWanTasks().catch(error => console.warn('Wan recovery:', error.name));
   console.log('');
   console.log('  ✨ Manifestador está corriendo');
   console.log(`  →  http://localhost:${PORT}`);

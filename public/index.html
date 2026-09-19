@@ -261,6 +261,13 @@
             <span class="hint" id="videoRefsHint"></span>
           </div>
         </div>
+        <div id="wanVideoControls" class="heygen-video-controls" hidden>
+          <div class="control-row"><label data-i18n="wan.seed"></label><input id="wanSeed" class="text-input" type="number" min="-1" max="2147483647" value="-1"></div>
+          <div class="control-row"><label data-i18n="wan.options"></label><label class="poser-toggle"><input id="wanPromptExtend" type="checkbox" checked><span data-i18n="wan.promptExtend"></span></label><label class="poser-toggle"><input id="wanWatermark" type="checkbox"><span data-i18n="wan.watermark"></span></label></div>
+          <div class="control-row"><label data-i18n="wan.context"></label><select id="wanContextType" class="select"><option value="link" data-i18n="wan.link"></option><option value="file" data-i18n="wan.file"></option></select><input id="wanContextUrl" type="url" class="text-input" placeholder="https://"></div>
+          <p class="hint" data-i18n="wan.contextHint"></p>
+          <p class="hint" data-i18n="wan.priceHint"></p>
+        </div>
         <div id="h3VideoControls" class="heygen-video-controls" hidden>
           <div class="control-row">
             <label>Context-IR</label>
@@ -851,8 +858,9 @@
           <span class="key-row"><input type="password" name="key_ark" placeholder="Key de Ark" data-i18n-placeholder="config.placeholders.arkKey"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="ark" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="ark"></span>
           </label>
-          <label>Qwen Image (Alibaba Model Studio)
+          <label><span data-i18n="wan.keyLabel"></span>
             <span class="key-row"><input type="password" name="key_qwen" placeholder="sk-…" autocomplete="off"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="qwen" data-i18n="config.test" data-i18n-title="qwen.testHint">Probar</button></span>
+            <button type="button" class="tool-btn test-btn" data-service="wan" data-i18n="wan.test"></button><span class="test-result" data-result="wan" role="status" aria-live="polite"></span>
             <span class="test-result" data-result="qwen" role="status" aria-live="polite"></span>
             <span class="hint" data-i18n="qwen.keyHint"></span>
           </label>
