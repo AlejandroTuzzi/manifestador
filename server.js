@@ -1064,10 +1064,6 @@ async function runImageGeneration(req) {
   const validStamp = (v) => typeof v === 'string' && v.startsWith('data:image/') && v.length < 40 * 1024 * 1024;
   const refPaths = [];
   for (const key of refs) refPaths.push(validStamp(labeledRefs[key]) ? labeledRefs[key] : await resolveAssetKey(key));
-  const characterRefs = refs.map((key) => /^characters\/([^/]+)(?:\/variants\/([^/]+))?\//.exec(key)).filter(Boolean);
-  const inferredCharacter = characterRefs.length && characterRefs.every((match) => match[1] === characterRefs[0][1])
-    ? { characterId: characterRefs[0][1], variantId: characterRefs.every((match) => (match[2] || null) === (characterRefs[0][2] || null)) ? (characterRefs[0][2] || null) : null }
-    : null;
 
   const batch = Math.max(1, Math.min(model.maxBatch || 4, Math.floor(Number(req.batch) || 1)));
   const qwenImage = model.provider === 'qwen' ? normalizeQwenOptions(req.qwenImage) : null;
@@ -1158,21 +1154,14 @@ async function runImageGeneration(req) {
     ...(qwenImage ? { qwenImage } : {}),
     ...(model.provider === 'openai' ? { openaiImage: req.openaiImage || {} } : {}),
     refs,
-    characterId: req.characterId || inferredCharacter?.characterId || null,
-    characterVariantId: req.characterVariantId || inferredCharacter?.variantId || null,
+    characterId: req.characterId || null,
+    characterVariantId: req.characterVariantId || null,
     outputs,
     errors,
     cost: Number(cost.toFixed(6))
   };
   await updateJson('history.json', [], (history) => [entry, ...history].slice(0, 1000));
   await recordAssetMetadata(entry);
-  if (entry.characterId) {
-    await updateJson('asset-links.json', [], (links) => {
-      const existing = new Set(links.map((link) => link.key));
-      const additions = outputs.filter((key) => !existing.has(key)).map((key) => ({ key, characterId: entry.characterId, variantId: entry.characterVariantId, ts: Date.now() }));
-      return [...additions, ...links].slice(0, 10000);
-    });
-  }
   return entry;
 }
 

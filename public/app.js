@@ -1747,8 +1747,7 @@ async function generate() {
     body: isImage ? {
       modelId: state.modelId, prompt, aspectRatio: state.aspectRatio,
       resolution: state.resolution, batch: state.batch,
-      refs: state.refs.map((r) => r.key), labeledRefs, characterId: state.pinnedId || null,
-      characterVariantId: state.characterVariantId || null,
+      refs: state.refs.map((r) => r.key), labeledRefs,
       ...(model.id.startsWith('gpt-image-2.5-') ? { openaiImage: readOpenaiOptions($('#openaiImageOptions')) } : {}), ...(model.provider === 'qwen' ? { qwenImage: readQwenOptions($('#qwenImageOptions')) } : {})
     } : isVideo ? {
       modelId: state.video.modelId, prompt, mode: state.video.mode,
@@ -1763,7 +1762,6 @@ async function generate() {
       h3ContextIr: isH3 && state.video.h3ContextIr,
       omniPreviousInteractionId: isOmni && ['edit', 'extend'].includes(state.video.mode) ? state.video.omniPreviousInteractionId : '',
       omniSourceHistoryId: isOmni && ['edit', 'extend'].includes(state.video.mode) ? state.video.omniSourceHistoryId : '',
-      characterId: state.pinnedId || null,
       heygenAuthMode: state.video.heygenAuthMode,
       heygenCharacterId: state.video.heygenCharacterId,
       heygenVoiceId: state.video.heygenVoiceId,
@@ -1777,8 +1775,7 @@ async function generate() {
       text: prompt,
       audioModelId: audioModel?.id || state.audioModelId,
       voiceId,
-      voiceName: voice?.name || pc?.voiceName || '',
-      characterId: state.pinnedId || null
+      voiceName: voice?.name || pc?.voiceName || ''
     }
   };
   if (isHeyGen) job.body.idempotencyKey = job.id;
@@ -1855,10 +1852,6 @@ async function runGenerationJob(job) {
     // historial del servidor — hay que sumarlas acá también.
     if (entry.siblingEntries?.length) state.history.unshift(...entry.siblingEntries);
     state.history.unshift(entry);
-    if (entry.type === 'image' && entry.characterId) {
-      for (const key of entry.outputs) state.assetLinks.unshift({ key, characterId: entry.characterId, variantId: entry.characterVariantId || null, ts: entry.ts });
-      renderCharacters();
-    }
     showEntry(entry);
     renderHistory();
     const costTxt = entry.cost ? ` — $${entry.cost.toFixed(3)}` : '';
