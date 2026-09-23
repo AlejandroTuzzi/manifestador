@@ -1,0 +1,26 @@
+{
+  "id": "1736017157ec",
+  "ts": 1790169219936,
+  "status": "succeeded",
+  "version": 1,
+  "kind": "image",
+  "request": {
+    "modelId": "nano-banana-2-lite",
+    "prompt": "insert shot; tightly frame the specific object or detail described in the scene, eye-level shot; camera at the subject's eye height, three-quarter view of the subject, 50mm standard lens; natural-looking framing, very shallow depth of field; f/1.4 aperture look; keep the focal subject sharp with a heavily defocused background and soft bokeh, focus precisely on the The woman's lips, centered composition; subject in the center of the frame,  sensual,",
+    "aspectRatio": "9:16",
+    "resolution": "1K",
+    "batch": 1,
+    "refs": [
+      "uploads/2026-09-23T13-12-35-Akuarela_-_19_de_Septiembre_de_2026.00_00_07_16.Still005.jpg"
+    ],
+    "labeledRefs": {},
+    "referenceTagsEnabled": false,
+    "referenceLabels": [
+      ""
+    ]
+  },
+  "nsfw": false,
+  "outputs": [
+    "generated/2026-09-23T13-13-45-nano-banana-2-lite-66bca98b6142.jpg"
+  ]
+}
