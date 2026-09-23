@@ -7518,7 +7518,8 @@ const server = http.createServer(async (req, res) => {
       const visible = filterNsfwHistory(history, cfg, metadata).filter(entry => getVideoModel(entry.modelId)?.provider === 'wan').slice(0, 30);
       return send(res, 200, {
         entries: visible,
-        jobs: jobs.filter(job => cfg.nsfwEnabled || !(job.request.refs || []).some(key => metadata[key]?.nsfw)).map(job => ({
+        jobs: jobs.filter(job => job.taskId && getVideoModel(job.request?.modelId)?.provider === 'wan')
+          .filter(job => cfg.nsfwEnabled || !(job.request.refs || []).some(key => metadata[key]?.nsfw)).map(job => ({
           id: job.id, clientId: job.request.wanClientId || '', taskId: job.taskId, modelId: job.request.modelId,
           prompt: job.request.prompt, createdAt: job.createdAt,
           failed: Boolean(job.failed || Date.now() - job.createdAt > 23 * 60 * 60 * 1000)
@@ -8485,6 +8486,7 @@ async function recoverWanTasks() {
   const jobs = await readJson('wan-tasks.json', []);
   for (const job of jobs) {
     if (wanActiveJobs.size >= 3) break;
+    if (getVideoModel(job.request?.modelId)?.provider !== 'wan' || job.request?.wanTaskId !== job.taskId) continue;
     if (wanActiveJobs.has(job.id) || job.failed || !job.taskId || Date.now() - job.createdAt > 23 * 60 * 60 * 1000) continue;
     wanActiveJobs.add(job.id);
     runVideoGeneration(job.request).catch(async error => {

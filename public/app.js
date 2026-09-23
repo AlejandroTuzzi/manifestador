@@ -1795,10 +1795,17 @@ async function syncWanGenerationJobs() {
   try {
     const result = await api('/api/generate/wan/status', { task: false });
     for (const pending of result.jobs || []) {
-      let job = state.generationJobs.find(item => item.id === pending.clientId || item.wanTaskId === pending.taskId);
+      const model = state.videoModels.find(model => model.id === pending.modelId);
+      if (model?.provider !== 'wan' || !pending.taskId) continue;
+      let job = state.generationJobs.find(item => item.recoveredWan
+        ? item.wanTaskId === pending.taskId
+        : item.body?.modelId === pending.modelId && (item.id === pending.clientId || item.wanTaskId === pending.taskId));
+      // Old failures are not new jobs. Still report failure when a recovered
+      // running task transitions to failed; dismissing it then stays dismissed.
+      if (!job && pending.failed) continue;
       if (!job) {
         job = { id: 'wan-' + pending.id, recoveredWan: true, mode: 'video',
-          label: state.videoModels.find(model => model.id === pending.modelId)?.name || 'Wan 3.0', prompt: pending.prompt,
+          label: model.name, prompt: pending.prompt,
           startedAt: pending.createdAt, status: 'running' };
         state.generationJobs.unshift(job);
       }
@@ -1810,6 +1817,7 @@ async function syncWanGenerationJobs() {
     }
     let changed = false;
     for (const entry of result.entries || []) {
+      if (!entry.wanTaskId || state.videoModels.find(model => model.id === entry.modelId)?.provider !== 'wan') continue;
       const job = state.generationJobs.find(item => item.wanTaskId === entry.wanTaskId);
       if (job?.recoveredWan) { job.entry = entry; job.status = 'done'; job.error = ''; }
       // Locally running requests insert their own history entry when they resolve.
