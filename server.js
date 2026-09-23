@@ -2,6 +2,8 @@
 // Ejecutar con: npm start   (luego abrir http://localhost:7777)
 
 import http from 'node:http';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { generationSettings } from './lib/generation-settings.js';
 import { budgetSettings, defaultBudgetSettings, saveBudget, refreshBudgetPrices, setBudgetStatus, budgetEarnings, budgetError } from './public/budget-model.js';
 import { budgetHtml, budgetCatalog, renderBudgetPdf, budgetPdfFilename } from './lib/budget-pdf.js';
 import { videoAudioPolicy } from './lib/video-audio-policy.js';
@@ -67,6 +69,7 @@ const AUTOMATION_LOGOS = {
 const AUTOMATION_LOGO_FADE_SECONDS = 0.75;
 const PORT = process.env.PORT ? Number(process.env.PORT) : 7777;
 const sessions = new Map();
+const generationContext = new AsyncLocalStorage();
 const automationAssemblyJobs = new Set();
 const heygenOAuthStates = new Map();
 const comfyProgress = new Map(); // genId -> { current, total }
@@ -341,6 +344,7 @@ async function recordCost(entry) {
 // Configuración jamás se aplicaba a nada generado — quedaba false siempre.
 function metadataFromEntry(entry, cfg) {
   return {
+    generationRequestId: entry.generationRequestId || generationContext.getStore()?.id || null,
     prompt: entry.prompt || '', type: entry.type, modelId: entry.modelId,
     modelName: entry.modelName, characterId: entry.characterId || null,
     characterVariantId: entry.characterVariantId || null, ts: entry.ts,
@@ -1030,6 +1034,45 @@ async function detectPhotoshop() {
 
 // Mide cuánto tarda una generación de punta a punta y lo persiste en el
 // historial (entry.durationMs), sin tocar cada función de generación.
+async function recordedGeneration(kind, body, fn) {
+  const id = newId();
+  const cfg = await getConfig();
+  const metadata = await readJson('asset-metadata.json', {});
+  const refs = Array.isArray(body.refs) ? body.refs : Object.values(body.refs || {});
+  const snapshot = { id, ts: Date.now(), status: 'submitted', ...generationSettings(kind, body),
+    nsfw: Boolean(cfg.nsfwUploadDefault || refs.some(key => metadata[key]?.nsfw)) };
+  await fs.mkdir(path.join(DATA_DIR, 'generation-requests'), { recursive: true });
+  const file = `generation-requests/${id}.json`;
+  const save = async () => {
+    await writeJson(file, snapshot);
+    const summary = { id, ts: snapshot.ts, kind, status: snapshot.status, nsfw: snapshot.nsfw,
+      modelId: body.modelId || body.audioModelId || body.model || body.workflowId || '',
+      prompt: String(body.prompt || body.text || '').slice(0, 300), error: snapshot.error || '', outputs: snapshot.outputs || [] };
+    await updateJson('generation-requests.json', [], list => [summary, ...list.filter(item => item.id !== id)].slice(0, 1000));
+  };
+  await save(); // Persist before making a potentially billable provider request.
+  body.generationRequestId = id;
+  return generationContext.run({ id }, async () => {
+    try {
+      const entry = await timedGeneration(fn);
+      const entries = [entry, ...(entry.siblingEntries || [])];
+      for (const item of entries) item.generationRequestId = id;
+      await updateJson('history.json', [], list => list.map(item => entries.some(e => e.id === item.id) ? { ...item, generationRequestId: id } : item));
+      snapshot.status = entry.errors?.length ? 'partial' : 'succeeded';
+      snapshot.outputs = entries.flatMap(item => item.outputs || []);
+      await save();
+      return entry;
+    } catch (error) {
+      snapshot.status = 'failed';
+      snapshot.error = String(error.message || error);
+      for (const secret of Object.values(cfg.keys || {})) if (typeof secret === 'string' && secret) snapshot.error = snapshot.error.replaceAll(secret, '[redacted]');
+      snapshot.error = snapshot.error.slice(0, 2000);
+      await save();
+      throw error;
+    }
+  });
+}
+
 async function timedGeneration(fn) {
   const startedAt = Date.now();
   const entry = await fn();
@@ -1444,10 +1487,20 @@ async function runVideoGeneration(req) {
       prompt, sentPrompt: video.finalPrompt, mode, aspectRatio, resolution, duration: outputSeconds, audio: Boolean(audio),
       avoidMusic: req.avoidMusic !== false, refs, refKinds: mediaRefs.map(ref => ref.kind), characterId: req.characterId || null,
       outputs: [key], errors: [], cost: Number(cost.toFixed(6)), wanTaskId: video.taskId,
+      generationRequestId: req.generationRequestId || null,
       wanOptions: req.wanOptions || {}, requestedDuration: duration, wanUsage: video.usage };
     await updateJson('history.json', [], entries => [entry, ...entries].slice(0, 1000));
     await recordAssetMetadata(entry);
     await recordCost({ type: 'video', modelId: model.id, label: `${model.name} ${resolution}`, units: billedSeconds, unitLabel: 'segundo(s)', cost });
+    if (req.wanTaskId && /^[a-z0-9]+$/i.test(req.generationRequestId || '')) {
+      const file = `generation-requests/${req.generationRequestId}.json`;
+      const snapshot = await readJson(file, null);
+      if (snapshot) {
+        await writeJson(file, { ...snapshot, status: 'succeeded', outputs: [key], error: '' });
+        await updateJson('generation-requests.json', [], list => list.map(item => item.id === req.generationRequestId
+          ? { ...item, status: 'succeeded', outputs: [key], error: '' } : item));
+      }
+    }
     await updateJson('wan-tasks.json', [], jobs => jobs.filter(j => j.id !== recoveryId));
     return entry;
   }
@@ -7509,8 +7562,22 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/generate/image' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const entry = await timedGeneration(() => runImageGeneration(body));
+      const entry = await recordedGeneration('image', body, () => runImageGeneration(body));
       return send(res, 200, entry);
+    }
+
+    if (p === '/api/generation-requests' && req.method === 'GET') {
+      const cfg = await getConfig();
+      const metadata = await readJson('asset-metadata.json', {});
+      const visible = item => cfg.nsfwEnabled || (!item.nsfw && !(item.outputs || []).some(key => metadata[key]?.nsfw));
+      const id = url.searchParams.get('id');
+      if (id) {
+        if (!/^[a-z0-9]+$/i.test(id)) return sendError(res, 404, 'generationRequestMissing', 'Saved request not found.');
+        const snapshot = await readJson(`generation-requests/${id}.json`, null);
+        if (!snapshot || !visible(snapshot)) return sendError(res, 404, 'generationRequestMissing', 'Saved request not found.');
+        return send(res, 200, snapshot);
+      }
+      return send(res, 200, { requests: (await readJson('generation-requests.json', [])).filter(visible) });
     }
 
     if (p === '/api/generate/wan/status' && req.method === 'GET') {
@@ -7536,7 +7603,7 @@ const server = http.createServer(async (req, res) => {
       body.wanRecoveryId = recoveryId;
       wanActiveJobs.add(recoveryId);
       try {
-        const entry = await timedGeneration(() => runVideoGeneration(body));
+        const entry = await recordedGeneration('video', body, () => runVideoGeneration(body));
         return send(res, 200, entry);
       } finally { wanActiveJobs.delete(recoveryId); }
     }
@@ -7552,19 +7619,19 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/generate/audio' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const entry = await timedGeneration(() => runAudioGeneration(body));
+      const entry = await recordedGeneration('audio', body, () => runAudioGeneration(body));
       return send(res, 200, entry);
     }
 
     if (p === '/api/generate/music' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const entry = await timedGeneration(() => runMusicGeneration(body));
+      const entry = await recordedGeneration('music', body, () => runMusicGeneration(body));
       return send(res, 200, entry);
     }
 
     if (p === '/api/generate/comfyui' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const entry = await timedGeneration(() => runComfyUIGeneration(body));
+      const entry = await recordedGeneration('comfyui', body, () => runComfyUIGeneration(body));
       return send(res, 200, entry);
     }
 

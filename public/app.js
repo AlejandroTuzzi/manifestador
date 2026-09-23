@@ -1778,6 +1778,8 @@ async function generate() {
       voiceName: voice?.name || pc?.voiceName || ''
     }
   };
+  job.body.referenceTagsEnabled = state.referenceTagsEnabled;
+  job.body.referenceLabels = state.refs.map(ref => ref.label || '');
   if (isHeyGen) job.body.idempotencyKey = job.id;
   if (isVideo && model?.provider === 'wan') job.body.wanClientId = job.id;
   if (isComfy && state.comfyui.loop) { job.comfyLoop = true; job.loopPrompt = prompt; }
@@ -1901,11 +1903,12 @@ function renderGenerationQueue() {
         ${job.progress?.total ? `<div class="job-progress-bar"><div style="width:${Math.min(100, Math.round(job.progress.current / job.progress.total * 100))}%"></div></div>` : ''}
         <div class="job-prompt ${job.status === 'error' ? 'job-error' : ''}">${esc(job.error ? i18n.errorMessage(job.error) : job.prompt)}</div>
       </div>
-      <div class="job-actions">${job.entry ? `<button class="mini-btn" data-job-act="view">${esc(tr('create.queue.view'))}</button>` : ''}${['done','error'].includes(job.status) ? '<button class="icon-btn" data-job-act="dismiss">×</button>' : ''}</div>
+      <div class="job-actions">${job.body && ['image', 'video', 'audio', 'music', 'comfyui'].includes((job.path || '').split('/').pop()) ? `<button class="mini-btn" data-job-act="restore">${esc(tr('recovery.restore'))}</button>` : ''}${job.entry ? `<button class="mini-btn" data-job-act="view">${esc(tr('create.queue.view'))}</button>` : ''}${['done','error'].includes(job.status) ? '<button class="icon-btn" data-job-act="dismiss">×</button>' : ''}</div>
     </div>`).join('');
   box.querySelectorAll('[data-job]').forEach((row) => row.querySelectorAll('[data-job-act]').forEach((button) => button.addEventListener('click', () => {
     const job = state.generationJobs.find((item) => item.id === row.dataset.job);
     if (button.dataset.jobAct === 'view' && job?.entry) showEntry(job.entry);
+    if (button.dataset.jobAct === 'restore' && job?.body) restoreGenerationSettings({ kind: job.path.split('/').pop(), request: job.body }).catch(error => toast(error.message, 'err'));
     if (button.dataset.jobAct === 'dismiss') { state.generationJobs = state.generationJobs.filter((item) => item.id !== row.dataset.job); renderGenerationQueue(); }
   })));
 }
@@ -2087,7 +2090,7 @@ function showEntry(entry, outputIdx = 0) {
       const act = b.dataset.act;
       if (act === 'regen') regenerate(entry);
       if (act === 'copy') copyPrompt(entry.prompt);
-      if (act === 'edit') editEntry(entry);
+      if (act === 'edit') restoreEntrySettings(entry);
       if (act === 'ref') { addRef(entry.outputs[state.currentOutput]); toast(tr('lightbox.referenceAdded')); }
       if (act === 'character') openCharModal(null, entry.outputs[state.currentOutput]);
       if (act === 'h3-2k') queueH3Promotion(entry);
@@ -2104,7 +2107,13 @@ function showEntry(entry, outputIdx = 0) {
 async function regenerate(entry) {
   promptBox.value = entry.prompt;
   renderHighlight();
-  if (entry.type === 'audio') {
+  if (entry.modelId === 'comfyui') {
+    state.comfyui.workflowId = entry.comfyWorkflowId || '';
+    state.comfyui.loop = false;
+    setMode('comfyui'); renderComfyControls();
+  } else if (entry.audioKind === 'music' || entry.modelId === 'suno') {
+    setMode('music'); renderMusicControls();
+  } else if (entry.type === 'audio') {
     if ((state.audioModels || []).some((model) => model.id === entry.modelId)) state.audioModelId = entry.modelId;
     setMode('audio');
     state.voiceId = entry.voiceId || state.voiceId;
@@ -2151,9 +2160,78 @@ async function regenerate(entry) {
   await generate();
 }
 
+async function restoreGenerationSettings(snapshot) {
+  const body = snapshot.request || {};
+  const kind = snapshot.kind;
+  const available = kind === 'video' ? state.videoModels : kind === 'image' ? state.models : kind === 'audio' ? state.audioModels : kind === 'comfyui' ? state.comfyuiWorkflows : null;
+  const modelId = body.modelId || body.audioModelId || body.workflowId;
+  if (available && !available.some(model => model.id === modelId)) { toast(tr('recovery.unavailable'), 'err'); return; }
+  // Restore inputs only. Never reuse task IDs or enqueue a paid request.
+  if (body.referenceTagsEnabled !== undefined) state.referenceTagsEnabled = body.referenceTagsEnabled;
+  $('#referenceTagsEnabled').checked = state.referenceTagsEnabled;
+  if (kind === 'music') {
+    Object.assign(state.music, { version: body.model, style: body.style || '', title: body.title || '',
+      instrumental: Boolean(body.instrumental), customMode: Boolean(body.customMode) });
+    setMode('music'); renderMusicControls();
+  } else if (kind === 'comfyui') {
+    Object.assign(state.comfyui, { workflowId: body.workflowId, aspectRatio: body.aspectRatio,
+      resolution: body.resolution, refs: body.refs || {}, loop: false,
+      customValues: Object.fromEntries(Object.entries(body.customValues || {}).map(([key, value]) => [key, { value: String(value), mode: 'fixed' }])) });
+    setMode('comfyui'); renderComfyControls();
+  } else {
+    if (kind === 'video') {
+      for (const key of ['heygenAuthMode', 'heygenCharacterId', 'heygenVoiceId', 'heygenMotionPrompt', 'heygenExpressiveness']) {
+        if (body[key] !== undefined) state.video[key] = body[key];
+      }
+    }
+    editEntry({ ...body, type: kind, modelId: body.modelId || body.audioModelId,
+      prompt: body.prompt ?? body.text ?? '', requestedDuration: body.duration, outputs: [] });
+    if (Array.isArray(body.refs)) {
+      state.refs = body.refs.map((key, index) => ({ key, kind: body.refKinds?.[index], label: body.referenceLabels?.[index] || '', fromChar: false }));
+      renderRefs();
+    }
+  }
+  promptBox.value = body.prompt ?? body.text ?? '';
+  renderHighlight(); goToCreate(); promptBox.focus();
+  toast(tr('recovery.restored'));
+}
+
+async function restoreEntrySettings(entry) {
+  try {
+    if (entry.generationRequestId) {
+      const snapshot = await api(`/api/generation-requests?id=${encodeURIComponent(entry.generationRequestId)}`, { task: false });
+      await restoreGenerationSettings(snapshot);
+    } else {
+      editEntry(entry);
+      toast(tr('recovery.legacy'));
+    }
+  } catch (error) { toast(error.message, 'err'); }
+}
+
+$('#savedRequestsClose').addEventListener('click', () => { $('#savedRequestsModal').hidden = true; });
+$('#btnSavedRequests').addEventListener('click', async () => {
+  try {
+    const { requests } = await api('/api/generation-requests', { task: false });
+    $('#savedRequestsList').innerHTML = requests.length ? requests.map(item => `<div class="hist-item"><div class="hist-body"><strong>${esc(item.modelId)} · ${esc(tr(`recovery.status.${item.status}`))}</strong><div class="hint">${esc(fmtDate(item.ts))}</div><div class="hist-prompt">${esc(item.prompt)}</div>${item.error ? `<div class="err">${esc(item.error)}</div>` : ''}</div><button class="mini-btn" data-restore-request="${esc(item.id)}">${esc(tr('recovery.restore'))}</button></div>`).join('') : `<p class="hint">${esc(tr('recovery.empty'))}</p>`;
+    $('#savedRequestsList').querySelectorAll('[data-restore-request]').forEach(button => button.addEventListener('click', async () => {
+      try {
+        const snapshot = await api(`/api/generation-requests?id=${encodeURIComponent(button.dataset.restoreRequest)}`, { task: false });
+        await restoreGenerationSettings(snapshot); $('#savedRequestsModal').hidden = true;
+      } catch (error) { toast(error.message, 'err'); }
+    }));
+    $('#savedRequestsModal').hidden = false;
+  } catch (error) { toast(error.message, 'err'); }
+});
+
 function editEntry(entry) {
   promptBox.value = entry.prompt;
-  if (entry.type === 'audio') {
+  if (entry.modelId === 'comfyui') {
+    state.comfyui.workflowId = entry.comfyWorkflowId || '';
+    state.comfyui.loop = false;
+    setMode('comfyui'); renderComfyControls();
+  } else if (entry.audioKind === 'music' || entry.modelId === 'suno') {
+    setMode('music'); renderMusicControls();
+  } else if (entry.type === 'audio') {
     if ((state.audioModels || []).some((model) => model.id === entry.modelId)) state.audioModelId = entry.modelId;
     setMode('audio');
     if (entry.voiceId) { state.voiceId = entry.voiceId; renderVoiceSelect(); $('#voiceSelect').value = entry.voiceId; }
@@ -2233,7 +2311,7 @@ function renderHistory() {
         const act = b.dataset.act;
         if (act === 'view') { showEntry(entry); $('#bigView').scrollIntoView({ behavior: 'smooth' }); }
         if (act === 'regen') regenerate(entry);
-        if (act === 'edit') editEntry(entry);
+        if (act === 'edit') restoreEntrySettings(entry);
         if (act === 'ref') { addRef(entry.outputs[0]); toast(tr('lightbox.referenceAdded')); }
         if (act === 'del') {
           await api(`/api/history/${entry.id}`, { method: 'DELETE' });
@@ -5141,13 +5219,17 @@ function openAssetInfo(asset) {
       <span class="hint">${esc(tr('assets.visual.tagsHint'))}</span>
       <button type="button" class="mini-btn" id="assetVisualMetadataSave">${esc(tr('assets.classify.save'))}</button>
     </div>` : ''}
-    <div class="asset-info-prompt"><div><span>${esc(tr('assets.info.usedPrompt'))}</span>${asset.prompt ? `<button class="mini-btn" id="assetInfoCopy">${IC('copy')} ${esc(tr('assets.info.copy'))}</button>` : ''}</div><pre>${esc(asset.prompt || tr('assets.info.noPrompt'))}</pre></div>`;
+    <div class="asset-info-prompt"><div>${asset.generationRequestId || asset.modelId ? `<button class="mini-btn" id="assetInfoRestore">${esc(tr('recovery.restore'))}</button>` : ''}<span>${esc(tr('assets.info.usedPrompt'))}</span>${asset.prompt ? `<button class="mini-btn" id="assetInfoCopy">${IC('copy')} ${esc(tr('assets.info.copy'))}</button>` : ''}</div><pre>${esc(asset.prompt || tr('assets.info.noPrompt'))}</pre></div>`;
   fillAudioDurations($('#assetInfoBody'));
   $('#assetInfoPlay')?.addEventListener('click', () => {
     $('#assetInfoModal').hidden = true;
     openAssetAudioPlayer(asset.key);
   });
   $('#assetInfoCopy')?.addEventListener('click', () => copyPrompt(asset.prompt));
+  $('#assetInfoRestore')?.addEventListener('click', () => {
+    const original = state.history.find(entry => entry.outputs?.includes(asset.key));
+    restoreEntrySettings(original || asset); $('#assetInfoModal').hidden = true;
+  });
   $('#assetRenameBtn').addEventListener('click', () => renameAsset(asset.key, $('#assetRenameInput').value));
   $('#assetRenameInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); renameAsset(asset.key, e.target.value); } });
   $('#assetAudioKind')?.addEventListener('change', () => { $('#assetMusicFields').hidden = $('#assetAudioKind').value !== 'music'; });

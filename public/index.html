@@ -373,6 +373,7 @@
         <div id="generationQueue" class="generation-queue" hidden></div>
         <div class="history-head">
           <h3 data-i18n="create.history">Historial</h3>
+          <button id="btnSavedRequests" class="mini-btn" data-i18n="recovery.requests"></button>
           <button id="btnClearHistory" class="mini-btn danger"><svg class="ic"><use href="#i-trash"/></svg><span data-i18n="create.history.clear">Borrar todo</span></button>
         </div>
         <div id="historyList" class="history-list"></div>
@@ -1050,6 +1051,13 @@
 </div>
 
 <!-- Información del asset -->
+<div id="savedRequestsModal" class="modal" hidden>
+  <div class="modal-box asset-info-box">
+    <div class="modal-head"><h3 data-i18n="recovery.requests"></h3><button id="savedRequestsClose" class="icon-btn" data-i18n-aria-label="common.close">×</button></div>
+    <p class="hint" data-i18n="recovery.hint"></p>
+    <div id="savedRequestsList"></div>
+  </div>
+</div>
 <div id="assetInfoModal" class="modal" hidden>
   <div class="modal-box asset-info-box">
     <div class="modal-head"><div><h3 data-i18n="assets.info.title">Información del asset</h3><p class="hint" data-i18n="assets.info.lead">Prompt y configuración de generación</p></div><button class="icon-btn" id="assetInfoClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
