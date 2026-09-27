@@ -1,4 +1,6 @@
 window.ManifestadorI18n.register('en', {
+  "config.audioReferencesWav": "Convert MP3 references to WAV before sending",
+  "config.audioReferencesWavHint": "Enabled by default for MiniMax, Seedance 2.5 and Wan, including Automation. Uses FFmpeg and a temporary copy: the original stays unchanged. Disable to send the original MP3.",
   "errors.generationRequestMissing": "The saved request is unavailable.",
   "recovery.requests": "Saved requests",
   "recovery.restore": "Restore settings",

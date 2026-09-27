@@ -2,12 +2,13 @@
 // Ejecutar con: npm start   (luego abrir http://localhost:7777)
 
 import http from 'node:http';
+import { withWavAudioReferences } from './lib/audio-reference-wav.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { generationSettings } from './lib/generation-settings.js';
 import { budgetSettings, defaultBudgetSettings, saveBudget, refreshBudgetPrices, setBudgetStatus, budgetEarnings, budgetError } from './public/budget-model.js';
 import { budgetHtml, budgetCatalog, renderBudgetPdf, budgetPdfFilename } from './lib/budget-pdf.js';
 import { videoAudioPolicy } from './lib/video-audio-policy.js';
-import { generateWanVideo, validateWanMedia, wanError } from './lib/wan-video.js';
+import { generateWanVideo as generateWanVideoRaw, validateWanMedia, wanError } from './lib/wan-video.js';
 import { protectedAssetKeys, protectedAssetAssociations } from './lib/asset-deletion-guard.js';
 import { changeInspiration, visibleInspiration, inspirationError } from './lib/series-inspiration.js';
 import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
@@ -21,8 +22,8 @@ import { spawn, execFile } from 'node:child_process';
 import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel, getAudioModel } from './lib/models.js';
 import {
   generateGemini, analyzeArtStyle, analyzeVocabularyImage, generateSeedream, generateFireRed, generateOpenAIImage, generateSeedanceVideo,
-  generateSeedance25Video, generateGeminiOmniVideo,
-  generateMiniMaxH3Video, regenerateMiniMaxH3Video, generateScreenplay,
+  generateSeedance25Video as generateSeedance25VideoRaw, generateGeminiOmniVideo,
+  generateMiniMaxH3Video as generateMiniMaxH3VideoRaw, regenerateMiniMaxH3Video as regenerateMiniMaxH3VideoRaw, generateScreenplay,
   listVoices, generateSpeech, generateMusic, translateText, searchUpdatedPricing, testService
 } from './lib/providers.js';
 import { mergePricing, imagePrice, videoPrice, audioPrice, musicPrice, translatePrice, scriptPrice } from './lib/pricing.js';
@@ -99,6 +100,7 @@ const DEFAULT_CONFIG = {
   poserPrompt: DEFAULT_POSER_PROMPT,
   photoshopPath: '',
   ffmpegPath: '',
+  convertAudioReferencesToWav: true,
   keys: { gemini: '', googleTranslate: '', ark: '', wavespeed: '', qwen: '', minimax: '', elevenlabs: '', openai: '', suno: '', heygen: '' },
   openaiModel: 'gpt-5-mini',
   audioModelId: AUDIO_MODEL.id,
@@ -1072,6 +1074,27 @@ async function recordedGeneration(kind, body, fn) {
     }
   });
 }
+
+async function sendWithWavReferences(options, provider, validate) {
+  const cfg = await getConfig();
+  let ffmpeg;
+  return withWavAudioReferences(options, {
+    enabled: cfg.convertAudioReferencesToWav !== false,
+    convert: async (source, target) => {
+      ffmpeg ||= await resolveFfmpegExecutable(cfg.ffmpegPath);
+      await runFfmpeg(ffmpeg, ['-y', '-i', source, '-vn', '-map', '0:a:0', '-c:a', 'pcm_s16le', '-ar', '44100', target]);
+    }
+  }, async prepared => {
+    if (ffmpeg) await validate(prepared, ffmpeg);
+    return provider(prepared);
+  });
+}
+const generateMiniMaxH3Video = options => sendWithWavReferences(options, generateMiniMaxH3VideoRaw, (prepared, ffmpeg) => validateMiniMaxH3Media(prepared.mediaRefs, ffmpeg));
+const regenerateMiniMaxH3Video = options => sendWithWavReferences(options, regenerateMiniMaxH3VideoRaw, (prepared, ffmpeg) => validateMiniMaxH3Media(prepared.mediaRefs, ffmpeg));
+const generateSeedance25Video = options => sendWithWavReferences(options, generateSeedance25VideoRaw, (prepared, ffmpeg) => validateSeedance25Media(prepared.mediaRefs, ffmpeg));
+const generateWanVideo = options => sendWithWavReferences(options, generateWanVideoRaw, (prepared, ffmpeg) => validateWanMedia(prepared.mediaRefs, {
+  mode: prepared.mode, duration: prepared.duration, probeDuration: file => probeMediaDuration(ffmpeg, file), probeDimensions: file => probeVideoDimensions(ffmpeg, file)
+}));
 
 async function timedGeneration(fn) {
   const startedAt = Date.now();
@@ -5086,6 +5109,7 @@ const server = http.createServer(async (req, res) => {
         poserPrompt: body.poserPrompt !== undefined ? String(body.poserPrompt) : cfg.poserPrompt,
         photoshopPath: body.photoshopPath !== undefined ? String(body.photoshopPath).trim() : cfg.photoshopPath,
         ffmpegPath: body.ffmpegPath !== undefined ? String(body.ffmpegPath).trim() : cfg.ffmpegPath,
+        convertAudioReferencesToWav: body.convertAudioReferencesToWav !== undefined ? body.convertAudioReferencesToWav !== false : cfg.convertAudioReferencesToWav !== false,
         comfyui: {
           host: body.comfyui?.host !== undefined ? String(body.comfyui.host).trim() || DEFAULT_CONFIG.comfyui.host : cfg.comfyui.host,
           port: body.comfyui?.port !== undefined ? Number(body.comfyui.port) || DEFAULT_CONFIG.comfyui.port : cfg.comfyui.port

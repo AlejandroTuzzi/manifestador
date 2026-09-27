@@ -1,4 +1,6 @@
 window.ManifestadorI18n.register('es', {
+  "config.audioReferencesWav": "Convertir referencias MP3 a WAV antes de enviarlas",
+  "config.audioReferencesWavHint": "Activado por defecto para MiniMax, Seedance 2.5 y Wan, también en el automatizador. Usa FFmpeg y una copia temporal: el original no cambia. Desactivá esta opción para enviar el MP3 original.",
   "errors.generationRequestMissing": "La solicitud guardada no está disponible.",
   "recovery.requests": "Solicitudes guardadas",
   "recovery.restore": "Recuperar configuración",

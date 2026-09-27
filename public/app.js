@@ -11853,6 +11853,7 @@ function fillConfigForm() {
   f.poserPrompt.value = c.poserPrompt || '';
   f.photoshopPath.value = c.photoshopPath || '';
   f.ffmpegPath.value = c.ffmpegPath || '';
+  f.convertAudioReferencesToWav.checked = c.convertAudioReferencesToWav !== false;
   f.nsfwEnabled.checked = Boolean(c.nsfwEnabled);
   f.nsfwAdminPassword.value = '';
   f.nsfwUploadDefault.checked = Boolean(c.nsfwUploadDefault);
@@ -12013,6 +12014,7 @@ $('#configForm').addEventListener('submit', async (e) => {
         poserPrompt: f.poserPrompt.value.trim(),
         photoshopPath: f.photoshopPath.value.trim(),
         ffmpegPath: f.ffmpegPath.value.trim(),
+        convertAudioReferencesToWav: f.convertAudioReferencesToWav.checked,
         nsfwEnabled: f.nsfwEnabled.checked,
         nsfwAdminPassword: f.nsfwAdminPassword.value,
         nsfwUploadDefault: f.nsfwUploadDefault.checked,

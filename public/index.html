@@ -913,6 +913,8 @@
         <h3>ffmpeg</h3>
         <div class="cfg-grid">
         <label><span data-i18n="config.ffmpeg.path">Ruta de FFmpeg</span> <input type="text" name="ffmpegPath" placeholder="C:\ffmpeg\bin · C:\ffmpeg\bin\ffmpeg.exe"></label>
+        <label class="poser-toggle"><input type="checkbox" name="convertAudioReferencesToWav" checked><span data-i18n="config.audioReferencesWav"></span></label>
+        <p class="hint" data-i18n="config.audioReferencesWavHint"></p>
         </div>
         <p class="hint" data-i18n="config.ffmpeg.hint">El Automatizador lo usa para armar el video mp4 de cada bloque (imagen + audio). Podés pegar la carpeta bin o la ruta completa a ffmpeg.exe.</p>
 
