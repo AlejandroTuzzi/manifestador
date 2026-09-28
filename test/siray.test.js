@@ -30,6 +30,33 @@ test('Siray connection test reports API errors rather than network errors', asyn
   assert.ok(!JSON.stringify(result).includes('secret'));
 });
 
+test('Siray normalizes success codes and empty failure markers without accepting actual errors', async () => {
+  for (const code of ['success', 'Success', 'SUCCESS', ' success ', 200, '200']) {
+    for (const fail_code of [undefined, '', 0, '0']) {
+      assert.deepEqual(await sirayFetch('secret', '/test', { fetchImpl: async () => json({ code, fail_code, message: 'Success', data: { task_id: 'task1' } }) }), { task_id: 'task1' });
+    }
+  }
+  for (const body of [{ code: 403 }, { code: 'Success', fail_code: 'REJECTED' }, { code: 'Success', success: false }, { code: 'Success', error: 'Denied' }]) {
+    await assert.rejects(sirayFetch('secret', '/test', { fetchImpl: async () => json({ ...body, message: 'Success' }) }), { localizationCode: 'sirayRequest' });
+  }
+  await assert.rejects(sirayFetch('secret', '/test', { fetchImpl: async () => new Response(JSON.stringify({ code: 'Success', message: 'Success' }), { status: 500 }) }), /HTTP 500/);
+});
+
+test('Qwen and Wan image jobs persist and finish with mixed-case success responses', async () => {
+  for (const model of SIRAY_IMAGE_MODELS.filter(model => ['Qwen', 'Wan'].includes(model.family))) {
+    let persisted = false;
+    const result = await generateSiray({ ...request(model), apiKey: 'secret', onTask: () => { persisted = true; }, fetchImpl: async (url, options) => {
+      if (url.endsWith('/v1/models')) return json({ code: 'Success', data: [{ id: model.apiModel, status: 'active' }] });
+      if (options.method === 'POST') return json({ code: 'Success', fail_code: '0', data: { task_id: 'image_123' } });
+      assert.ok(persisted);
+      if (url.includes('/generations/async/')) return json({ code: 'Success', data: { status: 'Success', outputs: ['https://media.example/image.png'] } });
+      return new Response('image', { headers: { 'Content-Type': 'image/png' } });
+    } });
+    assert.equal(result.taskId, 'image_123');
+    assert.equal(result.outputs[0].mime, 'image/png');
+  }
+});
+
 test('Siray uses existing families and preserves defaults, with latest video versions and both Wan tiers', () => {
   assert.equal(IMAGE_MODELS[0].id, 'nano-banana-pro');
   assert.equal(SIRAY_VIDEO_MODELS.length, 4);
