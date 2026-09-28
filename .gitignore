@@ -3,6 +3,8 @@ data/*.json
 data/characters/**
 data/poser/**
 data/fonts/**
+data/elements/**
+data/generation-requests/**
 !data/.gitkeep
 
 # Archivos generados o subidos
