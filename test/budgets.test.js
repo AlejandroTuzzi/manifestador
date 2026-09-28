@@ -21,6 +21,49 @@ function fixture(currency = 'USD') {
   body.discounts.characters=10;
   return {settings,body,quote:saveBudget(body,settings,null,{id:'q1',now:1})};
 }
+test('professional sound mixing is optional, per episode, discounted and snapshotted', async () => {
+  const {settings, body} = fixture();
+  settings.rates.soundMix.price = 125;
+  const off = saveBudget(body, settings, null, {id:'off'});
+  body.soundMix = 'professional'; body.discounts.soundMix = 10;
+  const quote = saveBudget(body, settings, null, {id:'mix'});
+  const row = quote.totals.groups.find(x => x.group === 'soundMix');
+  assert.equal(row.baseUsdCents, 37500);
+  assert.equal(row.totalUsdCents, 33750);
+  assert.equal(quote.totals.totalCents - off.totals.totalCents, 33750);
+  assert.equal(calculateBudget({...quote, episodes:[{}], pilotMinutes:20}).groups.find(x=>x.group==='soundMix').baseUsdCents,12500);
+  const eur = saveBudget({...body,currency:'EUR'},settings,null,{id:'eur'});
+  assert.equal(eur.totals.groups.find(x=>x.group==='soundMix').totalCents, Math.round(33750/settings.usdPerEuro));
+  settings.rates.soundMix.price = 999;
+  assert.equal(saveBudget({...quote},settings,quote).totals.totalCents,quote.totals.totalCents);
+  assert.throws(()=>budgetSettings({...settings,rates:{...settings.rates,soundMix:{price:-1}}}));
+  assert.throws(()=>saveBudget({...body,soundMix:'invalid'},settings,null,{id:'bad'}));
+  for(const locale of ['es','en']) {
+    const t=await budgetCatalog(locale);
+    const html=budgetHtml(quote,t,locale);
+    assert.ok(html.includes(t('budget.soundMixHint')));
+    assert.ok(html.includes(t('budget.soundMix')));
+    assert.ok(!html.includes('NaN'));
+  }
+});
+
+test('legacy budgets retain totals and can refresh the new sound mixing rate explicitly', async () => {
+  const {quote,settings}=fixture();
+  delete quote.soundMix; delete quote.snapshot.rates.soundMix; delete quote.discounts.soundMix;
+  quote.totals.groups=quote.totals.groups.filter(x=>x.group!=='soundMix');
+  const oldTotal=quote.totals.totalCents;
+  settings.rates.soundMix.price=40;
+  assert.equal(calculateBudget(quote).totalCents,oldTotal);
+  const saved=saveBudget({...quote},settings,quote);
+  assert.equal(saved.soundMix,'none');
+  assert.equal(saved.totals.totalCents,oldTotal);
+  assert.equal(saved.snapshot.rates.soundMix.price,0);
+  const refreshed=refreshBudgetPrices(quote,settings,quote.revision);
+  const enabled=saveBudget({...refreshed,soundMix:'professional'},settings,refreshed);
+  assert.equal(enabled.totals.totalCents,oldTotal+12000);
+  for(const q of [quote,saved,refreshed,enabled]) assert.ok(!budgetHtml(q,await budgetCatalog('es')).includes('NaN'));
+});
+
 test('quote calculation includes pilot and finale, provided versus created materials, billing units and group discounts',()=>{
   const {quote}=fixture();
   assert.equal(quote.episodes.length,3);assert.equal(quote.episodes[0].pilot,true);assert.equal(quote.episodes[2].final,true);

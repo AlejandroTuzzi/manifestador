@@ -1,4 +1,4 @@
-export const BUDGET_GROUPS = ['episodes', 'characters', 'locations', 'objects', 'script', 'voices', 'music'];
+export const BUDGET_GROUPS = ['episodes', 'characters', 'locations', 'objects', 'script', 'voices', 'music', 'soundMix'];
 export const budgetError = (code, status = 400) => Object.assign(new Error(code), { localizationCode: code, status });
 const text = (value, max = 200) => String(value ?? '').trim().slice(0, max);
 const number = (value, min = 0, max = 10000000, integer = false) => {
@@ -12,7 +12,8 @@ export function defaultBudgetSettings() {
     locations: { price: 0, revisions: 2 }, objects: { price: 0, revisions: 2 },
     script: { provided: 0, create: 0, unit: 'fixed', revisions: 2 },
     voices: { provided: 0, create: 0, unit: 'character', revisions: 2 },
-    music: { provided: 0, create: 0, unit: 'fixed', revisions: 2 }
+    music: { provided: 0, create: 0, unit: 'fixed', revisions: 2 },
+    soundMix: { price: 0, revisions: 2 }
   } };
 }
 export function budgetSettings(body = {}) {
@@ -36,7 +37,7 @@ export function budgetSettings(body = {}) {
 export function newBudgetDraft() {
   return { product: 'vertical-drama', client: '', title: '', description: '', deadline: '', currency: 'USD',
     pilotMinutes: 2, episodeMinutes: 2, episodes: [{}, {}], characters: [], locations: [], objects: [],
-    script: 'provided', voices: 'provided', music: 'provided', discounts: Object.fromEntries(BUDGET_GROUPS.map(group => [group, 0])) };
+    script: 'provided', voices: 'provided', music: 'provided', soundMix: 'none', discounts: Object.fromEntries(BUDGET_GROUPS.map(group => [group, 0])) };
 }
 export function saveBudget(body, settings, previous = null, { id, now = Date.now() } = {}) {
   if (previous && ['paid', 'cancelled'].includes(previous.status)) throw budgetError('budgetArchived', 409);
@@ -67,8 +68,11 @@ export function saveBudget(body, settings, previous = null, { id, now = Date.now
     out[group] = body[group];
   }
   out.discounts = {};
+  out.soundMix = body.soundMix ?? 'none';
+  if (!['none', 'professional'].includes(out.soundMix)) throw budgetError('budgetNumber');
   for (const group of BUDGET_GROUPS) out.discounts[group] = number(body.discounts?.[group] ?? 0, 0, 100);
   out.snapshot = previous?.snapshot || budgetSettings(settings);
+  if (!out.snapshot.rates.soundMix) out.snapshot = { ...out.snapshot, rates: { ...out.snapshot.rates, soundMix: { price: 0, revisions: 0 } } };
   if (out.currency === 'EUR' && !out.snapshot.usdPerEuro) throw budgetError('budgetEuroRate');
   out.totals = calculateBudget(out);
   return out;
@@ -80,13 +84,14 @@ export function calculateBudget(quote) {
     episodes: quote.pilotMinutes * rates.episodes.pilot + Math.max(0, quote.episodes.length - 1) * quote.episodeMinutes * rates.episodes.regular,
     characters: quote.characters.reduce((sum, item) => sum + rates.characters[item.source], 0),
     locations: quote.locations.length * rates.locations.price,
-    objects: quote.objects.length * rates.objects.price
+    objects: quote.objects.length * rates.objects.price,
+    soundMix: quote.soundMix === 'professional' ? quote.episodes.length * (rates.soundMix?.price ?? 0) : 0
   };
   for (const group of ['script', 'voices', 'music']) base[group] = rates[group][quote[group]] * (group === 'voices' && rates[group].unit === 'character' ? quote.characters.length : rates[group].unit === 'minute' ? minutes : rates[group].unit === 'episode' ? quote.episodes.length : 1);
   const fx = quote.currency === 'EUR' ? quote.snapshot.usdPerEuro : 1;
   const groups = BUDGET_GROUPS.map(group => {
     const baseUsdCents = Math.round(base[group] * 100);
-    const discountUsdCents = Math.round(baseUsdCents * quote.discounts[group] / 100);
+    const discountUsdCents = Math.round(baseUsdCents * (quote.discounts[group] ?? 0) / 100);
     const totalUsdCents = baseUsdCents - discountUsdCents;
     const baseCents = Math.round(baseUsdCents / fx), totalCents = Math.round(totalUsdCents / fx);
     return { group, baseUsdCents, discountUsdCents, totalUsdCents, baseCents, discountCents: baseCents - totalCents, totalCents };
@@ -109,7 +114,7 @@ export function refreshBudgetPrices(previous, settings, revision, now = Date.now
   if (previous.status !== 'draft') throw budgetError('budgetRefreshDraftOnly', 409);
   const current = budgetSettings(settings);
   const rates = Object.fromEntries(BUDGET_GROUPS.map(group => [group, {
-    ...current.rates[group], revisions: previous.snapshot.rates[group].revisions
+    ...current.rates[group], revisions: previous.snapshot.rates[group]?.revisions ?? current.rates[group].revisions
   }]));
   const quote = { ...previous, snapshot: { ...previous.snapshot, rates }, updatedAt: now, revision: previous.revision + 1 };
   quote.totals = calculateBudget(quote);

@@ -4,6 +4,20 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { BUDGET_GROUPS, defaultBudgetSettings, budgetSettings, newBudgetDraft, calculateBudget, saveBudget, setBudgetStatus, budgetEarnings } from '../public/budget-model.js';
 
+test('sound mixing has a configurable episode rate and persists the optional selection', async () => {
+  const h=harness();
+  await h.testing.changeTab('settings');
+  h.input('rates.soundMix.price','75',true);
+  await h.testing.saveSettings({preventDefault(){}});
+  await h.testing.changeTab('new');
+  h.input('client','Client'); h.input('title','Drama');
+  h.input('episodeCount','3',true); h.input('soundMix','professional');
+  await h.testing.saveCurrent({preventDefault(){}});
+  const q=h.testing.getDraft();
+  assert.equal(q.soundMix,'professional');
+  assert.equal(q.totals.groups.find(x=>x.group==='soundMix').baseUsdCents,22500);
+});
+
 function harness() {
   const nodes=new Map(), notices=[],calls=[];let seq=0;
   const settings=defaultBudgetSettings(); settings.usdPerEuro=1.25; settings.rates.episodes.pilot=100;settings.rates.episodes.regular=50;

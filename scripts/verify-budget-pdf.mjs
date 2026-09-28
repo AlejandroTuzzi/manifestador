@@ -7,12 +7,14 @@ settings.usdPerEuro = 1.2; // Synthetic test rate, not a market quote.
 settings.rates.episodes = { pilot:120, regular:80, revisions:2 };
 settings.rates.characters = { provided:40, create:120, revisions:3 };
 settings.rates.locations.price = 70; settings.rates.objects.price = 40;
+settings.rates.soundMix.price = 50;
 settings.rates.script.create = 400; settings.rates.voices.create = 20; settings.rates.voices.unit='episode'; settings.rates.music.create=150;
 settings.footerHtml = '<p><strong>Manifestador - Production studio</strong></p><p>Contact: <a href="mailto:studio@example.com">studio@example.com</a></p><p>Two revision rounds per stage unless otherwise specified.</p>';
 const draft = { ...newBudgetDraft(), client:'Example Client / Cliente de prueba', title:'The Last Promise / La última promesa', description:'A vertical drama about a family secret.\nPresupuesto de prueba: todas las tarifas son ficticias.', deadline:'2026-12-15', currency:'EUR', episodes:Array.from({length:24},()=>({})), pilotMinutes:3.5, episodeMinutes:1.5,
   characters:[{name:'Elena',sex:'Femenino / Female',species:'Humana / Human',age:'28',source:'create'},{name:'Mateo',sex:'Masculino / Male',species:'Humano / Human',age:'35',source:'provided'},{name:'Abuela / Grandmother',sex:'Femenino / Female',species:'Humana / Human',age:'72',source:'create'}],
   locations:[{name:'Palacio / Palace',type:'Interior',lighting:'Día cálido y noche azul / Warm daylight and blue night'},{name:'Bosque / Forest',type:'Exterior',lighting:'Atardecer / Sunset'}],objects:[{name:'Espada sagrada / Sacred sword',characteristics:'Gold hilt with a family crest, recurring in the pilot and finale.'}],script:'create',voices:'create',music:'create' };
 draft.discounts.episodes=10; draft.discounts.characters=5;
+draft.soundMix = 'professional';
 const quote=saveBudget(draft,settings,null,{id:'pdf-review',now:0});
 await mkdir(new URL('../tmp/pdfs/',import.meta.url),{recursive:true});
 for(const locale of ['es','en']) {

@@ -29,6 +29,10 @@ editar, enviar, pagar o cancelar un presupuesto.
   duración estimada y la tarifa regular.
 - Personajes: tarifa por personaje creado o adaptado del material del cliente.
 - Locaciones y objetos: tarifa por elemento.
+- Mezcla de sonido profesional: servicio opcional de mezcla, niveles y diseño
+  sonoro por un técnico. Tarifa configurable por capítulo, incluido el piloto.
+  Desactivado por defecto. En borradores antiguos, actualizar precios para
+  incorporar la nueva tarifa antes de seleccionarlo.
 - Guion, voces y música: elegir tarifa de creación o adaptación y unidad de cobro
   en Configuración: trabajo completo, minuto o episodio. Por minuto se usa la
   duración total, incluyendo el piloto; por episodio, el número total.
@@ -74,6 +78,10 @@ Quotes support USD or EUR, client and drama names, description, deadline, episod
 tiles (pilot and finale included), character tiles, location tiles, anchor objects,
 client-provided or created services, and independent group discounts. Script,
 voice and music prices can be per job, minute or episode. No taxes are calculated.
+Professional sound mixing is optional and charged per episode, including the
+pilot, at the configured rate. It covers an engineer's final mix, levels and
+custom sound design. Disabled by default; refresh prices on older drafts to
+include the new rate before selecting the service.
 
 Save as draft, mark as sent, then paid or cancelled. Marking as sent does not send
 an email. Paid and cancelled quotes are archived and read-only. Existing quotes

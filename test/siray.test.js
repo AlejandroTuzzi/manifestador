@@ -42,6 +42,50 @@ test('Siray normalizes success codes and empty failure markers without accepting
   await assert.rejects(sirayFetch('secret', '/test', { fetchImpl: async () => new Response(JSON.stringify({ code: 'Success', message: 'Success' }), { status: 500 }) }), /HTTP 500/);
 });
 
+test('zero code is accepted only with a task ID on task endpoints, never on message alone', async () => {
+  for (const route of ['/v1/images/generations/async', '/v1/video/generations', '/v1/images/generations/async/task1']) {
+    for (const code of [0, '0']) {
+      for (const payload of [{ data: { task_id: 'task1' } }, { task_id: 'task1' }]) {
+        const result = await sirayFetch('secret', route, { envelope: true, fetchImpl: async () => json({ code, message: 'Success', ...payload }) });
+        assert.equal(result.code, code);
+      }
+    }
+  }
+  for (const extra of [{}, { task_id: ' ' }, { task_id: 123 }, { request_uuid: 'support-only' }, { task_id: 'task1', success: false }, { task_id: 'task1', fail_code: 'REJECTED' }, { task_id: 'task1', error: 'Denied' }]) {
+    await assert.rejects(sirayFetch('secret', '/v1/images/generations/async', { fetchImpl: async () => json({ code: 0, message: 'Success', ...extra }) }), { localizationCode: 'sirayRequest' });
+  }
+  await assert.rejects(sirayFetch('secret', '/v1/account/balance', { fetchImpl: async () => json({ code: 0, task_id: 'task1' }) }), { localizationCode: 'sirayRequest' });
+  await assert.rejects(sirayFetch('secret', '/v1/video/generations', { fetchImpl: async () => new Response(JSON.stringify({ code: 0, task_id: 'task1' }), { status: 500 }) }), /HTTP 500/);
+});
+
+test('zero-code task submission persists before GET and never repeats the POST', async () => {
+  const events = [];
+  const model = SIRAY_IMAGE_MODELS.find(item => item.family === 'Qwen');
+  const result = await generateSiray({ ...request(model), apiKey: 'secret', onTask: id => events.push('persist:' + id), fetchImpl: async (url, options) => {
+    if (options.method === 'POST') { events.push('post'); return json({ code: 0, message: 'Success', data: { task_id: 'task1' } }); }
+    if (url.includes('/generations/async/')) { events.push('get'); return json({ code: 'success', data: { task_id: 'task1', status: 'SUCCESS', outputs: ['https://media.example/image.png'] } }); }
+    return new Response('image');
+  } });
+  assert.equal(result.taskId, 'task1');
+  assert.deepEqual(events, ['post', 'persist:task1', 'get']);
+});
+
+test('unrecognized submission keeps structural diagnostics without logging payloads or retrying', async () => {
+  let posts = 0;
+  await assert.rejects(generateSiray({ ...request(), apiKey: 'secret', fetchImpl: async (_url, options) => {
+    assert.equal(options.method, 'POST'); posts++;
+    return json({ code: 0, message: 'Success secret', request_uuid: 'support-only', data: { prompt: 'private prompt', images: ['private media'] } });
+  } }), error => {
+    assert.equal(error.localizationCode, 'sirayRequest');
+    assert.match(error.message, /code=0/);
+    assert.match(error.message, /dataFields/);
+    assert.match(error.message, /support-only/);
+    assert.doesNotMatch(error.message, /secret|private prompt|private media/);
+    return true;
+  });
+  assert.equal(posts, 1);
+});
+
 test('Qwen and Wan image jobs persist and finish with mixed-case success responses', async () => {
   for (const model of SIRAY_IMAGE_MODELS.filter(model => ['Qwen', 'Wan'].includes(model.family))) {
     let persisted = false;
@@ -85,6 +129,46 @@ test('every video route uses the verified Siray schema for text, first image and
     assert.equal(multi.body.videos.length, 1);
     assert.equal(multi.body.images.length, 1);
   }
+});
+
+test('Seedance 2.5 first-frame routes require adaptive ratio without changing other modes or models', async () => {
+  const model = sirayAutomationModel('seedance25');
+  for (const mode of ['first', 'frames']) {
+    for (const aspectRatio of ['9:16', '16:9', '1:1', 'adaptive']) {
+      const refs = Array.from({ length: mode === 'frames' ? 2 : 1 }, () => ref('image'));
+      const built = await buildSirayRequest(request(model, { mode, aspectRatio, mediaRefs: refs, resolution: '720p', duration: 5 }));
+      assert.equal(built.body.aspect_ratio, 'adaptive');
+      assert.equal(built.body.model, 'bytedance/seedance-2.5-i2v-spicy');
+      assert.equal(built.body.image, image);
+      assert.equal(built.body.end_image, mode === 'frames' ? image : undefined);
+      assert.equal(built.body.size, '720p');
+      assert.equal(built.body.duration, 5);
+    }
+  }
+  for (const mediaRefs of [[], [ref('image')]]) {
+    const built = await buildSirayRequest(request(model, { mode: 'reference', mediaRefs, aspectRatio: '9:16' }));
+    assert.equal(built.body.aspect_ratio, '9:16');
+  }
+  for (const generator of ['wan', 'wan-prime']) {
+    for (const mode of ['first', 'frames']) {
+      const built = await buildSirayRequest(request(sirayAutomationModel(generator), { mode, aspectRatio: '9:16', mediaRefs: Array.from({ length: mode === 'frames' ? 2 : 1 }, () => ref('image')) }));
+      assert.equal(built.body.aspect_ratio, '9:16');
+    }
+  }
+});
+
+test('Seedance frame submission sends adaptive on its first POST, without retrying', async () => {
+  let posts = 0;
+  await generateSiray({ ...request(sirayAutomationModel('seedance25'), { mode: 'first', aspectRatio: '9:16', mediaRefs: [ref('image')] }), apiKey: 'secret', fetchImpl: async (url, options) => {
+    if (options.method === 'POST') {
+      posts++;
+      assert.equal(JSON.parse(options.body).aspect_ratio, 'adaptive');
+      return json({ code: 'success', data: { task_id: 'landscape-test' } });
+    }
+    if (url.includes('/v1/video/')) return json({ code: 'success', data: { status: 'SUCCESS', outputs: ['https://media.example/landscape.mp4'] } });
+    return new Response('mock video');
+  } });
+  assert.equal(posts, 1);
 });
 
 test('end frame is sent separately, and unsupported MiniMax end frames fail before a paid request', async () => {

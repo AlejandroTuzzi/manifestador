@@ -8,7 +8,7 @@ const bt = (key, args = {}) => tr(`budget.${key}`, args);
 const h = key => esc(bt(key));
 const money = (cents, currency = 'USD') => i18n.formatNumber(cents / 100, { style:'currency', currency });
 const button = (action, key, extra = '') => `<button type="button" class="tool-btn" data-budget-action="${action}" ${extra}>${h(key)}</button>`;
-const field = (key, bind, value, type = 'text', extra = '') => `<label><span>${h(key)}</span><input type="${type}" data-bind="${bind}" value="${esc(value ?? '')}" ${type === 'number' ? `data-number min="${bind === 'episodeCount' ? 1 : ['pilotMinutes','episodeMinutes','usdPerEuro'].includes(bind) ? 0.000001 : 0}" step="${bind === 'episodeCount' || bind.endsWith('.revisions') ? 1 : 'any'}"` : ''} ${extra}></label>`;
+const field = (key, bind, value, type = 'text', extra = '') => `<label><span>${h(bind === 'rates.soundMix.price' ? 'soundMixPrice' : key)}</span><input type="${type}" data-bind="${bind}" value="${esc(value ?? '')}" ${type === 'number' ? `data-number min="${bind === 'episodeCount' ? 1 : ['pilotMinutes','episodeMinutes','usdPerEuro'].includes(bind) ? 0.000001 : 0}" step="${bind === 'episodeCount' || bind.endsWith('.revisions') ? 1 : 'any'}"` : ''} ${extra}></label>`;
 const area = (key, bind, value, max = 10000) => `<label><span>${h(key)}</span><textarea data-bind="${bind}" maxlength="${max}">${esc(value || '')}</textarea></label>`;
 const select = (key, bind, value, choices, extra = '') => `<label><span>${h(key)}</span><select class="select" data-bind="${bind}" ${extra}>${choices.map(choice => `<option value="${choice}"${value === choice ? ' selected' : ''}>${esc(['USD','EUR'].includes(choice) ? choice : bt(choice))}</option>`).join('')}</select></label>`;
 const readonly = () => ['paid','cancelled'].includes(draft?.status);
@@ -18,6 +18,7 @@ async function refresh() {
   const result = await api('/api/budgets');
   if (version !== requestNumber) return;
   library = result; library.settings.rates.voices.unit = 'character';
+  library.settings.rates.soundMix ||= defaultBudgetSettings().rates.soundMix;
 }
 function drawTabs() {
   $('#budgetTabs').innerHTML = ['new','sentQuotes','archived','settings'].map(key => `<button type="button" class="tool-btn${tab === key ? ' active' : ''}" data-tab="${key}" aria-pressed="${tab === key}">${h(key)}</button>`).join('');
@@ -43,6 +44,7 @@ function groupSection(group, body) {
 function episodeTiles(frozen = readonly()) { return draft.episodes.map((episode,index) => `<article class="budget-tile ${index === 0 ? 'pilot' : index === draft.episodes.length - 1 ? 'final' : ''}"><strong>${i18n.formatNumber(index + 1)}</strong><span>${index === 0 ? h('pilot') : ''}${index === draft.episodes.length - 1 ? ' ' + h('final') : ''}</span><small>${i18n.formatNumber(index === 0 ? draft.pilotMinutes : draft.episodeMinutes)} min</small>${!frozen && draft.episodes.length > 1 ? button('remove-episode','remove',`data-index="${index}"`) : ''}</article>`).join(''); }
 function drawEditor() {
   draft ||= newBudgetDraft();
+  if (draft.snapshot) draft.snapshot.rates.soundMix ||= { price: 0, revisions: 0 };
   const frozen = readonly();
   const entities = ['characters','locations','objects'].map(group => groupSection(group,
     `<div class="budget-tiles">${draft[group].map((item,index) => `<article class="budget-tile ${group}"><div class="budget-tile-head"><strong>${h(group)} ${i18n.formatNumber(index + 1)}</strong>${frozen ? '' : button('remove-item','remove', `data-group="${group}" data-index="${index}"`)}</div>${field('name',`${group}.${index}.name`,item.name,'text','required maxlength="200"')}
@@ -57,6 +59,7 @@ function drawEditor() {
     ${groupSection('episodes',`<div class="budget-fields">${field('episodeCount','episodeCount',draft.episodes.length,'number','max="500" required')}${field('pilotMinutes','pilotMinutes',draft.pilotMinutes,'number','max="1440" required')}${field('episodeMinutes','episodeMinutes',draft.episodeMinutes,'number','max="1440" required')}</div>
       <div class="budget-episodes">${episodeTiles(frozen)}</div><p id="budgetDurationTotal" aria-live="polite"></p>${!frozen ? button('add-episode','addEpisode') : ''}<p class="hint">${h('episodeHint')}</p>`)}
     ${entities}${['script','voices','music'].map(group => groupSection(group, select('source',group,draft[group],['provided','create']) + (group === 'voices' && (draft.snapshot || library.settings).rates.voices.unit === 'character' ? `<p class="hint">${h('voicePerCharacter')}</p>` : ''))).join('')}
+    ${groupSection('soundMix', select('soundMix', 'soundMix', draft.soundMix || 'none', ['none','professional']) + `<p class="hint">${h('soundMixHint')}</p>`)}
     </fieldset><div id="budgetTotals" class="budget-section"></div><p class="hint">${h('taxHint')}</p><div class="budget-actions">${!frozen ? '<button type="submit" class="generate-btn small">' + h('save') + '</button>' : ''}${draft.id && draft.status === 'draft' ? button('status','markSent',`data-id="${draft.id}" data-status="sent"`) : ''}${draft.id && draft.status === 'sent' ? button('status','markPaid',`data-id="${draft.id}" data-status="paid"`) : ''}${draft.id && !frozen ? button('status','cancelQuote',`data-id="${draft.id}" data-status="cancelled"`) : ''}</div></form>`;
   $('#budgetForm').onsubmit = saveCurrent;
   drawTotals();
