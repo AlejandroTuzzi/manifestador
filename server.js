@@ -20,6 +20,8 @@ import { fileURLToPath } from 'node:url';
 import { spawn, execFile } from 'node:child_process';
 
 import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel, getAudioModel } from './lib/models.js';
+import { generateSiray, sirayError } from './lib/siray.js';
+import { sirayAutomationModel } from './lib/siray-models.js';
 import {
   generateGemini, analyzeArtStyle, analyzeVocabularyImage, generateSeedream, generateFireRed, generateOpenAIImage, generateSeedanceVideo,
   generateSeedance25Video as generateSeedance25VideoRaw, generateGeminiOmniVideo,
@@ -101,7 +103,7 @@ const DEFAULT_CONFIG = {
   photoshopPath: '',
   ffmpegPath: '',
   convertAudioReferencesToWav: true,
-  keys: { gemini: '', googleTranslate: '', ark: '', wavespeed: '', qwen: '', minimax: '', elevenlabs: '', openai: '', suno: '', heygen: '' },
+  keys: { gemini: '', googleTranslate: '', ark: '', wavespeed: '', qwen: '', minimax: '', elevenlabs: '', openai: '', suno: '', heygen: '', siray: '' },
   openaiModel: 'gpt-5-mini',
   audioModelId: AUDIO_MODEL.id,
   heygenAuthMode: 'key',
@@ -334,6 +336,10 @@ function isLoopbackRequest(req) {
 async function recordCost(entry) {
   let recorded;
   await updateJson('ledger.json', [], (ledger) => {
+    if (entry.sirayTaskId) {
+      const existing = ledger.find(item => item.sirayTaskId === entry.sirayTaskId);
+      if (existing) { recorded = existing; return ledger; }
+    }
     recorded = { ts: Date.now(), ...entry, cost: Number(entry.cost.toFixed(6)) };
     return [recorded, ...ledger].slice(0, 20000);
   });
@@ -1107,6 +1113,74 @@ async function timedGeneration(fn) {
   return entry;
 }
 
+const sirayActiveJobs = new Set();
+async function runSirayGeneration(req, model, cfg, mediaRefs, sentPrompt, pending = null) {
+  const id = pending?.id || newId();
+  if (sirayActiveJobs.has(id)) throw sirayError('sirayPending', id);
+  sirayActiveJobs.add(id);
+  let job = pending;
+  try {
+    let inputVideoSeconds = pending?.inputVideoSeconds || 0;
+    if (!pending && mediaRefs.some(ref => ref.kind === 'video')) {
+      const ffmpeg = await resolveFfmpegExecutable(cfg.ffmpegPath);
+      for (const ref of mediaRefs.filter(ref => ref.kind === 'video')) inputVideoSeconds += await probeMediaDuration(ffmpeg, ref.path);
+    }
+    const imageCount = pending?.imageCount ?? mediaRefs.filter(ref => ref.kind === 'image').length;
+    const result = await sendWithWavReferences({ apiKey: cfg.keys.siray, model, prompt: sentPrompt,
+      mediaRefs, mode: req.mode || 'reference', aspectRatio: req.aspectRatio, resolution: req.resolution,
+      duration: req.duration, audio: req.audio, options: req.sirayOptions, taskId: pending?.taskId,
+      onTask: async taskId => {
+        job = { id, taskId, createdAt: Date.now(), modelId: model.id, sentPrompt, inputVideoSeconds, imageCount,
+          request: { ...generationSettings(model.durations ? 'video' : 'image', req).request, generationRequestId: req.generationRequestId },
+          nsfw: Boolean(cfg.nsfwUploadDefault), clientId: req.sirayClientId || '' };
+        await updateJson('siray-tasks.json', [], jobs => [...jobs.filter(item => item.id !== id), job]);
+      },
+      onFailed: async () => updateJson('siray-tasks.json', [], jobs => jobs.map(item => item.id === id ? { ...item, failed: true } : item))
+    }, generateSiray, async () => {});
+    const outputs = [];
+    for (const [index, output] of result.outputs.entries()) {
+      outputs.push(await saveBuffer(model.durations ? 'video' : 'generated', `siray-${id}-${index}${model.durations ? '.mp4' : extForMime(output.mime)}`, output.buffer));
+    }
+    const pricing = await getPricing();
+    const rate = model.durations ? videoPrice(pricing, model.id, req.resolution) : imagePrice(pricing, model.id, req.resolution);
+    const inputBilled = model.id.startsWith('siray-wan-3') ? Math.min(5, inputVideoSeconds) : model.id.includes('seedance') ? inputVideoSeconds : 0;
+    const cost = rate * (model.durations ? Math.max(0, Number(req.duration)) + inputBilled : outputs.length)
+      + (model.id.includes('minimax') ? Math.max(0, imageCount - 5) * 0.4 : 0);
+    const entry = { id, ts: job?.createdAt || Date.now(), type: model.durations ? 'video' : 'image',
+      modelId: model.id, modelName: model.name, prompt: req.prompt, aspectRatio: req.aspectRatio,
+      resolution: req.resolution, duration: req.duration, audio: req.audio, avoidMusic: req.avoidMusic !== false,
+      mode: req.mode || 'reference', refs: req.refs || [], refKinds: req.refKinds || [], batch: outputs.length,
+      sirayOptions: req.sirayOptions || {}, sirayTaskId: result.taskId, outputs, errors: [],
+      cost, costEstimated: true, costUnknown: !rate, generationRequestId: req.generationRequestId || null,
+      nsfw: job?.nsfw || false };
+    await updateJson('history.json', [], history => [entry, ...history.filter(item => item.id !== id)].slice(0, 1000));
+    await recordAssetMetadata(entry);
+    await recordCost({ sirayTaskId: result.taskId, type: entry.type, modelId: model.id, label: model.name, units: model.durations ? req.duration : outputs.length,
+      unitLabel: model.durations ? 'segundo(s)' : 'imagen(es)', cost });
+    if (pending && /^[a-z0-9]+$/i.test(req.generationRequestId || '')) {
+      const file = `generation-requests/${req.generationRequestId}.json`;
+      const snapshot = await readJson(file, null);
+      if (snapshot) {
+        const recovered = [...new Set([...(snapshot.outputs || []), ...outputs])];
+        await writeJson(file, { ...snapshot, status: 'succeeded', outputs: recovered, error: '' });
+        await updateJson('generation-requests.json', [], list => list.map(item => item.id === req.generationRequestId ? { ...item, status: 'succeeded', outputs: recovered, error: '' } : item));
+      }
+    }
+    await updateJson('siray-tasks.json', [], jobs => jobs.filter(item => item.id !== id));
+    return entry;
+  } finally { sirayActiveJobs.delete(id); }
+}
+async function recoverSirayTasks() {
+  const cfg = await getConfig();
+  if (!cfg.keys.siray) return;
+  for (const job of await readJson('siray-tasks.json', [])) {
+    if (!job.taskId || job.failed || sirayActiveJobs.has(job.id)) continue;
+    const model = getVideoModel(job.modelId) || getImageModel(job.modelId);
+    if (model?.provider !== 'siray') continue;
+    runSirayGeneration(job.request, model, cfg, [], job.sentPrompt, job).catch(error => console.warn('Siray recovery:', error.localizationCode || error.name));
+  }
+}
+
 async function runImageGeneration(req) {
   const cfg = await getConfig();
   const model = getImageModel(req.modelId);
@@ -1145,6 +1219,15 @@ async function runImageGeneration(req) {
   const preface = refs.some((key) => validStamp(labeledRefs[key])) ? LABELED_REFS_PROMPT : '';
   const suffix = hasPoserRef && cfg.poserPrompt?.trim() ? cfg.poserPrompt.trim() : '';
   const sentPrompt = [prompt, suffix].filter(Boolean).join('\n\n');
+
+  if (model.provider === 'siray') {
+    if ((req.refs || []).length > model.maxRefs) throw sirayError('sirayReferences');
+    const entries = [];
+    for (let index = 0; index < batch; index++) {
+      entries.push(await runSirayGeneration(req, model, cfg, refPaths.map(file => ({ path: file, kind: 'image' })), [preface, sentPrompt].filter(Boolean).join('\n\n')));
+    }
+    return { ...entries[0], siblingEntries: entries.slice(1) };
+  }
 
   const call = async () => {
     switch (model.provider) {
@@ -1449,7 +1532,7 @@ async function runVideoGeneration(req) {
   const requestedMode = String(req.mode || 'reference');
   const mode = model.provider === 'omni' && ['reference', 'frames', 'edit', 'extend'].includes(requestedMode)
     ? requestedMode
-    : model.provider === 'wan' && requestedMode === 'first' ? 'first'
+    : ['wan', 'siray'].includes(model.provider) && requestedMode === 'first' ? 'first'
     : requestedMode === 'frames' ? 'frames' : 'reference';
   const refLimit = model.refLimits?.[mode] ?? model.maxRefs;
   if (model.provider === 'wan' && (req.refs?.length || 0) > refLimit) throw wanError('wanReferences');
@@ -1484,6 +1567,11 @@ async function runVideoGeneration(req) {
   const preface = refs.some((key) => validStamp(labeledRefs[key])) ? LABELED_REFS_PROMPT : '';
   const suffix = hasPoserRef && cfg.poserPrompt?.trim() ? cfg.poserPrompt.trim() : '';
   const sentPrompt = [preface, prompt, suffix, videoAudioPolicy(req.avoidMusic)].filter(Boolean).join('\n\n');
+
+  if (model.provider === 'siray') {
+    if ((req.refs || []).length > refLimit) throw sirayError('sirayReferences');
+    return runSirayGeneration({ ...req, mode, aspectRatio, resolution, duration, audio: model.alwaysAudio || audio }, model, cfg, mediaRefs, sentPrompt);
+  }
 
   if (model.provider === 'wan') {
     const ffmpeg = !req.wanTaskId && mediaRefs.some(ref => ref.kind !== 'image') ? await resolveFfmpegExecutable(cfg.ffmpegPath) : null;
@@ -3346,8 +3434,9 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
       : Math.max(1, (block.items || []).reduce((total, item) => total + String(item.text || '').length, 0) / 14);
     let billedSeconds = 0;
     for (let remaining = approximate; remaining > 0.001; remaining -= Math.min(15, remaining)) {
-      billedSeconds += Math.max(4, Math.ceil(Math.min(15, remaining)));
+      billedSeconds += Math.max(block.videoProvider === 'siray' ? 5 : 4, Math.ceil(Math.min(15, remaining)));
     }
+    if (block.videoProvider === 'siray') return sum + billedSeconds * videoPrice(pricing, 'siray-minimax-h3-spicy', block.sirayResolution || '768p');
     return sum + billedSeconds * videoPrice(pricing, 'minimax-h3', block.h3Resolution === '2K' ? '2K' : '768P');
   }, 0);
   const seedance25Blocks = (project.blocks || []).filter((block) => block.generator === 'seedance25');
@@ -3361,6 +3450,7 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
       billedSeconds += Math.max(4, Math.ceil(Math.min(30, remaining)));
     }
     seedance25EstimatedSeconds += billedSeconds;
+    if (block.videoProvider === 'siray') return sum + billedSeconds * videoPrice(pricing, 'siray-seedance-2-5-spicy', block.sirayResolution || '480p');
     return sum + billedSeconds * videoPrice(pricing, 'seedance-2-5', block.seedance25Resolution === '480p' ? '480p' : '720p');
   }, 0);
   const omniBlocks = (project.blocks || []).filter((block) => block.generator === 'omni');
@@ -3382,9 +3472,12 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
   const wanVideoCost = wanBlocks.reduce((sum, block) => {
     const approximate = Number(block.estimatedDuration) || Math.max(1, (block.items || []).reduce((n, item) => n + String(item.text || '').length, 0) / 14);
     let seconds = 0;
-    const estimatedInput = (block.h3ReferenceKeys || []).some(key => key.startsWith('video/')) ? 15 : 0;
-    for (let left = approximate; left > 0.001; left -= Math.min(15, left)) seconds += Math.max(2, Math.ceil(Math.min(15, left))) + estimatedInput;
+    const spicy = block.videoProvider === 'siray';
+    const estimatedInput = (block.h3ReferenceKeys || []).some(key => key.startsWith('video/')) ? (spicy ? 5 : 15) : 0;
+    const chunkLimit = spicy ? 30 : 15;
+    for (let left = approximate; left > 0.001; left -= Math.min(chunkLimit, left)) seconds += Math.max(2, Math.ceil(Math.min(chunkLimit, left))) + estimatedInput;
     wanEstimatedSeconds += seconds;
+    if (spicy) return sum + seconds * videoPrice(pricing, sirayAutomationModel(block.generator).id, block.sirayResolution || '480p');
     return sum + seconds * videoPrice(pricing, block.generator === 'wan-prime' ? 'wan-3-prime' : 'wan-3', block.h3Resolution || '720P');
   }, 0);
   const estimatedTotal = wanVideoCost + resourceImageCost + blockImageCost + audioCost + generatedMusicCost
@@ -3517,6 +3610,8 @@ function sanitizeAutomation(src, prev = {}) {
       quoteReference: String(b.quoteReference || '').slice(0, 80),
       estimatedDuration: Math.max(0, Math.min(3600, Number(b.estimatedDuration) || 0)),
       generator: ['image', 'heygen', 'assets', 'h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(b.generator) ? b.generator : 'image',
+      videoProvider: b.videoProvider === 'siray' && sirayAutomationModel(b.generator) ? 'siray' : 'official',
+      sirayResolution: sirayAutomationModel(b.generator)?.resolutions.includes(b.sirayResolution) ? b.sirayResolution : sirayAutomationModel(b.generator)?.resolutions[0] || '',
       heygenCharacterId: /^[a-z0-9]+$/.test(String(b.heygenCharacterId || '')) ? String(b.heygenCharacterId) : '',
       heygenFraming: ['wide', 'close', 'split'].includes(b.heygenFraming) ? b.heygenFraming : 'wide',
       assetKeys: normalizeAutomationAssetKeys(b.assetKeys),
@@ -3526,12 +3621,12 @@ function sanitizeAutomation(src, prev = {}) {
       h3ContextIr: b.h3ContextIr === true,
       h3UseNarrationReference: b.h3UseNarrationReference !== false,
       h3KeepGeneratedAudio: b.h3KeepGeneratedAudio === true,
-      h3ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.h3ReferenceKeys, ['wan', 'wan-prime'].includes(b.generator) ? 20 : 12),
+      h3ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.h3ReferenceKeys, b.videoProvider === 'siray' ? sirayAutomationModel(b.generator)?.maxRefs || 12 : ['wan', 'wan-prime'].includes(b.generator) ? 20 : 12),
       seedance25Mode: b.seedance25Mode === 'frames' ? 'frames' : 'reference',
       seedance25Resolution: b.seedance25Resolution === '480p' ? '480p' : '720p',
       seedance25UseNarrationReference: b.seedance25UseNarrationReference !== false,
       seedance25KeepGeneratedAudio: b.seedance25KeepGeneratedAudio === true,
-      seedance25ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.seedance25ReferenceKeys),
+      seedance25ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.seedance25ReferenceKeys, b.videoProvider === 'siray' ? 50 : 12),
       omniMode: b.omniMode === 'frames' ? 'frames' : 'reference',
       omniResolution: ['360p', '720p', '1080p', '4K'].includes(b.omniResolution) ? b.omniResolution : '720p',
       omniReferenceKeys: normalizeAutomationH3ReferenceKeys(b.omniReferenceKeys)
@@ -5816,7 +5911,7 @@ const server = http.createServer(async (req, res) => {
               if (!previousBlock) {
                 generationChanged = true;
               } else {
-                const promptChanged = previousBlock.imagePrompt !== block.imagePrompt
+                const promptChanged = previousBlock.videoProvider !== block.videoProvider || previousBlock.sirayResolution !== block.sirayResolution || previousBlock.imagePrompt !== block.imagePrompt
                   || previousBlock.negativePrompt !== block.negativePrompt;
                 const h3IsRelevant = [previousBlock.generator, block.generator].some(g => ['h3', 'wan', 'wan-prime'].includes(g));
                 const h3GenerationChanged = h3IsRelevant && (
@@ -6311,15 +6406,18 @@ const server = http.createServer(async (req, res) => {
       const isWan = ['wan', 'wan-prime'].includes(block.generator);
       const isSeedance25 = block.generator === 'seedance25';
       const isOmni = block.generator === 'omni';
-      const model = getVideoModel(isWan ? (block.generator === 'wan-prime' ? 'wan-3-prime' : 'wan-3') : isOmni ? 'gemini-omni-1-1-flash' : isSeedance25 ? 'seedance-2-5' : 'minimax-h3');
+      const isSiray = block.videoProvider === 'siray';
+      const model = isSiray ? sirayAutomationModel(block.generator) : getVideoModel(isWan ? (block.generator === 'wan-prime' ? 'wan-3-prime' : 'wan-3') : isOmni ? 'gemini-omni-1-1-flash' : isSeedance25 ? 'seedance-2-5' : 'minimax-h3');
+      if (!model) throw sirayError('sirayParameters');
       const serviceName = model.name;
       const serviceSlug = isWan ? block.generator : isOmni ? 'omni' : isSeedance25 ? 'seedance25' : 'h3';
 
       const cfg = await getConfig();
-      if (isSeedance25 && !cfg.keys.ark) return send(res, 400, { error: 'Falta la API key de BytePlus ModelArk en Configuración.' });
+      if (isSiray && !cfg.keys.siray) throw sirayError('sirayKey');
+      if (!isSiray && isSeedance25 && !cfg.keys.ark) return send(res, 400, { error: 'Falta la API key de BytePlus ModelArk en Configuración.' });
       if (isOmni && !cfg.keys.gemini) return send(res, 400, { error: 'Falta la API key de Gemini en Configuración.' });
-      if (isWan && !cfg.keys.qwen) throw wanError('qwenKey');
-      if (!isWan && !isSeedance25 && !isOmni && !cfg.keys.minimax) return send(res, 400, { error: 'Falta la API key de MiniMax en Configuración.' });
+      if (!isSiray && isWan && !cfg.keys.qwen) throw wanError('qwenKey');
+      if (!isSiray && !isWan && !isSeedance25 && !isOmni && !cfg.keys.minimax) return send(res, 400, { error: 'Falta la API key de MiniMax en Configuración.' });
       const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
       const audioKeys = (Array.isArray(body.audioKeys) ? body.audioKeys : []).map(String).filter((key) => /^audio\//.test(key));
       if (!audioKeys.length) return send(res, 400, { error: 'Falta la narración del bloque.' });
@@ -6331,7 +6429,7 @@ const server = http.createServer(async (req, res) => {
 
       const configuredMode = isOmni ? block.omniMode : isSeedance25 ? block.seedance25Mode : block.h3Mode;
       const mode = configuredMode === 'frames' ? 'frames' : 'reference';
-      const configuredKeys = normalizeAutomationH3ReferenceKeys(isOmni ? block.omniReferenceKeys : isSeedance25 ? block.seedance25ReferenceKeys : block.h3ReferenceKeys, isWan ? 20 : 12);
+      const configuredKeys = normalizeAutomationH3ReferenceKeys(isOmni ? block.omniReferenceKeys : isSeedance25 ? block.seedance25ReferenceKeys : block.h3ReferenceKeys, isSiray ? model.maxRefs : isWan ? 20 : 12);
       const imageKey = String(body.imageKey || '');
       let referenceKeys;
       if (mode === 'frames') {
@@ -6348,18 +6446,18 @@ const server = http.createServer(async (req, res) => {
       if (allStats.some((stat) => !stat?.isFile())) return sendError(res, 400, 'automationReferencesMissing', `No encuentro una o más referencias de ${serviceName}.`, { model: serviceName });
 
       const chunks = [];
-      const maxChunkDuration = isOmni ? 10 : isSeedance25 ? 30 : 15;
+      const maxChunkDuration = isSiray ? Math.max(...model.durations) : isOmni ? 10 : isSeedance25 ? 30 : 15;
       for (const [audioIndex, audioDuration] of audioDurations.entries()) {
         let start = 0;
         while (start < audioDuration - 0.001) {
           const duration = Math.min(maxChunkDuration, audioDuration - start);
-          chunks.push({ audioIndex, start, duration, requestDuration: Math.max(isWan ? 2 : isOmni ? 3 : 4, Math.min(maxChunkDuration, Math.ceil(duration))) });
+          chunks.push({ audioIndex, start, duration, requestDuration: Math.max(isSiray ? Math.min(...model.durations) : isWan ? 2 : isOmni ? 3 : 4, Math.min(maxChunkDuration, Math.ceil(duration))) });
           start += duration;
         }
       }
       if (!chunks.length) return send(res, 400, { error: 'La narración no contiene audio utilizable.' });
 
-      const resolution = isWan ? (model.resolutions.includes(block.h3Resolution) ? block.h3Resolution : '720P') : isOmni
+      const resolution = isSiray ? (model.resolutions.includes(block.sirayResolution) ? block.sirayResolution : model.resolutions[0]) : isWan ? (model.resolutions.includes(block.h3Resolution) ? block.h3Resolution : '720P') : isOmni
         ? (['360p', '720p', '1080p', '4K'].includes(block.omniResolution) ? block.omniResolution : '720p')
         : isSeedance25
         ? (block.seedance25Resolution === '480p' ? '480p' : '720p')
@@ -6417,7 +6515,7 @@ const server = http.createServer(async (req, res) => {
               model: serviceName, images: limits.image, videos: limits.video, audios: limits.audio, total: limits.total
             });
           }
-          const mediaDurations = isWan
+          const mediaDurations = isSiray ? { video: (await Promise.all(refs.filter(ref => ref.kind === 'video').map(ref => probeMediaDuration(ffmpegExecutable, ref.path)))).reduce((sum, seconds) => sum + seconds, 0), audio: 0 } : isWan
             ? await validateWanMedia(refs, { mode, duration: chunk.requestDuration, probeDuration: file => probeMediaDuration(ffmpegExecutable, file), probeDimensions: file => probeVideoDimensions(ffmpegExecutable, file) })
             : isOmni
             ? (await validateGeminiOmniMedia(refs, ffmpegExecutable, mode, false), { video: 0, audio: 0 })
@@ -6440,7 +6538,16 @@ const server = http.createServer(async (req, res) => {
           ].filter(Boolean).join('\n\n').slice(0, 7000);
           const wanFingerprint = isWan ? crypto.createHash('sha256').update(JSON.stringify({ model: model.id, prompt, referenceKeys, audioKeys, chunk, mode, aspectRatio, resolution, audio: block.h3KeepGeneratedAudio })).digest('hex') : '';
           const wanPending = isWan ? (await readJson('wan-block-tasks.json', {}))[wanFingerprint] : null;
-          const generated = isWan
+          const sirayFingerprint = isSiray ? crypto.createHash('sha256').update(JSON.stringify({ model: model.id, prompt, referenceKeys, audioKeys, chunk, mode, aspectRatio, resolution, audio: isSeedance25 ? block.seedance25KeepGeneratedAudio : block.h3KeepGeneratedAudio })).digest('hex') : '';
+          const sirayPending = isSiray ? (await readJson('siray-block-tasks.json', {}))[sirayFingerprint] : null;
+          const sirayGenerated = isSiray ? await sendWithWavReferences({ apiKey: cfg.keys.siray, model,
+            prompt: [prompt, videoAudioPolicy(true)].join('\n\n'), mediaRefs: refs, mode, aspectRatio, resolution,
+            duration: chunk.requestDuration, audio: isSeedance25 ? block.seedance25KeepGeneratedAudio : block.h3KeepGeneratedAudio,
+            taskId: sirayPending?.taskId,
+            onTask: taskId => updateJson('siray-block-tasks.json', {}, jobs => ({ ...jobs, [sirayFingerprint]: { taskId, projectId, blockId: block.id } })),
+            onFailed: () => updateJson('siray-block-tasks.json', {}, jobs => { delete jobs[sirayFingerprint]; return jobs; })
+          }, generateSiray, async () => {}) : null;
+          const generated = isSiray ? { ...sirayGenerated.outputs[0], taskId: sirayGenerated.taskId } : isWan
             ? await generateWanVideo({ apiKey: cfg.keys.qwen, endpoint: cfg.endpoints.qwen, apiModel: model.apiModel,
               prompt: [prompt, videoAudioPolicy(true)].join('\n\n'), mediaRefs: refs, mode, aspectRatio, resolution,
               duration: chunk.requestDuration, audio: block.h3KeepGeneratedAudio === true, taskId: wanPending?.taskId,
@@ -6464,7 +6571,7 @@ const server = http.createServer(async (req, res) => {
               prompt, mediaRefs: refs, mode, aspectRatio, resolution,
               duration: chunk.requestDuration, contextIr: block.h3ContextIr === true
             });
-          const key = await saveBuffer('video', `${ts()}-auto-${serviceSlug}-${index + 1}-${newId()}.mp4`, generated.buffer);
+          const key = await saveBuffer('video', isSiray ? `auto-siray-${sirayFingerprint}.mp4` : `${ts()}-auto-${serviceSlug}-${index + 1}-${newId()}.mp4`, generated.buffer);
           const pricing = await getPricing();
           const outputSeconds = Number(generated.usage?.output_video_duration || generated.usage?.output_seconds) || chunk.requestDuration;
           const inputSeconds = Number(generated.usage?.input_seconds) || (isSeedance25 ? mediaDurations.video : 0) || 0;
@@ -6474,7 +6581,7 @@ const server = http.createServer(async (req, res) => {
               + (Number(generated.contextUsage.completion_tokens) || 0) * 3.6 / 1_000_000
             : 0;
           const omniInputTokens = Number(generated.usage?.input_tokens || generated.usage?.inputTokenCount || generated.usage?.prompt_token_count) || 0;
-          const cost = isWan ? videoPrice(pricing, model.id, resolution) * (outputSeconds + (Number(generated.usage?.input_video_duration) || mediaDurations.video || 0)) : isOmni
+          const cost = isSiray ? videoPrice(pricing, model.id, resolution) * (outputSeconds + (isWan ? Math.min(5, mediaDurations.video) : isSeedance25 ? mediaDurations.video : 0)) + (block.generator === 'h3' ? Math.max(0, counts.image - 5) * 0.4 : 0) : isWan ? videoPrice(pricing, model.id, resolution) * (outputSeconds + (Number(generated.usage?.input_video_duration) || mediaDurations.video || 0)) : isOmni
             ? videoPrice(pricing, model.id, resolution) * outputSeconds
               + omniInputTokens * (model.inputPricePerMillionTokens || 0) / 1_000_000
             : isSeedance25
@@ -6484,6 +6591,7 @@ const server = http.createServer(async (req, res) => {
               + Math.max(0, inputImages - 5) * 0.04 + contextCost;
           await recordCost({
             type: 'video', modelId: model.id, label: `${model.name} ${resolution} · Automatizador`,
+            sirayTaskId: isSiray ? generated.taskId : undefined,
             units: outputSeconds, unitLabel: 'segundo(s)', cost
           });
           clipResults[index] = { key, taskId: generated.taskId, finalPrompt: generated.finalPrompt || prompt, cost, reused: false };
@@ -6498,9 +6606,10 @@ const server = http.createServer(async (req, res) => {
             metadata[key] = {
               type: 'video', modelId: model.id, modelName: model.name, ts: Date.now(),
               category: `Auto: ${project.name}`.slice(0, 80), automationId: projectId, blockId: block.id,
-              wanTaskId: isWan ? generated.taskId : '',
-              h3TaskId: isWan || isSeedance25 || isOmni ? '' : generated.taskId,
-              seedanceTaskId: isSeedance25 ? generated.taskId : '',
+              wanTaskId: !isSiray && isWan ? generated.taskId : '',
+              sirayTaskId: isSiray ? generated.taskId : '', videoProvider: block.videoProvider,
+              h3TaskId: isSiray || isWan || isSeedance25 || isOmni ? '' : generated.taskId,
+              seedanceTaskId: !isSiray && isSeedance25 ? generated.taskId : '',
               omniInteractionId: isOmni ? generated.interactionId : '',
               h3ContextIr: !isWan && !isSeedance25 && !isOmni && block.h3ContextIr === true,
               h3ChunkIndex: index, h3Resolution: resolution, generator: block.generator, duration: chunk.duration,
@@ -6513,6 +6622,7 @@ const server = http.createServer(async (req, res) => {
         const segmentVideoKeys = clipResults.map((item) => item.key);
         const segmentPaths = await Promise.all(segmentVideoKeys.map((key) => resolveAssetKey(key)));
         if (isWan) await updateJson('wan-block-tasks.json', {}, jobs => Object.fromEntries(Object.entries(jobs).filter(([, job]) => job.projectId !== projectId || job.blockId !== block.id)));
+        if (isSiray) await updateJson('siray-block-tasks.json', {}, jobs => Object.fromEntries(Object.entries(jobs).filter(([, job]) => job.projectId !== projectId || job.blockId !== block.id)));
         const exactDuration = chunks.reduce((sum, chunk) => sum + chunk.duration, 0);
         const motionOverlay = await renderAutomationMotionOverlay({
           project, block, audioKeys, audioPaths, ffmpegExecutable, width, height, outDir,
@@ -7604,6 +7714,17 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { requests: (await readJson('generation-requests.json', [])).filter(visible) });
     }
 
+    if (p === '/api/generate/siray/status' && req.method === 'GET') {
+      const [jobs, history, cfg, metadata] = await Promise.all([readJson('siray-tasks.json', []), readJson('history.json', []), getConfig(), readJson('asset-metadata.json', {})]);
+      return send(res, 200, {
+        entries: filterNsfwHistory(history, cfg, metadata).filter(entry => entry.sirayTaskId).slice(0, 50),
+        jobs: jobs.filter(job => cfg.nsfwEnabled || (!job.nsfw && !(job.request.refs || []).some(key => metadata[key]?.nsfw))).map(job => ({
+          id: job.id, taskId: job.taskId, clientId: job.clientId, modelId: job.modelId, createdAt: job.createdAt,
+          prompt: job.request.prompt, failed: Boolean(job.failed)
+        }))
+      });
+    }
+
     if (p === '/api/generate/wan/status' && req.method === 'GET') {
       const [jobs, history, cfg, metadata] = await Promise.all([readJson('wan-tasks.json', []), readJson('history.json', []), getConfig(), readJson('asset-metadata.json', {})]);
       const visible = filterNsfwHistory(history, cfg, metadata).filter(entry => getVideoModel(entry.modelId)?.provider === 'wan').slice(0, 30);
@@ -8587,6 +8708,7 @@ async function recoverWanTasks() {
   }
 }
 setInterval(() => recoverWanTasks().catch(error => console.warn('Wan recovery:', error.name)), 60000).unref();
+setInterval(() => recoverSirayTasks().catch(error => console.warn('Siray recovery:', error.name)), 60000).unref();
 
 server.listen(PORT, () => {
   recoverWanTasks().catch(error => console.warn('Wan recovery:', error.name));

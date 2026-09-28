@@ -729,10 +729,28 @@ function chipRow(container, values, active, onPick, labelFn = (v) => v) {
 }
 
 function localizedModelNote(model) {
-  return model ? tr(`models.${model.id}.notes`, {}, model.notes || '') : '';
+  return model?.provider === 'siray' ? tr('siray.notes') + (model.availabilityUnverified ? ' ' + tr('siray.availability') : '') : model ? tr(`models.${model.id}.notes`, {}, model.notes || '') : '';
 }
 
 // Shared options UI: Creation and Automation use the same fields and defaults.
+function renderSirayOptions(model, parent) {
+  let root = parent.querySelector('[data-siray-options]');
+  if (!root) { root = document.createElement('div'); root.dataset.sirayOptions = ''; parent.append(root); }
+  root.hidden = model?.provider !== 'siray';
+  if (root.hidden) return;
+  state.sirayOptions ||= {};
+  const values = state.sirayOptions[model.id] || {};
+  root.innerHTML = `<details class="qwen-options"><summary>${esc(tr('siray.options'))}</summary><div class="cfg-grid">${Object.entries(model.sirayFields || {}).map(([key, spec]) => {
+    if (spec.type === 'boolean') return `<label class="check-row"><input data-siray="${key}" type="checkbox"${(values[key] ?? spec.default) ? ' checked' : ''}> ${esc(tr(`siray.${key}`))}</label>`;
+    if (spec.enum) return `<label>${esc(tr(`siray.${key}`))}<select class="select" data-siray="${key}">${spec.enum.map(value => `<option value="${value}"${value === values[key] ? ' selected' : ''}>${esc(key === 'task_type' ? tr(`siray.${value}`) : value)}</option>`).join('')}</select></label>`;
+    return `<label>${esc(tr(`siray.${key}`))}<input type="number" data-siray="${key}" min="${spec.minimum}" max="${spec.maximum}" step="1" value="${esc(values[key] ?? '')}"></label>`;
+  }).join('')}</div></details>`;
+  const read = () => {
+    state.sirayOptions[model.id] = Object.fromEntries([...root.querySelectorAll('[data-siray]')].filter(input => input.type !== 'number' || input.value !== '').map(input => [input.dataset.siray, input.type === 'checkbox' ? input.checked : input.type === 'number' ? Number(input.value) : input.value]));
+  };
+  root.oninput = read; read();
+}
+
 function qwenOptionsMarkup(value = {}) {
   return `<details class="qwen-options"><summary>${esc(tr('qwen.options'))}</summary>
     <div class="cfg-grid">
@@ -787,6 +805,7 @@ function renderImageControls() {
     (v) => `×${v}`);
 
   const qwenRoot = $('#qwenImageOptions');
+  renderSirayOptions(m, $('#imageControls'));
   const openaiRoot = $('#openaiImageOptions');
   openaiRoot.hidden = !m.id.startsWith('gpt-image-2.5-');
   openaiRoot.innerHTML = openaiOptionsMarkup(state.openaiImage);
@@ -847,6 +866,7 @@ function renderVideoControls() {
   const isOmni = m.provider === 'omni';
   const isSeedance25 = m.id === 'seedance-2-5';
   const multimediaRefs = supportsMultimediaVideoRefs(m);
+  renderSirayOptions(m, $('#videoControls'));
   state.video.modelId = m.id;
   if (!m.aspectRatios.includes(state.video.aspectRatio)) state.video.aspectRatio = m.aspectRatios[0];
   if (!m.resolutions.includes(state.video.resolution)) state.video.resolution = m.resolutions[0];
@@ -862,7 +882,7 @@ function renderVideoControls() {
       applyPinnedCharacterPhotos(); renderVideoControls();
     },
     (id) => state.videoModels.find((x) => x.id === id).name);
-  const videoModes = isOmni ? ['reference', 'frames', 'edit', 'extend'] : m.provider === 'wan' ? ['reference', 'first', 'frames'] : ['reference', 'frames'];
+  const videoModes = m.modes || (isOmni ? ['reference', 'frames', 'edit', 'extend'] : m.provider === 'wan' ? ['reference', 'first', 'frames'] : ['reference', 'frames']);
   if (!videoModes.includes(state.video.mode)) state.video.mode = 'reference';
   chipRow($('#videoModeChips'), videoModes, state.video.mode,
     (v) => {
@@ -911,7 +931,8 @@ function renderVideoControls() {
   if (isH3) state.video.audio = true;
   $('#videoGenerateAudioOption').hidden = !m.audio;
   $('#videoAudio').checked = m.audio && state.video.audio;
-  $('#videoAudio').disabled = isH3;
+  $('#videoAudio').disabled = isH3 || m.alwaysAudio;
+  if (m.alwaysAudio) { state.video.audio = true; $('#videoAudio').checked = true; }
   $('#videoDurationRow').hidden = isHeyGen;
   $('#videoModeRow').hidden = isHeyGen;
   $('#videoAudioRow').hidden = isHeyGen;
@@ -1693,6 +1714,7 @@ async function generate() {
     if (state.video.mode !== 'reference' && (counts.video || counts.audio || counts.image !== (state.video.mode === 'first' ? 1 : 2))) return toast(tr('errors.wanFrames'), 'err');
   }
   if (isH3 && !state.config?.keys?.minimax) return toast(tr('create.validation.minimaxKey'), 'err');
+  if (model?.provider === 'siray' && !state.config?.keys?.siray) return toast(tr('errors.sirayKey'), 'err');
   if (isOmni && !state.config?.keys?.gemini) return toast(tr('create.validation.geminiKey'), 'err');
   if (isSeedance25 && !state.config?.keys?.ark) return toast(tr('create.validation.arkKey'), 'err');
   if (isH3) {
@@ -1747,10 +1769,12 @@ async function generate() {
     body: isImage ? {
       modelId: state.modelId, prompt, aspectRatio: state.aspectRatio,
       resolution: state.resolution, batch: state.batch,
+      sirayOptions: model.provider === 'siray' ? state.sirayOptions?.[model.id] || {} : undefined,
       refs: state.refs.map((r) => r.key), labeledRefs,
       ...(model.id.startsWith('gpt-image-2.5-') ? { openaiImage: readOpenaiOptions($('#openaiImageOptions')) } : {}), ...(model.provider === 'qwen' ? { qwenImage: readQwenOptions($('#qwenImageOptions')) } : {})
     } : isVideo ? {
       modelId: state.video.modelId, prompt, mode: state.video.mode,
+      sirayOptions: model.provider === 'siray' ? state.sirayOptions?.[model.id] || {} : undefined,
       aspectRatio: state.video.aspectRatio, resolution: state.video.resolution,
       duration: state.video.duration, audio: state.video.audio,
       avoidMusic: state.video.avoidMusic !== false,
@@ -1782,6 +1806,7 @@ async function generate() {
   job.body.referenceLabels = state.refs.map(ref => ref.label || '');
   if (isHeyGen) job.body.idempotencyKey = job.id;
   if (isVideo && model?.provider === 'wan') job.body.wanClientId = job.id;
+  if (model?.provider === 'siray') job.body.sirayClientId = job.id;
   if (isComfy && state.comfyui.loop) { job.comfyLoop = true; job.loopPrompt = prompt; }
   state.generationJobs.unshift(job);
   renderGenerationQueue();
@@ -1830,6 +1855,38 @@ async function syncWanGenerationJobs() {
     renderGenerationQueue();
   } catch { /* A subsequent read-only poll retries; it never submits a generation. */ }
   finally { wanSyncBusy = false; }
+}
+
+let siraySyncBusy = false;
+async function syncSirayGenerationJobs() {
+  if (siraySyncBusy || document.hidden || !state.config?.keys?.siray) return;
+  siraySyncBusy = true;
+  try {
+    const result = await api('/api/generate/siray/status', { task: false });
+    for (const pending of result.jobs || []) {
+      const model = [...state.models, ...state.videoModels].find(item => item.id === pending.modelId);
+      if (model?.provider !== 'siray') continue;
+      let job = state.generationJobs.find(item => item.sirayTaskId === pending.taskId || item.id === pending.clientId);
+      if (!job && pending.failed) continue;
+      if (!job) {
+        job = { id: 'siray-' + pending.id, recoveredSiray: true, mode: model.durations ? 'video' : 'image',
+          label: model.name, prompt: pending.prompt, startedAt: pending.createdAt, status: 'running' };
+        state.generationJobs.unshift(job);
+      }
+      job.sirayTaskId = pending.taskId;
+      if (job.recoveredSiray && pending.failed) { job.status = 'error'; job.error = tr('errors.sirayRequest', { detail: pending.taskId }); }
+    }
+    let changed = false;
+    for (const entry of result.entries || []) {
+      const job = state.generationJobs.find(item => item.sirayTaskId === entry.sirayTaskId);
+      if (job && !job.recoveredSiray) continue;
+      if (job) { job.status = 'done'; job.entry = entry; job.error = ''; }
+      if (!state.history.some(item => item.id === entry.id)) { state.history.unshift(entry); changed = true; }
+    }
+    if (changed) { state.history.sort((a, b) => b.ts - a.ts); renderHistory(); }
+    renderGenerationQueue();
+  } catch { /* Read-only retry; never resubmit a generation. */ }
+  finally { siraySyncBusy = false; }
 }
 
 function pumpGenerationQueue() {
@@ -2105,6 +2162,7 @@ function showEntry(entry, outputIdx = 0) {
 }
 
 async function regenerate(entry) {
+  if (entry.modelId?.startsWith('siray-')) { state.sirayOptions ||= {}; state.sirayOptions[entry.modelId] = entry.sirayOptions || {}; }
   promptBox.value = entry.prompt;
   renderHighlight();
   if (entry.modelId === 'comfyui') {
@@ -2162,6 +2220,7 @@ async function regenerate(entry) {
 
 async function restoreGenerationSettings(snapshot) {
   const body = snapshot.request || {};
+  if (body.modelId?.startsWith('siray-')) { state.sirayOptions ||= {}; state.sirayOptions[body.modelId] = body.sirayOptions || {}; }
   const kind = snapshot.kind;
   const available = kind === 'video' ? state.videoModels : kind === 'image' ? state.models : kind === 'audio' ? state.audioModels : kind === 'comfyui' ? state.comfyuiWorkflows : null;
   const modelId = body.modelId || body.audioModelId || body.workflowId;
@@ -2224,6 +2283,7 @@ $('#btnSavedRequests').addEventListener('click', async () => {
 });
 
 function editEntry(entry) {
+  if (entry.modelId?.startsWith('siray-')) { state.sirayOptions ||= {}; state.sirayOptions[entry.modelId] = entry.sirayOptions || {}; }
   promptBox.value = entry.prompt;
   if (entry.modelId === 'comfyui') {
     state.comfyui.workflowId = entry.comfyWorkflowId || '';
@@ -8767,6 +8827,7 @@ async function openGenerativeVideoBlockAssetsPicker(blockElement, block, modelId
   try { await refreshAssets(); } catch { /* el modal mostrará el último estado disponible */ }
   const isSeedance25 = modelId === 'seedance-2-5';
   const isOmni = modelId === 'gemini-omni-1-1-flash';
+  if (blockElement.querySelector('[data-block-provider]')?.value === 'siray') modelId = ({ 'seedance-2-5': 'siray-seedance-2-5-spicy', 'wan-3': 'siray-wan-3-spicy', 'wan-3-prime': 'siray-wan-3-prime-spicy', 'minimax-h3': 'siray-minimax-h3-spicy' })[modelId] || modelId;
   const model = state.videoModels.find((item) => item.id === modelId);
   const settingsSelector = isOmni ? '[data-block-omni-settings]' : isSeedance25 ? '[data-block-seedance25-settings]' : '[data-block-h3-settings]';
   const settings = blockElement.querySelector(settingsSelector);
@@ -9185,6 +9246,8 @@ function renderAutomationProject() {
           </div>
           <div class="auto-block-editor">
             <div class="auto-block-generator">
+              <label data-block-provider-label><span>${esc(tr('siray.provider'))}</span><select class="select" data-block-provider><option value="official">${esc(tr('siray.official'))}</option><option value="siray"${b.videoProvider === 'siray' ? ' selected' : ''}>Siray · Spicy</option></select></label>
+              <label data-block-siray-resolution-label><span>${esc(tr('automation.config.resolution'))}</span><select class="select" data-block-siray-resolution data-saved="${esc(b.sirayResolution || '')}"></select></label>
               <label><span>${esc(tr('automation.generators.label'))}</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>${esc(tr('automation.generators.imageAudio'))}</option><option value="seedance25"${blockGenerator === 'seedance25' ? ' selected' : ''}>Seedance 2.5 · ${esc(tr('automation.generators.multimodalVideo'))}</option><option value="wan"${blockGenerator === 'wan' ? ' selected' : ''}>Wan 3.0</option><option value="wan-prime"${blockGenerator === 'wan-prime' ? ' selected' : ''}>Wan 3.0 Prime</option><option value="h3"${blockGenerator === 'h3' ? ' selected' : ''}>MiniMax H3 · ${esc(tr('automation.generators.multimodalVideo'))}</option><option value="omni"${blockGenerator === 'omni' ? ' selected' : ''}>Gemini Omni 1.1 Flash · ${esc(tr('common.video'))}</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + ${esc(tr('automation.generators.elevenLabsAudio'))}</option><option value="assets"${blockGenerator === 'assets' ? ' selected' : ''}>Assets · ${esc(tr('automation.generators.imagesVideos'))}</option></select></label>
               <div class="auto-block-heygen-settings" data-block-heygen-settings${blockGenerator === 'heygen' ? '' : ' hidden'}>
                 <label><span>${esc(tr('automation.heygen.characterVariant'))}</span><select class="select" data-block-heygen-character>${heygenCharacters.length ? heygenCharacters.map((character) => `<option value="${character.id}"${character.id === selectedHeyGenCharacter?.id ? ' selected' : ''}>${esc(character.name)} · HeyGen · ${esc(trn('characters.shots', character.heygen?.closeAvatarId ? 2 : 1))}</option>`).join('') : `<option value="">— ${esc(tr('automation.heygen.noReadyCharacters'))} —</option>`}</select></label>
@@ -9914,6 +9977,21 @@ function renderAutomationProject() {
     const hint = blockElement.querySelector('[data-block-heygen-hint]');
     const sync = () => {
       settings.hidden = select.value !== 'heygen';
+      const provider = blockElement.querySelector('[data-block-provider]');
+      const sirayId = { seedance25: 'siray-seedance-2-5-spicy', h3: 'siray-minimax-h3-spicy', wan: 'siray-wan-3-spicy', 'wan-prime': 'siray-wan-3-prime-spicy' }[select.value];
+      blockElement.querySelector('[data-block-provider-label]').hidden = !sirayId;
+      const sirayModel = provider.value === 'siray' ? state.videoModels.find(model => model.id === sirayId) : null;
+      const sirayRes = blockElement.querySelector('[data-block-siray-resolution]');
+      blockElement.querySelector('[data-block-siray-resolution-label]').hidden = !sirayModel;
+      if (sirayModel) {
+        const selected = sirayModel.resolutions.includes(sirayRes.value) ? sirayRes.value : sirayRes.dataset.saved;
+        sirayRes.innerHTML = sirayModel.resolutions.map(value => `<option value="${value}"${value === selected ? ' selected' : ''}>${value}</option>`).join('');
+      }
+      seedance25Settings.querySelector('[data-block-seedance25-resolution]').closest('label').hidden = Boolean(sirayModel);
+      h3Settings.querySelector('[data-block-h3-resolution]').closest('label').hidden = Boolean(sirayModel);
+      const h3ModeSelect = h3Settings.querySelector('[data-block-h3-mode]');
+      h3ModeSelect.querySelector('[value="frames"]').disabled = Boolean(sirayModel && !sirayModel.modes.includes('frames'));
+      if (sirayModel && !sirayModel.modes.includes(h3ModeSelect.value)) h3ModeSelect.value = 'reference';
       assetSettings.hidden = select.value !== 'assets';
       h3Settings.hidden = !['h3', 'wan', 'wan-prime'].includes(select.value);
       const wan = ['wan', 'wan-prime'].includes(select.value);
@@ -9921,7 +9999,7 @@ function renderAutomationProject() {
       const hints = h3Settings.querySelectorAll('.hint');
       if (hints[0]) hints[0].textContent = tr(wan ? 'wan.automationHint' : 'automation.generators.h3Hint');
       h3Settings.querySelector('[data-block-h3-hint]').textContent = tr(wan ? 'wan.refsHint' : 'automation.generators.h3ModeHint');
-      h3Settings.querySelector('[data-block-h3-context]').closest('label').hidden = wan;
+      h3Settings.querySelector('[data-block-h3-context]').closest('label').hidden = wan || Boolean(sirayModel);
       for (const [field, key] of [['narration', wan ? 'wan.narration' : 'automation.generators.h3NarrationReference'], ['native-audio', wan ? 'wan.keepAudio' : 'automation.generators.keepH3Audio']]) {
         const label = h3Settings.querySelector(`[data-block-h3-${field}]`).closest('label');
         for (const node of [...label.childNodes]) if (node.nodeType === Node.TEXT_NODE) node.textContent = ' ' + tr(key);
@@ -9940,6 +10018,7 @@ function renderAutomationProject() {
       if (character && !character.heygen?.closeAvatarId && ['close', 'split'].includes(framingSelect?.value)) framingSelect.value = 'wide';
     };
     select.addEventListener('change', sync);
+    blockElement.querySelector('[data-block-provider]').addEventListener('change', sync);
     characterSelect?.addEventListener('change', sync);
     sync();
   });
@@ -9974,6 +10053,8 @@ function renderAutomationProject() {
     const negativePrompt = blockElement.querySelector('[data-block-negative]').value.trim();
     const title = blockElement.querySelector('[data-block-title]').value.trim() || currentBlock.title || tr('automation.block');
     const selectedGenerator = blockElement.querySelector('[data-block-generator]').value;
+    const videoProvider = blockElement.querySelector('[data-block-provider]').value;
+    const sirayResolution = blockElement.querySelector('[data-block-siray-resolution]').value;
     const generator = ['image', 'heygen', 'assets', 'h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(selectedGenerator) ? selectedGenerator : 'image';
     const heygenCharacterId = generator === 'heygen' ? (blockElement.querySelector('[data-block-heygen-character]').value || '') : '';
     const heygenFraming = generator === 'heygen' ? blockElement.querySelector('[data-block-heygen-framing]').value : 'wide';
@@ -10034,7 +10115,7 @@ function renderAutomationProject() {
     button.disabled = true;
     const updated = await saveAutomation({
       blocks: pr.blocks.map((block) => block.id === blockId
-        ? { ...block, title, imagePrompt, negativePrompt, items, generator, heygenCharacterId, heygenFraming, assetKeys, assetMuteOriginal,
+        ? { ...block, title, imagePrompt, negativePrompt, items, generator, videoProvider, sirayResolution, heygenCharacterId, heygenFraming, assetKeys, assetMuteOriginal,
           h3Mode, h3Resolution, h3ContextIr, h3UseNarrationReference, h3KeepGeneratedAudio, h3ReferenceKeys,
           seedance25Mode, seedance25Resolution, seedance25UseNarrationReference, seedance25KeepGeneratedAudio, seedance25ReferenceKeys,
           omniMode, omniResolution, omniReferenceKeys }
@@ -11534,7 +11615,7 @@ function updateEstimate() {
   if (state.mode === 'image') {
     const referenceCost = (state.pricing.image?.[state.modelId]?.inputPerImage || 0) * state.refs.length;
     const p = imgPrice(state.modelId, state.resolution) * state.batch + referenceCost * (currentModel()?.nativeBatch ? 1 : state.batch);
-    el.textContent = p ? `≈ $${p.toFixed(3)}` : '';
+    el.textContent = p ? `≈ $${p.toFixed(3)}` : currentModel()?.provider === 'siray' ? tr('siray.unknownPrice') : '';
   } else if (state.mode === 'video') {
     const model = currentVideoModel();
     if (model?.provider === 'heygen') {
@@ -11551,7 +11632,9 @@ function updateEstimate() {
     const perSec = t[state.video.resolution] ?? Object.values(t)[0] ?? 0;
     const wanInputEstimate = model?.provider === 'wan' && state.refs.some(ref => referenceKind(ref) === 'video') ? 15 : 0;
     const estimatedSeconds = state.video.duration === -1 ? 30 : model?.provider === 'wan' ? Math.min(30, state.video.duration + wanInputEstimate) : state.video.duration;
-    const p = perSec * estimatedSeconds;
+    const sirayInputSeconds = model?.provider === 'siray' && model.family === 'Wan' && state.refs.some(ref => referenceKind(ref) === 'video') ? 5 : 0;
+    const sirayExtraImages = model?.id === 'siray-minimax-h3-spicy' ? Math.max(0, state.refs.filter(ref => referenceKind(ref) === 'image').length - 5) * 0.4 : 0;
+    const p = perSec * (estimatedSeconds + sirayInputSeconds) + sirayExtraImages;
     el.textContent = p ? `≈ $${p.toFixed(3)} (${state.video.duration === -1 ? tr('wan.smartDuration') : `${state.video.duration}s`})` : '';
   } else if (state.mode === 'music') {
     const perTrack = state.pricing.music?.perTrack ?? 0;
@@ -11828,6 +11911,7 @@ function fillConfigForm() {
   f.key_ark.value = c.keys.ark || '';
   f.key_wavespeed.value = c.keys.wavespeed || '';
   f.key_qwen.value = c.keys.qwen || '';
+  f.key_siray.value = c.keys.siray || '';
   f.key_elevenlabs.value = c.keys.elevenlabs || '';
   f.key_openai.value = c.keys.openai || '';
   f.key_minimax.value = c.keys.minimax || '';
@@ -11984,6 +12068,7 @@ $('#configForm').addEventListener('submit', async (e) => {
           ark: f.key_ark.value.trim(),
           wavespeed: f.key_wavespeed.value.trim(),
           qwen: f.key_qwen.value.trim(),
+          siray: f.key_siray.value.trim(),
           elevenlabs: f.key_elevenlabs.value.trim(),
           openai: f.key_openai.value.trim(),
           minimax: f.key_minimax.value.trim(),
@@ -12105,6 +12190,8 @@ async function init() {
   startAutomationSync();
   syncWanGenerationJobs();
   setInterval(syncWanGenerationJobs, 10000);
+  syncSirayGenerationJobs();
+  setInterval(syncSirayGenerationJobs, 10000);
 
   // deep-links: #audio, #assets, #characters, #series, #subtitler, #prompts, #vocabulary, #costs, #config
   const h = location.hash.slice(1);
