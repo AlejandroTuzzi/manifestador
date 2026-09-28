@@ -123,6 +123,37 @@ test('recovery only polls; terminal failure is localized and never resubmitted',
   assert.equal(failed, true);
 });
 
+test('video accepts top-level task responses as well as wrapped responses for Wan and Seedance', async () => {
+  for (const model of SIRAY_VIDEO_MODELS.filter(model => ['Wan', 'Seedance'].includes(model.family))) {
+    let persisted = false;
+    const result = await generateSiray({ ...request(model), apiKey: 'secret', onTask: id => { assert.equal(id, 'video_123'); persisted = true; }, fetchImpl: async (url, options) => {
+      if (options.method === 'POST') return json({ code: 'success', task_id: 'video_123' });
+      assert.ok(persisted);
+      if (url.includes('/v1/video/')) return json({ status: 'SUCCESS', task_id: 'video_123', outputs: ['https://media.example/result.mp4'] });
+      return new Response('video');
+    } });
+    assert.equal(result.taskId, 'video_123');
+  }
+});
+
+test('missing task ID preserves safe diagnostics, never uses request UUID, never resubmits', async () => {
+  let posts = 0;
+  await assert.rejects(generateSiray({ ...request(), apiKey: 'secret', onTask: () => assert.fail('No task to persist'), fetchImpl: async (_url, options) => {
+    assert.equal(options.method, 'POST'); posts++;
+    return json({ code: 'success', message: 'secret diagnostic', request_uuid: 'support-only', data: { prompt: 'private prompt', images: ['private media'] } });
+  } }), error => {
+    assert.equal(error.localizationCode, 'sirayMissingTask');
+    assert.match(error.localizationDetails.detail, /support-only/);
+    assert.doesNotMatch(error.message, /secret|private prompt|private media/);
+    return true;
+  });
+  assert.equal(posts, 1);
+});
+
+test('submission fail_code is not mistaken for a missing task ID', async () => {
+  await assert.rejects(sirayFetch('secret', '/v1/video/generations', { fetchImpl: async () => json({ code: 'success', fail_code: 'REJECTED' }) }), { localizationCode: 'sirayRequest' });
+});
+
 test('unconfirmed models require active account availability before any paid POST', async () => {
   const model = SIRAY_IMAGE_MODELS.find(item => item.availabilityUnverified);
   await assert.rejects(generateSiray({ ...request(model), apiKey: 'secret', fetchImpl: async (url, options) => {

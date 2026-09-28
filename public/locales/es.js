@@ -19,6 +19,7 @@ window.ManifestadorI18n.register('es', {
 "errors.sirayParameters": "Opciones de Siray inválidas: {detail}.",
 "errors.sirayRequest": "Siray: {detail}",
 "errors.sirayPending": "La tarea Siray sigue pendiente. Se recuperará sin volver a generarla: {detail}.",
+"errors.sirayMissingTask": "Siray respondió sin un identificador de tarea reconocible. Revisá el historial de Siray antes de volver a generar para evitar cargos duplicados. Diagnóstico: {detail}",
 "errors.sirayUnavailable": "El modelo no está activo en tu cuenta de Siray: {detail}. No se inició ninguna generación.",
   "config.audioReferencesWav": "Convertir referencias MP3 a WAV antes de enviarlas",
   "config.audioReferencesWavHint": "Activado por defecto para MiniMax, Seedance 2.5 y Wan, también en el automatizador. Usa FFmpeg y una copia temporal: el original no cambia. Desactivá esta opción para enviar el MP3 original.",
