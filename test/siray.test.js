@@ -5,11 +5,30 @@ import vm from 'node:vm';
 import { IMAGE_MODELS, VIDEO_MODELS } from '../lib/models.js';
 import { SIRAY_IMAGE_MODELS, SIRAY_VIDEO_MODELS, sirayAutomationModel } from '../lib/siray-models.js';
 import { buildSirayRequest, generateSiray, sirayFetch } from '../lib/siray.js';
+import { testService } from '../lib/providers.js';
 const image = 'data:image/png;base64,aGVsbG8=';
 const ref = kind => ({ kind, path: kind === 'image' ? image : `data:${kind}/${kind === 'audio' ? 'wav' : 'mp4'};base64,aGVsbG8=` });
 const video = SIRAY_VIDEO_MODELS[0];
 const request = (model = video, extra = {}) => ({ model, prompt: 'A quiet landscape', resolution: model.resolutions[0], aspectRatio: model.aspectRatios[0], duration: model.durations?.[0], ...extra });
 const json = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
+
+test('Siray balance accepts documented numeric 200 but rejects real errors', async () => {
+  const balance = { available_balance: 0 };
+  assert.deepEqual(await sirayFetch('secret', '/v1/account/balance', { fetchImpl: async () => json({ code: 200, message: 'OK', data: balance }) }), balance);
+  for (const body of [{ code: 401, message: 'Unauthorized' }, { code: 200, success: false }, { code: 200, error: 'Denied' }, { code: 0 }]) {
+    await assert.rejects(sirayFetch('secret', '/v1/account/balance', { fetchImpl: async () => json(body) }), { localizationCode: 'sirayRequest' });
+  }
+});
+
+test('Siray connection test reports API errors rather than network errors', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => json({ code: 200, message: 'OK', data: { available_balance: 0 } }));
+  assert.equal((await testService({ service: 'siray', key: 'secret' })).ok, true);
+  globalThis.fetch.mock.mockImplementation(async () => new Response(JSON.stringify({ code: 401, message: 'Invalid secret' }), { status: 401 }));
+  const result = await testService({ service: 'siray', key: 'secret' });
+  assert.equal(result.ok, false);
+  assert.equal(result.detailCode, 'errors.sirayRequest');
+  assert.ok(!JSON.stringify(result).includes('secret'));
+});
 
 test('Siray uses existing families and preserves defaults, with latest video versions and both Wan tiers', () => {
   assert.equal(IMAGE_MODELS[0].id, 'nano-banana-pro');
