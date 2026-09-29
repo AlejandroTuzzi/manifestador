@@ -6,6 +6,7 @@ import { withWavAudioReferences } from './lib/audio-reference-wav.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { generationSettings } from './lib/generation-settings.js';
 import { budgetSettings, defaultBudgetSettings, saveBudget, refreshBudgetPrices, setBudgetStatus, budgetEarnings, budgetError } from './public/budget-model.js';
+import { exportBudgetSettings, importBudgetSettings, BUDGET_TRANSFER_LIMIT } from './lib/budget-transfer.js';
 import { budgetHtml, budgetCatalog, renderBudgetPdf, budgetPdfFilename } from './lib/budget-pdf.js';
 import { videoAudioPolicy } from './lib/video-audio-policy.js';
 import { generateWanVideo as generateWanVideoRaw, validateWanMedia, wanError } from './lib/wan-video.js';
@@ -5440,6 +5441,26 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/budgets' && req.method === 'GET') {
       const data = await readJson('budgets.json', {});
       return send(res, 200, { settings: data.settings || defaultBudgetSettings(), quotes: data.quotes || [], earnings: budgetEarnings(data.quotes || []) });
+    }
+    if (p === '/api/budgets/settings/export' && req.method === 'GET') {
+      const data = await readJson('budgets.json', {});
+      const settings = budgetSettings(data.settings || defaultBudgetSettings());
+      const header = settings.headerImage ? await fs.readFile(await resolveAssetKey(settings.headerImage)).catch(() => { throw budgetError('budgetImage'); }) : null;
+      const archive = exportBudgetSettings(settings, header);
+      res.setHeader('Content-Disposition', `attachment; filename="budget_settings_${new Date().toISOString().slice(0,10)}.json"`);
+      return send(res, 200, archive);
+    }
+    if (p === '/api/budgets/settings/import' && req.method === 'POST') {
+      const { settings, header, extension } = importBudgetSettings(await readJsonBody(req, BUDGET_TRANSFER_LIMIT));
+      if (header) {
+        const filename = `budget-header-${crypto.createHash('sha256').update(header).digest('hex')}.${extension}`;
+        settings.headerImage = `uploads/${filename}`;
+        const target = await resolveAssetKey(settings.headerImage);
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.writeFile(target, header, { flag: 'wx' }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+      }
+      await updateJson('budgets.json', {}, data => ({ ...data, settings }));
+      return send(res, 200, { settings });
     }
     if (p === '/api/budgets/settings' && req.method === 'PUT') {
       const settings = budgetSettings(await readJsonBody(req));

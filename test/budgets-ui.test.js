@@ -24,7 +24,7 @@ function harness() {
   let data={settings,quotes:[]};
   const node=key=>{
     if(nodes.has(key))return nodes.get(key);
-    const item={innerHTML:'',hidden:false,dataset:{},listeners:{},classList:{toggle(){}},querySelector:selector=>node(key+' '+selector),querySelectorAll:()=>[],addEventListener(type,callback){this.listeners[type]=callback;}};
+    const item={innerHTML:'',hidden:false,dataset:{},listeners:{},classList:{toggle(){}},insertAdjacentHTML(_position,html){this.innerHTML+=html;},querySelector:selector=>node(key+' '+selector),querySelectorAll:()=>[],addEventListener(type,callback){this.listeners[type]=callback;}};
     nodes.set(key,item);return item;
   };
   const context={BUDGET_GROUPS,defaultBudgetSettings,newBudgetDraft,calculateBudget,structuredClone,console,

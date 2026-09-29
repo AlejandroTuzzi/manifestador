@@ -93,6 +93,21 @@ function drawSettings() {
     <section class="budget-section ${configGroup}"><h3>${h(configGroup)} · USD</h3><div class="budget-fields">${Object.entries(rate).map(([key,value]) => key === 'unit' ? select('billingUnit',`rates.${configGroup}.${key}`,configGroup === 'voices' ? 'character' : value,configGroup === 'voices' ? ['character'] : ['fixed','minute','episode']) : field(key === 'revisions' ? 'revisions' : configGroup === 'episodes' ? key + 'Rate' : key === 'price' ? 'unitPrice' : key + 'Price',`rates.${configGroup}.${key}`,value,'number',key === 'revisions' ? 'max="100"' : '')).join('')}</div></section>
     ${area('footerHtml','footerHtml',configDraft.footerHtml,12000)}<p class="hint">${h('footerHint')}</p><button type="submit" class="generate-btn small">${h('saveSettings')}</button></form>`;
   $('#budgetSettingsForm').onsubmit = saveSettings;
+  $('#budgetSettingsForm').insertAdjacentHTML('beforeend', `<div class="budget-tabs">${button('export-settings','exportSettings')}${button('import-settings','importSettings')}<input type="file" id="budgetSettingsImport" accept=".json,application/json" hidden><p class="hint">${h('transferHint')}</p></div>`);
+  $('#budgetSettingsImport').onchange = async event => {
+    const file = event.target.files[0]; if (!file || busy) return;
+    event.target.value = '';
+    if (file.size > 15 * 1024 * 1024) { toast(bt('invalidTransfer'),'err'); return; }
+    let archive;
+    try { archive = JSON.parse(await file.text()); } catch { toast(bt('invalidTransfer'),'err'); return; }
+    if (!confirm(bt('confirmImportSettings'))) return;
+    setBusy(true);
+    try {
+      const result = await api('/api/budgets/settings/import', { method:'POST', body:archive });
+      library.settings = result.settings; configDraft = structuredClone(result.settings); dirty = false;
+      drawSettings(); toast(bt('saved'));
+    } catch (error) { toast(error.message,'err'); } finally { setBusy(false); }
+  };
   $('#budgetHeaderUpload').onchange = async event => {
     const file = event.target.files[0]; if (!file || busy) return;
     if (file.size > 10 * 1024 * 1024 || !['image/png','image/jpeg','image/webp'].includes(file.type)) { toast(bt('imageError'),'err'); return; }
@@ -146,6 +161,16 @@ panel.addEventListener('click',async event=>{
   const action=target.dataset.budgetAction;
   try {
     if(action==='retry'){await changeTab(tab);return;}
+    if(action==='export-settings') {
+      if(dirty){toast(bt('saveFirst'),'err');return;}
+      setBusy(true);
+      const response = await fetch('/api/budgets/settings/export');
+      if(!response.ok) throw new Error(i18n.errorMessage(await response.json()));
+      const url=URL.createObjectURL(await response.blob()), anchor=document.createElement('a');
+      anchor.href=url; anchor.download=`budget_settings_${new Date().toISOString().slice(0,10)}.json`; anchor.click();
+      setTimeout(()=>URL.revokeObjectURL(url),1000); return;
+    }
+    if(action==='import-settings') { $('#budgetSettingsImport').click(); return; }
     if(action==='add-episode'){if(draft.episodes.length<500){draft.episodes.push({});dirty=true;drawEditor();}return;}
     if(action==='remove-episode'){if(draft.episodes.length>1){draft.episodes.splice(Number(target.dataset.index),1);dirty=true;drawEditor();}return;}
     if(action==='add-item'){const group=target.dataset.group;if(draft[group].length<200){draft[group].push(group==='characters'?{name:'',sex:'',species:'',age:'',source:'create'}:group==='locations'?{name:'',type:'',lighting:''}:{name:'',characteristics:''});dirty=true;drawEditor();}return;}
