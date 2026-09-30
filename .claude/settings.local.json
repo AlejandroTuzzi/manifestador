@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch *)",
+      "Bash(git status *)",
+      "Bash(node --check server.js)",
+      "Bash(git reset *)",
+      "Bash(git hash-object *)",
+      "Bash(git update-index *)",
+      "Bash(git --no-pager diff -- .gitignore)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(xxd)",
+      "Bash(xxd .gitignore)",
+      "Bash(grep -n \"if \\(p === '/api\\\\|if \\(p.startsWith\\('/api\\\\|const .*Match = /\\\\^\\\\\\\\\\\\\\\\/api\" server.js)"
+    ]
+  }
+}

@@ -13,6 +13,7 @@ import { generateWanVideo as generateWanVideoRaw, validateWanMedia, wanError } f
 import { protectedAssetKeys, protectedAssetAssociations } from './lib/asset-deletion-guard.js';
 import { changeInspiration, visibleInspiration, inspirationError } from './lib/series-inspiration.js';
 import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
+import { exportSeriesArchive, parseSeriesArchive, planSeriesImport } from './lib/series-transfer.js';
 import { exportInspirationArchive, importInspirationArchive, parseLibraryManifest } from './lib/inspiration-transfer.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -5571,6 +5572,48 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ...visibleInspiration(collection, cfg.nsfwEnabled, metadata), id });
     }
 
+    const seriesExportMatch = p.match(/^\/api\/series\/([a-z0-9]+)\/export$/);
+    if (seriesExportMatch && req.method === 'GET') {
+      const series = (await readJson('series.json', [])).find(s => s.id === seriesExportMatch[1]);
+      if (!series) throw localizedServerError('seriesTransfer', 'Series not found.');
+      const cfg = await getConfig(), metadata = await readJson('asset-metadata.json', {});
+      const characters = await readJson('characters.json', []), scripts = await readJson('scripts.json', []);
+      const files = await exportSeriesArchive(series, characters, scripts, metadata, async key => {
+        if (!cfg.nsfwEnabled && metadata[key]?.nsfw) throw localizedServerError('seriesTransferHidden', 'Enable NSFW content before transferring this series.');
+        return fs.readFile(await resolveAssetKey(key));
+      }, await readJson('asset-links.json', []));
+      if (!cfg.nsfwEnabled && /"nsfw"\s*:\s*true/.test(files[0].data.toString('utf8'))) throw localizedServerError('seriesTransferHidden', 'Enable NSFW content before transferring this series.');
+      return send(res, 200, createZip(files), { mime:'application/zip', extra:{ 'Content-Disposition':`attachment; filename="series-${series.id}.manifestador.zip"` } });
+    }
+    if (p === '/api/series/import' && req.method === 'POST') {
+      const body = await readJsonBody(req, 201 * 1024 * 1024);
+      const buffer = Buffer.from(String(body.zipBase64 || ''), 'base64');
+      if (!buffer.length || buffer.length > 150 * 1024 * 1024) throw localizedServerError('transferSize', 'Archive exceeds 150 MB.');
+      const files = readStoredZip(buffer), manifest = parseSeriesArchive(files), cfg = await getConfig();
+      if (!cfg.nsfwEnabled && /"nsfw"\s*:\s*true/.test(JSON.stringify(manifest))) throw localizedServerError('seriesTransferHidden', 'Enable NSFW content before importing this series.');
+      let imported;
+      await updateJson('series.json', [], async series => {
+        const current = { series, characters:await readJson('characters.json', []), scripts:await readJson('scripts.json', []), metadata:await readJson('asset-metadata.json', {}) };
+        const plan = await planSeriesImport(current, manifest, files, async key => fs.readFile(await resolveAssetKey(key)), newId);
+        if (!cfg.nsfwEnabled && plan.assetKeys.some(key => current.metadata[key]?.nsfw)) throw localizedServerError('seriesTransferHidden', 'Hidden asset conflict.');
+        if (!cfg.nsfwEnabled && (plan.characters.some(c => manifest.characters.some(source => importIds(c).some(id => importIds(source).includes(id))) && current.characters.some(old => old.id === c.id && old.nsfw)) || manifest.assets.some(asset => current.metadata[asset.key]?.nsfw))) throw localizedServerError('seriesTransferHidden', 'Enable NSFW content before replacing hidden content.');
+        for (const write of plan.writes) {
+          const target = await resolveAssetKey(write.key);
+          await fs.mkdir(path.dirname(target), { recursive:true });
+          await fs.writeFile(target, write.data);
+        }
+        await updateJson('characters.json', [], all => {
+          const ids = new Set(plan.series.characterIds);
+          return [...all.filter(c => !ids.has(c.id)), ...plan.characters.filter(c => ids.has(c.id))];
+        });
+        await updateJson('scripts.json', [], all => [...all.filter(s => s.seriesId !== plan.series.id), ...plan.scripts.filter(s => s.seriesId === plan.series.id)]);
+        await updateJson('asset-links.json', [], all => [...all.filter(link => !plan.assetLinks.some(incoming => incoming.key === link.key)), ...plan.assetLinks]);
+        await updateJson('asset-metadata.json', {}, all => ({ ...all, ...Object.fromEntries(plan.assetKeys.map(key => [key,plan.metadata[key]])) }));
+        imported = { id:plan.series.id, updated:plan.updated };
+        return [plan.series, ...series.filter(s => s.id !== plan.series.id)];
+      });
+      return send(res, 200, imported);
+    }
     if (p === '/api/series' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const characters = await readJson('characters.json', []);

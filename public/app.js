@@ -5999,6 +5999,23 @@ function seriesAssetThumb(key) {
   return `<img src="${fileUrl(key)}" loading="lazy" alt="">`;
 }
 
+$('#btnImportSeries').addEventListener('click', () => $('#seriesImportInput').click());
+$('#seriesImportInput').addEventListener('change', async event => {
+  const file = event.target.files[0]; event.target.value = '';
+  if (!file || !confirm(tr('series.importConfirm'))) return;
+  const button = $('#btnImportSeries'); button.disabled = true;
+  try {
+    if (file.size > 150 * 1024 * 1024) throw new Error(tr('errors.transferSize'));
+    const data = await readFileAsDataUrl(file);
+    await api('/api/series/import', { method:'POST', body:{ zipBase64:data.split(',')[1] } });
+    const snapshot = await api('/api/state');
+    state.series = snapshot.series; state.characters = snapshot.characters; state.scripts = snapshot.scripts;
+    state.assetLinks = snapshot.assetLinks || state.assetLinks;
+    renderSeries(); renderCharacters();
+    toast(tr('series.imported'));
+  } catch (error) { toast(error.message, 'err'); } finally { button.disabled = false; }
+});
+
 function renderSeries() {
   sortEntities();
   const grid = $('#seriesGrid');
@@ -6024,6 +6041,7 @@ function renderSeries() {
         : `<span class="hint">${esc(tr('series.noCharacters'))}</span>`}</div>
       <div class="char-actions">
         <button class="mini-btn accent" data-act="view">${IC('eye')} ${esc(tr('series.viewScript'))}</button>
+        <button class="mini-btn" data-act="export">${IC('download')} ${esc(tr('series.exportZip'))}</button>
         <button class="mini-btn" data-act="edit">${IC('edit')} ${esc(tr('common.edit'))}</button>
         <button class="mini-btn" data-act="profile">${IC('eye')} ${esc(tr('characters.viewProfile'))}</button>
         <button class="mini-btn" data-act="scripts">${IC('clapper')} ${esc(tr('series.scripts'))}${state.scripts.filter((sc) => sc.seriesId === s.id).length ? ` (${state.scripts.filter((sc) => sc.seriesId === s.id).length})` : ''}</button>
@@ -6034,6 +6052,17 @@ function renderSeries() {
     card.querySelectorAll('[data-act]').forEach((b) => {
       b.addEventListener('click', async () => {
         const act = b.dataset.act;
+        if (act === 'export') {
+          b.disabled = true;
+          try {
+            const response = await fetch(`/api/series/${s.id}/export`);
+            if (!response.ok) throw new Error(i18n.errorMessage(await response.json()));
+            const url = URL.createObjectURL(await response.blob()), anchor = document.createElement('a');
+            anchor.href = url; anchor.download = `series-${s.id}.manifestador.zip`; anchor.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+          } catch (error) { toast(error.message, 'err'); } finally { b.disabled = false; }
+          return;
+        }
         if (act === 'view') {
           const list = state.scripts.filter((sc) => sc.seriesId === s.id);
           if (!list.length) return toast(tr('series.noScripts'), 'err');
