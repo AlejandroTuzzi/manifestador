@@ -6005,9 +6005,9 @@ $('#seriesImportInput').addEventListener('change', async event => {
   if (!file || !confirm(tr('series.importConfirm'))) return;
   const button = $('#btnImportSeries'); button.disabled = true;
   try {
-    if (file.size > 150 * 1024 * 1024) throw new Error(tr('errors.transferSize'));
-    const data = await readFileAsDataUrl(file);
-    await api('/api/series/import', { method:'POST', body:{ zipBase64:data.split(',')[1] } });
+    if (file.size > 512 * 1024 * 1024) throw new Error(tr('errors.seriesTransferLarge', { size:Math.ceil(file.size / 1048576) }));
+    const response = await fetch('/api/series/import', { method:'POST', headers:{ 'Content-Type':'application/zip' }, body:file });
+    if (!response.ok) throw new Error(i18n.errorMessage(await response.json()));
     const snapshot = await api('/api/state');
     state.series = snapshot.series; state.characters = snapshot.characters; state.scripts = snapshot.scripts;
     state.assetLinks = snapshot.assetLinks || state.assetLinks;

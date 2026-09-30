@@ -13,7 +13,7 @@ import { generateWanVideo as generateWanVideoRaw, validateWanMedia, wanError } f
 import { protectedAssetKeys, protectedAssetAssociations } from './lib/asset-deletion-guard.js';
 import { changeInspiration, visibleInspiration, inspirationError } from './lib/series-inspiration.js';
 import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
-import { exportSeriesArchive, parseSeriesArchive, planSeriesImport } from './lib/series-transfer.js';
+import { exportSeriesArchive, parseSeriesArchive, planSeriesImport, SERIES_ZIP_LIMIT } from './lib/series-transfer.js';
 import { exportInspirationArchive, importInspirationArchive, parseLibraryManifest } from './lib/inspiration-transfer.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -5586,9 +5586,10 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, createZip(files), { mime:'application/zip', extra:{ 'Content-Disposition':`attachment; filename="series-${series.id}.manifestador.zip"` } });
     }
     if (p === '/api/series/import' && req.method === 'POST') {
-      const body = await readJsonBody(req, 201 * 1024 * 1024);
-      const buffer = Buffer.from(String(body.zipBase64 || ''), 'base64');
-      if (!buffer.length || buffer.length > 150 * 1024 * 1024) throw localizedServerError('transferSize', 'Archive exceeds 150 MB.');
+      const binary = String(req.headers['content-type'] || '').split(';')[0] === 'application/zip';
+      // Keep compatibility with older clients, but new clients upload binary ZIPs.
+      const buffer = binary ? await readBody(req, SERIES_ZIP_LIMIT) : Buffer.from(String((await readJsonBody(req, 201 * 1024 * 1024)).zipBase64 || ''), 'base64');
+      if (!buffer.length || buffer.length > SERIES_ZIP_LIMIT) throw localizedServerError('seriesTransferLarge', 'Invalid ZIP size.', { size:Math.ceil(buffer.length / 1048576) });
       const files = readStoredZip(buffer), manifest = parseSeriesArchive(files), cfg = await getConfig();
       if (!cfg.nsfwEnabled && /"nsfw"\s*:\s*true/.test(JSON.stringify(manifest))) throw localizedServerError('seriesTransferHidden', 'Enable NSFW content before importing this series.');
       let imported;
