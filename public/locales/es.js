@@ -19,6 +19,7 @@ window.ManifestadorI18n.register('es', {
 "errors.sirayParameters": "Opciones de Siray inválidas: {detail}.",
 "errors.sirayRequest": "Siray: {detail}",
 "errors.sirayPending": "La tarea Siray sigue pendiente. Se recuperará sin volver a generarla: {detail}.",
+"errors.sirayInvalidResponse": "Siray devolvió una respuesta vacía, ilegible o con formato inesperado. No se reenvió la solicitud. Revisá el historial de Siray antes de generar otra vez para evitar cargos duplicados. Diagnóstico: {detail}",
 "errors.sirayMissingTask": "Siray respondió sin un identificador de tarea reconocible. Revisá el historial de Siray antes de volver a generar para evitar cargos duplicados. Diagnóstico: {detail}",
 "errors.sirayUnavailable": "El modelo no está activo en tu cuenta de Siray: {detail}. No se inició ninguna generación.",
   "config.audioReferencesWav": "Convertir referencias MP3 a WAV antes de enviarlas",

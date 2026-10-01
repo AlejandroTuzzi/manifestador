@@ -12,6 +12,64 @@ const video = SIRAY_VIDEO_MODELS[0];
 const request = (model = video, extra = {}) => ({ model, prompt: 'A quiet landscape', resolution: model.resolutions[0], aspectRatio: model.aspectRatios[0], duration: model.durations?.[0], ...extra });
 const json = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
 
+test('Seedream sends two distinct references in order using its i2i schema and completes the async flow', async () => {
+  const model = SIRAY_IMAGE_MODELS.find(item => item.id.includes('seedream'));
+  const refs = ['data:image/png;base64,b2JqZWN0', 'data:image/png;base64,YmFja2dyb3VuZA=='];
+  let posts = 0, persisted = false;
+  const output = await generateSiray({ model, apiKey:'test-key', prompt:'Place the object from image one on the background from image two.', resolution:'2K', aspectRatio:'9:16', options:{ output_format:'jpg' },
+    mediaRefs:refs.map(path => ({ kind:'image', path })), onTask:() => { persisted = true; },
+    fetchImpl:async (url, options) => {
+      if (options.method === 'POST') {
+        posts++;
+        assert.equal(url, 'https://api.siray.ai/v1/images/generations/async');
+        const body = JSON.parse(options.body);
+        assert.equal(body.model,'bytedance/seedream-5.0-pro-i2i-spicy');
+        assert.deepEqual(body.images,refs);
+        assert.equal(body.size,'1584x2816');
+        assert.equal(body.output_format,'jpg');
+        assert.equal(body.image,undefined);
+        assert.equal(body.end_image,undefined);
+        return json({ code:'success', data:{ task_id:'neutral-two-images' } });
+      }
+      assert.ok(persisted);
+      if (url.includes('/generations/async/')) return json({ code:'success', data:{ status:'SUCCESS', outputs:['https://media.example/neutral.jpg'] } });
+      return new Response('fixture', { headers:{ 'Content-Type':'image/jpeg' } });
+    }
+  });
+  assert.equal(posts,1);
+  assert.equal(output.taskId,'neutral-two-images');
+});
+
+test('Seedream empty, HTML and truncated responses are diagnosed without resubmission or leaking bodies', async () => {
+  const model = SIRAY_IMAGE_MODELS.find(item => item.id.includes('seedream'));
+  for (const [body, kind] of [['', 'empty'], ['<html>secret private prompt</html>', 'html'], ['{"private":"secret"', 'invalid-json-envelope'], ['null', 'json-null']]) {
+    let calls = 0;
+    await assert.rejects(generateSiray({ ...request(model), apiKey:'secret', onTask:() => assert.fail('No known task'), fetchImpl:async (_url, options) => {
+      calls++; assert.equal(options.method, 'POST');
+      return new Response(body, { headers:{ 'Content-Type':'text/html', 'x-request-id':'support-123' } });
+    } }), error => {
+      assert.equal(error.localizationCode,'sirayInvalidResponse');
+      const diagnostic = JSON.parse(error.localizationDetails.detail);
+      assert.equal(diagnostic.kind, kind);
+      assert.equal(diagnostic.requestId, 'support-123');
+      assert.equal(diagnostic.method, 'POST');
+      assert.doesNotMatch(error.message, /secret|private prompt/);
+      return true;
+    });
+    assert.equal(calls, 1);
+  }
+});
+
+test('invalid polling response preserves the submitted Seedream task for recovery', async () => {
+  const model = SIRAY_IMAGE_MODELS.find(item => item.id.includes('seedream'));
+  let persisted, posts = 0;
+  await assert.rejects(generateSiray({ ...request(model), apiKey:'secret', onTask:id => { persisted = id; }, fetchImpl:async (_url, options) => {
+    if (options.method === 'POST') { posts++; return json({ code:'success', data:{ task_id:'original-task' } }); }
+    return new Response('');
+  } }), { localizationCode:'sirayInvalidResponse' });
+  assert.equal(persisted,'original-task'); assert.equal(posts,1);
+});
+
 test('Siray balance accepts documented numeric 200 but rejects real errors', async () => {
   const balance = { available_balance: 0 };
   assert.deepEqual(await sirayFetch('secret', '/v1/account/balance', { fetchImpl: async () => json({ code: 200, message: 'OK', data: balance }) }), balance);
