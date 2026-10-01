@@ -2779,7 +2779,7 @@ async function setPickerTab(src) {
     body.innerHTML = items.length
       ? `<div class="picker-grid">${items.map((a) =>
           `<div class="pick pick-${kind}" data-key="${esc(a.key)}" data-kind="${kind}">${nsfwBadgeHtml(a, 'overlay')}${kind === 'video'
-            ? `<video src="${fileUrl(a.key)}" muted preload="metadata"></video>`
+            ? `<img data-video-thumbnail="${esc(fileUrl(a.key) + (fileUrl(a.key).includes('?') ? '&' : '?') + 'thumbnailVersion=' + encodeURIComponent(a.mtime || 0))}" alt="">`
             : kind === 'audio' ? pickerAudioPreviewHtml(a.key)
               : `<img src="${fileUrl(a.key)}" loading="lazy" alt="">`}<div class="p-label">${esc(a.name)}</div></div>`
         ).join('')}</div>`
@@ -3427,8 +3427,9 @@ function renderAssetsGrid() {
         card.insertAdjacentHTML('beforeend', `<div class="audio-tile" data-audiokey="${esc(a.key)}" title="${esc(tr('assets.audio.openPlayer'))}"><span class="audio-kind-badge ${kind}">${esc(AUDIO_KIND_LABELS[kind] || tr('common.audio'))}</span><span class="audio-tile-icon">${IC('play', 'ic ic-lg')}</span><span class="audio-dur audio-tile-dur" data-durkey="${esc(a.key)}"></span></div><div class="a-name">${esc(a.name)}</div>${tags.length ? `<div class="audio-card-tags">${tags.map((tag) => `<span>${esc(tag)}</span>`).join('')}</div>` : ''}`);
         card.querySelector('.audio-tile').addEventListener('click', () => toggleAudioPlay(card, a.key));
       } else if (state.assetsZone === 'video') {
-        card.insertAdjacentHTML('beforeend', `<video src="${fileUrl(a.key)}" preload="metadata" muted></video><div class="a-name">${esc(a.name)}</div>`);
-        card.querySelector('video').addEventListener('click', () => openLightbox(a.key, items.map((item) => item.key)));
+        const thumbnailUrl = fileUrl(a.key) + (fileUrl(a.key).includes('?') ? '&' : '?') + 'thumbnailVersion=' + encodeURIComponent(a.mtime || 0);
+        card.insertAdjacentHTML('beforeend', `<img data-video-thumbnail="${esc(thumbnailUrl)}" alt="${esc(a.name)}"><div class="a-name">${esc(a.name)}</div>`);
+        card.querySelector('img').addEventListener('click', () => openLightbox(a.key, items.map((item) => item.key)));
       } else {
         card.insertAdjacentHTML('beforeend', `<img src="${fileUrl(a.key)}" loading="lazy" alt=""><div class="a-name">${esc(a.name)}</div>`);
         card.querySelector('img').addEventListener('click', () => openLightbox(a.key, items.map((item) => item.key)));
