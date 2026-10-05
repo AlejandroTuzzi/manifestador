@@ -3332,7 +3332,7 @@ function renderAssetFilterOptions() {
   const seriesSel = $('#assetFilterSeries');
   const projectSel = $('#assetFilterProject');
   charSel.innerHTML = `<option value="">${esc(tr('common.allMasculine'))}</option>` + state.characters.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
-  seriesSel.innerHTML = `<option value="">${esc(tr('common.allFeminine'))}</option>` + state.series.map((s) => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
+  seriesSel.innerHTML = `<option value="">${esc(tr('common.allFeminine'))}</option>` + state.series.map((s) => `<option value="${s.id}">${esc(s.title)}${s.archived ? ' · ' + esc(tr('series.finished')) : ''}</option>`).join('');
   projectSel.innerHTML = `<option value="">${esc(tr('common.allMasculine'))}</option>` + state.workspaceProjects.map((project) => `<option value="${project.id}">${esc(workspaceProjectDisplayName(project))}</option>`).join('');
   charSel.value = state.characters.some((c) => c.id === state.assetFilterCharacterId) ? state.assetFilterCharacterId : '';
   seriesSel.value = state.series.some((s) => s.id === state.assetFilterSeriesId) ? state.assetFilterSeriesId : '';
@@ -4736,10 +4736,16 @@ function normalizedAssetFilterText(value) {
 }
 
 function visibleAssets() {
+  const hiddenByFinished = new Set([...state.series, ...state.workspaceProjects].filter(item => item.archived).flatMap(item => item.assetKeys || []));
+  const selectedFinished = new Set([
+    ...state.series.filter(item => item.archived && item.id === state.assetFilterSeriesId),
+    ...state.workspaceProjects.filter(item => item.archived && item.id === state.assetFilterProjectId)
+  ].flatMap(item => item.assetKeys || []));
   const search = normalizedAssetFilterText(state.assetFilterSearch);
   const category = normalizedAssetFilterText(state.assetFilterCategory);
   const requiredTags = splitVisualTags(state.assetFilterTags).map(normalizedAssetFilterText);
   return (state.assets[state.assetsZone] || []).filter((a) =>
+    (!hiddenByFinished.has(a.key) || selectedFinished.has(a.key)) &&
     (!state.assetRange.from || a.mtime >= state.assetRange.from)
     && (!state.assetRange.to || a.mtime <= state.assetRange.to)
     && (state.assetsZone !== 'audio' || state.assetAudioKind === 'all' || (a.audioKind || 'voice') === state.assetAudioKind)
@@ -5620,6 +5626,7 @@ function visibleWorkspaceProjects() {
 async function setWorkspaceProjectArchived(project, archived) {
   const updated = await api(`/api/projects/${project.id}`, { method: 'PUT', body: { archived } });
   await replaceWorkspaceProject(updated);
+  renderAssetFilterOptions(); renderAssetsGrid();
   toast(tr(archived ? 'projects.archiveSuccess' : 'projects.reopenSuccess', { name: updated.name }));
   return updated;
 }
@@ -6045,12 +6052,13 @@ $('#seriesImportInput').addEventListener('change', async event => {
 function renderSeries() {
   sortEntities();
   const grid = $('#seriesGrid');
-  if (!state.series.length) {
-    grid.innerHTML = `<div class="empty-note">${esc(tr('series.empty'))}</div>`;
+  const seriesItems = state.series.filter(item => Boolean(item.archived) === Boolean(state.seriesArchiveView));
+  if (!seriesItems.length) {
+    grid.innerHTML = `<div class="empty-note">${esc(tr(state.seriesArchiveView ? 'series.finishedEmpty' : 'series.empty'))}</div>`;
     return;
   }
   grid.innerHTML = '';
-  for (const s of state.series) {
+  for (const s of seriesItems) {
     const characters = (s.characterIds || []).map((id) => state.characters.find((c) => c.id === id)).filter((c) => c && contentIsVisible(c));
     const assetCount = (s.assetKeys || []).length;
     const card = document.createElement('div');
@@ -6068,6 +6076,7 @@ function renderSeries() {
       <div class="char-actions">
         <button class="mini-btn accent" data-act="view">${IC('eye')} ${esc(tr('series.viewScript'))}</button>
         <button class="mini-btn" data-act="export">${IC('download')} ${esc(tr('series.exportZip'))}</button>
+        <button class="mini-btn" data-act="finish">${IC(s.archived ? 'refresh' : 'check')} ${esc(tr(s.archived ? 'projects.reopen' : 'series.finish'))}</button>
         <button class="mini-btn" data-act="edit">${IC('edit')} ${esc(tr('common.edit'))}</button>
         <button class="mini-btn" data-act="profile">${IC('eye')} ${esc(tr('characters.viewProfile'))}</button>
         <button class="mini-btn" data-act="scripts">${IC('clapper')} ${esc(tr('series.scripts'))}${state.scripts.filter((sc) => sc.seriesId === s.id).length ? ` (${state.scripts.filter((sc) => sc.seriesId === s.id).length})` : ''}</button>
@@ -6078,6 +6087,16 @@ function renderSeries() {
     card.querySelectorAll('[data-act]').forEach((b) => {
       b.addEventListener('click', async () => {
         const act = b.dataset.act;
+        if (act === 'finish') {
+          if (!s.archived && !confirm(tr('series.finishConfirm', { title:s.title }))) return;
+          b.disabled = true;
+          try {
+            const updated = await api(`/api/series/${s.id}`, { method:'PUT', body:{ archived:!s.archived } });
+            state.series = state.series.map(item => item.id === s.id ? updated : item);
+            renderSeries(); renderAssetFilterOptions(); renderAssetsGrid();
+          } catch (error) { toast(error.message, 'err'); } finally { b.disabled = false; }
+          return;
+        }
         if (act === 'export') {
           b.disabled = true;
           try {

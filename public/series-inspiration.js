@@ -122,17 +122,25 @@
     }
   }
   function acceptResult(result) { ++requestVersion; collection = result; loaded = true; renderPanel(); }
-  function setTab(value) {
+  function setTab(value, finished = false) {
     active = value; panel.hidden = !value; $('#seriesGrid').hidden = value; $('#btnNewSeries').hidden = value;
-    for (const [id, selected] of [['seriesOwnTab', !value], ['seriesInspirationTab', value]]) {
+    state.seriesArchiveView = finished;
+    for (const [id, selected] of [['seriesOwnTab', !value && !finished], ['seriesFinishedTab', !value && finished], ['seriesInspirationTab', value]]) {
       $('#' + id).classList.toggle('active', selected); $('#' + id).setAttribute('aria-selected', String(selected));
     }
     if (value) load();
+    else renderSeries();
   }
   $('#seriesOwnTab').onclick = () => setTab(false);
+  $('#seriesFinishedTab').onclick = () => setTab(false, true);
   $('#seriesInspirationTab').onclick = () => setTab(true);
-  for (const id of ['seriesOwnTab', 'seriesInspirationTab']) $('#' + id).onkeydown = event => {
-    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); setTab(event.key === 'Home' ? false : event.key === 'End' ? true : !active); $(active ? '#seriesInspirationTab' : '#seriesOwnTab').focus(); }
+  const seriesTabs = ['seriesOwnTab', 'seriesFinishedTab', 'seriesInspirationTab'];
+  for (const id of seriesTabs) $('#' + id).onkeydown = event => {
+    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      const index = event.key === 'Home' ? 0 : event.key === 'End' ? 2 : (seriesTabs.indexOf(id) + (event.key === 'ArrowRight' ? 1 : 2)) % 3;
+      setTab(index === 2, index === 1); $('#' + seriesTabs[index]).focus();
+    }
   };
   $('.nav-btn[data-view="series"]')?.addEventListener('click', () => { if (active) load(); });
   function producerOptions(selected = control('producerId').value) {

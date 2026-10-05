@@ -5680,6 +5680,10 @@ const server = http.createServer(async (req, res) => {
           if (body.chapters !== undefined) s.chapters = Math.max(1, Math.min(500, parseInt(body.chapters, 10) || 1));
           if (body.chapterSeconds !== undefined) s.chapterSeconds = Math.max(1, Math.min(36000, parseInt(body.chapterSeconds, 10) || 60));
           if (validIds) s.characterIds = validIds;
+          if (typeof body.archived === 'boolean') {
+            s.archived = body.archived;
+            s.archivedAt = body.archived ? (s.archivedAt || Date.now()) : null;
+          }
         });
         return item ? send(res, 200, item) : send(res, 404, { error: 'Serie no encontrada' });
       }

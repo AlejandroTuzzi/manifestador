@@ -67,7 +67,7 @@ test('archive action uses the existing persistent update route, not deletion', a
   const calls = [], updates = [];
   const context = vm.createContext({
     api: async (url, options) => { calls.push({ url, options }); return { id: 'p1', name: 'Project', ...options.body }; },
-    replaceWorkspaceProject: async (item) => updates.push(item), tr: (key) => key, toast() {}
+    replaceWorkspaceProject: async (item) => updates.push(item), tr: (key) => key, toast() {}, renderAssetFilterOptions() {}, renderAssetsGrid() {}
   });
   vm.runInContext(app.slice(app.indexOf('async function setWorkspaceProjectArchived('), app.indexOf("$$('#projectArchiveTabs")), context);
   await context.setWorkspaceProjectArchived({ id: 'p1' }, true);
