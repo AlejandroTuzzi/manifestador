@@ -13,6 +13,7 @@ import { generateWanVideo as generateWanVideoRaw, validateWanMedia, wanError } f
 import { protectedAssetKeys, protectedAssetAssociations } from './lib/asset-deletion-guard.js';
 import { changeInspiration, visibleInspiration, inspirationError } from './lib/series-inspiration.js';
 import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
+import { workflowRepositoryItem, workflowRepositorySummary } from './lib/workflow-repository.js';
 import { assertClosedAssociations } from './lib/closed-associations.js';
 import { exportSeriesArchive, parseSeriesArchive, planSeriesImport, SERIES_ZIP_LIMIT } from './lib/series-transfer.js';
 import { exportInspirationArchive, importInspirationArchive, parseLibraryManifest } from './lib/inspiration-transfer.js';
@@ -3814,6 +3815,7 @@ function sanitizeSnippet(body = {}, previous = {}) {
   };
 }
 const snippetStore = crudStore('snippets.json', sanitizeSnippet);
+const workflowRepository = crudStore('workflow-repository.json', (body, previous) => workflowRepositoryItem(body, previous, newId()));
 
 function sanitizeVocabularyForStore(body = {}, previous = {}) {
   const item = sanitizeVocabularyEntry(body, previous, { id: previous.id || newId(), now: Date.now() });
@@ -4663,6 +4665,20 @@ const server = http.createServer(async (req, res) => {
     // --- snippets de código (JS/ExtendScript, Python, Bash) — separados de
     // Prompts a propósito: no tienen "Usar" hacia la caja de generación ni
     // se mezclan en ninguna lista/búsqueda de prompts.
+    if (p === '/api/workflow-repository' && req.method === 'GET') return send(res, 200, (await workflowRepository.list()).map(workflowRepositorySummary));
+    if (p === '/api/workflow-repository' && req.method === 'POST') {
+      const item = await workflowRepository.create(await readJsonBody(req, 15 * 1024 * 1024));
+      return send(res, 200, workflowRepositorySummary(item));
+    }
+    const repositoryMatch = p.match(/^\/api\/workflow-repository\/([a-z0-9]+)(\/download)?$/);
+    if (repositoryMatch) {
+      const [, id, download] = repositoryMatch;
+      const item = (await workflowRepository.list()).find(item => item.id === id);
+      if (!item) return sendError(res, 404, 'workflowRepositoryMissing', 'Workflow not found.');
+      if (download && req.method === 'GET') return send(res, 200, Buffer.from(item.content), { mime:'application/json', extra:{ 'Content-Disposition':`attachment; filename="workflow.json"; filename*=UTF-8''${encodeURIComponent(item.filename).replace(/['()*]/g, c => '%' + c.charCodeAt(0).toString(16))}` } });
+      if (!download && req.method === 'PUT') return send(res, 200, workflowRepositorySummary(await workflowRepository.update(id, await readJsonBody(req, 15 * 1024 * 1024))));
+      if (!download && req.method === 'DELETE') { await workflowRepository.remove(id); return send(res, 200, { ok:true }); }
+    }
     if (p === '/api/snippet-categories' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const name = String(body.name || '').trim().slice(0, 80);

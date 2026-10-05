@@ -543,6 +543,8 @@
     </section>
 
     <section id="view-snippets" class="view">
+      <div class="tabs" id="snippetRepositoryTabs"><button type="button" class="tab active" data-repository-tab="code" data-i18n="snippets.title"></button><button type="button" class="tab" data-repository-tab="workflows" data-i18n="workflowRepo.title"></button></div>
+      <div id="snippetCodePanel">
       <div class="chars-head"><h2 data-i18n="snippets.title">Snippets de código</h2><button id="btnNewSnippet" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="snippets.new">Nuevo snippet</span></button></div>
       <div class="prompt-library-tools">
         <input id="snippetSearch" type="search" placeholder="Buscar snippets…" data-i18n-placeholder="snippets.search">
@@ -563,6 +565,17 @@
         <button type="button" id="newSnippetCategoryCancel" class="icon-btn" title="Cancelar" data-i18n-title="common.cancel"><svg class="ic"><use href="#i-x"/></svg></button>
       </div>
       <div id="snippetLibrary" class="prompt-library"></div>
+      </div>
+      <div id="workflowRepositoryPanel" hidden>
+        <p class="hint" data-i18n="workflowRepo.hint"></p>
+        <form id="workflowRepositoryForm" class="workflow-repository-form">
+          <label><span data-i18n="common.title"></span><input name="title" maxlength="120" required></label>
+          <label><span data-i18n="workflowRepo.description"></span><textarea name="description" rows="3" maxlength="10000"></textarea></label>
+          <label><span data-i18n="workflowRepo.file"></span><input name="file" type="file" accept=".json,application/json" required></label>
+          <div class="char-actions"><button type="submit" class="generate-btn small" data-i18n="common.save"></button><button type="button" id="workflowRepositoryCancel" class="tool-btn" data-i18n="common.cancel" hidden></button></div>
+        </form>
+        <div id="workflowRepositoryList" class="chars-grid"></div>
+      </div>
     </section>
 
     <!-- ==================== ASSETS ==================== -->
@@ -1566,6 +1579,7 @@
 <script src="model-families.js"></script>
 <script src="video-thumbnails.js"></script>
 <script src="app.js"></script>
+<script src="workflow-repository.js"></script>
 <dialog id="cameraDialog" class="camera-dialog" aria-labelledby="cameraTitle" aria-describedby="cameraHelp">
   <form id="cameraForm">
     <div class="modal-head"><h3 id="cameraTitle" data-i18n="camera.heading">Configuración de cámara</h3><button id="cameraClose" type="button" class="icon-btn" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button></div>
