@@ -601,7 +601,7 @@
         <label><span data-i18n="assets.filters.character">Personaje</span> <select id="assetFilterCharacter" class="select"><option value="" data-i18n="common.allMasculine">Todos</option></select></label>
         <label><span data-i18n="assets.filters.series">Serie</span> <select id="assetFilterSeries" class="select"><option value="" data-i18n="common.allFeminine">Todas</option></select></label>
         <label><span data-i18n="assets.filters.project">Proyecto</span> <select id="assetFilterProject" class="select"><option value="" data-i18n="common.allMasculine">Todos</option></select></label>
-        <label data-visual-asset-filter><span data-i18n="common.search">Buscar</span> <input id="assetFilterSearch" type="search" placeholder="Nombre o prompt" data-i18n-placeholder="assets.filters.searchPlaceholder"></label>
+        <label><span data-i18n="common.search">Buscar</span><span class="library-search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><input id="assetFilterSearch" type="search" placeholder="Nombre o prompt" data-i18n-placeholder="assets.filters.searchPlaceholder" data-i18n-aria-label="common.search"></span></label>
         <label data-visual-asset-filter><span data-i18n="categories.category">Categoría</span> <select id="assetFilterCategory" class="select"><option value="" data-i18n="common.allFeminine">Todas</option></select></label>
         <label data-visual-asset-filter><span data-i18n="assets.filters.tags">Etiquetas</span> <input id="assetFilterTags" type="search" list="assetTagsList" placeholder="noir, ciudad" data-i18n-placeholder="assets.filters.tagsPlaceholder"></label>
         <datalist id="assetTagsList"></datalist>
@@ -662,6 +662,7 @@
         <h2 data-i18n="characters.title">Personajes</h2>
         <div><button id="btnImportCharacter" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> <span data-i18n="characters.import">Importar ZIP</span></button> <button id="btnNewChar" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="characters.new">Nuevo personaje</span></button></div>
       </div>
+      <label class="library-search character-search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><input id="characterFilterSearch" type="search" data-i18n-placeholder="characters.searchName" data-i18n-aria-label="characters.searchName" autocomplete="off"></label>
       <div id="charsGrid" class="chars-grid"></div>
     </section>
 

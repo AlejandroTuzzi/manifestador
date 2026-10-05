@@ -4718,7 +4718,7 @@ function visibleAssets() {
     (!state.assetRange.from || a.mtime >= state.assetRange.from)
     && (!state.assetRange.to || a.mtime <= state.assetRange.to)
     && (state.assetsZone !== 'audio' || state.assetAudioKind === 'all' || (a.audioKind || 'voice') === state.assetAudioKind)
-    && (state.assetsZone === 'audio' || !search || normalizedAssetFilterText([a.name, a.prompt, a.category, ...(a.tags || [])].join(' ')).includes(search))
+    && (!search || normalizedAssetFilterText([a.name, a.prompt, a.category, ...(a.tags || [])].join(' ')).includes(search))
     && (state.assetsZone === 'audio' || !category || normalizedAssetFilterText(a.category) === category)
     && (state.assetsZone === 'audio' || !requiredTags.length || requiredTags.every((wanted) =>
       (a.tags || []).some((tag) => normalizedAssetFilterText(tag).includes(wanted))))
@@ -7051,6 +7051,8 @@ $('#shotAssetsModal').addEventListener('click', (e) => { if (e.target.id === 'sh
 // personajes
 // ---------------------------------------------------------------------------
 
+$('#characterFilterSearch').addEventListener('input', renderCharacters);
+
 function renderCharacters() {
   sortEntities();
   const grid = $('#charsGrid');
@@ -7058,8 +7060,14 @@ function renderCharacters() {
     grid.innerHTML = `<div class="empty-note">${esc(tr('characters.empty'))}</div>`;
     return;
   }
+  const search = normalizedAssetFilterText($('#characterFilterSearch').value);
+  const characters = state.characters.filter(c => contentIsVisible(c) && (!search || normalizedAssetFilterText(c.name).includes(search)));
+  if (!characters.length) {
+    grid.innerHTML = `<div class="empty-note">${esc(tr('characters.searchEmpty'))}</div>`;
+    return;
+  }
   grid.innerHTML = '';
-  for (const c of state.characters) {
+  for (const c of characters) {
     const card = document.createElement('div');
     card.className = 'char-card' + (c.id === state.pinnedId ? ' pinned' : '');
     const avatar = avatarHtml(c, 'user');

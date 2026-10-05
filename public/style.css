@@ -1212,6 +1212,11 @@ audio::-webkit-media-controls-volume-slider {
   aspect-ratio: 1;
   transition: all 0.13s;
 }
+.library-search { position: relative; display: flex; align-items: center; min-width: 0; }
+.library-search > .ic { position: absolute; left: 11px; color: var(--muted); pointer-events: none; }
+.library-search input { width: 100%; min-width: 0; padding-left: 36px; color: var(--text); background: var(--panel-solid); border: 1px solid var(--border); color-scheme: dark; }
+.library-search input:focus { border-color: var(--pink); }
+.character-search { max-width: 420px; margin-bottom: 18px; }
 .asset-card:hover { border-color: var(--pink); }
 .asset-card.selected { border-color: var(--pink); outline: 2px solid rgba(236,72,153,.35); outline-offset: -3px; }
 .asset-check, .asset-series, .asset-workspace-project, .asset-download, .asset-info, .asset-copy, .asset-delete { position: absolute; z-index: 3; top: 7px; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.25); background: rgba(8,4,14,.82); color: white; cursor: pointer; }

@@ -968,6 +968,8 @@ window.ManifestadorI18n.register('es', {
   'common.duplicate': 'Duplicar',
   'common.delete': 'Borrar',
   'common.search': 'Buscar',
+  'characters.searchName': 'Buscar personaje por nombre…',
+  'characters.searchEmpty': 'No hay personajes que coincidan con la búsqueda.',
   'common.all': 'Todo',
   'common.allMasculine': 'Todos',
   'common.allFeminine': 'Todas',
