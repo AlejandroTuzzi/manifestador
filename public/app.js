@@ -2919,7 +2919,7 @@ function renderPickerElements() {
 function renderPickerSeries() {
   renderEntityPicker({
     idKey: 'pickerSeriesId', variantKey: null, icon: 'layers',
-    items: () => state.series, cover: (s) => seriesImages(s)[0],
+    items: () => state.series.filter(s => !s.archived), cover: (s) => seriesImages(s)[0],
     groups: (s) => [{ id: '', name: s.title, photos: seriesImages(s) }],
     label: (s) => `${s.title} · ${tr('picker.imageCount', { count: seriesImages(s).length })}`,
     title: (s) => s.title, photoLabel: (s) => s.title,
@@ -2952,7 +2952,7 @@ function projectReferenceAssets(project, assets = state.pickerProjectAssets || {
 }
 
 function renderPickerProjects() {
-  const projects = (state.workspaceProjects || []).filter(contentIsVisible);
+  const projects = (state.workspaceProjects || []).filter(project => contentIsVisible(project) && !project.archived);
   const byProject = new Map(projects.map((project) => [project.id, projectReferenceAssets(project)]));
   const byKey = new Map([...byProject.values()].flat().map((asset) => [asset.key, asset]));
   const items = (project) => byProject.get(project.id) || [];

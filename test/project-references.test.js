@@ -89,6 +89,19 @@ test('project picker uses project assets, names, media types and bounded pages',
   assert.doesNotMatch(cfg.preview('audio/voice.mp3'), /<(?:video|img)/);
 });
 
+test('reference picker excludes completed projects and series without removing them from state', () => {
+  const context = setup();
+  context.state.workspaceProjects = [{id:'active',name:'Active'}, {id:'closed',name:'Closed',archived:true}];
+  context.renderPickerProjects();
+  assert.deepEqual(Array.from(context.config.items(), item => item.id), ['active']);
+  assert.equal(context.state.workspaceProjects.length, 2);
+  context.state.series = [{id:'active'}, {id:'closed',archived:true}];
+  vm.runInContext(source.slice(source.indexOf('function renderPickerSeries()'), source.indexOf('function projectReferenceAssets(')), context);
+  context.renderPickerSeries();
+  assert.deepEqual(Array.from(context.config.items(), item => item.id), ['active']);
+  assert.equal(context.state.series.length, 2);
+});
+
 test('shared entity picker paginates and forwards the selected media kind', () => {
   const context = setup({ multimedia: true });
   const listeners = {};
