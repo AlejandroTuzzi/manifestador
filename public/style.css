@@ -1213,10 +1213,11 @@ audio::-webkit-media-controls-volume-slider {
   transition: all 0.13s;
 }
 .library-search { position: relative; display: flex; align-items: center; min-width: 0; }
-.library-search > .ic { position: absolute; left: 11px; color: var(--muted); pointer-events: none; }
-.library-search input { width: 100%; min-width: 0; padding-left: 36px; color: var(--text); background: var(--panel-solid); border: 1px solid var(--border); color-scheme: dark; }
-.library-search input:focus { border-color: var(--pink); }
-.character-search { max-width: 420px; margin-bottom: 18px; }
+.library-search > .ic { position: absolute; left: 14px; width: 18px; height: 18px; color: var(--muted); pointer-events: none; }
+.library-search input[type="search"] { appearance: none; width: 100%; min-width: 0; min-height: 44px; padding: 11px 14px 11px 44px; font: inherit; font-size: 14px; line-height: 20px; color: var(--text); background: var(--panel-solid); border: 1px solid var(--border); border-radius: 4px; color-scheme: dark; }
+.library-search input[type="search"]::placeholder { color: var(--muted); opacity: 1; }
+.library-search input[type="search"]:focus { border-color: var(--pink); outline: 2px solid var(--border); outline-offset: 2px; }
+.character-search { width: 100%; max-width: 640px; margin-bottom: 20px; }
 .asset-card:hover { border-color: var(--pink); }
 .asset-card.selected { border-color: var(--pink); outline: 2px solid rgba(236,72,153,.35); outline-offset: -3px; }
 .asset-check, .asset-series, .asset-workspace-project, .asset-download, .asset-info, .asset-copy, .asset-delete { position: absolute; z-index: 3; top: 7px; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.25); background: rgba(8,4,14,.82); color: white; cursor: pointer; }
@@ -1598,6 +1599,14 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
   padding: 18px;
 }
 .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+#pickerModal .modal-head { gap: 12px; flex-wrap: wrap; }
+#pickerTitle { flex: 1 1 180px; }
+#pickerModal .picker-search { flex: 1 1 180px; max-width: 280px; margin-left: auto; }
+#pickerModal .picker-search input:disabled { opacity: .5; cursor: not-allowed; }
+#pickerModal .pick[hidden] { display: none; }
+@media (max-width: 520px) {
+  #pickerModal .picker-search { order: 3; flex-basis: 100%; max-width: none; }
+}
 .form-modal-box { max-width: 520px; display: flex; flex-direction: column; gap: 14px; }
 #variantEditorModal, #associateAssetModal { z-index: 140; }
 #charAssetPickerModal { z-index: 165; }

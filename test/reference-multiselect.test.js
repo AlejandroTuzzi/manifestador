@@ -22,7 +22,7 @@ function setup({ limit = 12, multimedia = true, mediaLimits = { image: 9, video:
     activeRefLimit: () => limit, activeRefModel: () => ({ name: 'Model', mediaLimits }),
     isVideoMultimediaPicker: () => multimedia,
     referenceKind: (ref) => ref.kind || 'image',
-    toast: (error) => errors.push(error), renderHighlight() {}, bindPickerAudioButtons() {},
+    toast: (error) => errors.push(error), renderHighlight() {}, bindPickerAudioButtons() {}, filterPickerCards() {},
     pickRef: (key, kind) => { state.refs.push({ key, kind }); added.push({ key, kind }); return true; }
   });
   vm.runInContext(source.slice(source.indexOf('function pickerAllowsMultiple('), source.indexOf("$('#pickerSelectionAdd').addEventListener")), context);

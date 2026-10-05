@@ -2488,6 +2488,7 @@ function isPromptLoraMediaPicker() {
 }
 
 function openPicker(replaceIndex = null) {
+  $('#pickerSearch').value = '';
   state.replaceRefIndex = replaceIndex;
   state.pickerSelection = new Map();
   state.pickerMulti = pickerAllowsMultiple();
@@ -2604,6 +2605,7 @@ function renderPickerSelectionPreviews() {
 }
 
 function bindPickerReferenceCards() {
+  filterPickerCards();
   $$('#pickerBody .pick[data-key]').forEach((card) => {
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
@@ -2702,6 +2704,8 @@ $$('#pickerTabs .tab').forEach((t) => {
 
 async function setPickerTab(src) {
   stopPickerAudioPreview();
+  $('#pickerSearch').value = '';
+  $('#pickerSearch').disabled = src === 'upload';
   const request = state.pickerRequest = (state.pickerRequest || 0) + 1;
   const multimedia = isVideoMultimediaPicker();
   const loraMedia = isPromptLoraMediaPicker();
@@ -2792,6 +2796,8 @@ async function setPickerTab(src) {
 // Drill-down genérico del picker: lista de entidades → (opcional) chips de
 // versión → fotos. Lo usan Personajes, Locaciones/Objetos y Series con su
 // propia config. `render` es la función-wrapper de cada tab (para re-dibujar).
+$('#pickerSearch').addEventListener('input', filterPickerCards);
+
 function pickerAudioPreviewHtml(key) {
   return `<span class="picker-audio"><button type="button" class="ref-audio-play picker-audio-play" data-ref-audio-key="${esc(key)}" title="${esc(tr('create.refs.playAudio'))}" aria-label="${esc(tr('create.refs.playAudio'))}" aria-pressed="false">${IC('play', 'ic ic-lg')}</button><small>${esc(tr('common.audio'))}</small></span>`;
 }
@@ -2804,6 +2810,23 @@ function bindPickerAudioButtons() {
   syncReferenceAudioButtons();
 }
 
+function filterPickerCards() {
+  const body = $('#pickerBody');
+  const query = normalizedAssetFilterText($('#pickerSearch').value);
+  const cards = [...body.querySelectorAll('.pick')];
+  let visible = 0;
+  for (const card of cards) {
+    const text = card.querySelector('.p-label')?.textContent || card.dataset.key || '';
+    card.hidden = Boolean(query && !normalizedAssetFilterText(text).includes(query));
+    if (!card.hidden) visible++;
+  }
+  let empty = body.querySelector('[data-picker-search-empty]');
+  if (!empty && cards.length) {
+    empty = document.createElement('div'); empty.className = 'empty-note';
+    empty.dataset.pickerSearchEmpty = ''; empty.setAttribute('role', 'status'); body.append(empty);
+  }
+  if (empty) { empty.textContent = tr('picker.searchEmpty'); empty.hidden = !cards.length || visible > 0; }
+}
 function renderEntityPicker(cfg) {
   sortEntities();
   const body = $('#pickerBody');
@@ -2823,11 +2846,13 @@ function renderEntityPicker(cfg) {
         }).join('')}</div>`
       : `<div class="empty-note">${cfg.empty}</div>`;
     body.querySelectorAll('[data-id]').forEach((n) => n.addEventListener('click', () => {
+      $('#pickerSearch').value = '';
       state[cfg.idKey] = n.dataset.id;
       if (cfg.pageKey) state[cfg.pageKey] = 0;
       if (cfg.variantKey) state[cfg.variantKey] = '';
       cfg.render();
     }));
+    filterPickerCards();
     return;
   }
 

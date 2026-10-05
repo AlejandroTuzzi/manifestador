@@ -22,6 +22,7 @@ function setup({ multimedia = false, lora = false, nsfw = false, audio = 3, comf
   vm.runInContext(source.slice(source.indexOf('function pickerAudioPreviewHtml('), source.indexOf('function renderEntityPicker(')), context);
   vm.runInContext(source.slice(source.indexOf('function pickerAllowsMultiple('), source.indexOf("$('#pickerSelectionAdd').addEventListener")), context);
   context.renderPickerSelectionPreviews = () => {};
+  context.filterPickerCards = () => {};
   context.workspaceProjectDisplayName = (project) => project.name;
   vm.runInContext(source.slice(source.indexOf('function projectReferenceAssets('), source.indexOf('function referenceFileKind(')), context);
   return context;
