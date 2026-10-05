@@ -972,6 +972,7 @@ window.ManifestadorI18n.register('es', {
   'common.duplicate': 'Duplicar',
   'common.delete': 'Borrar',
   'common.search': 'Buscar',
+  'errors.closedAssociations': 'No se pueden añadir asociaciones a una serie o proyecto finalizado. Reabrilo primero o elegí uno activo.',
   'picker.searchName': 'Buscar por nombre…',
   'picker.searchEmpty': 'No hay coincidencias en esta vista.',
   'characters.searchName': 'Buscar personaje por nombre…',

@@ -13,6 +13,7 @@ import { generateWanVideo as generateWanVideoRaw, validateWanMedia, wanError } f
 import { protectedAssetKeys, protectedAssetAssociations } from './lib/asset-deletion-guard.js';
 import { changeInspiration, visibleInspiration, inspirationError } from './lib/series-inspiration.js';
 import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
+import { assertClosedAssociations } from './lib/closed-associations.js';
 import { exportSeriesArchive, parseSeriesArchive, planSeriesImport, SERIES_ZIP_LIMIT } from './lib/series-transfer.js';
 import { exportInspirationArchive, importInspirationArchive, parseLibraryManifest } from './lib/inspiration-transfer.js';
 import { promises as fs } from 'node:fs';
@@ -5353,7 +5354,9 @@ const server = http.createServer(async (req, res) => {
         await updateJson('projects.json', [], (all) => {
           const project = all.find((item) => item.id === projectId);
           if (project) {
+            const previous = structuredClone(project);
             fn(project);
+            assertClosedAssociations(previous, project);
             project.updatedAt = Date.now();
             out = project;
           }
@@ -5596,6 +5599,7 @@ const server = http.createServer(async (req, res) => {
       await updateJson('series.json', [], async series => {
         const current = { series, characters:await readJson('characters.json', []), scripts:await readJson('scripts.json', []), metadata:await readJson('asset-metadata.json', {}) };
         const plan = await planSeriesImport(current, manifest, files, async key => fs.readFile(await resolveAssetKey(key)), newId);
+        assertClosedAssociations(current.series.find(item => item.id === plan.series.id), plan.series);
         if (!cfg.nsfwEnabled && plan.assetKeys.some(key => current.metadata[key]?.nsfw)) throw localizedServerError('seriesTransferHidden', 'Hidden asset conflict.');
         if (!cfg.nsfwEnabled && (plan.characters.some(c => manifest.characters.some(source => importIds(c).some(id => importIds(source).includes(id))) && current.characters.some(old => old.id === c.id && old.nsfw)) || manifest.assets.some(asset => current.metadata[asset.key]?.nsfw))) throw localizedServerError('seriesTransferHidden', 'Enable NSFW content before replacing hidden content.');
         for (const write of plan.writes) {
@@ -5642,7 +5646,7 @@ const server = http.createServer(async (req, res) => {
         let out = null;
         await updateJson('series.json', [], (all) => {
           const s = all.find((x) => x.id === seriesId);
-          if (s) { fn(s); out = s; }
+          if (s) { const previous = structuredClone(s); fn(s); assertClosedAssociations(previous, s); out = s; }
           return all;
         });
         return out;
@@ -5754,7 +5758,7 @@ const server = http.createServer(async (req, res) => {
       const matched = item.characters.map((c) => c.characterId).filter(Boolean);
       if (matched.length) {
         await updateJson('series.json', [], (all) => all.map((s) =>
-          s.id === serie.id ? { ...s, characterIds: [...new Set([...(s.characterIds || []), ...matched])] } : s));
+          s.id === serie.id && !s.archived ? { ...s, characterIds: [...new Set([...(s.characterIds || []), ...matched])] } : s));
         serie.characterIds = [...new Set([...(serie.characterIds || []), ...matched])];
       }
       return send(res, 200, { script: item, serie });

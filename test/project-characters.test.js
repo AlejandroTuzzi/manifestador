@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { assertClosedAssociations } from '../lib/closed-associations.js';
 
 const read = (file) => fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
 const server = read('server.js'), app = read('public/app.js');
@@ -9,7 +10,7 @@ const server = read('server.js'), app = read('public/app.js');
 test('project character routes support creation, idempotent linking and unlinking without altering characters', async () => {
   const characters = [{ id: 'char1', name: 'Observer' }];
   let projects = [], body = {}, response;
-  const context = vm.createContext({ newId: () => 'proj1',
+  const context = vm.createContext({ newId: () => 'proj1', structuredClone, assertClosedAssociations,
     readJsonBody: async () => body, readJson: async (file) => file === 'characters.json' ? characters : projects,
     updateJson: async (_file, _fallback, fn) => { projects = fn(projects); return projects; },
     send: (_res, status, value) => { response = { status, value }; },

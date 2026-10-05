@@ -5956,7 +5956,7 @@ function openCharacterProjectAssign(characterId) {
   if (assetAssociationBusy) return toast(tr('characters.assetPicker.saving'), 'err');
   const character = state.characters.find((c) => c.id === characterId && contentIsVisible(c));
   if (!character) return;
-  const projects = state.workspaceProjects.filter(contentIsVisible);
+  const projects = state.workspaceProjects.filter(project => contentIsVisible(project) && !project.archived);
   if (!projects.length) return toast(tr('assets.projects.createFirst'), 'err');
   state.pendingProjectCharacterId = characterId;
   state.pendingProjectAssetKeys = null;
@@ -5972,14 +5972,14 @@ function openProjectAssign(keyOrKeys) {
   state.pendingProjectCharacterId = null;
   const keys = [...new Set(Array.isArray(keyOrKeys) ? keyOrKeys : [keyOrKeys])].filter(Boolean);
   if (!keys.length) return;
-  if (!state.workspaceProjects.length) return toast(tr('assets.projects.createFirst'), 'err');
+  if (!state.workspaceProjects.some(project => !project.archived)) return toast(tr('errors.closedAssociations'), 'err');
   state.pendingProjectAssetKeys = keys;
   closeLightbox();
   const select = $('#projectAssignSelect');
-  select.innerHTML = state.workspaceProjects.map((project) => `<option value="${project.id}">${esc(workspaceProjectDisplayName(project))}</option>`).join('');
+  select.innerHTML = state.workspaceProjects.filter(project => !project.archived).map((project) => `<option value="${project.id}">${esc(workspaceProjectDisplayName(project))}</option>`).join('');
   if (keys.length === 1) {
     const current = state.workspaceProjects.filter((project) => (project.assetKeys || []).includes(keys[0]));
-    if (current.length) select.value = current[0].id;
+    if (current.some(project => !project.archived)) select.value = current.find(project => !project.archived).id;
     $('#projectAssignPreview').innerHTML = `${seriesAssetThumb(keys[0])}<div><strong>${current.length ? esc(tr('assets.projects.alreadyIn', { projects: current.map((project) => `“${project.name}”`).join(', ') })) : esc(tr('assets.projects.newLink'))}</strong><div class="hint">${esc(tr('assets.projects.multipleHint'))}</div></div>`;
   } else {
     $('#projectAssignPreview').innerHTML = `<div class="series-assign-batch">${keys.slice(0, 4).map(seriesAssetThumb).join('')}${keys.length > 4 ? `<div class="series-audio">+${keys.length - 4}</div>` : ''}</div><div><strong>${esc(trn('assets.projects.selected', keys.length))}</strong><div class="hint">${esc(tr('assets.projects.allAssociatedHint'))}</div></div>`;
@@ -6275,14 +6275,14 @@ function openSeriesAssign(keyOrKeys) {
   if (assetAssociationBusy) return toast(tr('characters.assetPicker.saving'), 'err');
   const keys = [...new Set(Array.isArray(keyOrKeys) ? keyOrKeys : [keyOrKeys])];
   if (!keys.length) return;
-  if (!state.series.length) return toast(tr('assets.series.createFirst'), 'err');
+  if (!state.series.some(series => !series.archived)) return toast(tr('errors.closedAssociations'), 'err');
   state.pendingSeriesAssetKey = keys;
   closeLightbox();
   const select = $('#seriesAssignSelect');
-  select.innerHTML = state.series.map((s) => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
+  select.innerHTML = state.series.filter(s => !s.archived).map((s) => `<option value="${s.id}">${esc(s.title)}</option>`).join('');
   if (keys.length === 1) {
     const current = state.series.filter((s) => (s.assetKeys || []).includes(keys[0]));
-    if (current.length) select.value = current[0].id;
+    if (current.some(series => !series.archived)) select.value = current.find(series => !series.archived).id;
     $('#seriesAssignPreview').innerHTML = `${seriesAssetThumb(keys[0])}<div><strong>${current.length ? tr('assets.series.alreadyIn', { series: current.map((s) => `“${esc(s.title)}”`).join(', ') }) : tr('assets.series.newLink')}</strong><div class="hint">${esc(tr('assets.series.multipleHint'))}</div></div>`;
   } else {
     $('#seriesAssignPreview').innerHTML = `<div class="series-assign-batch">${keys.slice(0, 4).map(seriesAssetThumb).join('')}${keys.length > 4 ? `<div class="series-audio">+${keys.length - 4}</div>` : ''}</div><div><strong>${esc(trn('assets.series.selected', keys.length))}</strong><div class="hint">${esc(tr('assets.series.allAssociatedHint'))}</div></div>`;

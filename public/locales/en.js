@@ -972,6 +972,7 @@ window.ManifestadorI18n.register('en', {
   'common.duplicate': 'Duplicate',
   'common.delete': 'Delete',
   'common.search': 'Search',
+  'errors.closedAssociations': 'You cannot add associations to a completed series or project. Reopen it first or choose an active one.',
   'picker.searchName': 'Search by name…',
   'picker.searchEmpty': 'No matches in this view.',
   'characters.searchName': 'Search characters by name…',
