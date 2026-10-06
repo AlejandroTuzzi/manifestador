@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { BUDGET_GROUPS, defaultBudgetSettings, budgetSettings, newBudgetDraft, calculateBudget, saveBudget, setBudgetStatus, budgetEarnings } from '../public/budget-model.js';
+import { BUDGET_GROUPS, BUDGET_RATE_GROUPS, defaultBudgetSettings, budgetSettings, newBudgetDraft, calculateBudget, saveBudget, setBudgetStatus, budgetEarnings } from '../public/budget-model.js';
 
 test('sound mixing has a configurable episode rate and persists the optional selection', async () => {
   const h=harness();
@@ -27,7 +27,7 @@ function harness() {
     const item={innerHTML:'',hidden:false,dataset:{},listeners:{},classList:{toggle(){}},insertAdjacentHTML(_position,html){this.innerHTML+=html;},querySelector:selector=>node(key+' '+selector),querySelectorAll:()=>[],addEventListener(type,callback){this.listeners[type]=callback;}};
     nodes.set(key,item);return item;
   };
-  const context={BUDGET_GROUPS,defaultBudgetSettings,newBudgetDraft,calculateBudget,structuredClone,console,
+  const context={BUDGET_GROUPS,BUDGET_RATE_GROUPS,defaultBudgetSettings,newBudgetDraft,calculateBudget,structuredClone,console,
     $:node,esc:value=>String(value??'').replaceAll('<','&lt;'),tr:(key,args={})=>key+JSON.stringify(args),toast:text=>notices.push(text),confirm:()=>true,
     i18n:{formatNumber:(value,options={})=>new Intl.NumberFormat('en',options).format(value),formatDate:()=>'',localeTag:()=> 'en',getLocale:()=> 'en'},
     window:{addEventListener(){}},fileUrl:key=>key,

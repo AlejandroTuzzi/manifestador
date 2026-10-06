@@ -16,6 +16,8 @@ const draft = { ...newBudgetDraft(), client:'Example Client / Cliente de prueba'
 draft.discounts.episodes=10; draft.discounts.characters=5;
 draft.soundMix = 'professional';
 const quote=saveBudget(draft,settings,null,{id:'pdf-review',now:0});
+settings.rates.singleVideo = {firstMinute:150,additionalMinute:75};
+const singleQuote=saveBudget({...draft,product:'single-video',durationMinutes:10,title:'Promotional video'},settings,null,{id:'single-review',now:0});
 await mkdir(new URL('../tmp/pdfs/',import.meta.url),{recursive:true});
 for(const locale of ['es','en']) {
   const header = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="550"><rect width="1920" height="550" fill="#2b193e"/><rect x="80" y="90" width="12" height="370" fill="#ec4899"/><text x="140" y="305" fill="#efe8fa" font-family="Arial" font-size="90">VERTICAL DRAMA / PDF HEADER</text></svg>').toString('base64');
@@ -23,4 +25,6 @@ for(const locale of ['es','en']) {
   await writeFile(new URL(`../tmp/pdfs/budget-${locale}.html`,import.meta.url),html);
   await writeFile(new URL(`../tmp/pdfs/budget-${locale}.pdf`,import.meta.url),await renderBudgetPdf(html));
   process.stdout.write(`Generated budget-${locale}.pdf\n`);
+  const singleHtml=budgetHtml(singleQuote,await budgetCatalog(locale),locale);
+  await writeFile(new URL(`../tmp/pdfs/single-${locale}.pdf`,import.meta.url),await renderBudgetPdf(singleHtml));
 }
