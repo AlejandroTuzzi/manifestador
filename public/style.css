@@ -1218,12 +1218,25 @@ audio::-webkit-media-controls-volume-slider {
 .library-search input[type="search"]::placeholder { color: var(--muted); opacity: 1; }
 .library-search input[type="search"]:focus { border-color: var(--pink); outline: 2px solid var(--border); outline-offset: 2px; }
 .character-search { width: 100%; max-width: 640px; margin-bottom: 20px; }
+.workflow-repository-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin: 18px 0 22px; }
+.workflow-category-create { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; }
+.workflow-category-create label { flex: 1; min-width: 180px; }
+.workflow-category-create button { min-height: 44px; }
+.workflow-repository-form select { width: 100%; padding: 12px; font: inherit; color: var(--text); background: var(--panel-solid); border: 1px solid var(--border); color-scheme: dark; }
+.workflow-repository-form select:focus { outline: none; border-color: var(--pink); }
+.workflow-repository-toolbar button { display: inline-flex; align-items: center; gap: 8px; }
 .workflow-repository-form { display: grid; gap: 14px; max-width: 720px; margin: 18px 0 24px; }
+.workflow-repository-form[hidden] { display: none; }
 .workflow-repository-form label { display: grid; gap: 7px; color: var(--muted); }
 .workflow-repository-form input, .workflow-repository-form textarea { width: 100%; padding: 12px; font: inherit; color: var(--text); background: var(--panel-solid); border: 1px solid var(--border); color-scheme: dark; }
 .workflow-repository-form input:focus, .workflow-repository-form textarea:focus { outline: 1px solid var(--pink); }
 .workflow-repository-form input::file-selector-button { padding: 8px 12px; margin-right: 12px; background: var(--panel); color: var(--text); border: 1px solid var(--border); cursor: pointer; }
-#workflowRepositoryList .char-desc { white-space: pre-wrap; }
+#workflowRepositoryList { grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 20px; }
+#workflowRepositoryList .char-card { padding: 22px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+#workflowRepositoryList h3 { font-size: 17px; line-height: 1.4; overflow-wrap: anywhere; }
+#workflowRepositoryList .char-desc { white-space: pre-wrap; font-size: 14px; line-height: 1.65; margin: 0; max-height: none; overflow-wrap: anywhere; -webkit-line-clamp: unset; }
+#workflowRepositoryList .hint { line-height: 1.5; overflow-wrap: anywhere; }
+#workflowRepositoryList .char-actions { margin-top: auto; padding-top: 6px; gap: 10px; }
 .asset-card:hover { border-color: var(--pink); }
 .asset-card.selected { border-color: var(--pink); outline: 2px solid rgba(236,72,153,.35); outline-offset: -3px; }
 .asset-check, .asset-series, .asset-workspace-project, .asset-download, .asset-info, .asset-copy, .asset-delete { position: absolute; z-index: 3; top: 7px; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.25); background: rgba(8,4,14,.82); color: white; cursor: pointer; }

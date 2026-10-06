@@ -4665,6 +4665,21 @@ const server = http.createServer(async (req, res) => {
     // --- snippets de código (JS/ExtendScript, Python, Bash) — separados de
     // Prompts a propósito: no tienen "Usar" hacia la caja de generación ni
     // se mezclan en ninguna lista/búsqueda de prompts.
+    if (p === '/api/workflow-repository-categories' && req.method === 'GET') {
+      const stored = await readJson('workflow-repository-categories.json', []);
+      for (const item of await workflowRepository.list()) {
+        if (item.category && !stored.some(name => sameCategory(name, item.category))) stored.push(item.category);
+      }
+      return send(res, 200, stored);
+    }
+    if (p === '/api/workflow-repository-categories' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const name = String(body.name || '').trim().slice(0,80);
+      if (!name) return sendError(res, 400, 'categoryNameRequired', 'Enter a category name.');
+      const categories = await updateJson('workflow-repository-categories.json', [], all =>
+        all.some(category => sameCategory(category, name)) ? all : [...all, name]);
+      return send(res, 200, categories);
+    }
     if (p === '/api/workflow-repository' && req.method === 'GET') return send(res, 200, (await workflowRepository.list()).map(workflowRepositorySummary));
     if (p === '/api/workflow-repository' && req.method === 'POST') {
       const item = await workflowRepository.create(await readJsonBody(req, 15 * 1024 * 1024));

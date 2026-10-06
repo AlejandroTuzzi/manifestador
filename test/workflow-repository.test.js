@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { workflowRepositoryItem, workflowRepositorySummary } from '../lib/workflow-repository.js';
+test('workflow categories are optional, editable and preserved with existing files', () => {
+  const original = workflowRepositoryItem({ title:'Example', filename:'a.json', content:'{"nodes":[]}' }, {}, 'id');
+  assert.equal(original.category, '');
+  const categorized = workflowRepositoryItem({ category:'  Video  ' }, original);
+  assert.equal(categorized.category, 'Video');
+  assert.equal(workflowRepositorySummary(categorized).category, 'Video');
+  assert.equal(workflowRepositoryItem({ title:'Updated' }, categorized).category, 'Video');
+  assert.equal(workflowRepositoryItem({ category:'' }, categorized).category, '');
+  assert.equal(categorized.content, original.content);
+  assert.equal(workflowRepositoryItem({ category:'x'.repeat(100) }, original).category.length, 80);
+});
 test('repository preserves JSON contents and filename, omits contents from listing', () => {
   const content = '\uFEFF{\n "nodes": [], "extra": {"note":"example"}\n}\n';
   const item = workflowRepositoryItem({ title:'Example', description:'Notes', filename:'example.json', content }, {}, 'id1');

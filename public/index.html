@@ -568,9 +568,12 @@
       </div>
       <div id="workflowRepositoryPanel" hidden>
         <p class="hint" data-i18n="workflowRepo.hint"></p>
-        <form id="workflowRepositoryForm" class="workflow-repository-form">
+        <div class="workflow-repository-toolbar"><label><span data-i18n="categories.category"></span> <select id="workflowRepositoryFilter" class="select"></select></label><button type="button" id="workflowRepositoryAdd" class="generate-btn small" aria-controls="workflowRepositoryForm" aria-expanded="false"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg><span data-i18n="workflowRepo.add"></span></button></div>
+        <form id="workflowRepositoryForm" class="workflow-repository-form" hidden>
           <label><span data-i18n="common.title"></span><input name="title" maxlength="120" required></label>
           <label><span data-i18n="workflowRepo.description"></span><textarea name="description" rows="3" maxlength="10000"></textarea></label>
+          <label><span data-i18n="categories.category"></span><select name="category" class="select"></select></label>
+          <div class="workflow-category-create"><label><span data-i18n="categories.newTitle"></span><input name="newCategory" maxlength="80"></label><button type="button" id="workflowRepositoryCreateCategory" class="tool-btn" data-i18n="workflowRepo.createCategory"></button></div>
           <label><span data-i18n="workflowRepo.file"></span><input name="file" type="file" accept=".json,application/json" required></label>
           <div class="char-actions"><button type="submit" class="generate-btn small" data-i18n="common.save"></button><button type="button" id="workflowRepositoryCancel" class="tool-btn" data-i18n="common.cancel" hidden></button></div>
         </form>
