@@ -1,4 +1,7 @@
 window.ManifestadorI18n.register('es', {
+  'budget.unspecified': 'No Especificado',
+  'budget.genericCharacter': 'Personaje Genérico',
+  'budget.genericLocation': 'Locación Genérica',
   "budget.service": "Servicio",
   "budget.videoUnit": "video",
   "budget.singleSoundMixHint": "Un sonidista realiza la mezcla final, ajusta niveles y personaliza el diseño sonoro. Se cobra una vez por el video.",

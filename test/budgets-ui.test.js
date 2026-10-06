@@ -45,6 +45,30 @@ function harness() {
   const click=(action,extra={})=>{const target={dataset:{budgetAction:action,...extra},closest:()=>target};return node('#budgetPanel').listeners.click({target});};
   return {node,input,click,notices,calls,testing:context.testing,get data(){return data;}};
 }
+
+test('new quote text and entity fields have editable localized defaults that persist', async () => {
+  const h=harness();await h.testing.changeTab('new');
+  const initial=h.testing.getDraft();
+  for(const key of ['client','title','description']) assert.equal(initial[key],'budget.unspecified{}');
+  assert.equal(initial.deadline,'');
+  for(const group of ['characters','locations','objects']) await h.click('add-item',{group});
+  const draft=h.testing.getDraft();
+  assert.equal(draft.characters[0].name,'budget.genericCharacter{}');
+  for(const key of ['sex','species','age']) assert.equal(draft.characters[0][key],'budget.unspecified{}');
+  assert.equal(draft.locations[0].name,'budget.genericLocation{}');
+  for(const key of ['type','lighting']) assert.equal(draft.locations[0][key],'budget.unspecified{}');
+  assert.equal(draft.objects[0].name,'budget.unspecified{}');
+  assert.equal(draft.objects[0].characteristics,'budget.unspecified{}');
+  h.input('characters.0.name','Custom name');
+  h.input('description','');
+  await h.click('add-item',{group:'characters'});
+  assert.equal(h.testing.getDraft().description,'');
+  await h.testing.saveCurrent({preventDefault(){}});
+  assert.equal(h.data.quotes[0].characters[0].name,'Custom name');
+  assert.equal(h.data.quotes[0].characters[1].name,'budget.genericCharacter{}');
+  assert.equal(h.data.quotes[0].description,'');
+  assert.equal(h.data.quotes[0].locations[0].name,'budget.genericLocation{}');
+});
 test('quote editor adds/removes episode and entity tiles and persists their fields',async()=>{
   const h=harness();await h.testing.changeTab('new');
   h.input('client','Client');h.input('title','Vertical drama');h.input('episodeCount','4',true);

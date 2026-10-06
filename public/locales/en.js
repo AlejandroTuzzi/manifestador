@@ -1,4 +1,7 @@
 window.ManifestadorI18n.register('en', {
+  'budget.unspecified': 'Not Specified',
+  'budget.genericCharacter': 'Generic Character',
+  'budget.genericLocation': 'Generic Location',
   "budget.service": "Service",
   "budget.videoUnit": "video",
   "budget.singleSoundMixHint": "A sound engineer handles the final mix, adjusts levels and customizes the sound design. Charged once for the video.",

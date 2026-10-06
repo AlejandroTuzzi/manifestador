@@ -46,7 +46,7 @@ function groupSection(group, body) {
 }
 function episodeTiles(frozen = readonly()) { return draft.episodes.map((episode,index) => `<article class="budget-tile ${index === 0 ? 'pilot' : index === draft.episodes.length - 1 ? 'final' : ''}"><strong>${i18n.formatNumber(index + 1)}</strong><span>${index === 0 ? h('pilot') : ''}${index === draft.episodes.length - 1 ? ' ' + h('final') : ''}</span><small>${i18n.formatNumber(index === 0 ? draft.pilotMinutes : draft.episodeMinutes)} min</small>${!frozen && draft.episodes.length > 1 ? button('remove-episode','remove',`data-index="${index}"`) : ''}</article>`).join(''); }
 function drawEditor() {
-  draft ||= newBudgetDraft();
+  draft ||= { ...newBudgetDraft(), client:bt('unspecified'), title:bt('unspecified'), description:bt('unspecified') };
   if (draft.snapshot) draft.snapshot.rates.soundMix ||= { price: 0, revisions: 0 };
   const frozen = readonly();
   const entities = ['characters','locations','objects'].map(group => groupSection(group,
@@ -181,7 +181,7 @@ panel.addEventListener('click',async event=>{
     if(action==='import-settings') { $('#budgetSettingsImport').click(); return; }
     if(action==='add-episode'){if(draft.episodes.length<500){draft.episodes.push({});dirty=true;drawEditor();}return;}
     if(action==='remove-episode'){if(draft.episodes.length>1){draft.episodes.splice(Number(target.dataset.index),1);dirty=true;drawEditor();}return;}
-    if(action==='add-item'){const group=target.dataset.group;if(draft[group].length<200){draft[group].push(group==='characters'?{name:'',sex:'',species:'',age:'',source:'create'}:group==='locations'?{name:'',type:'',lighting:''}:{name:'',characteristics:''});dirty=true;drawEditor();}return;}
+    if(action==='add-item'){const group=target.dataset.group;if(draft[group].length<200){draft[group].push(group==='characters'?{name:bt('genericCharacter'),sex:bt('unspecified'),species:bt('unspecified'),age:bt('unspecified'),source:'create'}:group==='locations'?{name:bt('genericLocation'),type:bt('unspecified'),lighting:bt('unspecified')}:{name:bt('unspecified'),characteristics:bt('unspecified')});dirty=true;drawEditor();}return;}
     if(action==='remove-item'){draft[target.dataset.group].splice(Number(target.dataset.index),1);dirty=true;drawEditor();return;}
     if(action==='rate-group'){configGroup=target.dataset.group;drawSettings();return;}
     if(action==='remove-header'){configDraft.headerImage='';dirty=true;drawSettings();return;}
