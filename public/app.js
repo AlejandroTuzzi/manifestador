@@ -854,6 +854,7 @@ function videoModeAllowsMultimedia(model = currentVideoModel(), mode = state.vid
 
 function typedVideoReferenceMention(model, kind, number) {
   const type = `${kind[0].toUpperCase()}${kind.slice(1)}`;
+  if (model?.provider === 'heygen-scene') return `<${kind === 'image' ? 'Picture' : type} ${number}>`;
   if (model?.provider === 'omni') return `<${kind.toUpperCase()}_REF_${number - 1}>`;
   return model?.id === 'seedance-2-5' ? `@${type}${number}` : `${type} ${number}`;
 }
@@ -862,6 +863,16 @@ function renderVideoControls() {
   const m = currentVideoModel();
   if (!m) return;
   const isHeyGen = m.provider === 'heygen';
+  const scene = m.provider === 'heygen-scene';
+  let sceneControls = $('#heygenSceneControls');
+  if (!sceneControls) { sceneControls=document.createElement('div'); sceneControls.id='heygenSceneControls'; sceneControls.className='control-row'; $('#videoControls').append(sceneControls); }
+  sceneControls.hidden=!scene;
+  if(scene) {
+    const opts=state.video.heygenSceneOptions || {};
+    sceneControls.innerHTML=`<label>${esc(tr('heygenScene.enhancement'))}<select class="select" id="heygenSceneEnhancement">${['disabled','turbo','quality'].map(v=>`<option value="${v}"${(opts.promptEnhancement || 'disabled')===v?' selected':''}>${esc(tr(`heygenScene.${v}`))}</option>`).join('')}</select></label><label>${esc(tr('heygenScene.seed'))}<input class="select" id="heygenSceneSeed" type="number" min="0" max="4294967295" step="1" value="${esc(opts.seed ?? '')}"></label><p class="hint">${esc(tr('heygenScene.hint'))}</p>`;
+    sceneControls.onchange=()=>{state.video.heygenSceneOptions={seed:$('#heygenSceneSeed').value,promptEnhancement:$('#heygenSceneEnhancement').value};};
+    if(['1080p','2k'].includes(state.video.resolution) && !['16:9','9:16'].includes(state.video.aspectRatio))state.video.aspectRatio='16:9';
+  }
   const isH3 = m.provider === 'minimax';
   const isOmni = m.provider === 'omni';
   const isSeedance25 = m.id === 'seedance-2-5';
@@ -896,7 +907,7 @@ function renderVideoControls() {
       renderVideoControls();
     },
     (v) => tr(`create.video.mode.${v}`));
-  $('#videoRefsHint').textContent = isHeyGen
+  $('#videoRefsHint').textContent = scene ? tr('heygenScene.hint') : isHeyGen
     ? tr('create.video.refsHeygen')
     : m.provider === 'wan'
     ? tr(state.video.mode === 'first' ? 'wan.firstHint' : state.video.mode === 'frames' ? 'create.video.framesHint' : 'wan.refsHint')
@@ -914,7 +925,7 @@ function renderVideoControls() {
     ? tr('create.video.refsDefault')
     : tr('create.video.framesHint');
   $('#videoRefsLabel').textContent = multimediaRefs ? tr('create.controls.references') : tr('create.controls.images');
-  chipRow($('#videoArChips'), m.aspectRatios, state.video.aspectRatio,
+  chipRow($('#videoArChips'), scene && ['1080p','2k'].includes(state.video.resolution) ? ['16:9','9:16'] : m.aspectRatios, state.video.aspectRatio,
     (v) => { state.video.aspectRatio = v; renderVideoControls(); });
   chipRow($('#videoResChips'), m.resolutions, state.video.resolution,
     (v) => { state.video.resolution = v; renderVideoControls(); });
@@ -1713,6 +1724,7 @@ async function generate() {
     if (counts.image > 10 || counts.video > 5 || counts.audio > 5) return toast(tr('errors.wanReferences'), 'err');
     if (state.video.mode !== 'reference' && (counts.video || counts.audio || counts.image !== (state.video.mode === 'first' ? 1 : 2))) return toast(tr('errors.wanFrames'), 'err');
   }
+  if (isVideo && model?.provider === 'heygen-scene' && !state.config?.keys?.heygen) return toast(tr('create.validation.heygenKey'),'err');
   if (isH3 && !state.config?.keys?.minimax) return toast(tr('create.validation.minimaxKey'), 'err');
   if (model?.provider === 'siray' && !state.config?.keys?.siray) return toast(tr('errors.sirayKey'), 'err');
   if (isOmni && !state.config?.keys?.gemini) return toast(tr('create.validation.geminiKey'), 'err');
@@ -1774,6 +1786,7 @@ async function generate() {
       ...(model.id.startsWith('gpt-image-2.5-') ? { openaiImage: readOpenaiOptions($('#openaiImageOptions')) } : {}), ...(model.provider === 'qwen' ? { qwenImage: readQwenOptions($('#qwenImageOptions')) } : {})
     } : isVideo ? {
       modelId: state.video.modelId, prompt, mode: state.video.mode,
+      heygenSceneOptions: model.provider === 'heygen-scene' ? state.video.heygenSceneOptions || {} : undefined,
       sirayOptions: model.provider === 'siray' ? state.sirayOptions?.[model.id] || {} : undefined,
       aspectRatio: state.video.aspectRatio, resolution: state.video.resolution,
       duration: state.video.duration, audio: state.video.audio,
@@ -1815,6 +1828,29 @@ async function generate() {
   toast(tr('create.queue.added'));
 }
 
+let heygenSceneSyncBusy = false;
+async function syncHeygenSceneJobs() {
+  if(heygenSceneSyncBusy || document.hidden || !state.config?.keys?.heygen)return;
+  heygenSceneSyncBusy=true;
+  try {
+    const result=await api('/api/generate/heygen-scene/status',{task:false});
+    const local=state.generationJobs.some(job=>job.body?.modelId==='heygen-video-1' && job.status==='running');
+    for(const pending of result.jobs || []) {
+      let job=state.generationJobs.find(item=>item.id==='heygen-scene-'+pending.id);
+      if(!job && (pending.failed || local))continue;
+      if(!job){job={id:'heygen-scene-'+pending.id,recoveredHeygenScene:true,label:'HeyGen Video 1.0',mode:'video',prompt:pending.prompt,startedAt:pending.createdAt};state.generationJobs.unshift(job);}
+      job.heygenSceneTaskId=pending.taskId;job.status=pending.failed?'error':'running';job.error=pending.failed?tr('errors.heygenSceneFailed'):'';
+    }
+    let changed=false;
+    for(const entry of result.entries || []) {
+      const job=state.generationJobs.find(item=>item.recoveredHeygenScene && item.heygenSceneTaskId===entry.heygenSceneTaskId);
+      if(job){job.status='done';job.entry=entry;job.error='';}
+      if(!local && !state.history.some(item=>item.id===entry.id)){state.history.unshift(entry);changed=true;}
+    }
+    if(changed){state.history.sort((a,b)=>b.ts-a.ts);renderHistory();} renderGenerationQueue();
+  } catch {} finally {heygenSceneSyncBusy=false;}
+}
+setInterval(syncHeygenSceneJobs,10000);
 let wanSyncBusy = false;
 async function syncWanGenerationJobs() {
   if (wanSyncBusy || document.hidden || !state.config) return;
@@ -2195,6 +2231,7 @@ async function regenerate(entry) {
     state.video.audio = Boolean(entry.audio);
     state.video.avoidMusic = entry.avoidMusic !== false;
     state.video.h3ContextIr = entry.h3ContextIr === true;
+    state.video.heygenSceneOptions = entry.heygenSceneOptions || {};
     state.video.omniPreviousInteractionId = entry.omniPreviousInteractionId || '';
     state.video.omniSourceHistoryId = entry.omniSourceHistoryId || '';
     state.video.omniChainDepth = Math.max(0, (Number(entry.omniChainDepth) || 0) - (entry.omniPreviousInteractionId ? 1 : 0));
@@ -2211,6 +2248,7 @@ async function regenerate(entry) {
     state.batch = entry.batch || 1;
     state.qwenImage = entry.qwenImage || {}; state.openaiImage = entry.openaiImage || {};
     state.video.h3ContextIr = entry.h3ContextIr === true;
+    state.video.heygenSceneOptions = entry.heygenSceneOptions || {};
     state.refs = (entry.refs || []).map((k, index) => ({ key: k, fromChar: false, kind: entry.refKinds?.[index] }));
     renderImageControls();
   }
@@ -2310,6 +2348,7 @@ function editEntry(entry) {
     state.video.audio = Boolean(entry.audio);
     state.video.avoidMusic = entry.avoidMusic !== false;
     state.video.h3ContextIr = entry.h3ContextIr === true;
+    state.video.heygenSceneOptions = entry.heygenSceneOptions || {};
     state.video.omniPreviousInteractionId = entry.omniPreviousInteractionId || '';
     state.video.omniSourceHistoryId = entry.omniSourceHistoryId || '';
     state.video.omniChainDepth = Math.max(0, (Number(entry.omniChainDepth) || 0) - (entry.omniPreviousInteractionId ? 1 : 0));
@@ -9315,7 +9354,7 @@ function renderAutomationProject() {
         const reusableAudioReady = Array.isArray(out?.audioKeys) && out.audioKeys.length >= (b.items || []).length;
         const heygenCharacters = automationHeyGenCharacters();
         const selectedHeyGenCharacter = automationBlockHeyGenCharacter(pr, b);
-        const blockGenerator = ['heygen', 'assets', 'h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(b.generator) ? b.generator : 'image';
+        const blockGenerator = ['heygen', 'assets', 'h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(b.generator) ? b.generator : 'image';
         return `
         <div class="auto-block${done ? ' is-done' : ''}" data-block="${b.id}">
           <div class="auto-block-head">
@@ -9330,7 +9369,7 @@ function renderAutomationProject() {
             <div class="auto-block-generator">
               <label data-block-provider-label><span>${esc(tr('siray.provider'))}</span><select class="select" data-block-provider><option value="official">${esc(tr('siray.official'))}</option><option value="siray"${b.videoProvider === 'siray' ? ' selected' : ''}>Siray · Spicy</option></select></label>
               <label data-block-siray-resolution-label><span>${esc(tr('automation.config.resolution'))}</span><select class="select" data-block-siray-resolution data-saved="${esc(b.sirayResolution || '')}"></select></label>
-              <label><span>${esc(tr('automation.generators.label'))}</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>${esc(tr('automation.generators.imageAudio'))}</option><option value="seedance25"${blockGenerator === 'seedance25' ? ' selected' : ''}>Seedance 2.5 · ${esc(tr('automation.generators.multimodalVideo'))}</option><option value="wan"${blockGenerator === 'wan' ? ' selected' : ''}>Wan 3.0</option><option value="wan-prime"${blockGenerator === 'wan-prime' ? ' selected' : ''}>Wan 3.0 Prime</option><option value="h3"${blockGenerator === 'h3' ? ' selected' : ''}>MiniMax H3 · ${esc(tr('automation.generators.multimodalVideo'))}</option><option value="omni"${blockGenerator === 'omni' ? ' selected' : ''}>Gemini Omni 1.1 Flash · ${esc(tr('common.video'))}</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + ${esc(tr('automation.generators.elevenLabsAudio'))}</option><option value="assets"${blockGenerator === 'assets' ? ' selected' : ''}>Assets · ${esc(tr('automation.generators.imagesVideos'))}</option></select></label>
+              <label><span>${esc(tr('automation.generators.label'))}</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>${esc(tr('automation.generators.imageAudio'))}</option><option value="seedance25"${blockGenerator === 'seedance25' ? ' selected' : ''}>Seedance 2.5 · ${esc(tr('automation.generators.multimodalVideo'))}</option><option value="wan"${blockGenerator === 'wan' ? ' selected' : ''}>Wan 3.0</option><option value="wan-prime"${blockGenerator === 'wan-prime' ? ' selected' : ''}>Wan 3.0 Prime</option><option value="heygen-scene"${blockGenerator === 'heygen-scene' ? ' selected' : ''}>HeyGen Video 1.0</option><option value="h3"${blockGenerator === 'h3' ? ' selected' : ''}>MiniMax H3 · ${esc(tr('automation.generators.multimodalVideo'))}</option><option value="omni"${blockGenerator === 'omni' ? ' selected' : ''}>Gemini Omni 1.1 Flash · ${esc(tr('common.video'))}</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + ${esc(tr('automation.generators.elevenLabsAudio'))}</option><option value="assets"${blockGenerator === 'assets' ? ' selected' : ''}>Assets · ${esc(tr('automation.generators.imagesVideos'))}</option></select></label>
               <div class="auto-block-heygen-settings" data-block-heygen-settings${blockGenerator === 'heygen' ? '' : ' hidden'}>
                 <label><span>${esc(tr('automation.heygen.characterVariant'))}</span><select class="select" data-block-heygen-character>${heygenCharacters.length ? heygenCharacters.map((character) => `<option value="${character.id}"${character.id === selectedHeyGenCharacter?.id ? ' selected' : ''}>${esc(character.name)} · HeyGen · ${esc(trn('characters.shots', character.heygen?.closeAvatarId ? 2 : 1))}</option>`).join('') : `<option value="">— ${esc(tr('automation.heygen.noReadyCharacters'))} —</option>`}</select></label>
                 <label><span>${esc(tr('automation.heygen.framing'))}</span><select class="select" data-block-heygen-framing><option value="wide"${b.heygenFraming === 'wide' || !b.heygenFraming ? ' selected' : ''}>${esc(tr('automation.heygen.wideShot'))}</option><option value="close"${b.heygenFraming === 'close' ? ' selected' : ''}>${esc(tr('automation.heygen.closeUp'))}</option><option value="split"${b.heygenFraming === 'split' ? ' selected' : ''}>${esc(tr('automation.heygen.alternate'))}</option></select></label>
@@ -10071,25 +10110,27 @@ function renderAutomationProject() {
       }
       seedance25Settings.querySelector('[data-block-seedance25-resolution]').closest('label').hidden = Boolean(sirayModel);
       h3Settings.querySelector('[data-block-h3-resolution]').closest('label').hidden = Boolean(sirayModel);
+      const scene = select.value === 'heygen-scene';
       const h3ModeSelect = h3Settings.querySelector('[data-block-h3-mode]');
-      h3ModeSelect.querySelector('[value="frames"]').disabled = Boolean(sirayModel && !sirayModel.modes.includes('frames'));
+      h3ModeSelect.querySelector('[value="frames"]').disabled = scene || Boolean(sirayModel && !sirayModel.modes.includes('frames'));
+      if(scene) h3ModeSelect.value='reference';
       if (sirayModel && !sirayModel.modes.includes(h3ModeSelect.value)) h3ModeSelect.value = 'reference';
       assetSettings.hidden = select.value !== 'assets';
-      h3Settings.hidden = !['h3', 'wan', 'wan-prime'].includes(select.value);
+      h3Settings.hidden = !['h3', 'wan', 'wan-prime', 'heygen-scene'].includes(select.value);
       const wan = ['wan', 'wan-prime'].includes(select.value);
-      h3Settings.querySelector('strong').textContent = wan ? (select.value === 'wan-prime' ? 'Wan 3.0 Prime' : 'Wan 3.0') : 'MiniMax H3';
+      h3Settings.querySelector('strong').textContent = scene ? 'HeyGen Video 1.0' : wan ? (select.value === 'wan-prime' ? 'Wan 3.0 Prime' : 'Wan 3.0') : 'MiniMax H3';
       const hints = h3Settings.querySelectorAll('.hint');
-      if (hints[0]) hints[0].textContent = tr(wan ? 'wan.automationHint' : 'automation.generators.h3Hint');
-      h3Settings.querySelector('[data-block-h3-hint]').textContent = tr(wan ? 'wan.refsHint' : 'automation.generators.h3ModeHint');
-      h3Settings.querySelector('[data-block-h3-context]').closest('label').hidden = wan || Boolean(sirayModel);
+      if (hints[0]) hints[0].textContent = tr(scene ? 'heygenScene.hint' : wan ? 'wan.automationHint' : 'automation.generators.h3Hint');
+      h3Settings.querySelector('[data-block-h3-hint]').textContent = tr(scene ? 'heygenScene.hint' : wan ? 'wan.refsHint' : 'automation.generators.h3ModeHint');
+      h3Settings.querySelector('[data-block-h3-context]').closest('label').hidden = scene || wan || Boolean(sirayModel);
       for (const [field, key] of [['narration', wan ? 'wan.narration' : 'automation.generators.h3NarrationReference'], ['native-audio', wan ? 'wan.keepAudio' : 'automation.generators.keepH3Audio']]) {
         const label = h3Settings.querySelector(`[data-block-h3-${field}]`).closest('label');
         for (const node of [...label.childNodes]) if (node.nodeType === Node.TEXT_NODE) node.textContent = ' ' + tr(key);
       }
       const resolutionSelect = h3Settings.querySelector('[data-block-h3-resolution]');
       const savedBlock = pr.blocks.find(item => item.id === blockElement.dataset.block);
-      const choices = wan ? ['480P', '720P', '1080P'] : ['768P', '2K'];
-      const current = choices.includes(resolutionSelect.value) ? resolutionSelect.value : choices.includes(savedBlock?.h3Resolution) ? savedBlock.h3Resolution : wan ? '720P' : '768P';
+      const choices = scene ? ['768p','480p','1080p','2k'] : wan ? ['480P', '720P', '1080P'] : ['768P', '2K'];
+      const current = choices.includes(resolutionSelect.value) ? resolutionSelect.value : choices.includes(savedBlock?.h3Resolution) ? savedBlock.h3Resolution : scene ? '768p' : wan ? '720P' : '768P';
       resolutionSelect.innerHTML = choices.map(value => `<option value="${value}"${value === current ? ' selected' : ''}>${value}</option>`).join('');
       h3Settings.querySelector('[data-block-h3-resolution]').previousElementSibling.textContent = tr('automation.config.resolution');
       seedance25Settings.hidden = select.value !== 'seedance25';
@@ -10137,7 +10178,7 @@ function renderAutomationProject() {
     const selectedGenerator = blockElement.querySelector('[data-block-generator]').value;
     const videoProvider = blockElement.querySelector('[data-block-provider]').value;
     const sirayResolution = blockElement.querySelector('[data-block-siray-resolution]').value;
-    const generator = ['image', 'heygen', 'assets', 'h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(selectedGenerator) ? selectedGenerator : 'image';
+    const generator = ['image', 'heygen', 'assets', 'h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(selectedGenerator) ? selectedGenerator : 'image';
     const heygenCharacterId = generator === 'heygen' ? (blockElement.querySelector('[data-block-heygen-character]').value || '') : '';
     const heygenFraming = generator === 'heygen' ? blockElement.querySelector('[data-block-heygen-framing]').value : 'wide';
     const heygenCharacter = state.characters.find((character) => character.id === heygenCharacterId);
@@ -10175,7 +10216,7 @@ function renderAutomationProject() {
     if (generator === 'heygen' && !heygenCharacterReady(heygenCharacter)) return toast(tr('automation.blockValidation.heygenCharacterRequired'), 'err');
     if (generator === 'heygen' && ['close', 'split'].includes(heygenFraming) && !heygenCharacter.heygen?.closeAvatarId) return toast(tr('automation.blockValidation.noCloseUpCode'), 'err');
     if (generator === 'assets' && !assetKeys.length) return toast(tr('automation.blockValidation.assetsRequired'), 'err');
-    if (['h3', 'wan', 'wan-prime'].includes(generator) && h3Mode === 'frames') {
+    if (['h3', 'wan', 'wan-prime', 'heygen-scene'].includes(generator) && h3Mode === 'frames') {
       const frameItems = h3ReferenceKeys.map(automationVisualAsset);
       if (frameItems.length !== 2 || frameItems.some((item) => ['video', 'audio'].includes(item.zone))) {
         return toast(tr(generator === 'h3' ? 'automation.blockValidation.h3Frames' : 'errors.wanFrames'), 'err');
@@ -10231,14 +10272,14 @@ function renderAutomationProject() {
     const existingAudioKeys = Array.isArray(output.audioKeys) ? output.audioKeys.slice(0, block.items.length) : [];
     if (existingAudioKeys.length !== block.items.length) return toast(tr('automation.regenerate.missingAudioForAssembly'), 'err');
     const visualDescription = block.generator === 'assets' ? trn('automation.regenerate.selectedAssets', (block.assetKeys || []).length)
-      : ['h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(block.generator)
-        ? tr('automation.regenerate.modelSegmentsAndBase', { segments: trn('automation.outputs.segmentCount', (output.h3SegmentVideoKeys || []).length), model: ['wan', 'wan-prime'].includes(block.generator) ? (block.generator === 'wan-prime' ? 'Wan 3.0 Prime' : 'Wan 3.0') : block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'H3' })
+      : ['h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(block.generator)
+        ? tr('automation.regenerate.modelSegmentsAndBase', { segments: trn('automation.outputs.segmentCount', (output.h3SegmentVideoKeys || []).length), model: block.generator === 'heygen-scene' ? 'HeyGen Video 1.0' : ['wan', 'wan-prime'].includes(block.generator) ? (block.generator === 'wan-prime' ? 'Wan 3.0 Prime' : 'Wan 3.0') : block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'H3' })
         : tr('automation.regenerate.cleanImage');
     if (!confirm(tr('automation.regenerate.textVideoConfirm', { title: block.title || tr('automation.thisBlock'), visuals: visualDescription, audio: trn('automation.regenerate.existingAudio', existingAudioKeys.length) }))) return;
     const preservedOutput = {
       ...(block.generator === 'assets' ? {
         generator: 'assets', assetKeys: [...block.assetKeys], assetMuteOriginal: block.assetMuteOriginal !== false
-      } : ['h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(block.generator) ? {
+      } : ['h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(block.generator) ? {
         generator: block.generator, imageKey: output.imageKey,
         imageModelId: output.imageModelId || '', imageModelName: output.imageModelName || '',
         h3SegmentVideoKeys: [...(output.h3SegmentVideoKeys || [])],
@@ -10612,14 +10653,14 @@ function automationBlockOutHtml(out, block = null) {
   const isHeyGen = out.generator === 'heygen';
   const isAssets = out.generator === 'assets';
   const isWan = ['wan', 'wan-prime'].includes(out.generator);
-  const isH3 = out.generator === 'h3';
+  const isH3 = ['h3','heygen-scene'].includes(out.generator);
   const isSeedance25 = out.generator === 'seedance25';
   const isOmni = out.generator === 'omni';
   const canRegenerateHeyGenPlanes = isHeyGen && out.heygenFraming === 'split' && segmentVideoKeys.length === 2 && block?.id;
   const sourceStatus = isWan ? `${out.generator === 'wan-prime' ? 'Wan 3.0 Prime' : 'Wan 3.0'} · ${out.h3Resolution || '720P'} · ${trn('automation.outputs.segmentCount', h3SegmentVideoKeys.length)}` : isHeyGen
     ? `HeyGen · ${trn('characters.shots', out.heygenFraming === 'split' ? 2 : 1)}`
     : isH3
-      ? `MiniMax H3 · ${out.h3Resolution || '768P'} · ${trn('automation.outputs.segmentCount', h3SegmentVideoKeys.length)}`
+      ? `${out.generator === 'heygen-scene' ? 'HeyGen Video 1.0' : 'MiniMax H3'} · ${out.h3Resolution || '768P'} · ${trn('automation.outputs.segmentCount', h3SegmentVideoKeys.length)}`
     : isSeedance25
       ? `Seedance 2.5 · ${out.h3Resolution || '720p'} · ${trn('automation.outputs.segmentCount', h3SegmentVideoKeys.length)}`
     : isOmni
@@ -11030,13 +11071,13 @@ async function runAutomationBlock(projectId, block, blockEl, {
     const { refs, labeledRefs, prompt } = await automationRefsAndPrompt(pr, block);
     let historyLoaded = false;
     let imageKey = output.imageKey;
-    const isGenerativeVideo = ['h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(block.generator);
+    const isGenerativeVideo = ['h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(block.generator);
     const generativeVideoMode = block.generator === 'omni' ? block.omniMode : block.generator === 'seedance25' ? block.seedance25Mode : block.h3Mode;
     const generativeReferenceKeys = block.generator === 'omni' ? block.omniReferenceKeys : block.generator === 'seedance25' ? block.seedance25ReferenceKeys : block.h3ReferenceKeys;
     if (!imageKey && isGenerativeVideo && generativeVideoMode === 'frames') {
       imageKey = (generativeReferenceKeys || [])[0] || '';
       if (imageKey) output = await persistAutomationBlockOutput(projectId, block.id, {
-        imageKey, imageModelId: `${block.generator}-frame`, imageModelName: tr('automation.pipeline.startFrameModel', { model: ['wan', 'wan-prime'].includes(block.generator) ? (block.generator === 'wan-prime' ? 'Wan 3.0 Prime' : 'Wan 3.0') : block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'H3' }),
+        imageKey, imageModelId: `${block.generator}-frame`, imageModelName: tr('automation.pipeline.startFrameModel', { model: block.generator === 'heygen-scene' ? 'HeyGen Video 1.0' : ['wan', 'wan-prime'].includes(block.generator) ? (block.generator === 'wan-prime' ? 'Wan 3.0 Prime' : 'Wan 3.0') : block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'H3' }),
         fallbackUsed: false, recoveredImage: true, audioCountExpected: block.items.length
       });
     }
@@ -11140,7 +11181,7 @@ async function runAutomationBlock(projectId, block, blockEl, {
     }
 
     setStatus(isGenerativeVideo
-      ? tr('automation.pipeline.generatingSegments', { model: ['wan', 'wan-prime'].includes(block.generator) ? (block.generator === 'wan-prime' ? 'Wan 3.0 Prime' : 'Wan 3.0') : block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'MiniMax H3' })
+      ? tr('automation.pipeline.generatingSegments', { model: block.generator === 'heygen-scene' ? 'HeyGen Video 1.0' : ['wan', 'wan-prime'].includes(block.generator) ? (block.generator === 'wan-prime' ? 'Wan 3.0 Prime' : 'Wan 3.0') : block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'MiniMax H3' })
       : dynamicTextEnabled ? tr('automation.pipeline.animatingText') : tr('automation.pipeline.assemblingVideo'));
     const category = `Auto: ${pr.name}`;
     const v = isGenerativeVideo
@@ -11162,13 +11203,13 @@ async function runAutomationBlock(projectId, block, blockEl, {
       completedAt: Date.now()
     });
     await tagAutomationStage(pr, block, [imageKey, textImageKey, textLayerKey, v.motionOverlayKey, ...(v.segmentVideoKeys || []), ...audioKeys, v.videoKey]);
-    if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: isGenerativeVideo ? tr('automation.pipeline.modelTakeDone', { model: ['wan', 'wan-prime'].includes(block.generator) ? (block.generator === 'wan-prime' ? 'Wan 3.0 Prime' : 'Wan 3.0') : block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'MiniMax H3' }) : tr('automation.pipeline.takeDone') });
+    if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { detail: isGenerativeVideo ? tr('automation.pipeline.modelTakeDone', { model: block.generator === 'heygen-scene' ? 'HeyGen Video 1.0' : ['wan', 'wan-prime'].includes(block.generator) ? (block.generator === 'wan-prime' ? 'Wan 3.0 Prime' : 'Wan 3.0') : block.generator === 'seedance25' ? 'Seedance 2.5' : block.generator === 'omni' ? 'Gemini Omni' : 'MiniMax H3' }) : tr('automation.pipeline.takeDone') });
     renderAutomationProject();
     return true;
   } catch (err) {
     if (ownsMonitorTask) finishUiTask(activeMonitorTaskId, { error: err.message });
     toast(err.message, 'err');
-    if (block.generator === 'heygen' || ['h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(block.generator)) {
+    if (block.generator === 'heygen' || ['h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(block.generator)) {
       try {
         const snapshot = await api('/api/state');
         state.automations = snapshot.automations || state.automations;

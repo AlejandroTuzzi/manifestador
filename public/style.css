@@ -2515,3 +2515,9 @@ body.asset-player-open main { padding-bottom: 132px; }
     padding: 12px 0;
   }
 }
+#heygenSceneControls { display:flex; flex-wrap:wrap; align-items:flex-start; gap:16px; }
+#heygenSceneControls[hidden] { display:none; }
+#heygenSceneControls label { display:grid; gap:8px; color:var(--muted); }
+#heygenSceneControls input, #heygenSceneControls select { background:var(--panel-solid); color:var(--text); border:1px solid var(--border); padding:10px; font:inherit; color-scheme:dark; }
+#heygenSceneControls input:focus, #heygenSceneControls select:focus { outline:1px solid var(--pink); }
+#heygenSceneControls .hint { flex-basis:100%; line-height:1.5; }

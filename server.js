@@ -20,6 +20,7 @@ import { exportInspirationArchive, importInspirationArchive, parseLibraryManifes
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { generateHeygenScene as generateHeygenSceneRaw, heygenScenePayload, heygenSceneError } from './lib/heygen-scene.js';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFile } from 'node:child_process';
 
@@ -1071,6 +1072,7 @@ async function recordedGeneration(kind, body, fn) {
       for (const item of entries) item.generationRequestId = id;
       await updateJson('history.json', [], list => list.map(item => entries.some(e => e.id === item.id) ? { ...item, generationRequestId: id } : item));
       snapshot.status = entry.errors?.length ? 'partial' : 'succeeded';
+      if(entry.modelId === 'heygen-video-1') snapshot.request.heygenSceneOptions = entry.heygenSceneOptions;
       snapshot.outputs = entries.flatMap(item => item.outputs || []);
       await save();
       return entry;
@@ -1525,10 +1527,69 @@ async function runHeyGenVideoGeneration(req, cfg, model) {
   return entry;
 }
 
+const generateHeygenScene = options => sendWithWavReferences(options, generateHeygenSceneRaw, async()=>{});
+const heygenSceneActive = new Set();
+async function runHeygenSceneGeneration(req, cfg, model) {
+  const id = req.heygenSceneRecoveryId || req.generationRequestId || newId();
+  if (heygenSceneActive.has(id)) throw heygenSceneError('heygenScenePending',409);
+  heygenSceneActive.add(id);
+  try {
+    const prior = (await readJson('heygen-scene-tasks.json',[])).find(job=>job.id===id);
+    if (prior?.failed) throw heygenSceneError('heygenSceneFailed',502);
+    const refs = Array.isArray(req.refs) ? req.refs : [];
+    const mediaRefs = await Promise.all(refs.map(async (key,index)=>({key,path:req.mode !== 'first' && /^data:image\//.test(req.labeledRefs?.[key] || '') ? req.labeledRefs[key] : await resolveAssetKey(key),kind:req.refKinds?.[index] || (key.startsWith('video/')?'video':key.startsWith('audio/')?'audio':'image')})));
+    const prompt = String(req.prompt || '').trim();
+    const sentPrompt = [mediaRefs.some(ref=>String(ref.path).startsWith('data:')) ? LABELED_REFS_PROMPT : '',prompt,videoAudioPolicy(req.avoidMusic)].filter(Boolean).join('\n\n');
+    const input = {apiKey:cfg.keys.heygen,prompt:sentPrompt,mediaRefs,mode:req.mode || 'reference',duration:Number(req.duration || 5),resolution:req.resolution || '768p',aspectRatio:req.aspectRatio || '16:9',options:req.heygenSceneOptions || {}};
+    input.prompt = heygenScenePayload(input).prompt;
+    if (!cfg.keys.heygen) throw heygenSceneError('heygenApiKeyMissing');
+    const record = prior || {id,request:{...generationSettings('video',req).request,generationRequestId:req.generationRequestId,heygenSceneRecoveryId:id},createdAt:Date.now()};
+    await updateJson('heygen-scene-tasks.json',[],jobs=>[record,...jobs.filter(job=>job.id!==id)]);
+    const video = await generateHeygenScene({...input, taskId:prior?.taskId,idempotencyKey:id,
+      onTask:taskId=>updateJson('heygen-scene-tasks.json',[],jobs=>jobs.map(job=>job.id===id?{...job,taskId}:job)),
+      onFailed:()=>updateJson('heygen-scene-tasks.json',[],jobs=>jobs.map(job=>job.id===id?{...job,failed:true}:job))});
+    let entry = (await readJson('history.json',[])).find(item=>item.heygenSceneTaskId===video.taskId);
+    if (!entry) {
+      const key = await saveBuffer('video',`heygen-scene-${id}.mp4`,video.buffer);
+      const seconds = Number(video.usage.output_seconds) || input.duration;
+      const cost = videoPrice(await getPricing(),model.id,input.resolution)*seconds;
+      entry = {id:newId(),ts:Date.now(),type:'video',modelId:model.id,modelName:model.name,prompt,sentPrompt:input.prompt,
+        mode:input.mode,resolution:input.resolution,aspectRatio:input.aspectRatio,duration:seconds,audio:true,avoidMusic:req.avoidMusic!==false,
+        refs,refKinds:mediaRefs.map(ref=>ref.kind),outputs:[key],errors:[],cost,heygenSceneTaskId:video.taskId,
+        heygenSceneOptions:{...input.options,seed:video.seed ?? input.options.seed},generationRequestId:req.generationRequestId};
+      await updateJson('history.json',[],items=>[entry,...items].slice(0,1000));
+      await recordAssetMetadata(entry);
+      await recordCost({type:'video',modelId:model.id,label:model.name,units:seconds,unitLabel:'seconds',cost});
+    }
+    if (/^[a-z0-9]+$/i.test(req.generationRequestId || '')) {
+      const file=`generation-requests/${req.generationRequestId}.json`, snapshot=await readJson(file,null);
+      if(snapshot) {
+        await writeJson(file,{...snapshot,request:{...snapshot.request,heygenSceneOptions:entry.heygenSceneOptions},status:'succeeded',outputs:entry.outputs,error:''});
+        await updateJson('generation-requests.json',[],items=>items.map(item=>item.id===req.generationRequestId?{...item,status:'succeeded',outputs:entry.outputs,error:''}:item));
+      }
+    }
+    await updateJson('heygen-scene-tasks.json',[],jobs=>jobs.filter(job=>job.id!==id));
+    return entry;
+  } catch(error) {
+    if(error.status>=400 && error.status<500 && ![408,409,429].includes(error.status)) await updateJson('heygen-scene-tasks.json',[],jobs=>jobs.map(job=>job.id===id?{...job,failed:true}:job));
+    throw error;
+  } finally { heygenSceneActive.delete(id); }
+}
+async function recoverHeygenScenes() {
+  for(const job of await readJson('heygen-scene-tasks.json',[])) {
+    if(heygenSceneActive.size>=2)break;
+    if(job.failed || heygenSceneActive.has(job.id) || Date.now()-job.createdAt>23*60*60*1000)continue;
+    if(job.request?.modelId!=='heygen-video-1')continue;
+    runVideoGeneration(job.request).catch(error=>console.warn('HeyGen scene recovery:',error.localizationCode || error.name));
+  }
+}
+setInterval(()=>recoverHeygenScenes().catch(error=>console.warn('HeyGen recovery:',error.name)),60000).unref();
+
 async function runVideoGeneration(req) {
   const cfg = await getConfig();
   const model = getVideoModel(req.modelId);
   if (!model) throw new Error(`Modelo de video desconocido: ${req.modelId}`);
+  if (model.provider === 'heygen-scene') return runHeygenSceneGeneration(req,cfg,model);
   if (model.provider === 'heygen') return runHeyGenVideoGeneration(req, cfg, model);
   const prompt = String(req.prompt || '').trim();
   if (!prompt) throw new Error('El prompt está vacío.');
@@ -3419,7 +3480,7 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
   const music = normalizeAutomationMusic(project.config?.music, project.requirements?.music);
   const generatedMusicTracks = music.enabled && music.source === 'suno' ? 2 : 0;
   const generatedMusicCost = generatedMusicTracks * musicPrice(pricing);
-  const h3Blocks = (project.blocks || []).filter((block) => block.generator === 'h3');
+  const h3Blocks = (project.blocks || []).filter((block) => ['h3','heygen-scene'].includes(block.generator));
   let h3EstimatedSeconds = 0;
   for (const block of h3Blocks) {
     const approximate = Number(block.estimatedDuration) > 0
@@ -3438,9 +3499,10 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
       : Math.max(1, (block.items || []).reduce((total, item) => total + String(item.text || '').length, 0) / 14);
     let billedSeconds = 0;
     for (let remaining = approximate; remaining > 0.001; remaining -= Math.min(15, remaining)) {
-      billedSeconds += Math.max(block.videoProvider === 'siray' ? 5 : 4, Math.ceil(Math.min(15, remaining)));
+      billedSeconds += Math.max(block.generator === 'heygen-scene' || block.videoProvider === 'siray' ? 5 : 4, Math.ceil(Math.min(15, remaining)));
     }
     if (block.videoProvider === 'siray') return sum + billedSeconds * videoPrice(pricing, 'siray-minimax-h3-spicy', block.sirayResolution || '768p');
+    if(block.generator === 'heygen-scene') return sum + billedSeconds * videoPrice(pricing,'heygen-video-1',block.h3Resolution || '768p');
     return sum + billedSeconds * videoPrice(pricing, 'minimax-h3', block.h3Resolution === '2K' ? '2K' : '768P');
   }, 0);
   const seedance25Blocks = (project.blocks || []).filter((block) => block.generator === 'seedance25');
@@ -3613,7 +3675,7 @@ function sanitizeAutomation(src, prev = {}) {
       sourceQuote: String(b.sourceQuote || '').slice(0, 4000),
       quoteReference: String(b.quoteReference || '').slice(0, 80),
       estimatedDuration: Math.max(0, Math.min(3600, Number(b.estimatedDuration) || 0)),
-      generator: ['image', 'heygen', 'assets', 'h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(b.generator) ? b.generator : 'image',
+      generator: ['image', 'heygen', 'assets', 'h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(b.generator) ? b.generator : 'image',
       videoProvider: b.videoProvider === 'siray' && sirayAutomationModel(b.generator) ? 'siray' : 'official',
       sirayResolution: sirayAutomationModel(b.generator)?.resolutions.includes(b.sirayResolution) ? b.sirayResolution : sirayAutomationModel(b.generator)?.resolutions[0] || '',
       heygenCharacterId: /^[a-z0-9]+$/.test(String(b.heygenCharacterId || '')) ? String(b.heygenCharacterId) : '',
@@ -3621,7 +3683,7 @@ function sanitizeAutomation(src, prev = {}) {
       assetKeys: normalizeAutomationAssetKeys(b.assetKeys),
       assetMuteOriginal: b.assetMuteOriginal !== false,
       h3Mode: b.h3Mode === 'frames' ? 'frames' : 'reference',
-      h3Resolution: ['wan', 'wan-prime'].includes(b.generator) ? (['480P', '720P', '1080P'].includes(b.h3Resolution) ? b.h3Resolution : '720P') : b.h3Resolution === '2K' ? '2K' : '768P',
+      h3Resolution: b.generator === 'heygen-scene' ? (['480p','768p','1080p','2k'].includes(b.h3Resolution)?b.h3Resolution:'768p') : ['wan', 'wan-prime'].includes(b.generator) ? (['480P', '720P', '1080P'].includes(b.h3Resolution) ? b.h3Resolution : '720P') : b.h3Resolution === '2K' ? '2K' : '768P',
       h3ContextIr: b.h3ContextIr === true,
       h3UseNarrationReference: b.h3UseNarrationReference !== false,
       h3KeepGeneratedAudio: b.h3KeepGeneratedAudio === true,
@@ -6415,6 +6477,7 @@ const server = http.createServer(async (req, res) => {
 
         if (clipResults.some((item) => !item)) throw new Error('No se pudieron preparar todos los planos HeyGen.');
         const segmentVideoKeys = clipResults.map((item) => item.key);
+        if(isScene) await updateJson('heygen-scene-block-tasks.json',{},jobs=>Object.fromEntries(Object.entries(jobs).filter(([,job])=>job.projectId!==projectId||job.blockId!==block.id)));
         let videoKey = segmentVideoKeys[0];
         if (segmentVideoKeys.length === 2) {
           const videoPaths = [];
@@ -6505,23 +6568,25 @@ const server = http.createServer(async (req, res) => {
       if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
       const block = project.blocks?.find((item) => item.id === String(body.blockId || ''));
       if (!block) return send(res, 404, { error: 'Bloque no encontrado.' });
-      if (!['h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(block.generator)) return send(res, 400, { error: 'Este bloque no está configurado para video generativo.' });
+      if (!['h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(block.generator)) return send(res, 400, { error: 'Este bloque no está configurado para video generativo.' });
 
       const isWan = ['wan', 'wan-prime'].includes(block.generator);
+      const isScene = block.generator === 'heygen-scene';
       const isSeedance25 = block.generator === 'seedance25';
       const isOmni = block.generator === 'omni';
       const isSiray = block.videoProvider === 'siray';
-      const model = isSiray ? sirayAutomationModel(block.generator) : getVideoModel(isWan ? (block.generator === 'wan-prime' ? 'wan-3-prime' : 'wan-3') : isOmni ? 'gemini-omni-1-1-flash' : isSeedance25 ? 'seedance-2-5' : 'minimax-h3');
+      const model = isSiray ? sirayAutomationModel(block.generator) : getVideoModel(isScene ? 'heygen-video-1' : isWan ? (block.generator === 'wan-prime' ? 'wan-3-prime' : 'wan-3') : isOmni ? 'gemini-omni-1-1-flash' : isSeedance25 ? 'seedance-2-5' : 'minimax-h3');
       if (!model) throw sirayError('sirayParameters');
       const serviceName = model.name;
-      const serviceSlug = isWan ? block.generator : isOmni ? 'omni' : isSeedance25 ? 'seedance25' : 'h3';
+      const serviceSlug = isScene ? 'heygen-scene' : isWan ? block.generator : isOmni ? 'omni' : isSeedance25 ? 'seedance25' : 'h3';
 
       const cfg = await getConfig();
       if (isSiray && !cfg.keys.siray) throw sirayError('sirayKey');
       if (!isSiray && isSeedance25 && !cfg.keys.ark) return send(res, 400, { error: 'Falta la API key de BytePlus ModelArk en Configuración.' });
       if (isOmni && !cfg.keys.gemini) return send(res, 400, { error: 'Falta la API key de Gemini en Configuración.' });
       if (!isSiray && isWan && !cfg.keys.qwen) throw wanError('qwenKey');
-      if (!isSiray && !isWan && !isSeedance25 && !isOmni && !cfg.keys.minimax) return send(res, 400, { error: 'Falta la API key de MiniMax en Configuración.' });
+      if (!isScene && !isSiray && !isWan && !isSeedance25 && !isOmni && !cfg.keys.minimax) return send(res, 400, { error: 'Falta la API key de MiniMax en Configuración.' });
+      if(isScene && !cfg.keys.heygen) throw heygenSceneError('heygenApiKeyMissing');
       const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
       const audioKeys = (Array.isArray(body.audioKeys) ? body.audioKeys : []).map(String).filter((key) => /^audio\//.test(key));
       if (!audioKeys.length) return send(res, 400, { error: 'Falta la narración del bloque.' });
@@ -6532,7 +6597,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       const configuredMode = isOmni ? block.omniMode : isSeedance25 ? block.seedance25Mode : block.h3Mode;
-      const mode = configuredMode === 'frames' ? 'frames' : 'reference';
+      const mode = !isScene && configuredMode === 'frames' ? 'frames' : 'reference';
       const configuredKeys = normalizeAutomationH3ReferenceKeys(isOmni ? block.omniReferenceKeys : isSeedance25 ? block.seedance25ReferenceKeys : block.h3ReferenceKeys, isSiray ? model.maxRefs : isWan ? 20 : 12);
       const imageKey = String(body.imageKey || '');
       let referenceKeys;
@@ -6555,13 +6620,13 @@ const server = http.createServer(async (req, res) => {
         let start = 0;
         while (start < audioDuration - 0.001) {
           const duration = Math.min(maxChunkDuration, audioDuration - start);
-          chunks.push({ audioIndex, start, duration, requestDuration: Math.max(isSiray ? Math.min(...model.durations) : isWan ? 2 : isOmni ? 3 : 4, Math.min(maxChunkDuration, Math.ceil(duration))) });
+          chunks.push({ audioIndex, start, duration, requestDuration: Math.max(isScene ? 5 : isSiray ? Math.min(...model.durations) : isWan ? 2 : isOmni ? 3 : 4, Math.min(maxChunkDuration, Math.ceil(duration))) });
           start += duration;
         }
       }
       if (!chunks.length) return send(res, 400, { error: 'La narración no contiene audio utilizable.' });
 
-      const resolution = isSiray ? (model.resolutions.includes(block.sirayResolution) ? block.sirayResolution : model.resolutions[0]) : isWan ? (model.resolutions.includes(block.h3Resolution) ? block.h3Resolution : '720P') : isOmni
+      const resolution = isScene ? (model.resolutions.includes(block.h3Resolution)?block.h3Resolution:'768p') : isSiray ? (model.resolutions.includes(block.sirayResolution) ? block.sirayResolution : model.resolutions[0]) : isWan ? (model.resolutions.includes(block.h3Resolution) ? block.h3Resolution : '720P') : isOmni
         ? (['360p', '720p', '1080p', '4K'].includes(block.omniResolution) ? block.omniResolution : '720p')
         : isSeedance25
         ? (block.seedance25Resolution === '480p' ? '480p' : '720p')
@@ -6619,7 +6684,7 @@ const server = http.createServer(async (req, res) => {
               model: serviceName, images: limits.image, videos: limits.video, audios: limits.audio, total: limits.total
             });
           }
-          const mediaDurations = isSiray ? { video: (await Promise.all(refs.filter(ref => ref.kind === 'video').map(ref => probeMediaDuration(ffmpegExecutable, ref.path)))).reduce((sum, seconds) => sum + seconds, 0), audio: 0 } : isWan
+          const mediaDurations = isScene ? {video:0,audio:0} : isSiray ? { video: (await Promise.all(refs.filter(ref => ref.kind === 'video').map(ref => probeMediaDuration(ffmpegExecutable, ref.path)))).reduce((sum, seconds) => sum + seconds, 0), audio: 0 } : isWan
             ? await validateWanMedia(refs, { mode, duration: chunk.requestDuration, probeDuration: file => probeMediaDuration(ffmpegExecutable, file), probeDimensions: file => probeVideoDimensions(ffmpegExecutable, file) })
             : isOmni
             ? (await validateGeminiOmniMedia(refs, ffmpegExecutable, mode, false), { video: 0, audio: 0 })
@@ -6644,6 +6709,10 @@ const server = http.createServer(async (req, res) => {
           const wanPending = isWan ? (await readJson('wan-block-tasks.json', {}))[wanFingerprint] : null;
           const sirayFingerprint = isSiray ? crypto.createHash('sha256').update(JSON.stringify({ model: model.id, prompt, referenceKeys, audioKeys, chunk, mode, aspectRatio, resolution, audio: isSeedance25 ? block.seedance25KeepGeneratedAudio : block.h3KeepGeneratedAudio })).digest('hex') : '';
           const sirayPending = isSiray ? (await readJson('siray-block-tasks.json', {}))[sirayFingerprint] : null;
+          const sceneFingerprint = isScene ? crypto.createHash('sha256').update(JSON.stringify({projectId,blockId:block.id,prompt,referenceKeys,audioKeys,chunk,resolution,aspectRatio})).digest('hex') : '';
+          const scenePending = isScene ? (await readJson('heygen-scene-block-tasks.json',{}))[sceneFingerprint] : null;
+          const sceneRequestId = scenePending?.requestId || newId();
+          if(isScene && !scenePending) await updateJson('heygen-scene-block-tasks.json',{},jobs=>({...jobs,[sceneFingerprint]:{requestId:sceneRequestId,projectId,blockId:block.id}}));
           const sirayGenerated = isSiray ? await sendWithWavReferences({ apiKey: cfg.keys.siray, model,
             prompt: [prompt, videoAudioPolicy(true)].join('\n\n'), mediaRefs: refs, mode, aspectRatio, resolution,
             duration: chunk.requestDuration, audio: isSeedance25 ? block.seedance25KeepGeneratedAudio : block.h3KeepGeneratedAudio,
@@ -6651,7 +6720,7 @@ const server = http.createServer(async (req, res) => {
             onTask: taskId => updateJson('siray-block-tasks.json', {}, jobs => ({ ...jobs, [sirayFingerprint]: { taskId, projectId, blockId: block.id } })),
             onFailed: () => updateJson('siray-block-tasks.json', {}, jobs => { delete jobs[sirayFingerprint]; return jobs; })
           }, generateSiray, async () => {}) : null;
-          const generated = isSiray ? { ...sirayGenerated.outputs[0], taskId: sirayGenerated.taskId } : isWan
+          const generated = isScene ? await generateHeygenScene({apiKey:cfg.keys.heygen,prompt:[prompt,videoAudioPolicy(true)].join('\n\n'),mediaRefs:refs,mode,aspectRatio,resolution,duration:chunk.requestDuration,idempotencyKey:sceneRequestId,taskId:scenePending?.taskId,onTask:taskId=>updateJson('heygen-scene-block-tasks.json',{},jobs=>({...jobs,[sceneFingerprint]:{taskId,requestId:sceneRequestId,projectId,blockId:block.id}})),onFailed:()=>updateJson('heygen-scene-block-tasks.json',{},jobs=>{delete jobs[sceneFingerprint];return jobs;})}) : isSiray ? { ...sirayGenerated.outputs[0], taskId: sirayGenerated.taskId } : isWan
             ? await generateWanVideo({ apiKey: cfg.keys.qwen, endpoint: cfg.endpoints.qwen, apiModel: model.apiModel,
               prompt: [prompt, videoAudioPolicy(true)].join('\n\n'), mediaRefs: refs, mode, aspectRatio, resolution,
               duration: chunk.requestDuration, audio: block.h3KeepGeneratedAudio === true, taskId: wanPending?.taskId,
@@ -6685,7 +6754,7 @@ const server = http.createServer(async (req, res) => {
               + (Number(generated.contextUsage.completion_tokens) || 0) * 3.6 / 1_000_000
             : 0;
           const omniInputTokens = Number(generated.usage?.input_tokens || generated.usage?.inputTokenCount || generated.usage?.prompt_token_count) || 0;
-          const cost = isSiray ? videoPrice(pricing, model.id, resolution) * (outputSeconds + (isWan ? Math.min(5, mediaDurations.video) : isSeedance25 ? mediaDurations.video : 0)) + (block.generator === 'h3' ? Math.max(0, counts.image - 5) * 0.4 : 0) : isWan ? videoPrice(pricing, model.id, resolution) * (outputSeconds + (Number(generated.usage?.input_video_duration) || mediaDurations.video || 0)) : isOmni
+          const cost = isScene ? videoPrice(pricing,model.id,resolution)*outputSeconds : isSiray ? videoPrice(pricing, model.id, resolution) * (outputSeconds + (isWan ? Math.min(5, mediaDurations.video) : isSeedance25 ? mediaDurations.video : 0)) + (block.generator === 'h3' ? Math.max(0, counts.image - 5) * 0.4 : 0) : isWan ? videoPrice(pricing, model.id, resolution) * (outputSeconds + (Number(generated.usage?.input_video_duration) || mediaDurations.video || 0)) : isOmni
             ? videoPrice(pricing, model.id, resolution) * outputSeconds
               + omniInputTokens * (model.inputPricePerMillionTokens || 0) / 1_000_000
             : isSeedance25
@@ -6724,6 +6793,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         const segmentVideoKeys = clipResults.map((item) => item.key);
+        if(isScene) await updateJson('heygen-scene-block-tasks.json',{},jobs=>Object.fromEntries(Object.entries(jobs).filter(([,job])=>job.projectId!==projectId||job.blockId!==block.id)));
         const segmentPaths = await Promise.all(segmentVideoKeys.map((key) => resolveAssetKey(key)));
         if (isWan) await updateJson('wan-block-tasks.json', {}, jobs => Object.fromEntries(Object.entries(jobs).filter(([, job]) => job.projectId !== projectId || job.blockId !== block.id)));
         if (isSiray) await updateJson('siray-block-tasks.json', {}, jobs => Object.fromEntries(Object.entries(jobs).filter(([, job]) => job.projectId !== projectId || job.blockId !== block.id)));
@@ -7451,7 +7521,7 @@ const server = http.createServer(async (req, res) => {
         const motionOverlayKey = String(output.motionOverlayKey || '');
         const blockVideoKey = String(output.videoKey || '');
         const isHeyGen = block.generator === 'heygen' || output.generator === 'heygen';
-        const isH3 = ['h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(block.generator) || ['h3', 'seedance25', 'omni', 'wan', 'wan-prime'].includes(output.generator);
+        const isH3 = ['h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(block.generator) || ['h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(output.generator);
         const isAssetBlock = block.generator === 'assets' || output.generator === 'assets';
         const selectedAssetKeys = normalizeAutomationAssetKeys(block.assetKeys);
         const heygenSegmentKeys = (Array.isArray(output.heygenSegmentVideoKeys) ? output.heygenSegmentVideoKeys : [])
@@ -7843,9 +7913,15 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    if (p === '/api/generate/heygen-scene/status' && req.method === 'GET') {
+      const [jobs,history,cfg,metadata] = await Promise.all([readJson('heygen-scene-tasks.json',[]),readJson('history.json',[]),getConfig(),readJson('asset-metadata.json',{})]);
+      return send(res,200,{entries:filterNsfwHistory(history,cfg,metadata).filter(item=>item.modelId==='heygen-video-1').slice(0,30),
+        jobs:jobs.filter(job=>cfg.nsfwEnabled || !(job.request.refs||[]).some(key=>metadata[key]?.nsfw)).map(job=>({id:job.id,taskId:job.taskId,prompt:job.request.prompt,createdAt:job.createdAt,failed:Boolean(job.failed || Date.now()-job.createdAt>23*60*60*1000)}))});
+    }
     if (p === '/api/generate/video' && req.method === 'POST') {
       const body = await readJsonBody(req);
       delete body.wanSentPrompt;
+      delete body.heygenSceneRecoveryId;
       delete body.wanTaskId;
       delete body.wanRecoveryId;
       const recoveryId = newId();
