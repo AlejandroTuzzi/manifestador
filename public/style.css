@@ -1793,7 +1793,8 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
   gap: 10px; flex-wrap: wrap; margin-top: 14px; padding: 12px 0;
   background: var(--panel-solid); border-top: 1px solid var(--border); z-index: 2;
 }
-.picker-selection-bar .hint { margin-right: auto; }
+.picker-selection-bar .hint { margin-right: 0; }
+#pickerSelectionClear { margin-left: auto; }
 .asset-editor-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; align-items: start; }
 .asset-editor-stage, .asset-editor-tools, .dictation-panel { background: var(--panel-solid); border: 1px solid var(--border); padding: 16px; min-width: 0; }
 .asset-editor-stage canvas { display: block; max-width: 100%; height: auto; margin: auto; touch-action: none; cursor: crosshair; }

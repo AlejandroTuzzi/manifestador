@@ -8509,9 +8509,9 @@ const server = http.createServer(async (req, res) => {
       if (typeof body.retired !== 'boolean') return sendError(res,400,'characterRetirementInvalid','Invalid retirement state.');
       if (body.retired) {
         const [series,projects] = await Promise.all([readJson('series.json',[]),readJson('projects.json',[])]);
-        const associations = [...series.filter(item=>(item.characterIds||[]).includes(id)).map(item=>item.title),
-          ...projects.filter(item=>(item.characterIds||[]).includes(id)).map(item=>item.name)];
-        if(associations.length) return sendError(res,409,'characterRetirementLinked','Character is associated with a series or project.',{names:associations.join(', ')});
+        const associations = [...series.filter(item=>!item.archived && (item.characterIds||[]).includes(id)).map(item=>item.title),
+          ...projects.filter(item=>!item.archived && (item.characterIds||[]).includes(id)).map(item=>item.name)];
+        if(associations.length) return sendError(res,409,'characterRetirementLinked','Character is associated with an active series or project.',{names:associations.join(', ')});
       }
       let updated;
       await updateJson('characters.json',[],items=>items.map(item=>{

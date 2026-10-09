@@ -2751,6 +2751,7 @@ async function setPickerTab(src) {
   if (src === 'audio' && !multimedia) src = 'upload';
   if (src === 'video' && !(multimedia || loraMedia)) src = 'upload';
   state.pickerTab = src;
+  $('#pickerCharactersActive').hidden = src !== 'characters';
   $$('#pickerTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.src === src));
   const body = $('#pickerBody');
 
@@ -2933,10 +2934,21 @@ const entityVariantGroups = (e) => [
 const firstPhoto = (e) => e.photos[0] || (e.variants || []).find((v) => (v.photos || []).length)?.photos[0];
 const seriesImages = (s) => (s.assetKeys || []).filter((k) => !/^(audio|video)\//.test(k));
 
+$('#pickerCharactersActive').addEventListener('click', () => {
+  state.pickerCharactersActive = !state.pickerCharactersActive;
+  $('#pickerCharactersActive').setAttribute('aria-pressed', String(state.pickerCharactersActive));
+  $('#pickerCharactersActive').classList.toggle('accent', state.pickerCharactersActive);
+  state.pickerCharacterId = null;
+  state.pickerVariantId = null;
+  renderPickerCharacters();
+});
+
 function renderPickerCharacters() {
+  const activeIds = new Set([...state.series, ...state.workspaceProjects]
+    .filter(item => !item.archived).flatMap(item => item.characterIds || []));
   renderEntityPicker({
     idKey: 'pickerCharacterId', variantKey: 'pickerVariantId', icon: 'user',
-    items: () => state.characters, cover: firstPhoto, groups: entityVariantGroups,
+    items: () => state.characters.filter(c => !c.retired && (!state.pickerCharactersActive || activeIds.has(c.id))), cover: firstPhoto, groups: entityVariantGroups,
     label: (c) => `${c.name}${(c.variants || []).length ? ` · ${tr('picker.versions', { count: 1 + c.variants.length })}` : ''}`,
     title: (c) => c.name, photoLabel: (c, g) => `${c.name} · ${g.name}`,
     backLabel: tr('picker.characters'), empty: tr('picker.noCharacters'),

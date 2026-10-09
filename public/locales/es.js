@@ -4,7 +4,7 @@ window.ManifestadorI18n.register('es', {
 "characters.retire": "Retirar",
 "characters.restoreRetired": "Reincorporar",
 "characters.retireConfirm": "¿Querés retirar a «{name}»? Solo aparecerá en Retirados.",
-"errors.characterRetirementLinked": "No se puede retirar este personaje porque está asociado a estas series o proyectos: {names}. Desvinculalo primero.",
+"errors.characterRetirementLinked": "No se puede retirar este personaje porque está asociado a estas series o proyectos activos: {names}. Desvinculalo o finalizá esas series o proyectos primero.",
 "errors.characterRetirementInvalid": "El estado de retiro no es válido.",
 "heygenScene.hint": "HeyGen Video 1.0 · API de pago. Referencias: 9 imágenes, 3 videos y 3 audios; 12 en total. Solo lee los primeros 5 s de cada video. Audio nativo; no garantiza lipsync exacto. Coste estimado conservador sin promoción; ajustable en Usage.",
 "heygenScene.enhancement": "Mejora del prompt",
