@@ -1,4 +1,11 @@
 window.ManifestadorI18n.register('en', {
+"characters.activeFilter": "Active",
+"characters.retiredFilter": "Retired",
+"characters.retire": "Retire",
+"characters.restoreRetired": "Restore",
+"characters.retireConfirm": "Retire “{name}”? They will only appear under Retired.",
+"errors.characterRetirementLinked": "This character cannot be retired because they are associated with these series or projects: {names}. Unlink them first.",
+"errors.characterRetirementInvalid": "Invalid retirement state.",
 "heygenScene.hint": "HeyGen Video 1.0 · Paid API. References: 9 images, 3 videos and 3 audio files; 12 total. Only the first 5 s of each video are read. Native audio; exact lipsync is not guaranteed. Conservative cost estimate without promotions; editable in Usage.",
 "heygenScene.enhancement": "Prompt enhancement",
 "heygenScene.seed": "Seed (blank: random)",

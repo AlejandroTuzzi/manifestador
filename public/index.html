@@ -679,6 +679,11 @@
         <div><button id="btnImportCharacter" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> <span data-i18n="characters.import">Importar ZIP</span></button> <button id="btnNewChar" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="characters.new">Nuevo personaje</span></button></div>
       </div>
       <label class="library-search character-search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><input id="characterFilterSearch" type="search" data-i18n-placeholder="characters.searchName" data-i18n-aria-label="characters.searchName" autocomplete="off"></label>
+      <div id="characterStatusFilters" class="tabs">
+        <button type="button" class="tab active" data-character-status="all" data-i18n="common.allMasculine"></button>
+        <button type="button" class="tab" data-character-status="active" data-i18n="characters.activeFilter"></button>
+        <button type="button" class="tab" data-character-status="retired" data-i18n="characters.retiredFilter"></button>
+      </div>
       <div id="charsGrid" class="chars-grid"></div>
     </section>
 

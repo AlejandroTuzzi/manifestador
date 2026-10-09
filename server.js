@@ -8503,6 +8503,23 @@ const server = http.createServer(async (req, res) => {
     }
 
     // --- personajes y elementos: fotos, variantes, vínculos y CRUD compartidos ---
+    const retireCharacterMatch = /^\/api\/characters\/([a-z0-9]+)\/retirement$/.exec(p);
+    if (retireCharacterMatch && req.method === 'PUT') {
+      const body = await readJsonBody(req), id = retireCharacterMatch[1];
+      if (typeof body.retired !== 'boolean') return sendError(res,400,'characterRetirementInvalid','Invalid retirement state.');
+      if (body.retired) {
+        const [series,projects] = await Promise.all([readJson('series.json',[]),readJson('projects.json',[])]);
+        const associations = [...series.filter(item=>(item.characterIds||[]).includes(id)).map(item=>item.title),
+          ...projects.filter(item=>(item.characterIds||[]).includes(id)).map(item=>item.name)];
+        if(associations.length) return sendError(res,409,'characterRetirementLinked','Character is associated with a series or project.',{names:associations.join(', ')});
+      }
+      let updated;
+      await updateJson('characters.json',[],items=>items.map(item=>{
+        if(item.id!==id)return item;
+        updated={...item,retired:body.retired,retiredAt:body.retired?Date.now():null};return updated;
+      }));
+      return updated ? send(res,200,updated) : sendError(res,404,'workspaceProjectCharacterMissing','Character not found.');
+    }
     if (await serveEntityRoutes(ENTITY_META.characters, { p, req, res, url })) return;
     if (await serveEntityRoutes(ENTITY_META.elements, { p, req, res, url })) return;
 

@@ -7135,6 +7135,13 @@ $('#shotAssetsModal').addEventListener('click', (e) => { if (e.target.id === 'sh
 // ---------------------------------------------------------------------------
 
 $('#characterFilterSearch').addEventListener('input', renderCharacters);
+let characterStatusFilter = 'all';
+$('#characterStatusFilters').addEventListener('click',event=>{
+  const button=event.target.closest('[data-character-status]');if(!button)return;
+  characterStatusFilter=button.dataset.characterStatus;
+  $$('#characterStatusFilters button').forEach(node=>node.classList.toggle('active',node===button));
+  renderCharacters();
+});
 
 function renderCharacters() {
   sortEntities();
@@ -7144,7 +7151,10 @@ function renderCharacters() {
     return;
   }
   const search = normalizedAssetFilterText($('#characterFilterSearch').value);
-  const characters = state.characters.filter(c => contentIsVisible(c) && (!search || normalizedAssetFilterText(c.name).includes(search)));
+  const activeIds = new Set([...state.series,...state.workspaceProjects].filter(item=>!item.archived).flatMap(item=>item.characterIds||[]));
+  const characters = state.characters.filter(c => contentIsVisible(c)
+    && (characterStatusFilter === 'retired' ? c.retired === true : !c.retired && (characterStatusFilter !== 'active' || activeIds.has(c.id)))
+    && (!search || normalizedAssetFilterText(c.name).includes(search)));
   if (!characters.length) {
     grid.innerHTML = `<div class="empty-note">${esc(tr('characters.searchEmpty'))}</div>`;
     return;
@@ -7176,12 +7186,24 @@ function renderCharacters() {
         <button class="mini-btn" data-act="gallery">${IC('eye')} ${esc(tr('characters.viewPhotos'))}</button>
         <button class="mini-btn" data-act="assets">${IC('image')} Assets${linkedCount ? ` (${linkedCount})` : ''}</button>
         <button class="mini-btn" data-act="project">${IC('folder')} ${esc(tr('common.associateProject'))}</button>
+        <button class="mini-btn" data-act="retirement">${IC(c.retired ? 'refresh' : 'folder')} ${esc(tr(c.retired ? 'characters.restoreRetired' : 'characters.retire'))}</button>
         <a class="mini-btn" href="/api/characters/${c.id}/export" download>${IC('download')} ${esc(tr('characters.export'))}</a>
         <button class="mini-btn danger" data-act="del" title="${esc(tr('common.delete'))}">${IC('trash')}</button>
       </div>`;
     card.querySelectorAll('[data-act]').forEach((b) => {
       b.addEventListener('click', async () => {
         const act = b.dataset.act;
+        if(act === 'retirement') {
+          if(!c.retired && !confirm(tr('characters.retireConfirm',{name:c.name})))return;
+          b.disabled=true;
+          try {
+            const updated=await api(`/api/characters/${c.id}/retirement`,{method:'PUT',body:{retired:!c.retired}});
+            state.characters=state.characters.map(item=>item.id===c.id?updated:item);
+            if(updated.retired && state.pinnedId===c.id)setPinned('');
+            renderCharacters();
+          } catch(error){toast(error.message,'err');} finally {b.disabled=false;}
+          return;
+        }
         if (act === 'pin') setPinned(c.id === state.pinnedId ? '' : c.id);
         if (act === 'use') {
           setMode('image');
