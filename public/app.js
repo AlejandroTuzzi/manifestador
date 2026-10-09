@@ -693,6 +693,17 @@ document.addEventListener('keydown', event => {
   });
 });
 
+function sortedResolutions(values) {
+  const rank = value => {
+    const text = String(value).trim();
+    const match = /^(\d+(?:\.\d+)?)\s*([pk])?$/i.exec(text);
+    if (match) return Number(match[1]) * (match[2]?.toLowerCase() === 'k' ? 1024 : 1);
+    const dimensions = /^(\d+)\s*[x×]\s*(\d+)$/i.exec(text);
+    return dimensions ? Math.min(Number(dimensions[1]), Number(dimensions[2])) : Infinity;
+  };
+  return [...values].sort((a, b) => rank(a) - rank(b));
+}
+
 function chipRow(container, values, active, onPick, labelFn = (v) => v) {
   const models = container.id === 'modelChips' ? state.models : container.id === 'videoModelChips' ? state.videoModels : container.id === 'audioModelChips' ? state.audioModels : container.id === 'musicModelChips' ? values.map(id => ({ id, name: id.replaceAll('_', '.'), provider: 'suno' })) : null;
   if (models) {
@@ -797,7 +808,7 @@ function renderImageControls() {
     (id) => state.models.find((x) => x.id === id).name);
   chipRow($('#arChips'), m.aspectRatios, state.aspectRatio,
     (v) => { state.aspectRatio = v; renderImageControls(); });
-  chipRow($('#resChips'), m.resolutions, state.resolution,
+  chipRow($('#resChips'), sortedResolutions(m.resolutions), state.resolution,
     (v) => { state.resolution = v; renderImageControls(); });
   state.batch = Math.min(state.batch, m.maxBatch || 4);
   chipRow($('#batchChips'), Array.from({ length: m.maxBatch || 4 }, (_, index) => index + 1), state.batch,
@@ -927,7 +938,7 @@ function renderVideoControls() {
   $('#videoRefsLabel').textContent = multimediaRefs ? tr('create.controls.references') : tr('create.controls.images');
   chipRow($('#videoArChips'), scene && ['1080p','2k'].includes(state.video.resolution) ? ['16:9','9:16'] : m.aspectRatios, state.video.aspectRatio,
     (v) => { state.video.aspectRatio = v; renderVideoControls(); });
-  chipRow($('#videoResChips'), m.resolutions, state.video.resolution,
+  chipRow($('#videoResChips'), sortedResolutions(m.resolutions), state.video.resolution,
     (v) => { state.video.resolution = v; renderVideoControls(); });
   chipRow($('#videoDurChips'), m.durations, state.video.duration,
     (v) => {
@@ -9196,7 +9207,7 @@ function renderAutomationProject() {
       <div class="control-row"><label>${esc(tr('automation.config.aspectRatio'))}</label>
         <select class="select" id="autoAr">${(model?.aspectRatios || []).map((a) => `<option${a === pr.config.aspectRatio ? ' selected' : ''}>${a}</option>`).join('')}</select>
         <label>${esc(tr('automation.config.resolution'))}</label>
-        <select class="select" id="autoRes">${(model?.resolutions || []).map((r) => `<option${r === pr.config.resolution ? ' selected' : ''}>${r}</option>`).join('')}</select></div>
+        <select class="select" id="autoRes">${sortedResolutions(model?.resolutions || []).map((r) => `<option${r === pr.config.resolution ? ' selected' : ''}>${r}</option>`).join('')}</select></div>
       <div class="control-row"><label>${esc(tr('automation.config.narratorVoice'))}</label>
         <select class="select" id="autoVoice"><option value="">— ${esc(tr('automation.config.chooseVoice'))} —</option>${(state.voices || []).map((v) => `<option value="${v.id}"${v.id === pr.config.narratorVoiceId ? ' selected' : ''}>${esc(v.name)}</option>`).join('')}</select>
         <label>${esc(tr('automation.config.elevenLabsModel'))}</label>
@@ -10140,7 +10151,7 @@ function renderAutomationProject() {
       blockElement.querySelector('[data-block-siray-resolution-label]').hidden = !sirayModel;
       if (sirayModel) {
         const selected = sirayModel.resolutions.includes(sirayRes.value) ? sirayRes.value : sirayRes.dataset.saved;
-        sirayRes.innerHTML = sirayModel.resolutions.map(value => `<option value="${value}"${value === selected ? ' selected' : ''}>${value}</option>`).join('');
+        sirayRes.innerHTML = sortedResolutions(sirayModel.resolutions).map(value => `<option value="${value}"${value === selected ? ' selected' : ''}>${value}</option>`).join('');
       }
       seedance25Settings.querySelector('[data-block-seedance25-resolution]').closest('label').hidden = Boolean(sirayModel);
       h3Settings.querySelector('[data-block-h3-resolution]').closest('label').hidden = Boolean(sirayModel);
@@ -10165,7 +10176,7 @@ function renderAutomationProject() {
       const savedBlock = pr.blocks.find(item => item.id === blockElement.dataset.block);
       const choices = scene ? ['768p','480p','1080p','2k'] : wan ? ['480P', '720P', '1080P'] : ['768P', '2K'];
       const current = choices.includes(resolutionSelect.value) ? resolutionSelect.value : choices.includes(savedBlock?.h3Resolution) ? savedBlock.h3Resolution : scene ? '768p' : wan ? '720P' : '768P';
-      resolutionSelect.innerHTML = choices.map(value => `<option value="${value}"${value === current ? ' selected' : ''}>${value}</option>`).join('');
+      resolutionSelect.innerHTML = sortedResolutions(choices).map(value => `<option value="${value}"${value === current ? ' selected' : ''}>${value}</option>`).join('');
       h3Settings.querySelector('[data-block-h3-resolution]').previousElementSibling.textContent = tr('automation.config.resolution');
       seedance25Settings.hidden = select.value !== 'seedance25';
       omniSettings.hidden = select.value !== 'omni';
