@@ -3630,13 +3630,23 @@ function addStyleReference(key) {
   return true;
 }
 
+function insertSavedPrompt(text, position = promptBox.selectionStart ?? promptBox.value.length) {
+  const content = String(text || '').trim();
+  if (!content) return;
+  const before = promptBox.value.slice(0, position);
+  const after = promptBox.value.slice(position);
+  const insertion = `${before && !/\s$/.test(before) ? ' ' : ''}${content}${after && !/^\s/.test(after) ? ' ' : ''}`;
+  promptBox.setRangeText(insertion, position, position, 'end');
+  promptBox.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function usePrompt(pr) {
   if (isLoraPrompt(pr)) return;
+  const position = promptBox.selectionStart ?? promptBox.value.length;
   const mode = isStylePrompt(pr) ? 'image' : (['audio', 'video'].includes(pr.mode) ? pr.mode : 'image');
   setMode(mode);
   if (isStylePrompt(pr) && !addStyleReference(pr.styleImageKey)) return;
-  promptBox.value = pr.text;
-  renderHighlight();
+  insertSavedPrompt(pr.text, position);
   goToCreate();
   promptBox.focus();
 }
