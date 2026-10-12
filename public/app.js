@@ -5476,6 +5476,7 @@ function associationIsElement() {
 
 const NEW_ASSOCIATION_VARIANT = '__new__';
 let assetAssociationBusy = false;
+let associateCharactersActive = false;
 
 function toggleAssociationNewVariant() {
   const creating = $('#associateVariant').value === NEW_ASSOCIATION_VARIANT;
@@ -5510,7 +5511,11 @@ function renderAssociationOwners(ownerId = '', variantId = '') {
   sortEntities();
   const isElement = associationIsElement();
   $('#associateOwnerLabelText').textContent = isElement ? tr('assets.associate.element') : tr('assets.filters.character');
-  const list = isElement ? state.elements : state.characters;
+  $('#associateCharactersActive').hidden = isElement;
+  const activeIds = new Set([...state.series, ...state.workspaceProjects]
+    .filter(item => !item.archived).flatMap(item => item.characterIds || []));
+  const list = isElement ? state.elements : state.characters.filter(character =>
+    !associateCharactersActive || (!character.retired && activeIds.has(character.id)));
   const select = $('#associateCharacter');
   select.innerHTML = list.map((c) => `<option value="${c.id}">${esc(c.name)}${isElement ? ` (${ELEMENT_KIND_LABEL[c.kind] || ''})` : ''}</option>`).join('');
   if (ownerId && list.some((c) => c.id === ownerId)) select.value = ownerId;
@@ -5528,6 +5533,14 @@ function renderAssociationVariants(selected = '') {
 }
 
 $('#associateTargetType').addEventListener('change', () => { resetAssociationNewVariant(); renderAssociationOwners(); });
+$('#associateCharactersActive').addEventListener('click', () => {
+  const ownerId = $('#associateCharacter').value;
+  associateCharactersActive = !associateCharactersActive;
+  $('#associateCharactersActive').setAttribute('aria-pressed', String(associateCharactersActive));
+  $('#associateCharactersActive').classList.toggle('accent', associateCharactersActive);
+  resetAssociationNewVariant();
+  renderAssociationOwners(ownerId);
+});
 $('#associateCharacter').addEventListener('change', () => { resetAssociationNewVariant(); renderAssociationVariants(); });
 $('#associateVariant').addEventListener('change', toggleAssociationNewVariant);
 $('#associateAssetForm').addEventListener('submit', async (e) => {
