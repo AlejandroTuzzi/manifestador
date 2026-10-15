@@ -1,4 +1,6 @@
 window.ManifestadorI18n.register('es', {
+"ideas.view": "Ver",
+"ideas.back": "Volver a ideas",
 "ideas.title": "Ideas",
 "ideas.new": "Nueva idea",
 "ideas.categories": "Categorías",

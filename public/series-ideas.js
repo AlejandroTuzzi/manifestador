@@ -6,6 +6,11 @@
   tab.setAttribute('aria-selected', 'false'); tab.dataset.i18n = 'ideas.title';
   $('#seriesInspirationTab').after(tab);
   let data = { entries: [], categories: [] }, filter = '', draft = null, categoryId = '', busy = false;
+  let viewingId = '';
+  function ideaPreview(text) {
+    const characters = Array.from(String(text || ''));
+    return characters.slice(0, 500).join('') + (characters.length > 500 ? '…' : '');
+  }
   const t = key => esc(tr(key));
   const button = (action, key) => `<button type="button" class="mini-btn" data-idea-action="${action}">${t(key)}</button>`;
   const field = (name, key, value = '', multiline = false) => `<label><span>${t(key)}</span>${multiline
@@ -24,7 +29,18 @@
   }
   function render() {
     panel.innerHTML = `<div class="inspiration-tabs">${button('new', 'ideas.new')}${button('categories', 'ideas.categories')}</div>`;
-    if (draft) {
+    const viewing = data.entries.find(item => item.id === viewingId);
+    if (viewing && !draft) {
+      panel.insertAdjacentHTML('beforeend', `<article class="idea-editor idea-reader">
+        <div class="inspiration-tabs">${button('back', 'ideas.back')}${button(`edit:${viewing.id}`, 'common.edit')}</div>
+        <h2>${esc(viewing.name)} ${nsfwBadgeHtml(viewing)}</h2>
+        <p class="hint">${esc(data.categories.find(c => c.id === viewing.categoryId)?.name || '')}</p>
+        <div class="idea-story">${esc(viewing.development)}</div>
+        <h3>${t('ideas.characters')}</h3>
+        ${viewing.characters.map(character => `<section class="idea-character"><h3>${esc(character.name)}</h3>${characterFields.filter(key => key !== 'name' && character[key]).map(key => `<h4>${t(`ideas.${key}`)}</h4><p class="idea-story">${esc(character[key])}</p>`).join('')}</section>`).join('')}
+        <div>${button('back', 'ideas.back')}</div>
+      </article>`);
+    } else if (draft) {
       panel.insertAdjacentHTML('beforeend', `<form id="ideaForm" class="inspiration-form idea-editor">
         ${field('name', 'common.name', draft.name)}
         <label><span>${t('ideas.category')}</span><select name="categoryId" class="select">${options(draft.categoryId)}</select></label>
@@ -37,7 +53,7 @@
       </form>`);
       panel.querySelector('#ideaForm').onsubmit = async event => { event.preventDefault(); capture(); await save('entries', draft.id, draft); };
     } else {
-      panel.insertAdjacentHTML('beforeend', `<select id="ideaFilter" class="select" aria-label="${t('ideas.category')}">${options(filter, true)}</select><div class="chars-grid">${data.entries.filter(item => !filter || item.categoryId === filter).map(item => `<article class="char-card idea-card"><h3>${esc(item.name)} ${nsfwBadgeHtml(item)}</h3><p class="hint">${esc(data.categories.find(c => c.id === item.categoryId)?.name || '')}</p><p>${esc(item.development)}</p><p>${esc(item.characters.map(c => c.name).filter(Boolean).join(', '))}</p><div class="inspiration-tabs">${button(`edit:${item.id}`, 'common.edit')}${button(`delete:${item.id}`, 'common.delete')}</div></article>`).join('') || `<p class="hint">${t('ideas.empty')}</p>`}</div>`);
+      panel.insertAdjacentHTML('beforeend', `<select id="ideaFilter" class="select" aria-label="${t('ideas.category')}">${options(filter, true)}</select><div class="ideas-list">${data.entries.filter(item => !filter || item.categoryId === filter).map(item => `<article class="char-card idea-card"><h3>${esc(item.name)} ${nsfwBadgeHtml(item)}</h3><p class="hint">${esc(data.categories.find(c => c.id === item.categoryId)?.name || '')}</p><p>${esc(ideaPreview(item.development))}</p><p>${esc(item.characters.map(c => c.name).filter(Boolean).join(', '))}</p><div class="inspiration-tabs">${button(`view:${item.id}`, 'ideas.view')}${button(`edit:${item.id}`, 'common.edit')}${button(`delete:${item.id}`, 'common.delete')}</div></article>`).join('') || `<p class="hint">${t('ideas.empty')}</p>`}</div>`);
       panel.querySelector('#ideaFilter').onchange = event => { filter = event.target.value; render(); };
     }
     panel.insertAdjacentHTML('beforeend', `<section id="ideaCategories" class="idea-editor" hidden><h3>${t('ideas.categories')}</h3><form id="ideaCategoryForm" class="inspiration-form">${field('name', 'common.name')}<div class="inspiration-tabs"><button type="submit" class="mini-btn">${t('common.save')}</button>${button('new-category', 'ideas.newCategory')}</div></form>${data.categories.map(c => `<div class="inspiration-tabs"><span>${esc(c.name)}</span>${button(`category-edit:${c.id}`, 'common.edit')}${button(`category-delete:${c.id}`, 'common.delete')}</div>`).join('')}</section>`);
@@ -62,9 +78,14 @@
     const action = event.target.closest('[data-idea-action]')?.dataset.ideaAction;
     if (!action || busy) return;
     const [kind, id] = action.split(':');
+    if (kind === 'view' || kind === 'back') {
+      viewingId = kind === 'view' ? id : '';
+      render(); panel.scrollIntoView({ block: 'start' });
+    }
     if (kind === 'categories') { capture(); panel.querySelector('#ideaCategories').hidden = !panel.querySelector('#ideaCategories').hidden; }
     if (kind === 'new' || kind === 'edit') {
       if (draft && !confirm(tr('ideas.discard'))) return;
+      viewingId = '';
       draft = kind === 'edit' ? structuredClone(data.entries.find(item => item.id === id)) : { name: '', categoryId: '', development: '', characters: [] };
       render();
     }
