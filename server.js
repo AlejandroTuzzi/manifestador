@@ -12,6 +12,7 @@ import { videoAudioPolicy } from './lib/video-audio-policy.js';
 import { generateWanVideo as generateWanVideoRaw, validateWanMedia, wanError } from './lib/wan-video.js';
 import { protectedAssetKeys, protectedAssetAssociations } from './lib/asset-deletion-guard.js';
 import { changeInspiration, visibleInspiration, inspirationError } from './lib/series-inspiration.js';
+import { changeIdeas } from './lib/series-ideas.js';
 import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
 import { workflowRepositoryItem, workflowRepositorySummary } from './lib/workflow-repository.js';
 import { assertClosedAssociations } from './lib/closed-associations.js';
@@ -5643,6 +5644,28 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ...visibleInspiration(collection, cfg.nsfwEnabled, await readJson('asset-metadata.json', {})), ...stats });
     }
 
+    if (p === '/api/series-ideas' && req.method === 'GET') {
+      const data = await readJson('series-ideas.json', { entries: [], categories: [] });
+      const cfg = await getConfig();
+      return send(res, 200, { ...data, entries: data.entries.filter(item => cfg.nsfwEnabled || !item.nsfw) });
+    }
+    const ideaMatch = p.match(/^\/api\/series-ideas\/(entries|categories)(?:\/([a-z0-9]+))?$/);
+    if (ideaMatch && ['POST', 'PUT', 'DELETE'].includes(req.method)) {
+      const [, kind, existingId] = ideaMatch;
+      const body = req.method === 'DELETE' ? {} : await readJsonBody(req);
+      const cfg = await getConfig();
+      try {
+        if ((req.method === 'POST') === Boolean(existingId)) throw new Error('Invalid route');
+        const data = await updateJson('series-ideas.json', { entries: [], categories: [] }, current => {
+          if (!cfg.nsfwEnabled && (body.nsfw || current.entries.some(item => item.id === existingId && item.nsfw))) throw new Error('Hidden entry');
+          return changeIdeas(current, kind, req.method, existingId || newId(), body);
+        });
+        return send(res, 200, { ...data, entries: data.entries.filter(item => cfg.nsfwEnabled || !item.nsfw) });
+      } catch (error) {
+        if (!['Invalid route', 'Hidden entry', 'Invalid collection', 'Not found', 'Name required', 'Duplicate category'].includes(error.message)) throw error;
+        return sendError(res, 400, 'ideasInvalid', 'Check the idea name and category.');
+      }
+    }
     if (p === '/api/series-inspiration' && req.method === 'GET') {
       const [collection, cfg, metadata] = await Promise.all([readJson('series-inspiration.json', {}), getConfig(), readJson('asset-metadata.json', {})]);
       return send(res, 200, visibleInspiration(collection, cfg.nsfwEnabled, metadata));

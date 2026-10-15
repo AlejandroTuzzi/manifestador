@@ -1530,6 +1530,12 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .inspiration-form { max-width: 640px; }
 .inspiration-producer-form { display: flex; flex-direction: column; gap: 14px; }
 .inspiration-form label, .inspiration-filters label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.idea-editor { padding: 20px; margin: 16px 0; background: var(--panel-solid); border: 1px solid var(--border); display: grid; gap: 16px; }
+.idea-editor input:not([type=checkbox]), .idea-editor textarea { width: 100%; box-sizing: border-box; background: var(--bg2); color: var(--text); border: 1px solid var(--border); padding: 10px 12px; font: inherit; }
+.idea-editor input:focus, .idea-editor textarea:focus { outline: 1px solid var(--violet); }
+.idea-character { min-width: 0; padding: 16px; border: 1px solid var(--border); }
+.idea-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; margin-bottom: 12px; }
+.idea-card p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .inspiration-form input, .inspiration-form textarea, .inspiration-form select, .inspiration-filters input, .inspiration-filters select { width: 100%; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 11px 12px; font: inherit; color-scheme: dark; }
 .inspiration-form input::file-selector-button { background: var(--panel-solid); color: var(--text); border: 1px solid var(--border); padding: 8px; margin-right: 10px; cursor: pointer; }
 .inspiration-form input::file-selector-button:hover { border-color: var(--pink-strong); }
