@@ -75,6 +75,7 @@
       <button class="nav-btn" data-view="prompts"><svg class="ic"><use href="#i-book"/></svg><span data-i18n="nav.prompts">Prompts</span></button>
       <button class="nav-btn" data-view="vocabulary"><svg class="ic"><use href="#i-tag"/></svg><span data-i18n="nav.vocabulary">Vocabulario</span></button>
       <button class="nav-btn" data-view="snippets"><svg class="ic"><use href="#i-code"/></svg><span data-i18n="nav.snippets">Snippets</span></button>
+      <button class="nav-btn" data-view="llms"><svg class="ic"><use href="#i-edit"/></svg><span data-i18n="llms.title"></span></button>
       <button class="nav-btn" data-view="budgets"><svg class="ic"><use href="#i-dollar"/></svg><span data-i18n="budget.title"></span></button>
       <button class="nav-btn" data-view="costs"><svg class="ic"><use href="#i-dollar"/></svg><span data-i18n="nav.costs">Consumo e ingresos</span></button>
       <button class="nav-btn" data-view="config"><svg class="ic"><use href="#i-gear"/></svg><span data-i18n="nav.config">Configuración</span></button>
@@ -542,6 +543,7 @@
       <div id="vocabularyLibrary" class="vocabulary-library"></div>
     </section>
 
+    <section id="view-llms" class="view"><h2 data-i18n="llms.title"></h2><p class="hint" data-i18n="llms.privacy"></p><div id="llmWorkspace"></div></section>
     <section id="view-snippets" class="view">
       <div class="tabs" id="snippetRepositoryTabs"><button type="button" class="tab active" data-repository-tab="code" data-i18n="snippets.title"></button><button type="button" class="tab" data-repository-tab="workflows" data-i18n="workflowRepo.title"></button></div>
       <div id="snippetCodePanel">
@@ -894,6 +896,9 @@
           <label>WaveSpeed (FireRed)
           <span class="key-row"><input type="password" name="key_wavespeed" placeholder="Key de WaveSpeed" data-i18n-placeholder="config.placeholders.wavespeedKey"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle aria-label="Mostrar clave" title="Mostrar clave" data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="wavespeed" data-i18n="config.test">Probar</button></span>
             <span class="test-result" data-result="wavespeed"></span>
+          </label>
+          <label>Venice
+            <span class="key-row"><input type="password" name="key_venice" autocomplete="off"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn" id="veniceTest" data-i18n="config.test"></button></span>
           </label>
           <label>Siray
             <span class="key-row"><input type="password" name="key_siray" autocomplete="off"><button type="button" class="icon-btn key-visibility-btn" data-password-toggle data-i18n-aria-label="config.showKey" data-i18n-title="config.showKey"><svg class="ic"><use href="#i-eye"/></svg></button><button type="button" class="tool-btn test-btn" data-service="siray" data-i18n="config.test">Probar</button></span>
@@ -1605,6 +1610,7 @@
 <script type="module" src="camera.js"></script>
 <script src="series-inspiration.js"></script>
 <script src="series-ideas.js"></script>
+<script src="llm-chats.js"></script>
 <script type="module" src="budgets.js"></script>
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
 <script type="module" src="poser.js"></script>

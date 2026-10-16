@@ -13,6 +13,7 @@ import { generateWanVideo as generateWanVideoRaw, validateWanMedia, wanError } f
 import { protectedAssetKeys, protectedAssetAssociations } from './lib/asset-deletion-guard.js';
 import { changeInspiration, visibleInspiration, inspirationError } from './lib/series-inspiration.js';
 import { changeIdeas } from './lib/series-ideas.js';
+import { createChatRoutes } from './lib/llm-chats.js';
 import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
 import { workflowRepositoryItem, workflowRepositorySummary } from './lib/workflow-repository.js';
 import { assertClosedAssociations } from './lib/closed-associations.js';
@@ -109,7 +110,7 @@ const DEFAULT_CONFIG = {
   photoshopPath: '',
   ffmpegPath: '',
   convertAudioReferencesToWav: true,
-  keys: { gemini: '', googleTranslate: '', ark: '', wavespeed: '', qwen: '', minimax: '', elevenlabs: '', openai: '', suno: '', heygen: '', siray: '' },
+  keys: { gemini: '', googleTranslate: '', ark: '', wavespeed: '', qwen: '', minimax: '', elevenlabs: '', openai: '', suno: '', heygen: '', siray: '', venice: '' },
   openaiModel: 'gpt-5-mini',
   audioModelId: AUDIO_MODEL.id,
   heygenAuthMode: 'key',
@@ -339,6 +340,7 @@ function isLoopbackRequest(req) {
 }
 
 // Registro de consumo: una línea por operación cobrada.
+const handleLlmChats = createChatRoutes({ readJson, updateJson, getConfig, readJsonBody, send, sendError, newId, recordCost });
 async function recordCost(entry) {
   let recorded;
   await updateJson('ledger.json', [], (ledger) => {
@@ -2318,6 +2320,8 @@ function badRequest(message) {
 // Compatibilidad para validaciones anteriores a sendError(): send() adjunta un
 // código estable sin perder el mensaje original que sigue sirviendo de fallback.
 const SERVER_ERROR_CODE_BY_MESSAGE = new Map([
+  ['Invalid route', 'ideasInvalid'],
+  ['Hidden entry', 'ideasInvalid'],
   ['No se pudo leer la imagen para etiquetarla', 'labelImageReadFailed'],
   ['No se pudo leer la imagen para sobreimprimir el texto', 'overlayImageReadFailed'],
   ['Categoría de prompts no encontrada.', 'promptCategoryMissing'],
@@ -5644,6 +5648,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ...visibleInspiration(collection, cfg.nsfwEnabled, await readJson('asset-metadata.json', {})), ...stats });
     }
 
+    if (await handleLlmChats(p, req, res)) return;
     if (p === '/api/series-ideas' && req.method === 'GET') {
       const data = await readJson('series-ideas.json', { entries: [], categories: [] });
       const cfg = await getConfig();

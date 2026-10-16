@@ -1540,6 +1540,25 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .ideas-list .idea-card { width: 100%; min-width: 0; box-sizing: border-box; }
 .idea-reader { width: 100%; min-width: 0; box-sizing: border-box; }
 .idea-story { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.75; }
+.llm-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; margin-top: 20px; }
+.llm-sidebar, .llm-main { min-width: 0; padding: 18px; background: var(--panel-solid); border: 1px solid var(--border); }
+.llm-chat-list { display: grid; gap: 8px; margin-top: 16px; max-height: 70vh; overflow-y: auto; }
+.llm-chat-list button { white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.llm-chat-list .active { border-color: var(--pink-strong); color: var(--text); }
+.llm-settings { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.llm-settings label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; min-width: 0; }
+.llm-settings input:not([type=checkbox]), #llmComposer textarea { background: var(--bg2); color: var(--text); border: 1px solid var(--border); padding: 12px; font: inherit; box-sizing: border-box; }
+.llm-settings input:focus, #llmComposer textarea:focus { outline: 1px solid var(--violet); }
+.llm-messages { display: grid; gap: 16px; margin: 20px 0; max-height: 65vh; overflow-y: auto; }
+.llm-message { padding: 18px; border: 1px solid var(--border); min-width: 0; }
+.llm-user { border-left: 3px solid var(--pink-strong); }
+.llm-assistant { border-left: 3px solid var(--violet); }
+.llm-message header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.llm-message-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+.llm-message small { display: block; margin-top: 12px; color: var(--muted); }
+#llmComposer { display: grid; justify-items: end; gap: 12px; }
+#llmComposer textarea { width: 100%; resize: vertical; }
+@media (max-width: 850px) { .llm-layout { grid-template-columns: minmax(0, 1fr); } .llm-chat-list { max-height: 220px; } }
 .idea-reader h2, .idea-card h3 { overflow-wrap: anywhere; }
 .inspiration-form input, .inspiration-form textarea, .inspiration-form select, .inspiration-filters input, .inspiration-filters select { width: 100%; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 11px 12px; font: inherit; color-scheme: dark; }
 .inspiration-form input::file-selector-button { background: var(--panel-solid); color: var(--text); border: 1px solid var(--border); padding: 8px; margin-right: 10px; cursor: pointer; }

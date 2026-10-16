@@ -12103,6 +12103,7 @@ function fillConfigForm() {
   f.key_wavespeed.value = c.keys.wavespeed || '';
   f.key_qwen.value = c.keys.qwen || '';
   f.key_siray.value = c.keys.siray || '';
+  f.key_venice.value = c.keys.venice || '';
   f.key_elevenlabs.value = c.keys.elevenlabs || '';
   f.key_openai.value = c.keys.openai || '';
   f.key_minimax.value = c.keys.minimax || '';
@@ -12260,6 +12261,7 @@ $('#configForm').addEventListener('submit', async (e) => {
           wavespeed: f.key_wavespeed.value.trim(),
           qwen: f.key_qwen.value.trim(),
           siray: f.key_siray.value.trim(),
+          venice: f.key_venice.value.trim(),
           elevenlabs: f.key_elevenlabs.value.trim(),
           openai: f.key_openai.value.trim(),
           minimax: f.key_minimax.value.trim(),
