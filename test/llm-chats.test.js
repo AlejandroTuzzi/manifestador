@@ -59,6 +59,21 @@ test('context uses current metadata, separates reference data and excludes hidde
   assert.equal((await buildChatContext(cfg, chat, read)).messages.length, 1);
   assert.equal((await buildChatContext({}, {}, read)).messages.length, 0);
 });
+test('archive and restore preserve messages and deletion removes archived chats', async () => {
+  const h = harness();
+  h.files['llm-chats.json'] = [{ id: 'chat', title: 'Saved', modelId: LLM_MODELS[0].id, messages: [{role:'user',content:'Keep me'}] }];
+  assert.equal((await h.call('/api/llm-chats/chat/archive', 'PUT', {archived:true})).status, 200);
+  assert.equal(h.files['llm-chats.json'][0].archived, true);
+  assert.equal((await h.call('/api/llm-chats/chat/messages','POST',{content:'No'})).code, 'llmArchived');
+  assert.equal(h.requests.length, 0);
+  assert.equal((await h.call('/api/llm-chats/chat/archive', 'PUT', {archived:'yes'})).status, 400);
+  await h.call('/api/llm-chats/chat/archive', 'PUT', {archived:false});
+  assert.equal(h.files['llm-chats.json'][0].archived, false);
+  assert.equal(h.files['llm-chats.json'][0].messages[0].content, 'Keep me');
+  await h.call('/api/llm-chats/chat/archive', 'PUT', {archived:true});
+  await h.call('/api/llm-chats/chat', 'DELETE');
+  assert.equal(h.files['llm-chats.json'].length, 0);
+});
 test('invalid models and closed associations rejected; hidden chats excluded', async () => {
   const h = harness();
   assert.equal((await h.call('/api/llm-chats','POST',{title:'Test',modelId:'unknown'})).status,400);

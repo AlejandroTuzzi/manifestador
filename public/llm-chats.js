@@ -2,6 +2,7 @@
   const root = $('#llmWorkspace');
   let chats = [], models = [], selected = '', busy = false, timer;
   const drafts = new Map();
+  let archiveView = false;
   const t = key => esc(tr(key));
   const active = () => chats.find(c => c.id === selected);
   function associationOptions(chat) {
@@ -17,19 +18,19 @@
   function render() {
     const chat = active();
     const pending = chat?.status === 'pending';
-    root.innerHTML = `<div class="llm-layout"><aside class="llm-sidebar"><button class="generate-btn small" type="button" data-chat-new>${t('llms.new')}</button><div class="llm-chat-list">${chats.map(c => `<button type="button" class="tool-btn${selected === c.id ? ' active' : ''}" data-chat-id="${esc(c.id)}">${esc(c.title)} ${c.status === 'pending' ? '…' : ''}</button>`).join('')}</div></aside><div class="llm-main">
+    root.innerHTML = `<div class="llm-layout"><aside class="llm-sidebar"><button class="generate-btn small" type="button" data-chat-new>${t('llms.new')}</button><div class="llm-list-tabs"><button type="button" class="mini-btn${!archiveView ? ' accent' : ''}" data-chat-list="current" aria-pressed="${!archiveView}">${t('llms.current')}</button><button type="button" class="mini-btn${archiveView ? ' accent' : ''}" data-chat-list="archive" aria-pressed="${archiveView}">${t('llms.archived')}</button></div><div class="llm-chat-list">${chats.filter(c => Boolean(c.archived) === archiveView).map(c => `<button type="button" class="tool-btn${selected === c.id ? ' active' : ''}" data-chat-id="${esc(c.id)}">${esc(c.title)} ${c.status === 'pending' ? '…' : ''}</button>`).join('')}</div></aside><div class="llm-main">
       <form id="llmSettings" class="llm-settings">
       <label>${t('common.name')}<input name="title" required maxlength="200" value="${esc(chat?.title || tr('llms.new'))}"></label>
       <label>${t('llms.model')}<select name="modelId" class="select">${models.map(m => `<option value="${esc(m.id)}"${m.id === chat?.modelId ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
       <label>${t('llms.association')}<select name="association" class="select">${associationOptions(chat)}</select></label>
       <label class="check-row"><input name="nsfw" type="checkbox"${chat?.nsfw ? ' checked' : ''}${state.config?.nsfwEnabled ? '' : ' disabled'}>${t('common.nsfwContent')}</label>
       <button type="submit" class="mini-btn"${pending ? ' disabled' : ''}>${t(chat ? 'common.save' : 'llms.create')}</button>
-      ${chat ? `<button type="button" class="mini-btn danger" data-chat-delete${pending ? ' disabled' : ''}>${t('common.delete')}</button>` : ''}</form>
+      ${chat ? `<button type="button" class="mini-btn" data-chat-archive${pending ? ' disabled' : ''}>${t(chat.archived ? 'llms.restore' : 'llms.archive')}</button><button type="button" class="mini-btn danger" data-chat-delete${pending ? ' disabled' : ''}>${t('common.delete')}</button>` : ''}</form>
       <p class="hint" id="llmRates"></p>
       ${chat ? `<button type="button" class="mini-btn" data-chat-context>${t('llms.viewContext')}</button><div id="llmContext" class="llm-message" hidden></div>` : ''}
       <div class="llm-messages" role="log" aria-label="${t('llms.messages')}">${chat?.messages.map(m => `<article class="llm-message llm-${m.role}"><header><strong>${t(m.role === 'user' ? 'llms.you' : 'llms.assistant')}</strong><button type="button" class="mini-btn" data-message-copy="${esc(m.id)}">${t('llms.copy')}</button></header><div class="llm-message-text">${esc(m.content)}</div>${m.role === 'assistant' ? `<small>${esc(models.find(model => model.id === m.modelId)?.name || m.modelId)} · ≈ US$ ${Number(m.cost || 0).toFixed(6)}</small>` : ''}</article>`).join('') || `<p class="hint">${t('llms.empty')}</p>`}</div>
       ${pending ? `<p role="status">${t('llms.generating')}</p>` : ['error', 'interrupted'].includes(chat?.status) ? `<p role="alert">${t('llms.failed')}</p>` : ''}
-      ${chat ? `<form id="llmComposer"><textarea name="content" rows="5" maxlength="40000" required aria-label="${t('llms.message')}" placeholder="${t('llms.message')}">${esc(drafts.get(selected) || '')}</textarea><button type="submit" class="generate-btn small"${pending ? ' disabled' : ''}>${t('llms.send')}</button></form>` : ''}
+      ${chat?.archived ? `<p class="hint">${t('llms.archivedHint')}</p>` : chat ? `<form id="llmComposer"><textarea name="content" rows="5" maxlength="40000" required aria-label="${t('llms.message')}" placeholder="${t('llms.message')}">${esc(drafts.get(selected) || '')}</textarea><button type="submit" class="generate-btn small"${pending ? ' disabled' : ''}>${t('llms.send')}</button></form>` : ''}
     </div></div>`;
     const settings = $('#llmSettings');
     const rates = () => {
@@ -77,7 +78,13 @@
   }
   root.onclick = async event => {
     const button = event.target.closest('button'); if (!button || busy) return;
-    if (button.hasAttribute('data-chat-new')) { selected = ''; render(); }
+    if (button.hasAttribute('data-chat-new')) { selected = ''; archiveView = false; render(); }
+    if (button.dataset.chatList) { archiveView = button.dataset.chatList === 'archive'; selected = ''; render(); }
+    if (button.hasAttribute('data-chat-archive')) await action(async () => {
+      const archived = !active().archived;
+      await api(`/api/llm-chats/${selected}/archive`, { method: 'PUT', body: { archived } });
+      archiveView = archived; await load();
+    });
     if (button.dataset.chatId) { selected = button.dataset.chatId; render(); }
     if (button.hasAttribute('data-chat-context')) {
       const box = $('#llmContext'), chatId = selected;

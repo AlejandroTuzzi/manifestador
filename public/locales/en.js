@@ -1,4 +1,10 @@
 window.ManifestadorI18n.register('en', {
+"llms.current": "Chats",
+"llms.archived": "Archived",
+"llms.archive": "Archive",
+"llms.restore": "Restore",
+"llms.archivedHint": "Archived chat. Restore it to continue the conversation.",
+"errors.llmArchived": "Restore this archived chat before sending messages.",
 "llms.globalContext": "LLMs · Global context",
 "llms.contextHint": "General instructions for all chats. Sent with each message along with the linked series or project name and description. Counts as input tokens.",
 "llms.viewContext": "View context",

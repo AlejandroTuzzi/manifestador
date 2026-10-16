@@ -1545,7 +1545,12 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .llm-chat-list { display: grid; gap: 8px; margin-top: 16px; max-height: 70vh; overflow-y: auto; }
 .llm-chat-list button { white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .llm-chat-list .active { border-color: var(--pink-strong); color: var(--text); }
-.llm-settings { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.llm-settings { display: flex; flex-wrap: wrap; align-items: end; gap: 18px 16px; margin-bottom: 20px; }
+.llm-list-tabs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+#llmRates { margin: 18px 0 16px; line-height: 1.65; }
+#llmContext { margin-top: 16px; }
+.llm-settings label.check-row { flex-direction: row; align-items: center; gap: 8px; padding: 8px 0; }
+.llm-main > .hint { line-height: 1.65; }
 .llm-settings label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; min-width: 0; }
 .llm-settings input:not([type=checkbox]), #llmComposer textarea { background: var(--bg2); color: var(--text); border: 1px solid var(--border); padding: 12px; font: inherit; box-sizing: border-box; }
 .llm-settings input:focus, #llmComposer textarea:focus { outline: 1px solid var(--violet); }
