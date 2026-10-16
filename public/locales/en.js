@@ -1,4 +1,11 @@
 window.ManifestadorI18n.register('en', {
+"llms.globalContext": "LLMs · Global context",
+"llms.contextHint": "General instructions for all chats. Sent with each message along with the linked series or project name and description. Counts as input tokens.",
+"llms.viewContext": "View context",
+"llms.contextPreviewHint": "Additional context for the next message, based on saved settings and association. Conversation history follows. No files are attached.",
+"llms.contextSystem": "System instructions",
+"llms.contextReference": "Reference data",
+"llms.noContext": "No global context or visible linked series or project.",
 "llms.title": "LLMs",
 "llms.privacy": "Chats are saved on this computer. Sending a message transmits the conversation history to Venice. Linking a chat does not send project or series files.",
 "llms.new": "New chat",

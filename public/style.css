@@ -1555,6 +1555,8 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .llm-assistant { border-left: 3px solid var(--violet); }
 .llm-message header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .llm-message-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+#configForm textarea[name="llmGlobalContext"] { width: 100%; min-height: 160px; resize: vertical; box-sizing: border-box; background: var(--panel-solid); color: var(--text); border: 1px solid var(--border); padding: 12px; font: inherit; }
+#configForm textarea[name="llmGlobalContext"]:focus { outline: 1px solid var(--violet); }
 .llm-message small { display: block; margin-top: 12px; color: var(--muted); }
 #llmComposer { display: grid; justify-items: end; gap: 12px; }
 #llmComposer textarea { width: 100%; resize: vertical; }

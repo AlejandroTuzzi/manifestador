@@ -1,4 +1,11 @@
 window.ManifestadorI18n.register('es', {
+"llms.globalContext": "LLMs · Contexto global",
+"llms.contextHint": "Instrucciones generales para todos los chats. Se envían en cada mensaje junto al nombre y descripción de la serie o proyecto asociado. Cuenta como tokens de entrada.",
+"llms.viewContext": "Ver contexto",
+"llms.contextPreviewHint": "Contexto adicional del próximo envío, según la configuración y asociación guardadas. El historial se añade después. No se adjuntan archivos.",
+"llms.contextSystem": "Instrucciones del sistema",
+"llms.contextReference": "Datos de referencia",
+"llms.noContext": "No hay contexto global ni una serie o proyecto visible asociado.",
 "llms.title": "LLMs",
 "llms.privacy": "Chats guardados en este equipo. Al enviar un mensaje, el historial se transmite a Venice. Asociar un chat no envía los archivos del proyecto o serie.",
 "llms.new": "Nuevo chat",

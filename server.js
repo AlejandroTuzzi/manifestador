@@ -112,6 +112,7 @@ const DEFAULT_CONFIG = {
   convertAudioReferencesToWav: true,
   keys: { gemini: '', googleTranslate: '', ark: '', wavespeed: '', qwen: '', minimax: '', elevenlabs: '', openai: '', suno: '', heygen: '', siray: '', venice: '' },
   openaiModel: 'gpt-5-mini',
+  llmGlobalContext: '',
   audioModelId: AUDIO_MODEL.id,
   heygenAuthMode: 'key',
   paths: {
@@ -5301,6 +5302,7 @@ const server = http.createServer(async (req, res) => {
         seedanceMiniModelId: body.seedanceMiniModelId ?? cfg.seedanceMiniModelId,
         sunoModelId: body.sunoModelId ?? cfg.sunoModelId,
         openaiModel: body.openaiModel ?? cfg.openaiModel,
+        llmGlobalContext: String(body.llmGlobalContext ?? cfg.llmGlobalContext ?? '').slice(0, 20000),
         audioModelId: getAudioModel(body.audioModelId ?? cfg.audioModelId).id,
         poserPrompt: body.poserPrompt !== undefined ? String(body.poserPrompt) : cfg.poserPrompt,
         photoshopPath: body.photoshopPath !== undefined ? String(body.photoshopPath).trim() : cfg.photoshopPath,

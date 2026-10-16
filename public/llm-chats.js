@@ -26,6 +26,7 @@
       <button type="submit" class="mini-btn"${pending ? ' disabled' : ''}>${t(chat ? 'common.save' : 'llms.create')}</button>
       ${chat ? `<button type="button" class="mini-btn danger" data-chat-delete${pending ? ' disabled' : ''}>${t('common.delete')}</button>` : ''}</form>
       <p class="hint" id="llmRates"></p>
+      ${chat ? `<button type="button" class="mini-btn" data-chat-context>${t('llms.viewContext')}</button><div id="llmContext" class="llm-message" hidden></div>` : ''}
       <div class="llm-messages" role="log" aria-label="${t('llms.messages')}">${chat?.messages.map(m => `<article class="llm-message llm-${m.role}"><header><strong>${t(m.role === 'user' ? 'llms.you' : 'llms.assistant')}</strong><button type="button" class="mini-btn" data-message-copy="${esc(m.id)}">${t('llms.copy')}</button></header><div class="llm-message-text">${esc(m.content)}</div>${m.role === 'assistant' ? `<small>${esc(models.find(model => model.id === m.modelId)?.name || m.modelId)} · ≈ US$ ${Number(m.cost || 0).toFixed(6)}</small>` : ''}</article>`).join('') || `<p class="hint">${t('llms.empty')}</p>`}</div>
       ${pending ? `<p role="status">${t('llms.generating')}</p>` : ['error', 'interrupted'].includes(chat?.status) ? `<p role="alert">${t('llms.failed')}</p>` : ''}
       ${chat ? `<form id="llmComposer"><textarea name="content" rows="5" maxlength="40000" required aria-label="${t('llms.message')}" placeholder="${t('llms.message')}">${esc(drafts.get(selected) || '')}</textarea><button type="submit" class="generate-btn small"${pending ? ' disabled' : ''}>${t('llms.send')}</button></form>` : ''}
@@ -78,6 +79,20 @@
     const button = event.target.closest('button'); if (!button || busy) return;
     if (button.hasAttribute('data-chat-new')) { selected = ''; render(); }
     if (button.dataset.chatId) { selected = button.dataset.chatId; render(); }
+    if (button.hasAttribute('data-chat-context')) {
+      const box = $('#llmContext'), chatId = selected;
+      if (!box.hidden) { box.hidden = true; return; }
+      button.disabled = true;
+      try {
+        const context = await api(`/api/llm-chats/${chatId}/context`, { task: false });
+        if (selected !== chatId || !box.isConnected) return;
+        box.innerHTML = `<p class="hint">${t('llms.contextPreviewHint')}</p>` + (context.messages.length
+          ? context.messages.map(message => `<p><strong>${t(message.role === 'system' ? 'llms.contextSystem' : 'llms.contextReference')}</strong></p><div class="llm-message-text">${esc(message.content)}</div>`).join('')
+          : `<p>${t('llms.noContext')}</p>`);
+        box.hidden = false;
+      } catch (error) { toast(error.message, 'err'); }
+      finally { button.disabled = false; }
+    }
     if (button.hasAttribute('data-chat-delete') && confirm(tr('llms.deleteConfirm'))) await action(async () => { await api(`/api/llm-chats/${selected}`, { method: 'DELETE' }); selected = ''; await load(); });
     if (button.dataset.messageCopy) {
       try { await navigator.clipboard.writeText(active().messages.find(m => m.id === button.dataset.messageCopy).content); }

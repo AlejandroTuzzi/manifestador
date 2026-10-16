@@ -12110,6 +12110,7 @@ function fillConfigForm() {
   f.key_suno.value = c.keys.suno || '';
   f.key_heygen.value = c.keys.heygen || '';
   f.openaiModel.value = c.openaiModel || 'gpt-5-mini';
+  f.llmGlobalContext.value = c.llmGlobalContext || '';
   f.path_generated.value = c.paths.generated || '';
   f.path_uploads.value = c.paths.uploads || '';
   f.path_audio.value = c.paths.audio || '';
@@ -12269,6 +12270,7 @@ $('#configForm').addEventListener('submit', async (e) => {
           heygen: f.key_heygen.value.trim()
         },
         openaiModel: f.openaiModel.value.trim() || 'gpt-5-mini',
+        llmGlobalContext: f.llmGlobalContext.value,
         paths: {
           generated: f.path_generated.value.trim(),
           uploads: f.path_uploads.value.trim(),
