@@ -6,6 +6,34 @@ import vm from 'node:vm';
 const read = (file) => fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
 const source = read('public/app.js');
 
+test('chat consumer reuses picker without modifying generation references or limits', async () => {
+  const {context,state,added,node} = setup({limit:1});
+  state.refs.push({key:'generated/keep.png'});
+  let selected;
+  state.externalPicker = {kind:'image',limit:2,onSelect:async refs=>{selected=refs;}};
+  assert.equal(context.pickerAllowsMultiple(),true);
+  context.selectPickerReference('generated/keep.png','image');
+  context.selectPickerReference('characters/hero/photo.png','image');
+  assert.equal(context.selectPickerReference('uploads/extra.png','image'),false);
+  assert.equal(context.selectPickerReference('audio/test.wav','audio'),false);
+  await context.confirmPickerSelection();
+  assert.equal(selected.length,2);
+  assert.equal(added.length,0);
+  assert.equal(state.refs.length,1);
+  assert.equal(node('#pickerModal').hidden,true);
+  assert.equal(state.externalPicker,null);
+});
+
+test('document picker retains selection when attachment import fails', async () => {
+  const {context,state,node} = setup();
+  state.externalPicker={kind:'document',limit:4,onSelect:async()=>{throw new Error('test');}};
+  context.selectPickerReference('document1','document','Notes.pdf');
+  await context.confirmPickerSelection();
+  assert.equal(state.pickerSelection.size,1);
+  assert.equal(state.externalPicker.saving,false);
+  assert.equal(node('#pickerModal').hidden,false);
+});
+
 function setup({ limit = 12, multimedia = true, mediaLimits = { image: 9, video: 3, audio: 3 } } = {}) {
   const nodes = new Map();
   const element = () => ({ hidden: false, dataset: {}, attrs: {}, listeners: {},

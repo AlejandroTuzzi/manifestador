@@ -2595,3 +2595,6 @@ body.asset-player-open main { padding-bottom: 132px; }
 .document-card { padding:20px; background:var(--panel-solid); border:1px solid var(--border); overflow-wrap:anywhere; }
 .document-card .hint { margin:12px 0 18px; }
 #mediaAssetsPanel[hidden], #documentsAssetsPanel[hidden] { display:none; }
+.document-picker-icon { display:grid; place-items:center; min-height:110px; color:var(--pink); background:var(--bg2); }
+.document-picker-icon .ic { width:36px; height:36px; }
+.pick-document .p-label { white-space:normal; overflow-wrap:anywhere; padding:10px; }

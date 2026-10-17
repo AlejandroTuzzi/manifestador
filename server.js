@@ -342,7 +342,7 @@ function isLoopbackRequest(req) {
 }
 
 // Registro de consumo: una línea por operación cobrada.
-const llmFiles = createLlmFiles({ dataDir: DATA_DIR, readJson, updateJson, getConfig, readJsonBody, send, sendError, newId });
+const llmFiles = createLlmFiles({ dataDir: DATA_DIR, readJson, updateJson, getConfig, readJsonBody, send, sendError, newId, resolveAssetKey });
 const handleLlmChats = createChatRoutes({ readJson, updateJson, getConfig, readJsonBody, send, sendError, newId, recordCost, attachments: llmFiles });
 async function recordCost(entry) {
   let recorded;

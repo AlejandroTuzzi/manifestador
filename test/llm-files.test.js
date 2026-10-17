@@ -11,6 +11,28 @@ test('file validation rejects unsupported formats, oversized files and forged im
   assert.throws(()=>validateChatFile(upload('bad.png','hello')),/llmFileInvalid/);
   assert.throws(()=>validateChatFile(upload('big.txt','x'.repeat(10*1024*1024+1))),/llmFileInvalid/);
 });
+test('asset imports use the resolver, preserve snapshots and reject hidden or invalid sources', async t => {
+  const dataDir=await fs.mkdtemp(path.join(os.tmpdir(),'manifestador-import-'));
+  t.after(()=>fs.rm(dataDir,{recursive:true,force:true}));
+  const source=path.join(dataDir,'image.png');
+  await fs.writeFile(source,Buffer.from('89504e470d0a1a0a00000000','hex'));
+  const records={}; let id=0;
+  const service=createLlmFiles({dataDir,readJson:async(k,d)=>records[k]||d,
+    updateJson:async(k,d,fn)=>records[k]=fn(records[k]||d),getConfig:async()=>({nsfwEnabled:false}),
+    resolveAssetKey:async key=>{if(key!=='generated/image.png')throw new Error('invalid');return source;},
+    readJsonBody:async req=>req.body,newId:()=>`asset${++id}`,
+    send:(res,status,data)=>Object.assign(res,{status,data}),sendError:(res,status,code)=>Object.assign(res,{status,code})});
+  const call=async key=>{const res={};await service.route('/api/chat-files',{method:'POST',body:{assetKey:key}},res);return res;};
+  const saved=await call('generated/image.png');
+  assert.equal(saved.status,200);
+  assert.equal(saved.data.sourceKey,'generated/image.png');
+  assert.equal((await call('../secret.png')).status,400);
+  records['asset-metadata.json']={'generated/image.png':{nsfw:true}};
+  assert.equal((await call('generated/image.png')).status,400);
+  await fs.unlink(source);
+  const messages=await service.messages([{role:'user',content:'Look',attachments:[saved.data]}],{vision:true},{});
+  assert.match(messages[0].content[1].image_url.url,/^data:image\/png;base64,/);
+});
 test('documents persist, are sent as file blocks in history and respect visibility/capabilities', async t => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(),'manifestador-files-'));
   t.after(()=>fs.rm(dataDir,{recursive:true,force:true}));

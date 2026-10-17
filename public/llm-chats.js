@@ -60,18 +60,23 @@
       $('#llmAttach').onchange = async event => {
         const kind = event.target.value; event.target.value = '';
         if (!kind || busy || pending) return;
-        const input = document.createElement('input'); input.type = 'file'; input.multiple = true;
-        input.accept = kind === 'image' ? '.png,.jpg,.jpeg,.webp' : window.ManifestadorFiles.documentAccept;
-        input.onchange = () => action(async () => {
-          const current = fileDrafts.get(chat.id) || [];
-          if (current.length + input.files.length > 4) throw new Error(tr('errors.llmFileLimit'));
-          for (const file of input.files) {
-            const uploaded = await window.ManifestadorFiles.upload(file, chat.nsfw);
-            current.push(uploaded); fileDrafts.set(chat.id, current);
+        const remaining = 4 - (fileDrafts.get(chat.id) || []).length;
+        if (!remaining) { toast(tr('errors.llmFileLimit'), 'err'); return; }
+        openPicker(null, {kind, limit:remaining, nsfw:chat.nsfw, onSelect:async refs => {
+          const current = [...(fileDrafts.get(chat.id) || [])];
+          const documents = kind === 'document' ? (await api('/api/chat-files', {task:false})).files : [];
+          const additions = [];
+          for (const ref of refs) {
+            if (current.some(f => f.id === ref.key || f.sourceKey === ref.key)) continue;
+            const file = kind === 'document' ? documents.find(f => f.id === ref.key && f.kind === 'document')
+              : await api('/api/chat-files', {method:'POST',body:{assetKey:ref.key,nsfw:chat.nsfw},task:false});
+            if (!file) throw new Error(tr('errors.llmFileInvalid'));
+            additions.push(file);
           }
+          if (current.length + additions.length > 4) throw new Error(tr('errors.llmFileLimit'));
+          fileDrafts.set(chat.id, [...current,...additions]);
           render();
-        });
-        input.click();
+        }});
       };
       composer.elements.content.oninput = () => drafts.set(chat.id, composer.elements.content.value);
       composer.elements.content.onkeydown = event => {

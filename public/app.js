@@ -2527,7 +2527,7 @@ function renderPromptsPanel() {
 // replaceIndex null = agregar una referencia nueva; un índice = reemplazar esa
 // referencia in-place (conserva posición, cita y etiqueta)
 function isVideoMultimediaPicker() {
-  return state.mode === 'video'
+  return !state.externalPicker && state.mode === 'video'
     && videoModeAllowsMultimedia()
     && state.replaceRefIndex == null
     && !state.promptStyleImagePick
@@ -2536,10 +2536,11 @@ function isVideoMultimediaPicker() {
 }
 
 function isPromptLoraMediaPicker() {
-  return Boolean(state.promptStyleImagePick && promptEditorIsLora());
+  return !state.externalPicker && Boolean(state.promptStyleImagePick && promptEditorIsLora());
 }
 
-function openPicker(replaceIndex = null) {
+function openPicker(replaceIndex = null, consumer = null) {
+  state.externalPicker = consumer;
   $('#pickerSearch').value = '';
   state.replaceRefIndex = replaceIndex;
   state.pickerSelection = new Map();
@@ -2547,6 +2548,12 @@ function openPicker(replaceIndex = null) {
   const multimedia = isVideoMultimediaPicker();
   const loraMedia = isPromptLoraMediaPicker();
   const multimediaAudio = multimedia && (currentVideoModel()?.mediaLimits?.audio || 0) > 0;
+  $$('#pickerTabs .tab').forEach(tab => {
+    tab.hidden = consumer?.kind === 'document' && !['upload', 'documents'].includes(tab.dataset.src);
+    if (tab.dataset.src === 'documents') tab.hidden = consumer?.kind !== 'document';
+  });
+  if (consumer) state.pickerTab = consumer.kind === 'document' ? 'documents' : 'uploads';
+  else if (state.pickerTab === 'documents') state.pickerTab = 'upload';
   $('#pickerTitle').textContent = replaceIndex != null
     ? tr('picker.replaceImage', {}, 'Reemplazar imagen de referencia')
     : loraMedia
@@ -2560,16 +2567,23 @@ function openPicker(replaceIndex = null) {
   if (!multimediaAudio && state.pickerTab === 'audio') state.pickerTab = 'upload';
   if (loraMedia && state.pickerTab === 'audio') state.pickerTab = 'upload';
   $('#pickerModal').hidden = false;
+  if (consumer) $('#pickerTitle').textContent = tr(consumer.kind === 'document' ? 'assets.documents' : 'picker.referenceImage');
   syncPickerSelection();
   setPickerTab(state.pickerTab || 'upload');
 }
 
 function pickerAllowsMultiple() {
+  if (state.externalPicker) return true;
   return state.replaceRefIndex == null && !state.comfyPickerSlot
     && !state.promptStyleImagePick && !state.assetEditorImagePick && !state.overlayBgPick && activeRefLimit() > 1;
 }
 
 function pickerSelectionError(key, kind) {
+  if (state.externalPicker) {
+    if (kind !== state.externalPicker.kind) return tr('errors.llmFileUnsupported');
+    if (state.pickerSelection.size >= state.externalPicker.limit) return tr('errors.llmFileLimit');
+    return '';
+  }
   const refs = [...state.refs, ...state.pickerSelection.values()];
   if (refs.some((ref) => ref.key === key)) return tr('picker.duplicateReference');
   if (kind !== 'image' && !isVideoMultimediaPicker()) return tr('create.refs.onlyImages');
@@ -2584,6 +2598,7 @@ function pickerSelectionError(key, kind) {
 }
 
 function selectPickerReference(key, kind = 'image', name = '') {
+  if (state.externalPicker?.saving) return false;
   if (!state.pickerMulti) {
     const result = pickRef(key, kind);
     if (result !== false) $('#pickerModal').hidden = true;
@@ -2607,7 +2622,7 @@ function syncPickerSelection() {
   $('#pickerSelectionClear').disabled = !selected.size;
   const order = new Map([...selected.keys()].map((key, index) => [key, index + 1]));
   $$('#pickerBody .pick[data-key]').forEach((card) => {
-    const added = state.pickerMulti && state.refs.some((ref) => ref.key === card.dataset.key);
+    const added = !state.externalPicker && state.pickerMulti && state.refs.some((ref) => ref.key === card.dataset.key);
     const checked = selected.has(card.dataset.key);
     card.classList.toggle('is-selected', checked);
     card.classList.toggle('is-added', added);
@@ -2634,7 +2649,7 @@ function renderPickerSelectionPreviews() {
       card = document.createElement('div');
       card.className = 'picker-selected-item';
       card.dataset.selectionKey = key;
-      const preview = ref.kind === 'audio'
+      const preview = ref.kind === 'document' ? IC('folder') : ref.kind === 'audio'
         ? `<button type="button" class="ref-audio-play" data-ref-audio-key="${esc(key)}">${IC('play', 'ic ic-lg')}</button>`
         : ref.kind === 'video' ? `<video src="${fileUrl(key)}" preload="metadata" muted playsinline></video>`
           : `<img src="${fileUrl(key)}" loading="lazy" alt="">`;
@@ -2673,7 +2688,24 @@ function bindPickerReferenceCards() {
   bindPickerAudioButtons();
 }
 
-function confirmPickerSelection() {
+async function confirmPickerSelection() {
+  if (state.externalPicker) {
+    const consumer = state.externalPicker;
+    if (consumer.saving) return;
+    consumer.saving = true;
+    $('#pickerSelectionAdd').disabled = true;
+    try {
+      await consumer.onSelect([...state.pickerSelection.values()]);
+      if (state.externalPicker === consumer) {
+        state.externalPicker = null;
+        state.pickerSelection.clear();
+        state.pickerMulti = false;
+        $('#pickerModal').hidden = true;
+      }
+    } catch (error) { toast(error.message, 'err'); }
+    finally { consumer.saving = false; if (state.externalPicker === consumer) syncPickerSelection(); }
+    return;
+  }
   for (const [key, ref] of state.pickerSelection) {
     if (pickRef(key, ref.kind) !== false) state.pickerSelection.delete(key);
   }
@@ -2750,6 +2782,7 @@ function replaceRef(i, key) {
 }
 
 $('#pickerClose').addEventListener('click', () => { stopPickerAudioPreview(); state.assetEditorImagePick = false; state.pickerSelection = new Map(); state.pickerMulti = false; $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.overlayBgPick = false; state.promptStyleImagePick = false; state.promptLoraMediaTarget = null; state.comfyPickerSlot = null; });
+$('#pickerClose').addEventListener('click', () => { state.externalPicker = null; state.pickerRequest = (state.pickerRequest || 0) + 1; });
 $$('#pickerTabs .tab').forEach((t) => {
   t.addEventListener('click', () => setPickerTab(t.dataset.src));
 });
@@ -2768,6 +2801,17 @@ async function setPickerTab(src) {
   $$('#pickerTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.src === src));
   const body = $('#pickerBody');
 
+  if (src === 'documents' && state.externalPicker?.kind === 'document') {
+    try {
+      const {files} = await api('/api/chat-files', {task:false});
+      if (state.pickerRequest !== request || $('#pickerModal').hidden) return;
+      const documents = files.filter(file => file.kind === 'document');
+      body.innerHTML = documents.length ? `<div class="picker-grid">${documents.map(file => `<div class="pick pick-document" data-key="${esc(file.id)}" data-kind="document"><span class="document-picker-icon">${IC('folder')}</span><div class="p-label">${esc(file.name)}</div></div>`).join('')}</div>` : `<p class="empty-note">${esc(tr('documents.empty'))}</p>`;
+      bindPickerReferenceCards();
+    } catch (error) { if (state.pickerRequest === request) body.textContent = error.message; }
+    return;
+  }
+
   if (src === 'upload') {
     const input = $('#fileInput');
     input.multiple = state.pickerMulti;
@@ -2779,6 +2823,28 @@ async function setPickerTab(src) {
       : loraMedia ? esc(tr('picker.dropLora'))
       : esc(tr('picker.dropImages'))}<br>${esc(tr('picker.clickFiles'))}</div>`;
     const dz = $('#dropZone');
+    if (state.externalPicker?.kind === 'document') {
+      input.accept = window.ManifestadorFiles.documentAccept;
+      dz.textContent = tr('documents.upload') + ' · ' + tr('picker.clickFiles');
+      const consumer = state.externalPicker, selection = state.pickerSelection;
+      const uploadDocuments = async files => {
+        for (const file of files) {
+          if (state.externalPicker !== consumer || state.pickerSelection !== selection) return;
+          const error = pickerSelectionError(null, 'document');
+          if (error) { toast(error, 'err'); break; }
+          try {
+            const saved = await window.ManifestadorFiles.upload(file, consumer.nsfw);
+            if (state.externalPicker !== consumer || state.pickerSelection !== selection) return;
+            selectPickerReference(saved.id, 'document', saved.name);
+          } catch (error) { toast(error.message, 'err'); }
+        }
+      };
+      dz.addEventListener('click', () => { input.onchange = async e => { await uploadDocuments([...e.target.files]); input.value = ''; }; input.click(); });
+      dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+      dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+      dz.addEventListener('drop', async e => {e.preventDefault();dz.classList.remove('over');await uploadDocuments([...e.dataTransfer.files]);});
+      return;
+    }
     dz.addEventListener('click', () => {
       input.onchange = async (e) => { await uploadFiles([...e.target.files], true); e.target.value = ''; };
       input.click();
