@@ -39,6 +39,8 @@ function goToCreate() {
 
 function setMode(mode) {
   state.mode = mode;
+  $('#btnQuickHistory').hidden = !['image', 'video', 'audio'].includes(mode);
+  window.closeQuickHistory?.();
   $('#referenceTagsControl').hidden = mode !== 'image' && mode !== 'video';
   $('#referenceTagsEnabled').checked = state.referenceTagsEnabled === true;
   $('#btnDistinctive').hidden = mode !== 'image' && mode !== 'video';

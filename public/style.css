@@ -1560,6 +1560,17 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .llm-assistant { border-left: 3px solid var(--violet); }
 .llm-message header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .llm-message-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+.quick-history-menu, .quick-history-preview { position: fixed; inset: auto; margin: 0; padding: 14px; box-sizing: border-box; background: var(--panel-solid); color: var(--text); border: 1px solid var(--border); box-shadow: 0 12px 36px #0009; overflow: auto; }
+.quick-history-menu { width: min(370px, calc(100vw - 16px)); max-height: min(450px, calc(100vh - 16px)); }
+.quick-history-menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; width: 100%; margin-bottom: 8px; white-space: normal; text-align: left; overflow-wrap: anywhere; padding: 12px; }
+.quick-history-menu button:focus-visible { outline: 2px solid var(--violet); }
+.quick-history-menu small { color: var(--muted); }
+.quick-history-preview { width: min(520px, calc(100vw - 16px)); max-height: min(350px, 45vh); }
+.quick-history-prompt { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; margin: 12px 0; }
+.quick-history-refs { display: flex; flex-wrap: wrap; gap: 10px; }
+.quick-history-refs > div { width: 75px; min-width: 0; }
+.quick-history-refs img, .quick-history-refs > div > span { width: 75px; height: 65px; object-fit: contain; background: var(--bg2); display: flex; align-items: center; justify-content: center; }
+.quick-history-refs small { display: block; overflow-wrap: anywhere; color: var(--muted); margin-top: 5px; }
 #configForm textarea[name="llmGlobalContext"] { width: 100%; min-height: 160px; resize: vertical; box-sizing: border-box; background: var(--panel-solid); color: var(--text); border: 1px solid var(--border); padding: 12px; font: inherit; }
 #configForm textarea[name="llmGlobalContext"]:focus { outline: 1px solid var(--violet); }
 .llm-message small { display: block; margin-top: 12px; color: var(--muted); }

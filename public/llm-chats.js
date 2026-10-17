@@ -49,6 +49,12 @@
     const composer = $('#llmComposer');
     if (composer) {
       composer.elements.content.oninput = () => drafts.set(chat.id, composer.elements.content.value);
+      composer.elements.content.onkeydown = event => {
+        if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+        event.preventDefault();
+        if (event.repeat || busy || pending || !composer.elements.content.value.trim()) return;
+        composer.requestSubmit();
+      };
       composer.onsubmit = async event => {
         event.preventDefault(); if (busy || pending) return;
         const content = composer.elements.content.value.trim(); if (!content) return;

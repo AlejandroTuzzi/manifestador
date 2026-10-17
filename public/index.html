@@ -155,6 +155,7 @@
             <button id="btnCamera" type="button" class="tool-btn" aria-haspopup="dialog" aria-controls="cameraDialog"><svg class="ic"><use href="#i-camera"/></svg><span data-i18n="camera.title">Cámara</span></button>
             <button id="btnShotList" class="tool-btn" data-i18n-title="create.shotsTitle" title="Insertar una lista de tomas con sus tiempos" hidden><svg class="ic"><use href="#i-clapper"/></svg><span data-i18n="create.shots">Tomas</span></button>
           </div>
+          <button id="btnQuickHistory" type="button" class="tool-btn" aria-expanded="false" aria-controls="quickHistoryMenu" data-i18n="quickHistory.title"></button>
           <div class="gen-side">
             <span id="costEstimate" class="cost-estimate" data-i18n-title="create.estimatedCost" title="Costo estimado de esta generación"></span>
             <button id="btnGenerate" class="generate-btn"><svg class="ic"><use href="#i-spark"/></svg><span data-i18n="create.generate.image">Manifestar</span></button>
@@ -1612,6 +1613,7 @@
 <script src="series-inspiration.js"></script>
 <script src="series-ideas.js"></script>
 <script src="llm-chats.js"></script>
+<script src="quick-history.js"></script>
 <script type="module" src="budgets.js"></script>
 <script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
 <script type="module" src="poser.js"></script>

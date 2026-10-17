@@ -1,4 +1,7 @@
 window.ManifestadorI18n.register('es', {
+"quickHistory.title": "History",
+"quickHistory.loading": "Cargando las últimas configuraciones…",
+"quickHistory.empty": "Todavía no hay configuraciones guardadas para este tipo de generación.",
 "llms.current": "Chats",
 "llms.archived": "Archivados",
 "llms.archive": "Archivar",
