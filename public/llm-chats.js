@@ -2,6 +2,8 @@
   const root = $('#llmWorkspace');
   let chats = [], models = [], selected = '', busy = false, timer;
   const drafts = new Map();
+  const fileDrafts = new Map();
+  const fileLinks = files => `<div class="llm-attachments">${(files || []).map(f => `<a class="mini-btn" href="/api/chat-files/${encodeURIComponent(f.id)}" download>${esc(f.name)}</a>`).join('')}</div>`;
   let archiveView = false;
   const t = key => esc(tr(key));
   const active = () => chats.find(c => c.id === selected);
@@ -47,20 +49,45 @@
       });
     };
     const composer = $('#llmComposer');
+    root.querySelectorAll('.llm-message-text').forEach((node, index) => {
+      node.insertAdjacentHTML('afterend', fileLinks(chat?.messages[index]?.attachments));
+    });
     if (composer) {
+      composer.elements.content.required = false;
+      const model = models.find(m => m.id === chat.modelId);
+      const files = fileDrafts.get(chat.id) || [];
+      composer.insertAdjacentHTML('afterbegin', `<div class="llm-file-tools"><select class="select" id="llmAttach" aria-label="${t('llms.attach')}"${pending ? ' disabled' : ''}><option value="">${t('llms.attach')}</option><option value="image"${model?.vision ? '' : ' disabled'}>${t('llms.image')}</option><option value="document"${model?.documents ? '' : ' disabled'}>${t('assets.documents')}</option></select><span class="hint">${t('llms.fileHint')}</span></div><div class="llm-attachments">${files.map(f => `<span class="llm-file-chip">${esc(f.name)}<button type="button" class="mini-btn" data-file-remove="${esc(f.id)}" aria-label="${t('llms.removeFile')}">×</button></span>`).join('')}</div>`);
+      $('#llmAttach').onchange = async event => {
+        const kind = event.target.value; event.target.value = '';
+        if (!kind || busy || pending) return;
+        const input = document.createElement('input'); input.type = 'file'; input.multiple = true;
+        input.accept = kind === 'image' ? '.png,.jpg,.jpeg,.webp' : window.ManifestadorFiles.documentAccept;
+        input.onchange = () => action(async () => {
+          const current = fileDrafts.get(chat.id) || [];
+          if (current.length + input.files.length > 4) throw new Error(tr('errors.llmFileLimit'));
+          for (const file of input.files) {
+            const uploaded = await window.ManifestadorFiles.upload(file, chat.nsfw);
+            current.push(uploaded); fileDrafts.set(chat.id, current);
+          }
+          render();
+        });
+        input.click();
+      };
       composer.elements.content.oninput = () => drafts.set(chat.id, composer.elements.content.value);
       composer.elements.content.onkeydown = event => {
         if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
         event.preventDefault();
-        if (event.repeat || busy || pending || !composer.elements.content.value.trim()) return;
+        if (event.repeat || busy || pending || (!composer.elements.content.value.trim() && !fileDrafts.get(chat.id)?.length)) return;
         composer.requestSubmit();
       };
       composer.onsubmit = async event => {
         event.preventDefault(); if (busy || pending) return;
-        const content = composer.elements.content.value.trim(); if (!content) return;
+        const content = composer.elements.content.value.trim();
+        const attachments = (fileDrafts.get(chat.id) || []).map(f => f.id);
+        if (!content && !attachments.length) return;
         await action(async () => {
-          await api(`/api/llm-chats/${chat.id}/messages`, { method: 'POST', body: { content }, task: false });
-          drafts.delete(chat.id); await load();
+          await api(`/api/llm-chats/${chat.id}/messages`, { method: 'POST', body: { content, attachments }, task: false });
+          drafts.delete(chat.id); fileDrafts.delete(chat.id); await load();
         });
       };
     }
@@ -84,6 +111,7 @@
   }
   root.onclick = async event => {
     const button = event.target.closest('button'); if (!button || busy) return;
+    if (button.dataset.fileRemove) { fileDrafts.set(selected, (fileDrafts.get(selected) || []).filter(f => f.id !== button.dataset.fileRemove)); render(); }
     if (button.hasAttribute('data-chat-new')) { selected = ''; archiveView = false; render(); }
     if (button.dataset.chatList) { archiveView = button.dataset.chatList === 'archive'; selected = ''; render(); }
     if (button.hasAttribute('data-chat-archive')) await action(async () => {

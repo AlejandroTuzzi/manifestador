@@ -14,6 +14,7 @@ import { protectedAssetKeys, protectedAssetAssociations } from './lib/asset-dele
 import { changeInspiration, visibleInspiration, inspirationError } from './lib/series-inspiration.js';
 import { changeIdeas } from './lib/series-ideas.js';
 import { createChatRoutes } from './lib/llm-chats.js';
+import { createLlmFiles } from './lib/llm-files.js';
 import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
 import { workflowRepositoryItem, workflowRepositorySummary } from './lib/workflow-repository.js';
 import { assertClosedAssociations } from './lib/closed-associations.js';
@@ -341,7 +342,8 @@ function isLoopbackRequest(req) {
 }
 
 // Registro de consumo: una línea por operación cobrada.
-const handleLlmChats = createChatRoutes({ readJson, updateJson, getConfig, readJsonBody, send, sendError, newId, recordCost });
+const llmFiles = createLlmFiles({ dataDir: DATA_DIR, readJson, updateJson, getConfig, readJsonBody, send, sendError, newId });
+const handleLlmChats = createChatRoutes({ readJson, updateJson, getConfig, readJsonBody, send, sendError, newId, recordCost, attachments: llmFiles });
 async function recordCost(entry) {
   let recorded;
   await updateJson('ledger.json', [], (ledger) => {
@@ -5651,6 +5653,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (await handleLlmChats(p, req, res)) return;
+    if (await llmFiles.route(p, req, res)) return;
     if (p === '/api/series-ideas' && req.method === 'GET') {
       const data = await readJson('series-ideas.json', { entries: [], categories: [] });
       const cfg = await getConfig();

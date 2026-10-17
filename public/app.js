@@ -3442,7 +3442,7 @@ $('#assetFilterTags').addEventListener('input', () => {
   renderAssetsGrid();
 });
 
-$$('#view-assets .tabs .tab').forEach((t) => {
+$$('#view-assets .tabs .tab[data-zone]').forEach((t) => {
   t.addEventListener('click', () => {
     state.assetsZone = t.dataset.zone;
     state.selectedAssets.clear();

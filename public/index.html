@@ -592,7 +592,10 @@
         <button class="tab" data-zone="uploads" data-i18n="common.uploaded">Subidas</button>
         <button class="tab" data-zone="video" data-i18n="common.videos">Videos</button>
         <button class="tab" data-zone="audio" data-i18n="common.audio">Audio</button>
+        <button class="tab" id="documentsTab" data-i18n="assets.documents"></button>
       </div>
+      <div id="documentsAssetsPanel" hidden></div>
+      <div id="mediaAssetsPanel">
       <div class="audio-kind-tabs" id="audioKindTabs" hidden>
         <button class="mini-btn active" data-audio-kind="all" data-i18n="common.all">Todo</button>
         <button class="mini-btn" data-audio-kind="voice" data-i18n="assets.audio.voice">Voz</button>
@@ -630,6 +633,7 @@
         <button id="btnApplyAssetRange" class="mini-btn" data-i18n="assets.filters.applyRange">Aplicar rango</button>
       </div>
       <div id="assetsGrid" class="assets-grid"></div>
+      </div>
     </section>
 
     <section id="view-asset-editor" class="view">
@@ -1612,6 +1616,7 @@
 <script type="module" src="camera.js"></script>
 <script src="series-inspiration.js"></script>
 <script src="series-ideas.js"></script>
+<script src="document-assets.js"></script>
 <script src="llm-chats.js"></script>
 <script src="quick-history.js"></script>
 <script type="module" src="budgets.js"></script>

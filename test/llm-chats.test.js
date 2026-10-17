@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createChatRoutes, LLM_MODELS, llmCost, buildChatContext } from '../lib/llm-chats.js';
 
-function harness() {
+function harness(overrides = {}) {
   const files = { 'llm-chats.json': [], 'series.json': [{id:'series', title:'Test'}], 'projects.json': [{id:'closed', archived:true}] };
   const costs = [], requests = [];
   let count = 0, release;
@@ -16,9 +16,29 @@ function harness() {
     newId: () => `id${++count}`, recordCost: async entry => costs.push(entry),
     fetchImpl: async (url, options) => { requests.push(JSON.parse(options.body)); await new Promise(resolve => release = resolve); return {ok:true, json:async()=>({choices:[{message:{content:'Reply'}}],usage:{prompt_tokens:1000,completion_tokens:1000}})}; }
   };
-  const route = createChatRoutes(deps);
+  const route = createChatRoutes({...deps,...overrides});
   return { files, costs, requests, deps, finish: () => release(), call: async (path, method='GET', body={}) => {const res={}; await route(path,{method,body},res); return res;} };
 }
+test('attachments are persisted and sent, incompatible history fails before a paid request', async () => {
+  const attachments = {
+    resolve: async ids => ids.map(id=>({id,name:'picture.png',kind:'image'})),
+    messages: async (history,model) => {
+      if (!model.vision && history.some(m=>m.attachments?.length)) throw new Error('llmFileUnsupported');
+      return history.map(m=>({role:m.role,content:m.attachments?.length ? [{type:'image_url',image_url:{url:'data:image/png;base64,test'}}] : m.content}));
+    }
+  };
+  const h=harness({attachments});
+  h.files['llm-chats.json']=[{id:'chat',modelId:LLM_MODELS[0].id,messages:[]}];
+  assert.equal((await h.call('/api/llm-chats/chat/messages','POST',{attachments:['image']})).status,202);
+  assert.equal(h.files['llm-chats.json'][0].messages[0].attachments[0].name,'picture.png');
+  assert.equal(h.requests[0].messages[0].content[0].type,'image_url');
+  h.finish(); await new Promise(resolve=>setImmediate(resolve));
+  h.files['llm-chats.json'][0].modelId=LLM_MODELS[1].id;
+  const failed=await h.call('/api/llm-chats/chat/messages','POST',{content:'Continue'});
+  assert.equal(failed.code,'llmFileUnsupported');
+  assert.equal(h.requests.length,1);
+  assert.equal(h.files['llm-chats.json'][0].messages.length,2);
+});
 test('chat persistence, history, background generation and costs', async () => {
   const h = harness();
   const created = await h.call('/api/llm-chats','POST',{title:'Hello',modelId:LLM_MODELS[0].id,association:{type:'series',id:'series'}});
