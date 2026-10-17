@@ -39,7 +39,7 @@ window.ManifestadorI18n.register('en', {
 "llms.assistant": "Assistant",
 "llms.copy": "Copy",
 "llms.empty": "Create a chat or choose a saved conversation to continue.",
-"llms.generating": "Generating a reply… You can switch chats or reload the page.",
+"llms.generating": "Waiting for a response…",
 "llms.failed": "No reply was confirmed. Your message was saved. There is no automatic retry to avoid duplicate charges; send a new message to continue.",
 "llms.message": "Write your message…",
 "llms.send": "Send",

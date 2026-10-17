@@ -7,6 +7,15 @@
   let archiveView = false;
   const t = key => esc(tr(key));
   const active = () => chats.find(c => c.id === selected);
+  function scrollChatToEnd() {
+    const messages = root.querySelector('.llm-messages');
+    if (!messages) return;
+    // Scroll only the conversation, never the page or another open view.
+    messages.scrollTop = messages.scrollHeight;
+    requestAnimationFrame(() => {
+      if (messages.isConnected) messages.scrollTop = messages.scrollHeight;
+    });
+  }
   function associationOptions(chat) {
     const options = [{ value: '', label: tr('llms.unlinked') }];
     for (const [type, items] of [['series', state.series], ['project', state.workspaceProjects]]) {
@@ -31,7 +40,8 @@
       <p class="hint" id="llmRates"></p>
       ${chat ? `<button type="button" class="mini-btn" data-chat-context>${t('llms.viewContext')}</button><div id="llmContext" class="llm-message" hidden></div>` : ''}
       <div class="llm-messages" role="log" aria-label="${t('llms.messages')}">${chat?.messages.map(m => `<article class="llm-message llm-${m.role}"><header><strong>${t(m.role === 'user' ? 'llms.you' : 'llms.assistant')}</strong><button type="button" class="mini-btn" data-message-copy="${esc(m.id)}">${t('llms.copy')}</button></header><div class="llm-message-text">${esc(m.content)}</div>${m.role === 'assistant' ? `<small>${esc(models.find(model => model.id === m.modelId)?.name || m.modelId)} · ≈ US$ ${Number(m.cost || 0).toFixed(6)}</small>` : ''}</article>`).join('') || `<p class="hint">${t('llms.empty')}</p>`}</div>
-      ${pending ? `<p role="status">${t('llms.generating')}</p>` : ['error', 'interrupted'].includes(chat?.status) ? `<p role="alert">${t('llms.failed')}</p>` : ''}
+      <p class="llm-waiting" role="status" aria-live="polite"${pending ? '' : ' hidden'}><span class="llm-waiting-spinner" aria-hidden="true"></span><span>${t('llms.generating')}</span></p>
+      ${['error', 'interrupted'].includes(chat?.status) ? `<p role="alert">${t('llms.failed')}</p>` : ''}
       ${chat?.archived ? `<p class="hint">${t('llms.archivedHint')}</p>` : chat ? `<form id="llmComposer"><textarea name="content" rows="5" maxlength="40000" required aria-label="${t('llms.message')}" placeholder="${t('llms.message')}">${esc(drafts.get(selected) || '')}</textarea><button type="submit" class="generate-btn small"${pending ? ' disabled' : ''}>${t('llms.send')}</button></form>` : ''}
     </div></div>`;
     const settings = $('#llmSettings');
@@ -90,12 +100,14 @@
         const content = composer.elements.content.value.trim();
         const attachments = (fileDrafts.get(chat.id) || []).map(f => f.id);
         if (!content && !attachments.length) return;
+        root.querySelector('.llm-waiting').hidden = false;
         await action(async () => {
           await api(`/api/llm-chats/${chat.id}/messages`, { method: 'POST', body: { content, attachments }, task: false });
           drafts.delete(chat.id); fileDrafts.delete(chat.id); await load();
         });
       };
     }
+    scrollChatToEnd();
   }
   async function action(fn) {
     busy = true;

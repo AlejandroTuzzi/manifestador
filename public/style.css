@@ -1555,6 +1555,11 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .llm-settings input:not([type=checkbox]), #llmComposer textarea { background: var(--bg2); color: var(--text); border: 1px solid var(--border); padding: 12px; font: inherit; box-sizing: border-box; }
 .llm-settings input:focus, #llmComposer textarea:focus { outline: 1px solid var(--violet); }
 .llm-messages { display: grid; gap: 16px; margin: 20px 0; max-height: 65vh; overflow-y: auto; }
+.llm-waiting { display:flex; align-items:center; gap:12px; padding:12px 0; color:var(--muted); }
+.llm-waiting[hidden] { display:none; }
+.llm-waiting-spinner { width:18px; height:18px; flex:0 0 18px; border:2px solid var(--border); border-top-color:var(--pink); border-radius:50%; animation:llm-waiting-spin .8s linear infinite; }
+@keyframes llm-waiting-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) { .llm-waiting-spinner { animation:none; } }
 .llm-message { padding: 18px; border: 1px solid var(--border); min-width: 0; }
 .llm-user { border-left: 3px solid var(--pink-strong); }
 .llm-assistant { border-left: 3px solid var(--violet); }

@@ -39,7 +39,7 @@ window.ManifestadorI18n.register('es', {
 "llms.assistant": "Asistente",
 "llms.copy": "Copiar",
 "llms.empty": "Creá un chat o elegí uno guardado para continuar.",
-"llms.generating": "Generando respuesta… Podés cambiar de chat o recargar la página.",
+"llms.generating": "Esperando respuesta…",
 "llms.failed": "No se confirmó una respuesta. Tu mensaje quedó guardado. No se reintentará automáticamente para evitar cobros duplicados; podés enviar un nuevo mensaje para continuar.",
 "llms.message": "Escribí tu mensaje…",
 "llms.send": "Enviar",
