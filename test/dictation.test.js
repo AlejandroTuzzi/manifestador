@@ -8,6 +8,8 @@ function setup({ supported = true, secure = true } = {}) {
   const nodes = new Map(), sessions = [], pageEvents = {};
   const node = (key) => {
     if (!nodes.has(key)) nodes.set(key, { value: '', hidden: true, dataset: {}, listeners: {}, selectionStart: 0, selectionEnd: 0,
+      parentNode: {insertBefore() {}}, isConnected: true, maxLength: 40000,
+      setRangeText(text, start, end) { this.value = this.value.slice(0,start) + text + this.value.slice(end); this.selectionStart = this.selectionEnd = start + text.length; },
       classList: { toggle() {} }, addEventListener(type, fn) { this.listeners[type] = fn; }, setAttribute(name, value) { this[name] = value; }, dispatchEvent() {} });
     return nodes.get(key);
   };
@@ -74,4 +76,27 @@ test('inserted speech adds word spacing without adding a space before punctuatio
   assert.equal(context.dictationInsertion('blue', 'A sky', 2, 2), 'blue ');
   assert.equal(context.dictationInsertion('blue', 'A,', 1, 1), ' blue');
   assert.equal(context.dictationInsertion('  ', 'A', 1, 1), '');
+});
+
+test('shared dictation targets chat at the cursor and stops safely before replacing its UI', () => {
+  const {context,node,sessions,result}=setup();
+  const field=node('#chat'); field.value='Hello world';field.selectionStart=field.selectionEnd=6;
+  let moved=false, inputs=0;
+  field.dispatchEvent=()=>inputs++;
+  context.toggleChatDictation(field,{appendChild(){moved=true;}},node('#chatButton'));
+  assert.equal(moved,true);
+  assert.equal(sessions.length,0);
+  node('#dictationStart').listeners.click();
+  sessions[0].onresult({resultIndex:0,results:[result('beautiful')]});
+  assert.equal(field.value,'Hello beautiful world');
+  assert.equal(inputs,1);
+  assert.equal(node('#promptBox').value,'');
+  context.releaseChatDictation();
+  assert.equal(sessions[0].aborted,true);
+  sessions[0].onresult({resultIndex:1,results:[result('beautiful'),result('late')]});
+  assert.equal(field.value,'Hello beautiful world');
+  assert.equal(node('#dictationPanel').hidden,true);
+  node('#dictationStart').listeners.click();
+  sessions[1].onresult({resultIndex:0,results:[result('Prompt again')]});
+  assert.equal(node('#promptBox').value,'Prompt again');
 });

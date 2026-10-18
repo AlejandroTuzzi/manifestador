@@ -1881,6 +1881,7 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .dictation-controls label { min-width: 150px; }
 #btnDictation.listening { color: var(--pink); border-color: var(--pink); background: var(--panel-solid); }
 #dictationInterim { font-style: italic; overflow-wrap: anywhere; }
+#llmComposer > .dictation-panel { width:100%; box-sizing:border-box; }
 @media (max-width: 800px) { .asset-editor-layout { grid-template-columns: 1fr; } }
 .picker-selected-previews {
   display: flex; gap: 8px; width: 100%; overflow-x: auto; padding: 3px 0 7px;

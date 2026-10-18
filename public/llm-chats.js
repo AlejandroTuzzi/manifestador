@@ -27,6 +27,7 @@
     return options.map(o => `<option value="${esc(o.value)}"${o.value === `${chat?.association?.type}:${chat?.association?.id}` ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
   }
   function render() {
+    releaseChatDictation();
     const chat = active();
     const pending = chat?.status === 'pending';
     root.innerHTML = `<div class="llm-layout"><aside class="llm-sidebar"><button class="generate-btn small" type="button" data-chat-new>${t('llms.new')}</button><div class="llm-list-tabs"><button type="button" class="mini-btn${!archiveView ? ' accent' : ''}" data-chat-list="current" aria-pressed="${!archiveView}">${t('llms.current')}</button><button type="button" class="mini-btn${archiveView ? ' accent' : ''}" data-chat-list="archive" aria-pressed="${archiveView}">${t('llms.archived')}</button></div><div class="llm-chat-list">${chats.filter(c => Boolean(c.archived) === archiveView).map(c => `<button type="button" class="tool-btn${selected === c.id ? ' active' : ''}" data-chat-id="${esc(c.id)}">${esc(c.title)} ${c.status === 'pending' ? '…' : ''}</button>`).join('')}</div></aside><div class="llm-main">
@@ -63,6 +64,14 @@
       node.insertAdjacentHTML('afterend', fileLinks(chat?.messages[index]?.attachments));
     });
     if (composer) {
+      const dictationButton = document.createElement('button');
+      dictationButton.type = 'button';
+      dictationButton.className = 'tool-btn';
+      dictationButton.innerHTML = `${IC('mic')} ${t('dictation.title')}`;
+      dictationButton.setAttribute('aria-expanded', 'false');
+      dictationButton.setAttribute('aria-controls', 'dictationPanel');
+      composer.prepend(dictationButton);
+      dictationButton.onclick = () => toggleChatDictation(composer.elements.content, composer, dictationButton);
       composer.elements.content.required = false;
       const model = models.find(m => m.id === chat.modelId);
       const files = fileDrafts.get(chat.id) || [];
@@ -97,6 +106,7 @@
       };
       composer.onsubmit = async event => {
         event.preventDefault(); if (busy || pending) return;
+        stopPromptDictation();
         const content = composer.elements.content.value.trim();
         const attachments = (fileDrafts.get(chat.id) || []).map(f => f.id);
         if (!content && !attachments.length) return;

@@ -1,13 +1,47 @@
 /* Browser speech recognition only. No provider key, paid API or background capture. */
 let promptDictation = null;
 let dictationStatusKey = 'dictation.ready';
+let dictationTarget = null;
+let dictationTrigger = null;
+const dictationPanelHome = $('#dictationPanel').parentNode;
+const dictationPanelNext = $('#dictationPanel').nextSibling;
+
+function releaseChatDictation() {
+  if (!dictationTarget) return;
+  stopPromptDictation();
+  const panel = $('#dictationPanel');
+  panel.hidden = true;
+  dictationTrigger?.setAttribute('aria-expanded', 'false');
+  dictationPanelHome.insertBefore(panel, dictationPanelNext);
+  dictationTarget = null;
+  dictationTrigger = null;
+}
+
+function toggleChatDictation(field, container, button) {
+  if (dictationTarget === field && !$('#dictationPanel').hidden) { releaseChatDictation(); return; }
+  releaseChatDictation();
+  stopPromptDictation();
+  dictationTarget = field;
+  dictationTrigger = button;
+  const panel = $('#dictationPanel');
+  container.appendChild(panel);
+  panel.hidden = false;
+  button.setAttribute('aria-expanded', 'true');
+  $('#btnDictation').setAttribute('aria-expanded', 'false');
+  if (!$('#dictationLanguage').dataset.initialized) {
+    $('#dictationLanguage').value = i18n.localeTag();
+    $('#dictationLanguage').dataset.initialized = '1';
+  }
+  updateDictationControls();
+}
 
 function updateDictationControls() {
   const supported = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
   $('#dictationStart').disabled = Boolean(promptDictation) || !supported || !window.isSecureContext;
   $('#dictationStop').disabled = !promptDictation;
   $('#dictationLanguage').disabled = Boolean(promptDictation);
-  $('#btnDictation').classList.toggle('listening', Boolean(promptDictation));
+  $('#btnDictation').classList.toggle('listening', Boolean(promptDictation) && !dictationTarget);
+  dictationTrigger?.classList.toggle('listening', Boolean(promptDictation));
   $('#dictationStatus').textContent = tr(!supported ? 'dictation.unsupported' : !window.isSecureContext ? 'dictation.insecure' : dictationStatusKey);
 }
 
@@ -28,6 +62,7 @@ function dictationInsertion(text, value, start, end) {
 }
 
 $('#btnDictation').addEventListener('click', () => {
+  releaseChatDictation();
   const panel = $('#dictationPanel');
   panel.hidden = !panel.hidden;
   $('#btnDictation').setAttribute('aria-expanded', String(!panel.hidden));
@@ -65,9 +100,16 @@ $('#dictationStart').addEventListener('click', () => {
       if (!result.isFinal) { interim.push(text); continue; }
       if (delivered.has(index)) continue;
       delivered.add(index);
-      const field = $('#promptBox');
+      const field = dictationTarget || $('#promptBox');
+      if (dictationTarget && !field.isConnected) { stopPromptDictation(); return; }
       const insertion = dictationInsertion(text, field.value, field.selectionStart, field.selectionEnd);
-      if (insertion) { insertAtCursor(insertion); field.dispatchEvent(new Event('input', { bubbles: true })); }
+      if (insertion) {
+        if (dictationTarget) {
+          const available = field.maxLength > 0 ? Math.max(0, field.maxLength - field.value.length + field.selectionEnd - field.selectionStart) : insertion.length;
+          field.setRangeText(insertion.slice(0, available), field.selectionStart, field.selectionEnd, 'end');
+        } else insertAtCursor(insertion);
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      }
     }
     $('#dictationInterim').textContent = interim.join(' ');
   };
