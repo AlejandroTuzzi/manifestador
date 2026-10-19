@@ -1,4 +1,5 @@
 window.ManifestadorI18n.register('en', {
+"llms.deleteMessageConfirm": "Delete this message? Its text and attachments will no longer be sent in future requests. Asset files and other messages will be kept. If a reply repeats this information, you will also need to delete that reply. This cannot be undone.",
 "llms.attach": "Attach…",
 "llms.image": "Image",
 "llms.fileHint": "Up to 4 files, 10 MB each. Sent to Venice with conversation history. Save model changes before attaching.",

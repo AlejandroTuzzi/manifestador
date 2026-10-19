@@ -19,6 +19,22 @@ function harness(overrides = {}) {
   const route = createChatRoutes({...deps,...overrides});
   return { files, costs, requests, deps, finish: () => release(), call: async (path, method='GET', body={}) => {const res={}; await route(path,{method,body},res); return res;} };
 }
+test('deleted messages and their attachments never reach subsequent requests; pending chats are protected', async () => {
+  const h = harness();
+  h.files['llm-chats.json'] = [{id:'chat', modelId:LLM_MODELS[0].id, messages:[
+    {id:'one',role:'user',content:'Remove this',attachments:[{id:'file1'}]},
+    {id:'two',role:'assistant',content:'Keep this'}]}];
+  assert.equal((await h.call('/api/llm-chats/chat/messages/missing','DELETE')).status,404);
+  assert.equal((await h.call('/api/llm-chats/chat/messages/one','DELETE')).status,200);
+  assert.deepEqual(h.files['llm-chats.json'][0].messages.map(m=>m.id),['two']);
+  await h.call('/api/llm-chats/chat/messages','POST',{content:'Continue'});
+  assert.equal(JSON.stringify(h.requests).includes('Remove this'),false);
+  assert.equal(JSON.stringify(h.requests).includes('file1'),false);
+  assert.equal((await h.call('/api/llm-chats/chat/messages/two','DELETE')).status,409);
+  h.finish(); await new Promise(resolve=>setImmediate(resolve));
+  assert.equal((await h.call('/api/llm-chats/chat/messages/two','DELETE')).status,200);
+});
+
 test('attachments are persisted and sent, incompatible history fails before a paid request', async () => {
   const attachments = {
     resolve: async ids => ids.map(id=>({id,name:'picture.png',kind:'image'})),

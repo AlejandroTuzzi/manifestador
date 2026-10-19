@@ -60,6 +60,9 @@
       });
     };
     const composer = $('#llmComposer');
+    root.querySelectorAll('[data-message-copy]').forEach(copy => {
+      copy.insertAdjacentHTML('afterend', `<button type="button" class="mini-btn danger" data-message-delete="${esc(copy.dataset.messageCopy)}"${pending ? ' disabled' : ''}>${t('common.delete')}</button>`);
+    });
     root.querySelectorAll('.llm-message-text').forEach((node, index) => {
       node.insertAdjacentHTML('afterend', fileLinks(chat?.messages[index]?.attachments));
     });
@@ -165,6 +168,13 @@
     if (button.dataset.messageCopy) {
       try { await navigator.clipboard.writeText(active().messages.find(m => m.id === button.dataset.messageCopy).content); }
       catch { toast(tr('llms.copyFailed'), 'err'); }
+    }
+    if (button.dataset.messageDelete && confirm(tr('llms.deleteMessageConfirm'))) {
+      const chatId = selected;
+      await action(async () => {
+        await api(`/api/llm-chats/${chatId}/messages/${encodeURIComponent(button.dataset.messageDelete)}`, {method:'DELETE',task:false});
+        await load();
+      });
     }
   };
   $('.nav-btn[data-view="llms"]').addEventListener('click', () => load());

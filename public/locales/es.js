@@ -1,4 +1,5 @@
 window.ManifestadorI18n.register('es', {
+"llms.deleteMessageConfirm": "¿Borrar este mensaje? Su texto y adjuntos dejarán de enviarse en las próximas peticiones. Los archivos de Assets y los demás mensajes se conservarán. Si una respuesta repite esta información, también deberás borrar esa respuesta. Esta acción no se puede deshacer.",
 "llms.attach": "Adjuntar…",
 "llms.image": "Imagen",
 "llms.fileHint": "Hasta 4 archivos, 10 MB cada uno. Se envían a Venice con el historial. Guardá los cambios de modelo antes de adjuntar.",
