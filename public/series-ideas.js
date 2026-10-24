@@ -25,6 +25,7 @@
     if (!form || !draft) return;
     for (const key of ['name', 'categoryId', 'development']) draft[key] = form.elements.namedItem(key).value;
     draft.nsfw = form.elements.namedItem('nsfw')?.checked || false;
+    IdeaOutline.capture(panel, draft);
     draft.characters = [...form.querySelectorAll('[data-idea-character]')].map(card => Object.fromEntries(characterFields.map(key => [key, card.querySelector(`[name="character-${key}"]`).value])));
   }
   function render() {
@@ -36,6 +37,7 @@
         <h2>${esc(viewing.name)} ${nsfwBadgeHtml(viewing)}</h2>
         <p class="hint">${esc(data.categories.find(c => c.id === viewing.categoryId)?.name || '')}</p>
         <div class="idea-story">${esc(viewing.development)}</div>
+        ${IdeaOutline.render(viewing)}
         <h3>${t('ideas.characters')}</h3>
         ${viewing.characters.map(character => `<section class="idea-character"><h3>${esc(character.name)}</h3>${characterFields.filter(key => key !== 'name' && character[key]).map(key => `<h4>${t(`ideas.${key}`)}</h4><p class="idea-story">${esc(character[key])}</p>`).join('')}</section>`).join('')}
         <div>${button('back', 'ideas.back')}</div>
@@ -45,6 +47,7 @@
         ${field('name', 'common.name', draft.name)}
         <label><span>${t('ideas.category')}</span><select name="categoryId" class="select">${options(draft.categoryId)}</select></label>
         ${field('development', 'ideas.development', draft.development, true)}
+        ${IdeaOutline.render(draft, true)}
         <h3>${t('ideas.characters')}</h3><p class="hint">${t('ideas.privateCharacters')}</p>
         ${draft.characters.map((character, index) => `<fieldset class="idea-character" data-idea-character="${index}"><legend>${t('ideas.character')} ${index + 1}</legend><div class="idea-fields">${characterFields.map(key => field(`character-${key}`, `ideas.${key}`, character[key] || '', !['name', 'sex', 'profession', 'role'].includes(key))).join('')}</div>${button(`remove:${index}`, 'common.delete')}</fieldset>`).join('')}
         ${button('add-character', 'ideas.addCharacter')}
@@ -75,6 +78,11 @@
     finally { busy = false; panel.querySelectorAll('button').forEach(b => b.disabled = false); }
   }
   panel.onclick = async event => {
+    const outlineAction = event.target.closest('[data-outline-action]')?.dataset.outlineAction;
+    if (outlineAction && draft && !busy) {
+      if (outlineAction.includes('remove') && !confirm(tr('outline.confirmRemove'))) return;
+      capture(); IdeaOutline.change(draft, outlineAction); render(); return;
+    }
     const action = event.target.closest('[data-idea-action]')?.dataset.ideaAction;
     if (!action || busy) return;
     const [kind, id] = action.split(':');
@@ -100,6 +108,14 @@
       panel.querySelector('#ideaCategoryForm input').focus();
     }
   };
+  panel.addEventListener('input', event => {
+    if (!draft || !event.target.closest('[data-outline-editor]')) return;
+    capture();
+    const preview = panel.querySelector('[data-outline-preview]');
+    const scroll = preview.querySelector('.outline-scroll')?.scrollLeft || 0;
+    preview.innerHTML = IdeaOutline.graph(draft.outline);
+    if (preview.querySelector('.outline-scroll')) preview.querySelector('.outline-scroll').scrollLeft = scroll;
+  });
   tab.onclick = async () => {
     $('#seriesGrid').hidden = true; $('#seriesInspirationPanel').hidden = true;
     $('#btnNewSeries').hidden = true; $('#btnImportSeries').hidden = true;

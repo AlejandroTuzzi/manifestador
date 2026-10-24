@@ -2606,3 +2606,21 @@ body.asset-player-open main { padding-bottom: 132px; }
 .document-picker-icon { display:grid; place-items:center; min-height:110px; color:var(--pink); background:var(--bg2); }
 .document-picker-icon .ic { width:36px; height:36px; }
 .pick-document .p-label { white-space:normal; overflow-wrap:anywhere; padding:10px; }
+.idea-outline { grid-column:1 / -1; min-width:0; width:100%; display:grid; gap:16px; }
+.idea-outline h3, .idea-outline h4 { margin:0; }
+.idea-outline > .mini-btn { justify-self:start; }
+.outline-scroll { max-width:100%; overflow-x:auto; padding:8px 0 16px; }
+.outline-scroll:focus-visible { outline:1px solid var(--violet); }
+.outline-timeline { display:grid; grid-template-columns:repeat(var(--episode-count),180px); gap:10px; width:max-content; }
+.outline-tile { background:var(--bg2); border:1px solid var(--border); border-top:4px solid var(--violet); padding:14px; min-height:180px; overflow-wrap:anywhere; }
+.outline-tile.pilot { border-top-color:#49c9ae; background:#102b2a; }
+.outline-tile.finale { border-top-color:var(--pink); background:#32142b; }
+.outline-tile.pilot.finale { background:linear-gradient(120deg,#102b2a,#32142b); }
+.outline-tile p { white-space:pre-wrap; max-height:140px; overflow-y:auto; line-height:1.5; }
+.outline-tile small { color:var(--muted); }
+.outline-markers { display:flex; flex-wrap:wrap; gap:8px; font-size:12px; margin:8px 0; }
+.outline-band { border:1px solid var(--range-color,var(--violet)); border-left-width:5px; background:var(--bg2); padding:10px; color:var(--text); overflow-wrap:anywhere; }
+.tone-0 { --range-color:#a78bfa; }.tone-1 { --range-color:#ec4899; }.tone-2 { --range-color:#49c9ae; }.tone-3 { --range-color:#e2ae55; }.tone-4 { --range-color:#609ef0; }.tone-5 { --range-color:#d77a5e; }
+.outline-edit-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr)); gap:16px; }
+.outline-edit-grid fieldset { margin:0; min-width:0; padding:16px; border:1px solid var(--range-color,var(--border)); background:var(--bg2); display:grid; align-content:start; gap:12px; }
+.outline-edit-grid label { display:grid; gap:6px; color:var(--muted); }

@@ -5672,8 +5672,8 @@ const server = http.createServer(async (req, res) => {
         });
         return send(res, 200, { ...data, entries: data.entries.filter(item => cfg.nsfwEnabled || !item.nsfw) });
       } catch (error) {
-        if (!['Invalid route', 'Hidden entry', 'Invalid collection', 'Not found', 'Name required', 'Duplicate category'].includes(error.message)) throw error;
-        return sendError(res, 400, 'ideasInvalid', 'Check the idea name and category.');
+        if (!['Invalid route', 'Hidden entry', 'Invalid collection', 'Not found', 'Name required', 'Duplicate category', 'Invalid outline'].includes(error.message)) throw error;
+        return sendError(res, 400, error.message === 'Invalid outline' ? 'ideasOutlineInvalid' : 'ideasInvalid', 'Check the idea fields.');
       }
     }
     if (p === '/api/series-inspiration' && req.method === 'GET') {
