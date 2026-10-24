@@ -1,4 +1,9 @@
 window.ManifestadorI18n.register('en', {
+"outline.exportPdf": "Export PDF",
+"outline.pdfDevelopment": "Idea description and development",
+"outline.pdfUnspecified": "Not specified",
+"outline.pdfNone": "No items recorded.",
+"errors.ideasPdfFailed": "Could not export the PDF. Check the rendering browser installation and try again.",
 "outline.title": "Visual outline",
 "outline.help": "Pilot and finale use distinct colors. Bands show narrative stages; ranges include both endpoints and may overlap. Scroll horizontally to explore the story.",
 "outline.empty": "Add episodes to build the story overview.",

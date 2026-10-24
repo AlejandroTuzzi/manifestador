@@ -13,6 +13,7 @@ import { generateWanVideo as generateWanVideoRaw, validateWanMedia, wanError } f
 import { protectedAssetKeys, protectedAssetAssociations } from './lib/asset-deletion-guard.js';
 import { changeInspiration, visibleInspiration, inspirationError } from './lib/series-inspiration.js';
 import { changeIdeas } from './lib/series-ideas.js';
+import { ideaPdfHtml, ideaPdfFilename } from './lib/idea-pdf.js';
 import { createChatRoutes } from './lib/llm-chats.js';
 import { createLlmFiles } from './lib/llm-files.js';
 import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
@@ -5658,6 +5659,21 @@ const server = http.createServer(async (req, res) => {
       const data = await readJson('series-ideas.json', { entries: [], categories: [] });
       const cfg = await getConfig();
       return send(res, 200, { ...data, entries: data.entries.filter(item => cfg.nsfwEnabled || !item.nsfw) });
+    }
+    const ideaPdfMatch = /^\/api\/series-ideas\/entries\/([a-z0-9]+)\/pdf$/.exec(p);
+    if (ideaPdfMatch && req.method === 'GET') {
+      const cfg = await getConfig();
+      const collection = await readJson('series-ideas.json', {entries:[],categories:[]});
+      const idea = collection.entries.find(item => item.id === ideaPdfMatch[1] && (cfg.nsfwEnabled || !item.nsfw));
+      if (!idea) return sendError(res,404,'ideasInvalid','Idea not found.');
+      const locale = url.searchParams.get('lang') === 'en' ? 'en' : 'es';
+      const category = collection.categories.find(item => item.id === idea.categoryId)?.name || '';
+      let pdf;
+      try { pdf = await renderBudgetPdf(ideaPdfHtml(idea,category,await budgetCatalog(locale),locale)); }
+      catch { return sendError(res,500,'ideasPdfFailed','Could not export the idea PDF.'); }
+      const filename = ideaPdfFilename(idea);
+      const encoded = encodeURIComponent(filename).replace(/['()*]/g,char=>'%'+char.charCodeAt(0).toString(16).toUpperCase());
+      return send(res,200,pdf,{mime:'application/pdf',extra:{'Content-Disposition':`attachment; filename="${filename.replace(/[^\x20-\x7e]/g,'_')}"; filename*=UTF-8''${encoded}`}});
     }
     const ideaMatch = p.match(/^\/api\/series-ideas\/(entries|categories)(?:\/([a-z0-9]+))?$/);
     if (ideaMatch && ['POST', 'PUT', 'DELETE'].includes(req.method)) {

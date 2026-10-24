@@ -1,4 +1,9 @@
 window.ManifestadorI18n.register('es', {
+"outline.exportPdf": "Exportar PDF",
+"outline.pdfDevelopment": "Descripción y desarrollo de la idea",
+"outline.pdfUnspecified": "No especificado",
+"outline.pdfNone": "No hay elementos registrados.",
+"errors.ideasPdfFailed": "No se pudo exportar el PDF. Revisá la instalación del navegador de renderizado e intentá nuevamente.",
 "outline.title": "Bosquejo gráfico",
 "outline.help": "Piloto y final se distinguen por color. Las bandas muestran etapas narrativas; los rangos incluyen ambos capítulos y pueden solaparse. Desplazá horizontalmente para recorrer la historia.",
 "outline.empty": "Añadí episodios para construir el panorama de la historia.",

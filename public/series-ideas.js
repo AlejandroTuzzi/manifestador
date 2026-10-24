@@ -61,6 +61,9 @@
     }
     panel.insertAdjacentHTML('beforeend', `<section id="ideaCategories" class="idea-editor" hidden><h3>${t('ideas.categories')}</h3><form id="ideaCategoryForm" class="inspiration-form">${field('name', 'common.name')}<div class="inspiration-tabs"><button type="submit" class="mini-btn">${t('common.save')}</button>${button('new-category', 'ideas.newCategory')}</div></form>${data.categories.map(c => `<div class="inspiration-tabs"><span>${esc(c.name)}</span>${button(`category-edit:${c.id}`, 'common.edit')}${button(`category-delete:${c.id}`, 'common.delete')}</div>`).join('')}</section>`);
     panel.querySelector('#ideaCategoryForm').onsubmit = async event => { event.preventDefault(); capture(); await save('categories', categoryId, { name: event.target.elements.namedItem('name').value }); };
+    if (!draft) panel.querySelectorAll('[data-idea-action^="edit:"]').forEach(edit => {
+      edit.insertAdjacentHTML('afterend', button(`pdf:${edit.dataset.ideaAction.split(':')[1]}`, 'outline.exportPdf'));
+    });
   }
   async function save(kind, id, body, remove = false) {
     if (busy) return;
@@ -86,6 +89,20 @@
     const action = event.target.closest('[data-idea-action]')?.dataset.ideaAction;
     if (!action || busy) return;
     const [kind, id] = action.split(':');
+    if (kind === 'pdf') {
+      busy = true;
+      const trigger = event.target.closest('button'); trigger.disabled = true;
+      try {
+        const response = await fetch(`/api/series-ideas/entries/${encodeURIComponent(id)}/pdf?lang=${i18n.getLocale()}`);
+        if (!response.ok) throw new Error(i18n.errorMessage(await response.json()));
+        const encoded = (response.headers.get('Content-Disposition') || '').match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+        const url = URL.createObjectURL(await response.blob()), link = document.createElement('a');
+        link.href = url; link.download = encoded ? decodeURIComponent(encoded) : `idea_${id}.pdf`;
+        link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (error) { toast(error.message, 'err'); }
+      finally { busy = false; trigger.disabled = false; }
+      return;
+    }
     if (kind === 'view' || kind === 'back') {
       viewingId = kind === 'view' ? id : '';
       render(); panel.scrollIntoView({ block: 'start' });
