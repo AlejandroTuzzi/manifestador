@@ -35,6 +35,39 @@ test('deleted messages and their attachments never reach subsequent requests; pe
   assert.equal((await h.call('/api/llm-chats/chat/messages/two','DELETE')).status,200);
 });
 
+test('removing chat images preserves documents, texts, other chats and asset files', async () => {
+  const h = harness({ attachments: {
+    resolve: async () => [],
+    messages: async history => history
+  } });
+  const image = {id:'image',kind:'image'}, doc = {id:'pdf',kind:'document'};
+  h.files['chat-files.json'] = [image, doc];
+  h.files['llm-chats.json'] = [
+    {id:'chat',modelId:LLM_MODELS[0].id,messages:[
+      {id:'one',role:'user',content:'Keep text',attachments:[image,doc]},
+      {id:'two',role:'user',content:'',attachments:[image]},
+      {id:'three',role:'assistant',content:'Existing description'}]},
+    {id:'other',messages:[{content:'Other',attachments:[image]}]},
+    {id:'hidden',nsfw:true,messages:[]}
+  ];
+  assert.equal((await h.call('/api/llm-chats/hidden/images','DELETE')).status,404);
+  assert.equal((await h.call('/api/llm-chats/missing/images','DELETE')).status,404);
+  assert.equal((await h.call('/api/llm-chats/chat/images','DELETE')).status,200);
+  assert.deepEqual(h.files['llm-chats.json'][0].messages[0].attachments,[doc]);
+  assert.equal(h.files['llm-chats.json'][0].messages.length,3);
+  assert.deepEqual(h.files['llm-chats.json'][1].messages[0].attachments,[image]);
+  assert.deepEqual(h.files['chat-files.json'],[image,doc]);
+  assert.equal((await h.call('/api/llm-chats/chat/images','DELETE')).status,200);
+  await h.call('/api/llm-chats/chat/messages','POST',{content:'Continue'});
+  const outgoing = h.requests[0].messages;
+  assert.equal(outgoing.some(m => m.attachments?.some(f => f.kind === 'image')),false);
+  assert.equal(outgoing.some(m => m.id === 'two'),false);
+  assert.equal(outgoing[0].content,'Keep text');
+  assert.deepEqual(outgoing[0].attachments,[doc]);
+  assert.equal((await h.call('/api/llm-chats/chat/images','DELETE')).status,409);
+  h.finish(); await new Promise(resolve=>setImmediate(resolve));
+});
+
 test('attachments are persisted and sent, incompatible history fails before a paid request', async () => {
   const attachments = {
     resolve: async ids => ids.map(id=>({id,name:'picture.png',kind:'image'})),

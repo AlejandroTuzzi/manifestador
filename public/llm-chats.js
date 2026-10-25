@@ -46,6 +46,11 @@
       ${chat?.archived ? `<p class="hint">${t('llms.archivedHint')}</p>` : chat ? `<form id="llmComposer"><textarea name="content" rows="5" maxlength="40000" required aria-label="${t('llms.message')}" placeholder="${t('llms.message')}">${esc(drafts.get(selected) || '')}</textarea><button type="submit" class="generate-btn small"${pending ? ' disabled' : ''}>${t('llms.send')}</button></form>` : ''}
     </div></div>`;
     const settings = $('#llmSettings');
+    if (chat) {
+      const hasImages = chat.messages.some(m => m.attachments?.some(f => f.kind === 'image'))
+        || (fileDrafts.get(chat.id) || []).some(f => f.kind === 'image');
+      settings.insertAdjacentHTML('beforeend', `<button type="button" class="mini-btn danger" data-chat-remove-images${pending || !hasImages ? ' disabled' : ''}>${t('llms.removeImages')}</button>`);
+    }
     const rates = () => {
       const model = models.find(m => m.id === settings.elements.modelId.value);
       $('#llmRates').textContent = model ? tr('llms.rates', { input: model.input, output: model.output }) : '';
@@ -165,6 +170,15 @@
       finally { button.disabled = false; }
     }
     if (button.hasAttribute('data-chat-delete') && confirm(tr('llms.deleteConfirm'))) await action(async () => { await api(`/api/llm-chats/${selected}`, { method: 'DELETE' }); selected = ''; await load(); });
+    if (button.hasAttribute('data-chat-remove-images') && confirm(tr('llms.removeImagesConfirm'))) {
+      const chatId = selected;
+      await action(async () => {
+        await api(`/api/llm-chats/${chatId}/images`, { method: 'DELETE', task: false });
+        fileDrafts.set(chatId, (fileDrafts.get(chatId) || []).filter(f => f.kind !== 'image'));
+        await load();
+        toast(tr('llms.imagesRemoved'));
+      });
+    }
     if (button.dataset.messageCopy) {
       try { await navigator.clipboard.writeText(active().messages.find(m => m.id === button.dataset.messageCopy).content); }
       catch { toast(tr('llms.copyFailed'), 'err'); }
