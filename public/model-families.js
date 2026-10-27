@@ -8,6 +8,10 @@
     const numbers = model.name.match(/\d+/g) || [];
     return Number(numbers[0] || 0) * 100 + Number(numbers[1] || 0);
   }
+  // Resellers serve another vendor's model; the rest are the model's own API.
+  const vendors = { seedance: 'BytePlus', seedream: 'BytePlus', qwen: 'Alibaba', wan: 'Alibaba', minimax: 'MiniMax', heygen: 'HeyGen', 'heygen-scene': 'HeyGen', siray: 'Siray', nezhagate: 'NezhaGate' };
+  const resellers = new Set(['siray', 'nezhagate']);
+  root.ManifestadorModelVendor = model => ({ name: vendors[model.provider] || model.provider, official: !resellers.has(model.provider) });
   root.ManifestadorModelFamilies = function (models) {
     const groups = new Map();
     for (const model of models) {

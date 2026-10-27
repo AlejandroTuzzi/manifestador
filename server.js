@@ -31,6 +31,8 @@ import { spawn, execFile } from 'node:child_process';
 import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel, getAudioModel } from './lib/models.js';
 import { generateSiray, sirayError } from './lib/siray.js';
 import { sirayAutomationModel } from './lib/siray-models.js';
+import { generateNezhaGate, nezhagateError, nezhagateFetch, nezhagateClipPrice } from './lib/nezhagate.js';
+import { r2Settings, r2Put, r2Delete, r2SignedGetUrl, r2Check } from './lib/r2.js';
 import {
   generateGemini, analyzeArtStyle, analyzeVocabularyImage, generateSeedream, generateFireRed, generateOpenAIImage, generateSeedanceVideo,
   generateSeedance25Video as generateSeedance25VideoRaw, generateGeminiOmniVideo,
@@ -112,7 +114,7 @@ const DEFAULT_CONFIG = {
   photoshopPath: '',
   ffmpegPath: '',
   convertAudioReferencesToWav: true,
-  keys: { gemini: '', googleTranslate: '', ark: '', wavespeed: '', qwen: '', minimax: '', elevenlabs: '', openai: '', suno: '', heygen: '', siray: '', venice: '' },
+  keys: { gemini: '', googleTranslate: '', ark: '', wavespeed: '', qwen: '', minimax: '', elevenlabs: '', openai: '', suno: '', heygen: '', siray: '', nezhagate: '', r2AccessKeyId: '', r2SecretAccessKey: '', venice: '' },
   openaiModel: 'gpt-5-mini',
   llmGlobalContext: '',
   audioModelId: AUDIO_MODEL.id,
@@ -142,7 +144,8 @@ const DEFAULT_CONFIG = {
   nsfwEnabled: false,
   nsfwUploadDefault: false,
   accessPasswordHash: '',
-  comfyui: { host: '127.0.0.1', port: 8188 }
+  comfyui: { host: '127.0.0.1', port: 8188 },
+  r2: { accountId: '', bucket: '' }
 };
 
 // ---------------------------------------------------------------------------
@@ -262,7 +265,8 @@ async function getConfig() {
     keys: Object.fromEntries(Object.keys(DEFAULT_CONFIG.keys).map((key) => [key, savedKeys[key] || ''])),
     paths: { ...DEFAULT_CONFIG.paths, ...(cfg.paths || {}) },
     endpoints: Object.fromEntries(Object.keys(DEFAULT_CONFIG.endpoints).map((key) => [key, savedEndpoints[key] || DEFAULT_CONFIG.endpoints[key]])),
-    comfyui: { ...DEFAULT_CONFIG.comfyui, ...(cfg.comfyui || {}) }
+    comfyui: { ...DEFAULT_CONFIG.comfyui, ...(cfg.comfyui || {}) },
+    r2: { ...DEFAULT_CONFIG.r2, ...(cfg.r2 || {}) }
   };
   merged.language = normalizeInterfaceLanguage(merged.language);
   return merged;
@@ -348,8 +352,8 @@ const handleLlmChats = createChatRoutes({ readJson, updateJson, getConfig, readJ
 async function recordCost(entry) {
   let recorded;
   await updateJson('ledger.json', [], (ledger) => {
-    if (entry.sirayTaskId) {
-      const existing = ledger.find(item => item.sirayTaskId === entry.sirayTaskId);
+    for (const field of ['sirayTaskId', 'nezhagateTaskId']) {
+      const existing = entry[field] && ledger.find(item => item[field] === entry[field]);
       if (existing) { recorded = existing; return ledger; }
     }
     recorded = { ts: Date.now(), ...entry, cost: Number(entry.cost.toFixed(6)) };
@@ -1194,6 +1198,80 @@ async function recoverSirayTasks() {
   }
 }
 
+// NezhaGate only downloads reference audio from public HTTPS links: each file goes to
+// the private R2 bucket behind a 2-hour signed link and is deleted when the job ends.
+// The bucket's lifecycle rule removes anything left behind by an interrupted job.
+const NEZHAGATE_AUDIO_TYPES = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4' };
+function nezhagateAudioPublisher(cfg) {
+  const settings = r2Settings(cfg);
+  const keys = [];
+  return {
+    publishAudio: settings.configured ? async (filePath) => {
+      const ext = path.extname(filePath).toLowerCase();
+      if (!NEZHAGATE_AUDIO_TYPES[ext]) throw nezhagateError('nezhagateReferences');
+      const key = `nezhagate/${crypto.randomBytes(24).toString('hex')}${ext}`;
+      await r2Put(settings, key, await fs.readFile(filePath), NEZHAGATE_AUDIO_TYPES[ext]);
+      keys.push(key);
+      return r2SignedGetUrl(settings, key, { expires: 7200 });
+    } : undefined,
+    cleanup: () => Promise.all(keys.splice(0).map(key => r2Delete(settings, key).catch(() => {})))
+  };
+}
+
+const nezhagateActiveJobs = new Set();
+async function runNezhaGateGeneration(req, model, cfg, mediaRefs, sentPrompt, pending = null) {
+  const id = pending?.id || newId();
+  if (nezhagateActiveJobs.has(id)) throw nezhagateError('nezhagatePending', id);
+  nezhagateActiveJobs.add(id);
+  let job = pending;
+  const audioHost = nezhagateAudioPublisher(cfg);
+  try {
+    const hasAudioReference = pending?.hasAudioReference ?? mediaRefs.some(ref => ref.kind === 'audio');
+    const result = await sendWithWavReferences({ apiKey: cfg.keys.nezhagate, model, prompt: sentPrompt, mediaRefs,
+      mode: req.mode, aspectRatio: req.aspectRatio, duration: req.duration, taskId: pending?.taskId,
+      publishAudio: audioHost.publishAudio,
+      onTask: async taskId => {
+        job = { id, taskId, createdAt: Date.now(), modelId: model.id, sentPrompt, hasAudioReference,
+          request: { ...generationSettings('video', req).request, generationRequestId: req.generationRequestId },
+          nsfw: Boolean(cfg.nsfwUploadDefault), clientId: req.nezhagateClientId || '' };
+        await updateJson('nezhagate-tasks.json', [], jobs => [...jobs.filter(item => item.id !== id), job]);
+      },
+      onFailed: async () => updateJson('nezhagate-tasks.json', [], jobs => jobs.map(item => item.id === id ? { ...item, failed: true } : item))
+    }, generateNezhaGate, async () => {});
+    const key = await saveBuffer('video', `nezhagate-${id}.mp4`, result.buffer);
+    const cost = nezhagateClipPrice(await getPricing(), model.id, hasAudioReference);
+    const entry = { id, ts: job?.createdAt || Date.now(), type: 'video', modelId: model.id, modelName: model.name,
+      prompt: req.prompt, aspectRatio: req.aspectRatio, resolution: req.resolution, duration: req.duration,
+      audio: true, avoidMusic: req.avoidMusic !== false, mode: 'reference', refs: req.refs || [], refKinds: req.refKinds || [],
+      batch: 1, nezhagateTaskId: result.taskId, outputs: [key], errors: [], cost, costEstimated: true, costUnknown: !cost,
+      generationRequestId: req.generationRequestId || null, nsfw: job?.nsfw || false };
+    await updateJson('history.json', [], history => [entry, ...history.filter(item => item.id !== id)].slice(0, 1000));
+    await recordAssetMetadata(entry);
+    await recordCost({ nezhagateTaskId: result.taskId, type: 'video', modelId: model.id, label: `${model.name} · NezhaGate`,
+      units: 1, unitLabel: 'video', cost });
+    if (pending && /^[a-z0-9]+$/i.test(req.generationRequestId || '')) {
+      const file = `generation-requests/${req.generationRequestId}.json`;
+      const snapshot = await readJson(file, null);
+      if (snapshot) {
+        await writeJson(file, { ...snapshot, status: 'succeeded', outputs: [key], error: '' });
+        await updateJson('generation-requests.json', [], list => list.map(item => item.id === req.generationRequestId ? { ...item, status: 'succeeded', outputs: [key], error: '' } : item));
+      }
+    }
+    await updateJson('nezhagate-tasks.json', [], jobs => jobs.filter(item => item.id !== id));
+    return entry;
+  } finally { nezhagateActiveJobs.delete(id); await audioHost.cleanup(); }
+}
+async function recoverNezhaGateTasks() {
+  const cfg = await getConfig();
+  if (!cfg.keys.nezhagate) return;
+  for (const job of await readJson('nezhagate-tasks.json', [])) {
+    if (!job.taskId || job.failed || nezhagateActiveJobs.has(job.id)) continue;
+    const model = getVideoModel(job.modelId);
+    if (model?.provider !== 'nezhagate') continue;
+    runNezhaGateGeneration(job.request, model, cfg, [], job.sentPrompt, job).catch(error => console.warn('NezhaGate recovery:', error.localizationCode || error.name));
+  }
+}
+
 async function runImageGeneration(req) {
   const cfg = await getConfig();
   const model = getImageModel(req.modelId);
@@ -1643,6 +1721,10 @@ async function runVideoGeneration(req) {
   if (model.provider === 'siray') {
     if ((req.refs || []).length > refLimit) throw sirayError('sirayReferences');
     return runSirayGeneration({ ...req, mode, aspectRatio, resolution, duration, audio: model.alwaysAudio || audio }, model, cfg, mediaRefs, sentPrompt);
+  }
+  if (model.provider === 'nezhagate') {
+    if (!cfg.keys.nezhagate) throw nezhagateError('nezhagateKey');
+    return runNezhaGateGeneration({ ...req, mode, aspectRatio, resolution, duration }, model, cfg, mediaRefs, sentPrompt);
   }
 
   if (model.provider === 'wan') {
@@ -3525,6 +3607,10 @@ function automationProjectCostEstimate(project, pricing, assetMetadata) {
       billedSeconds += Math.max(4, Math.ceil(Math.min(30, remaining)));
     }
     seedance25EstimatedSeconds += billedSeconds;
+    if (block.videoProvider === 'nezhagate') {
+      const clips = Math.max(1, Math.ceil(approximate / 30));
+      return sum + clips * nezhagateClipPrice(pricing, 'nezhagate-seedance-2-5-special', block.seedance25UseNarrationReference !== false);
+    }
     if (block.videoProvider === 'siray') return sum + billedSeconds * videoPrice(pricing, 'siray-seedance-2-5-spicy', block.sirayResolution || '480p');
     return sum + billedSeconds * videoPrice(pricing, 'seedance-2-5', block.seedance25Resolution === '480p' ? '480p' : '720p');
   }, 0);
@@ -3685,7 +3771,7 @@ function sanitizeAutomation(src, prev = {}) {
       quoteReference: String(b.quoteReference || '').slice(0, 80),
       estimatedDuration: Math.max(0, Math.min(3600, Number(b.estimatedDuration) || 0)),
       generator: ['image', 'heygen', 'assets', 'h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(b.generator) ? b.generator : 'image',
-      videoProvider: b.videoProvider === 'siray' && sirayAutomationModel(b.generator) ? 'siray' : 'official',
+      videoProvider: b.videoProvider === 'siray' && sirayAutomationModel(b.generator) ? 'siray' : b.videoProvider === 'nezhagate' && b.generator === 'seedance25' ? 'nezhagate' : 'official',
       sirayResolution: sirayAutomationModel(b.generator)?.resolutions.includes(b.sirayResolution) ? b.sirayResolution : sirayAutomationModel(b.generator)?.resolutions[0] || '',
       heygenCharacterId: /^[a-z0-9]+$/.test(String(b.heygenCharacterId || '')) ? String(b.heygenCharacterId) : '',
       heygenFraming: ['wide', 'close', 'split'].includes(b.heygenFraming) ? b.heygenFraming : 'wide',
@@ -3701,7 +3787,7 @@ function sanitizeAutomation(src, prev = {}) {
       seedance25Resolution: b.seedance25Resolution === '480p' ? '480p' : '720p',
       seedance25UseNarrationReference: b.seedance25UseNarrationReference !== false,
       seedance25KeepGeneratedAudio: b.seedance25KeepGeneratedAudio === true,
-      seedance25ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.seedance25ReferenceKeys, b.videoProvider === 'siray' ? 50 : 12),
+      seedance25ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.seedance25ReferenceKeys, b.videoProvider === 'siray' ? 50 : b.videoProvider === 'nezhagate' ? 40 : 12),
       omniMode: b.omniMode === 'frames' ? 'frames' : 'reference',
       omniResolution: ['360p', '720p', '1080p', '4K'].includes(b.omniResolution) ? b.omniResolution : '720p',
       omniReferenceKeys: normalizeAutomationH3ReferenceKeys(b.omniReferenceKeys)
@@ -5315,6 +5401,10 @@ const server = http.createServer(async (req, res) => {
           host: body.comfyui?.host !== undefined ? String(body.comfyui.host).trim() || DEFAULT_CONFIG.comfyui.host : cfg.comfyui.host,
           port: body.comfyui?.port !== undefined ? Number(body.comfyui.port) || DEFAULT_CONFIG.comfyui.port : cfg.comfyui.port
         },
+        r2: {
+          accountId: body.r2?.accountId !== undefined ? String(body.r2.accountId).trim().toLowerCase().slice(0, 64) : cfg.r2.accountId,
+          bucket: body.r2?.bucket !== undefined ? String(body.r2.bucket).trim().slice(0, 63) : cfg.r2.bucket
+        },
         customAudioTags: Array.isArray(body.customAudioTags)
           ? [...new Set(body.customAudioTags.map((tag) => String(tag).trim().replace(/^\[|\]$/g, '')).filter(Boolean))].slice(0, 100)
           : (cfg.customAudioTags || []),
@@ -6624,14 +6714,16 @@ const server = http.createServer(async (req, res) => {
       const isSeedance25 = block.generator === 'seedance25';
       const isOmni = block.generator === 'omni';
       const isSiray = block.videoProvider === 'siray';
-      const model = isSiray ? sirayAutomationModel(block.generator) : getVideoModel(isScene ? 'heygen-video-1' : isWan ? (block.generator === 'wan-prime' ? 'wan-3-prime' : 'wan-3') : isOmni ? 'gemini-omni-1-1-flash' : isSeedance25 ? 'seedance-2-5' : 'minimax-h3');
+      const isNezha = isSeedance25 && block.videoProvider === 'nezhagate';
+      const model = isSiray ? sirayAutomationModel(block.generator) : isNezha ? getVideoModel('nezhagate-seedance-2-5-special') : getVideoModel(isScene ? 'heygen-video-1' : isWan ? (block.generator === 'wan-prime' ? 'wan-3-prime' : 'wan-3') : isOmni ? 'gemini-omni-1-1-flash' : isSeedance25 ? 'seedance-2-5' : 'minimax-h3');
       if (!model) throw sirayError('sirayParameters');
       const serviceName = model.name;
       const serviceSlug = isScene ? 'heygen-scene' : isWan ? block.generator : isOmni ? 'omni' : isSeedance25 ? 'seedance25' : 'h3';
 
       const cfg = await getConfig();
       if (isSiray && !cfg.keys.siray) throw sirayError('sirayKey');
-      if (!isSiray && isSeedance25 && !cfg.keys.ark) return send(res, 400, { error: 'Falta la API key de BytePlus ModelArk en Configuración.' });
+      if (isNezha && !cfg.keys.nezhagate) throw nezhagateError('nezhagateKey');
+      if (!isSiray && !isNezha && isSeedance25 && !cfg.keys.ark) return send(res, 400, { error: 'Falta la API key de BytePlus ModelArk en Configuración.' });
       if (isOmni && !cfg.keys.gemini) return send(res, 400, { error: 'Falta la API key de Gemini en Configuración.' });
       if (!isSiray && isWan && !cfg.keys.qwen) throw wanError('qwenKey');
       if (!isScene && !isSiray && !isWan && !isSeedance25 && !isOmni && !cfg.keys.minimax) return send(res, 400, { error: 'Falta la API key de MiniMax en Configuración.' });
@@ -6647,7 +6739,8 @@ const server = http.createServer(async (req, res) => {
 
       const configuredMode = isOmni ? block.omniMode : isSeedance25 ? block.seedance25Mode : block.h3Mode;
       const mode = !isScene && configuredMode === 'frames' ? 'frames' : 'reference';
-      const configuredKeys = normalizeAutomationH3ReferenceKeys(isOmni ? block.omniReferenceKeys : isSeedance25 ? block.seedance25ReferenceKeys : block.h3ReferenceKeys, isSiray ? model.maxRefs : isWan ? 20 : 12);
+      if (isNezha && mode === 'frames') throw nezhagateError('nezhagateFrames');
+      const configuredKeys = normalizeAutomationH3ReferenceKeys(isOmni ? block.omniReferenceKeys : isSeedance25 ? block.seedance25ReferenceKeys : block.h3ReferenceKeys, isSiray || isNezha ? model.maxRefs : isWan ? 20 : 12);
       const imageKey = String(body.imageKey || '');
       let referenceKeys;
       if (mode === 'frames') {
@@ -6675,7 +6768,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (!chunks.length) return send(res, 400, { error: 'La narración no contiene audio utilizable.' });
 
-      const resolution = isScene ? (model.resolutions.includes(block.h3Resolution)?block.h3Resolution:'768p') : isSiray ? (model.resolutions.includes(block.sirayResolution) ? block.sirayResolution : model.resolutions[0]) : isWan ? (model.resolutions.includes(block.h3Resolution) ? block.h3Resolution : '720P') : isOmni
+      const resolution = isNezha ? '720p' : isScene ? (model.resolutions.includes(block.h3Resolution)?block.h3Resolution:'768p') : isSiray ? (model.resolutions.includes(block.sirayResolution) ? block.sirayResolution : model.resolutions[0]) : isWan ? (model.resolutions.includes(block.h3Resolution) ? block.h3Resolution : '720P') : isOmni
         ? (['360p', '720p', '1080p', '4K'].includes(block.omniResolution) ? block.omniResolution : '720p')
         : isSeedance25
         ? (block.seedance25Resolution === '480p' ? '480p' : '720p')
@@ -6733,7 +6826,7 @@ const server = http.createServer(async (req, res) => {
               model: serviceName, images: limits.image, videos: limits.video, audios: limits.audio, total: limits.total
             });
           }
-          const mediaDurations = isScene ? {video:0,audio:0} : isSiray ? { video: (await Promise.all(refs.filter(ref => ref.kind === 'video').map(ref => probeMediaDuration(ffmpegExecutable, ref.path)))).reduce((sum, seconds) => sum + seconds, 0), audio: 0 } : isWan
+          const mediaDurations = isScene || isNezha ? {video:0,audio:0} : isSiray ? { video: (await Promise.all(refs.filter(ref => ref.kind === 'video').map(ref => probeMediaDuration(ffmpegExecutable, ref.path)))).reduce((sum, seconds) => sum + seconds, 0), audio: 0 } : isWan
             ? await validateWanMedia(refs, { mode, duration: chunk.requestDuration, probeDuration: file => probeMediaDuration(ffmpegExecutable, file), probeDimensions: file => probeVideoDimensions(ffmpegExecutable, file) })
             : isOmni
             ? (await validateGeminiOmniMedia(refs, ffmpegExecutable, mode, false), { video: 0, audio: 0 })
@@ -6758,6 +6851,8 @@ const server = http.createServer(async (req, res) => {
           const wanPending = isWan ? (await readJson('wan-block-tasks.json', {}))[wanFingerprint] : null;
           const sirayFingerprint = isSiray ? crypto.createHash('sha256').update(JSON.stringify({ model: model.id, prompt, referenceKeys, audioKeys, chunk, mode, aspectRatio, resolution, audio: isSeedance25 ? block.seedance25KeepGeneratedAudio : block.h3KeepGeneratedAudio })).digest('hex') : '';
           const sirayPending = isSiray ? (await readJson('siray-block-tasks.json', {}))[sirayFingerprint] : null;
+          const nezhaFingerprint = isNezha ? crypto.createHash('sha256').update(JSON.stringify({ model: model.id, prompt, referenceKeys, audioKeys, chunk, mode, aspectRatio })).digest('hex') : '';
+          const nezhaPending = isNezha ? (await readJson('nezhagate-block-tasks.json', {}))[nezhaFingerprint] : null;
           const sceneFingerprint = isScene ? crypto.createHash('sha256').update(JSON.stringify({projectId,blockId:block.id,prompt,referenceKeys,audioKeys,chunk,resolution,aspectRatio})).digest('hex') : '';
           const scenePending = isScene ? (await readJson('heygen-scene-block-tasks.json',{}))[sceneFingerprint] : null;
           const sceneRequestId = scenePending?.requestId || newId();
@@ -6769,7 +6864,14 @@ const server = http.createServer(async (req, res) => {
             onTask: taskId => updateJson('siray-block-tasks.json', {}, jobs => ({ ...jobs, [sirayFingerprint]: { taskId, projectId, blockId: block.id } })),
             onFailed: () => updateJson('siray-block-tasks.json', {}, jobs => { delete jobs[sirayFingerprint]; return jobs; })
           }, generateSiray, async () => {}) : null;
-          const generated = isScene ? await generateHeygenScene({apiKey:cfg.keys.heygen,prompt:[prompt,videoAudioPolicy(true)].join('\n\n'),mediaRefs:refs,mode,aspectRatio,resolution,duration:chunk.requestDuration,idempotencyKey:sceneRequestId,taskId:scenePending?.taskId,onTask:taskId=>updateJson('heygen-scene-block-tasks.json',{},jobs=>({...jobs,[sceneFingerprint]:{taskId,requestId:sceneRequestId,projectId,blockId:block.id}})),onFailed:()=>updateJson('heygen-scene-block-tasks.json',{},jobs=>{delete jobs[sceneFingerprint];return jobs;})}) : isSiray ? { ...sirayGenerated.outputs[0], taskId: sirayGenerated.taskId } : isWan
+          const nezhaAudioHost = isNezha ? nezhagateAudioPublisher(cfg) : null;
+          const nezhaGenerated = isNezha ? await sendWithWavReferences({ apiKey: cfg.keys.nezhagate, model, publishAudio: nezhaAudioHost.publishAudio,
+            prompt: [prompt, videoAudioPolicy(true)].join('\n\n'), mediaRefs: refs, mode, aspectRatio,
+            duration: chunk.requestDuration, taskId: nezhaPending?.taskId,
+            onTask: taskId => updateJson('nezhagate-block-tasks.json', {}, jobs => ({ ...jobs, [nezhaFingerprint]: { taskId, projectId, blockId: block.id } })),
+            onFailed: () => updateJson('nezhagate-block-tasks.json', {}, jobs => { delete jobs[nezhaFingerprint]; return jobs; })
+          }, generateNezhaGate, async () => {}).finally(() => nezhaAudioHost.cleanup()) : null;
+          const generated = isScene ? await generateHeygenScene({apiKey:cfg.keys.heygen,prompt:[prompt,videoAudioPolicy(true)].join('\n\n'),mediaRefs:refs,mode,aspectRatio,resolution,duration:chunk.requestDuration,idempotencyKey:sceneRequestId,taskId:scenePending?.taskId,onTask:taskId=>updateJson('heygen-scene-block-tasks.json',{},jobs=>({...jobs,[sceneFingerprint]:{taskId,requestId:sceneRequestId,projectId,blockId:block.id}})),onFailed:()=>updateJson('heygen-scene-block-tasks.json',{},jobs=>{delete jobs[sceneFingerprint];return jobs;})}) : isSiray ? { ...sirayGenerated.outputs[0], taskId: sirayGenerated.taskId } : isNezha ? nezhaGenerated : isWan
             ? await generateWanVideo({ apiKey: cfg.keys.qwen, endpoint: cfg.endpoints.qwen, apiModel: model.apiModel,
               prompt: [prompt, videoAudioPolicy(true)].join('\n\n'), mediaRefs: refs, mode, aspectRatio, resolution,
               duration: chunk.requestDuration, audio: block.h3KeepGeneratedAudio === true, taskId: wanPending?.taskId,
@@ -6793,7 +6895,7 @@ const server = http.createServer(async (req, res) => {
               prompt, mediaRefs: refs, mode, aspectRatio, resolution,
               duration: chunk.requestDuration, contextIr: block.h3ContextIr === true
             });
-          const key = await saveBuffer('video', isSiray ? `auto-siray-${sirayFingerprint}.mp4` : `${ts()}-auto-${serviceSlug}-${index + 1}-${newId()}.mp4`, generated.buffer);
+          const key = await saveBuffer('video', isSiray ? `auto-siray-${sirayFingerprint}.mp4` : isNezha ? `auto-nezhagate-${nezhaFingerprint}.mp4` : `${ts()}-auto-${serviceSlug}-${index + 1}-${newId()}.mp4`, generated.buffer);
           const pricing = await getPricing();
           const outputSeconds = Number(generated.usage?.output_video_duration || generated.usage?.output_seconds) || chunk.requestDuration;
           const inputSeconds = Number(generated.usage?.input_seconds) || (isSeedance25 ? mediaDurations.video : 0) || 0;
@@ -6803,7 +6905,7 @@ const server = http.createServer(async (req, res) => {
               + (Number(generated.contextUsage.completion_tokens) || 0) * 3.6 / 1_000_000
             : 0;
           const omniInputTokens = Number(generated.usage?.input_tokens || generated.usage?.inputTokenCount || generated.usage?.prompt_token_count) || 0;
-          const cost = isScene ? videoPrice(pricing,model.id,resolution)*outputSeconds : isSiray ? videoPrice(pricing, model.id, resolution) * (outputSeconds + (isWan ? Math.min(5, mediaDurations.video) : isSeedance25 ? mediaDurations.video : 0)) + (block.generator === 'h3' ? Math.max(0, counts.image - 5) * 0.4 : 0) : isWan ? videoPrice(pricing, model.id, resolution) * (outputSeconds + (Number(generated.usage?.input_video_duration) || mediaDurations.video || 0)) : isOmni
+          const cost = isNezha ? nezhagateClipPrice(pricing, model.id, counts.audio > 0) : isScene ? videoPrice(pricing,model.id,resolution)*outputSeconds : isSiray ? videoPrice(pricing, model.id, resolution) * (outputSeconds + (isWan ? Math.min(5, mediaDurations.video) : isSeedance25 ? mediaDurations.video : 0)) + (block.generator === 'h3' ? Math.max(0, counts.image - 5) * 0.4 : 0) : isWan ? videoPrice(pricing, model.id, resolution) * (outputSeconds + (Number(generated.usage?.input_video_duration) || mediaDurations.video || 0)) : isOmni
             ? videoPrice(pricing, model.id, resolution) * outputSeconds
               + omniInputTokens * (model.inputPricePerMillionTokens || 0) / 1_000_000
             : isSeedance25
@@ -6814,7 +6916,8 @@ const server = http.createServer(async (req, res) => {
           await recordCost({
             type: 'video', modelId: model.id, label: `${model.name} ${resolution} · Automatizador`,
             sirayTaskId: isSiray ? generated.taskId : undefined,
-            units: outputSeconds, unitLabel: 'segundo(s)', cost
+            nezhagateTaskId: isNezha ? generated.taskId : undefined,
+            units: isNezha ? 1 : outputSeconds, unitLabel: isNezha ? 'video' : 'segundo(s)', cost
           });
           clipResults[index] = { key, taskId: generated.taskId, finalPrompt: generated.finalPrompt || prompt, cost, reused: false };
           const partialKeys = clipResults.map((item) => item?.key || '').filter(Boolean);
@@ -6831,7 +6934,8 @@ const server = http.createServer(async (req, res) => {
               wanTaskId: !isSiray && isWan ? generated.taskId : '',
               sirayTaskId: isSiray ? generated.taskId : '', videoProvider: block.videoProvider,
               h3TaskId: isSiray || isWan || isSeedance25 || isOmni ? '' : generated.taskId,
-              seedanceTaskId: !isSiray && isSeedance25 ? generated.taskId : '',
+              seedanceTaskId: !isSiray && !isNezha && isSeedance25 ? generated.taskId : '',
+              nezhagateTaskId: isNezha ? generated.taskId : '',
               omniInteractionId: isOmni ? generated.interactionId : '',
               h3ContextIr: !isWan && !isSeedance25 && !isOmni && block.h3ContextIr === true,
               h3ChunkIndex: index, h3Resolution: resolution, generator: block.generator, duration: chunk.duration,
@@ -6846,6 +6950,7 @@ const server = http.createServer(async (req, res) => {
         const segmentPaths = await Promise.all(segmentVideoKeys.map((key) => resolveAssetKey(key)));
         if (isWan) await updateJson('wan-block-tasks.json', {}, jobs => Object.fromEntries(Object.entries(jobs).filter(([, job]) => job.projectId !== projectId || job.blockId !== block.id)));
         if (isSiray) await updateJson('siray-block-tasks.json', {}, jobs => Object.fromEntries(Object.entries(jobs).filter(([, job]) => job.projectId !== projectId || job.blockId !== block.id)));
+        if (isNezha) await updateJson('nezhagate-block-tasks.json', {}, jobs => Object.fromEntries(Object.entries(jobs).filter(([, job]) => job.projectId !== projectId || job.blockId !== block.id)));
         const exactDuration = chunks.reduce((sum, chunk) => sum + chunk.duration, 0);
         const motionOverlay = await renderAutomationMotionOverlay({
           project, block, audioKeys, audioPaths, ffmpegExecutable, width, height, outDir,
@@ -7948,6 +8053,17 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    if (p === '/api/generate/nezhagate/status' && req.method === 'GET') {
+      const [jobs, history, cfg, metadata] = await Promise.all([readJson('nezhagate-tasks.json', []), readJson('history.json', []), getConfig(), readJson('asset-metadata.json', {})]);
+      return send(res, 200, {
+        entries: filterNsfwHistory(history, cfg, metadata).filter(entry => entry.nezhagateTaskId).slice(0, 50),
+        jobs: jobs.filter(job => cfg.nsfwEnabled || (!job.nsfw && !(job.request.refs || []).some(key => metadata[key]?.nsfw))).map(job => ({
+          id: job.id, taskId: job.taskId, clientId: job.clientId, modelId: job.modelId, createdAt: job.createdAt,
+          prompt: job.request.prompt, failed: Boolean(job.failed)
+        }))
+      });
+    }
+
     if (p === '/api/generate/wan/status' && req.method === 'GET') {
       const [jobs, history, cfg, metadata] = await Promise.all([readJson('wan-tasks.json', []), readJson('history.json', []), getConfig(), readJson('asset-metadata.json', {})]);
       const visible = filterNsfwHistory(history, cfg, metadata).filter(entry => getVideoModel(entry.modelId)?.provider === 'wan').slice(0, 30);
@@ -8143,6 +8259,25 @@ const server = http.createServer(async (req, res) => {
           detail: `Conectado a ${label}${account.billingType ? ` · ${account.billingType}` : ''}`,
           account
         });
+      }
+      if (service === 'r2') {
+        const settings = r2Settings({ r2: { ...cfg.r2, ...(body.r2 || {}) }, keys: { ...cfg.keys, ...(body.keys || {}) } });
+        try {
+          await r2Check(settings);
+          return send(res, 200, { ok: true, detailCode: 'r2.testOk', detail: 'R2 OK' });
+        } catch (error) {
+          return send(res, 200, { ok: false, detailCode: `errors.${error.localizationCode || 'r2Request'}`, detailParams: error.localizationDetails || {}, detail: error.message });
+        }
+      }
+      if (service === 'nezhagate') {
+        // Read-only: reports the balance, never submits a generation.
+        try {
+          const grants = await nezhagateFetch(body.key || cfg.keys.nezhagate, '/dashboard/billing/credit_grants');
+          const balance = Number(grants.total_available) || 0;
+          return send(res, 200, { ok: true, detailCode: 'nezhagate.testOk', detailParams: { balance }, detail: `NezhaGate · $${balance.toFixed(2)}` });
+        } catch (error) {
+          return send(res, 200, { ok: false, detailCode: `errors.${error.localizationCode || 'nezhagateRequest'}`, detailParams: error.localizationDetails || {}, detail: error.message });
+        }
       }
       if (service === 'comfyui') {
         const testCfg = { comfyui: { ...cfg.comfyui, ...(body.comfyui || {}) } };
@@ -8955,6 +9090,7 @@ async function recoverWanTasks() {
 }
 setInterval(() => recoverWanTasks().catch(error => console.warn('Wan recovery:', error.name)), 60000).unref();
 setInterval(() => recoverSirayTasks().catch(error => console.warn('Siray recovery:', error.name)), 60000).unref();
+setInterval(() => recoverNezhaGateTasks().catch(error => console.warn('NezhaGate recovery:', error.name)), 60000).unref();
 
 server.listen(PORT, () => {
   recoverWanTasks().catch(error => console.warn('Wan recovery:', error.name));

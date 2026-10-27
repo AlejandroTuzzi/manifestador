@@ -716,15 +716,20 @@ function chipRow(container, values, active, onPick, labelFn = (v) => v) {
       const details = document.createElement('details');
       details.className = 'model-family'; details.dataset.family = family.name;
       const selected = family.models.find(model => model.id === active);
+      // Same model from several providers: name each provider so the choices are distinguishable.
+      const vendor = model => ManifestadorModelVendor(model);
+      const mixed = new Set(family.models.map(model => vendor(model).name)).size > 1;
+      const vendorLabel = model => vendor(model).official ? tr('models.officialProvider', { vendor: vendor(model).name }) : vendor(model).name;
+      const familyLabel = mixed ? id => `${labelFn(id)} · ${vendorLabel(family.models.find(model => model.id === id))}` : labelFn;
       details.open = opened.get(family.name) ?? false;
       const summary = document.createElement('summary');
       summary.addEventListener('click', () => {
         document.querySelectorAll('.model-family[open]').forEach(menu => { if (menu !== details) menu.open = false; });
       });
-      summary.textContent = family.name + ' · ' + (selected || family.models[0]).name;
+      summary.textContent = family.name + ' · ' + familyLabel((selected || family.models[0]).id);
       details.classList.toggle('selected', Boolean(selected));
       const list = document.createElement('div'); list.className = 'chips';
-      chipRow(list, family.models.map(model => model.id), active, id => { details.open = false; onPick(id); }, labelFn);
+      chipRow(list, family.models.map(model => model.id), active, id => { details.open = false; onPick(id); }, familyLabel);
       details.append(summary, list); container.appendChild(details);
     }
     return;
@@ -742,6 +747,7 @@ function chipRow(container, values, active, onPick, labelFn = (v) => v) {
 }
 
 function localizedModelNote(model) {
+  if (model?.provider === 'nezhagate') return tr('nezhagate.notes');
   return model?.provider === 'siray' ? tr('siray.notes') + (model.availabilityUnverified ? ' ' + tr('siray.availability') : '') : model ? tr(`models.${model.id}.notes`, {}, model.notes || '') : '';
 }
 
@@ -869,7 +875,7 @@ function typedVideoReferenceMention(model, kind, number) {
   const type = `${kind[0].toUpperCase()}${kind.slice(1)}`;
   if (model?.provider === 'heygen-scene') return `<${kind === 'image' ? 'Picture' : type} ${number}>`;
   if (model?.provider === 'omni') return `<${kind.toUpperCase()}_REF_${number - 1}>`;
-  return model?.id === 'seedance-2-5' ? `@${type}${number}` : `${type} ${number}`;
+  return model?.id === 'seedance-2-5' || model?.provider === 'nezhagate' ? `@${type}${number}` : `${type} ${number}`;
 }
 
 function renderVideoControls() {
@@ -903,6 +909,7 @@ function renderVideoControls() {
       const next = state.videoModels.find((model) => model.id === id);
       if (next?.provider !== 'omni' && ['edit', 'extend'].includes(state.video.mode)) state.video.mode = 'reference';
       if (!supportsMultimediaVideoRefs(next)) state.refs = state.refs.filter((ref) => referenceKind(ref) === 'image');
+      else if (next.mediaLimits) state.refs = state.refs.filter((ref) => next.mediaLimits[referenceKind(ref)] !== 0);
       applyPinnedCharacterPhotos(); renderVideoControls();
     },
     (id) => state.videoModels.find((x) => x.id === id).name);
@@ -928,6 +935,8 @@ function renderVideoControls() {
     ? tr('create.video.refsH3')
     : isSeedance25 && state.video.mode === 'reference'
     ? tr('create.video.refsSeedance25')
+    : m.provider === 'nezhagate'
+    ? tr('nezhagate.refsHint')
     : isOmni && state.video.mode === 'reference'
     ? tr('create.video.refsOmni')
     : isOmni && state.video.mode === 'edit'
@@ -1161,7 +1170,7 @@ function addRef(key, fromChar = false, kind = 'image') {
     const kindCount = state.refs.filter((ref) => referenceKind(ref) === normalizedKind).length;
     if (mediaLimit != null && kindCount >= mediaLimit) {
       const label = tr(normalizedKind === 'image' ? 'create.refs.images' : normalizedKind === 'video' ? 'create.refs.videos' : 'create.refs.audios');
-      toast(tr('create.refs.mediaLimit', { model: m.name, count: mediaLimit, media: label }), 'err');
+      toast(tr(mediaLimit === 0 ? 'create.refs.mediaUnsupported' : 'create.refs.mediaLimit', { model: m.name, count: mediaLimit, media: label }), 'err');
       return false;
     }
   }
@@ -1833,6 +1842,7 @@ async function generate() {
   if (isHeyGen) job.body.idempotencyKey = job.id;
   if (isVideo && model?.provider === 'wan') job.body.wanClientId = job.id;
   if (model?.provider === 'siray') job.body.sirayClientId = job.id;
+  if (model?.provider === 'nezhagate') job.body.nezhagateClientId = job.id;
   if (isComfy && state.comfyui.loop) { job.comfyLoop = true; job.loopPrompt = prompt; }
   state.generationJobs.unshift(job);
   renderGenerationQueue();
@@ -1936,6 +1946,38 @@ async function syncSirayGenerationJobs() {
     renderGenerationQueue();
   } catch { /* Read-only retry; never resubmit a generation. */ }
   finally { siraySyncBusy = false; }
+}
+
+let nezhagateSyncBusy = false;
+async function syncNezhaGateGenerationJobs() {
+  if (nezhagateSyncBusy || document.hidden || !state.config?.keys?.nezhagate) return;
+  nezhagateSyncBusy = true;
+  try {
+    const result = await api('/api/generate/nezhagate/status', { task: false });
+    for (const pending of result.jobs || []) {
+      const model = state.videoModels.find(item => item.id === pending.modelId);
+      if (model?.provider !== 'nezhagate') continue;
+      let job = state.generationJobs.find(item => item.nezhagateTaskId === pending.taskId || item.id === pending.clientId);
+      if (!job && pending.failed) continue;
+      if (!job) {
+        job = { id: 'nezhagate-' + pending.id, recoveredNezhaGate: true, mode: 'video',
+          label: model.name, prompt: pending.prompt, startedAt: pending.createdAt, status: 'running' };
+        state.generationJobs.unshift(job);
+      }
+      job.nezhagateTaskId = pending.taskId;
+      if (job.recoveredNezhaGate && pending.failed) { job.status = 'error'; job.error = tr('errors.nezhagateRequest', { detail: pending.taskId }); }
+    }
+    let changed = false;
+    for (const entry of result.entries || []) {
+      const job = state.generationJobs.find(item => item.nezhagateTaskId === entry.nezhagateTaskId);
+      if (job && !job.recoveredNezhaGate) continue;
+      if (job) { job.status = 'done'; job.entry = entry; job.error = ''; }
+      if (!state.history.some(item => item.id === entry.id)) { state.history.unshift(entry); changed = true; }
+    }
+    if (changed) { state.history.sort((a, b) => b.ts - a.ts); renderHistory(); }
+    renderGenerationQueue();
+  } catch { /* Read-only retry; never resubmit a generation. */ }
+  finally { nezhagateSyncBusy = false; }
 }
 
 function pumpGenerationQueue() {
@@ -2591,7 +2633,7 @@ function pickerSelectionError(key, kind) {
   if (refs.length >= activeRefLimit()) return tr('create.refs.modelLimit', { model: model.name, count: activeRefLimit() });
   const limit = isVideoMultimediaPicker() ? model.mediaLimits?.[kind] : null;
   if (limit != null && refs.filter((ref) => referenceKind(ref) === kind).length >= limit) {
-    return tr('create.refs.mediaLimit', { model: model.name, count: limit,
+    return tr(limit === 0 ? 'create.refs.mediaUnsupported' : 'create.refs.mediaLimit', { model: model.name, count: limit,
       media: tr(kind === 'image' ? 'create.refs.images' : kind === 'video' ? 'create.refs.videos' : 'create.refs.audios') });
   }
   return '';
@@ -9084,6 +9126,7 @@ async function openGenerativeVideoBlockAssetsPicker(blockElement, block, modelId
   try { await refreshAssets(); } catch { /* el modal mostrará el último estado disponible */ }
   const isSeedance25 = modelId === 'seedance-2-5';
   const isOmni = modelId === 'gemini-omni-1-1-flash';
+  if (isSeedance25 && blockElement.querySelector('[data-block-provider]')?.value === 'nezhagate') modelId = 'nezhagate-seedance-2-5-special';
   if (blockElement.querySelector('[data-block-provider]')?.value === 'siray') modelId = ({ 'seedance-2-5': 'siray-seedance-2-5-spicy', 'wan-3': 'siray-wan-3-spicy', 'wan-3-prime': 'siray-wan-3-prime-spicy', 'minimax-h3': 'siray-minimax-h3-spicy' })[modelId] || modelId;
   const model = state.videoModels.find((item) => item.id === modelId);
   const settingsSelector = isOmni ? '[data-block-omni-settings]' : isSeedance25 ? '[data-block-seedance25-settings]' : '[data-block-h3-settings]';
@@ -9503,7 +9546,7 @@ function renderAutomationProject() {
           </div>
           <div class="auto-block-editor">
             <div class="auto-block-generator">
-              <label data-block-provider-label><span>${esc(tr('siray.provider'))}</span><select class="select" data-block-provider><option value="official">${esc(tr('siray.official'))}</option><option value="siray"${b.videoProvider === 'siray' ? ' selected' : ''}>Siray · Spicy</option></select></label>
+              <label data-block-provider-label><span>${esc(tr('siray.provider'))}</span><select class="select" data-block-provider><option value="official">${esc(tr('siray.official'))}</option><option value="siray"${b.videoProvider === 'siray' ? ' selected' : ''}>Siray · Spicy</option><option value="nezhagate"${b.videoProvider === 'nezhagate' ? ' selected' : ''}>NezhaGate · Special</option></select></label>
               <label data-block-siray-resolution-label><span>${esc(tr('automation.config.resolution'))}</span><select class="select" data-block-siray-resolution data-saved="${esc(b.sirayResolution || '')}"></select></label>
               <label><span>${esc(tr('automation.generators.label'))}</span><select class="select" data-block-generator><option value="image"${blockGenerator === 'image' ? ' selected' : ''}>${esc(tr('automation.generators.imageAudio'))}</option><option value="seedance25"${blockGenerator === 'seedance25' ? ' selected' : ''}>Seedance 2.5 · ${esc(tr('automation.generators.multimodalVideo'))}</option><option value="wan"${blockGenerator === 'wan' ? ' selected' : ''}>Wan 3.0</option><option value="wan-prime"${blockGenerator === 'wan-prime' ? ' selected' : ''}>Wan 3.0 Prime</option><option value="heygen-scene"${blockGenerator === 'heygen-scene' ? ' selected' : ''}>HeyGen Video 1.0</option><option value="h3"${blockGenerator === 'h3' ? ' selected' : ''}>MiniMax H3 · ${esc(tr('automation.generators.multimodalVideo'))}</option><option value="omni"${blockGenerator === 'omni' ? ' selected' : ''}>Gemini Omni 1.1 Flash · ${esc(tr('common.video'))}</option><option value="heygen"${blockGenerator === 'heygen' ? ' selected' : ''}>HeyGen + ${esc(tr('automation.generators.elevenLabsAudio'))}</option><option value="assets"${blockGenerator === 'assets' ? ' selected' : ''}>Assets · ${esc(tr('automation.generators.imagesVideos'))}</option></select></label>
               <div class="auto-block-heygen-settings" data-block-heygen-settings${blockGenerator === 'heygen' ? '' : ' hidden'}>
@@ -10237,6 +10280,14 @@ function renderAutomationProject() {
       const provider = blockElement.querySelector('[data-block-provider]');
       const sirayId = { seedance25: 'siray-seedance-2-5-spicy', h3: 'siray-minimax-h3-spicy', wan: 'siray-wan-3-spicy', 'wan-prime': 'siray-wan-3-prime-spicy' }[select.value];
       blockElement.querySelector('[data-block-provider-label]').hidden = !sirayId;
+      // NezhaGate only serves Seedance 2.5: 720p, reference mode.
+      const nezhaOption = provider.querySelector('[value="nezhagate"]');
+      nezhaOption.hidden = nezhaOption.disabled = select.value !== 'seedance25';
+      if (nezhaOption.disabled && provider.value === 'nezhagate') provider.value = 'official';
+      const nezha = provider.value === 'nezhagate';
+      const seedanceMode = seedance25Settings.querySelector('[data-block-seedance25-mode]');
+      seedanceMode.querySelector('[value="frames"]').disabled = nezha;
+      if (nezha) seedanceMode.value = 'reference';
       const sirayModel = provider.value === 'siray' ? state.videoModels.find(model => model.id === sirayId) : null;
       const sirayRes = blockElement.querySelector('[data-block-siray-resolution]');
       blockElement.querySelector('[data-block-siray-resolution-label]').hidden = !sirayModel;
@@ -10244,7 +10295,7 @@ function renderAutomationProject() {
         const selected = sirayModel.resolutions.includes(sirayRes.value) ? sirayRes.value : sirayRes.dataset.saved;
         sirayRes.innerHTML = sortedResolutions(sirayModel.resolutions).map(value => `<option value="${value}"${value === selected ? ' selected' : ''}>${value}</option>`).join('');
       }
-      seedance25Settings.querySelector('[data-block-seedance25-resolution]').closest('label').hidden = Boolean(sirayModel);
+      seedance25Settings.querySelector('[data-block-seedance25-resolution]').closest('label').hidden = Boolean(sirayModel) || nezha;
       h3Settings.querySelector('[data-block-h3-resolution]').closest('label').hidden = Boolean(sirayModel);
       const scene = select.value === 'heygen-scene';
       const h3ModeSelect = h3Settings.querySelector('[data-block-h3-mode]');
@@ -11888,6 +11939,11 @@ function updateEstimate() {
       return;
     }
     const t = state.pricing.video?.[state.video.modelId] || {};
+    if (model?.pricedPerClip) {
+      const clip = Number(state.refs.some(ref => referenceKind(ref) === 'audio') ? t.clipWithAudio : t.clip) || 0;
+      el.textContent = clip ? `≈ $${clip.toFixed(3)} (${tr('nezhagate.perClip')})` : '';
+      return;
+    }
     const perSec = t[state.video.resolution] ?? Object.values(t)[0] ?? 0;
     const wanInputEstimate = model?.provider === 'wan' && state.refs.some(ref => referenceKind(ref) === 'video') ? 15 : 0;
     const estimatedSeconds = state.video.duration === -1 ? 30 : model?.provider === 'wan' ? Math.min(30, state.video.duration + wanInputEstimate) : state.video.duration;
@@ -12068,11 +12124,12 @@ async function loadCosts() {
       ).join('') + `<span class="pr-unit">${esc(tr('costs.usdPerImage'))}</span></div>`;
   }
   for (const [modelId, table] of Object.entries(data.pricing.video || {})) {
-    const name = state.videoModels.find((x) => x.id === modelId)?.name || modelId;
+    const model = state.videoModels.find((x) => x.id === modelId);
+    const name = !model ? modelId : ManifestadorModelVendor(model).official ? model.name : `${model.name} · ${ManifestadorModelVendor(model).name}`;
     rows += `<div class="pricing-row"><span class="pr-name">${esc(name)}</span>` +
       Object.entries(table).map(([res, val]) =>
-        `<label class="pr-unit">${res} <input type="number" step="0.001" min="0" data-vmodel="${esc(modelId)}" data-res="${esc(res)}" value="${val}"></label>`
-      ).join('') + `<span class="pr-unit">${esc(tr('costs.usdPerSecond'))}</span></div>`;
+        `<label class="pr-unit">${model?.pricedPerClip ? esc(tr(`nezhagate.price.${res}`)) : res} <input type="number" step="0.001" min="0" data-vmodel="${esc(modelId)}" data-res="${esc(res)}" value="${val}"></label>`
+      ).join('') + `<span class="pr-unit">${esc(tr(model?.pricedPerClip ? 'nezhagate.usdPerClip' : 'costs.usdPerSecond'))}</span></div>`;
   }
   for (const [modelId, table] of Object.entries(data.pricing.audio || {})) {
     const name = (state.audioModels || []).find((model) => model.id === modelId)?.name || modelId;
@@ -12171,6 +12228,11 @@ function fillConfigForm() {
   f.key_wavespeed.value = c.keys.wavespeed || '';
   f.key_qwen.value = c.keys.qwen || '';
   f.key_siray.value = c.keys.siray || '';
+  f.key_nezhagate.value = c.keys.nezhagate || '';
+  f.r2_accountId.value = c.r2?.accountId || '';
+  f.r2_bucket.value = c.r2?.bucket || '';
+  f.key_r2AccessKeyId.value = c.keys.r2AccessKeyId || '';
+  f.key_r2SecretAccessKey.value = c.keys.r2SecretAccessKey || '';
   f.key_venice.value = c.keys.venice || '';
   f.key_elevenlabs.value = c.keys.elevenlabs || '';
   f.key_openai.value = c.keys.openai || '';
@@ -12262,6 +12324,9 @@ $$('.test-btn').forEach((btn) => {
     try {
       const body = service === 'comfyui'
         ? { service, comfyui: { host: f.comfyui_host.value.trim(), port: Number(f.comfyui_port.value) || undefined } }
+        : service === 'r2'
+        ? { service, r2: { accountId: f.r2_accountId.value.trim(), bucket: f.r2_bucket.value.trim() },
+          keys: { r2AccessKeyId: f.key_r2AccessKeyId.value.trim(), r2SecretAccessKey: f.key_r2SecretAccessKey.value.trim() } }
         : { service, key: f[`key_${service === 'wan' ? 'qwen' : service}`].value.trim() };
       if (service === 'ark') {
         body.endpoint = f.endpoint_ark.value.trim();
@@ -12273,8 +12338,11 @@ $$('.test-btn').forEach((btn) => {
       if (service === 'minimax') body.endpoint = f.endpoint_minimax.value.trim();
       const r = await api('/api/test', { method: 'POST', body });
       out.className = `test-result ${r.ok ? 'ok' : 'err'}`;
+      // Numeric details (balances) follow the active locale.
+      const params = Object.fromEntries(Object.entries(r.detailParams || {}).map(([name, value]) => [name,
+        typeof value === 'number' ? i18n?.formatNumber(value, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? value : value]));
       const detail = r.detailCode && i18n?.has(r.detailCode)
-        ? tr(r.detailCode, r.detailParams || {})
+        ? tr(r.detailCode, params)
         : r.detail;
       out.textContent = `${r.ok ? '✓' : '✗'} ${detail}`;
     } catch (e) {
@@ -12330,6 +12398,9 @@ $('#configForm').addEventListener('submit', async (e) => {
           wavespeed: f.key_wavespeed.value.trim(),
           qwen: f.key_qwen.value.trim(),
           siray: f.key_siray.value.trim(),
+          nezhagate: f.key_nezhagate.value.trim(),
+          r2AccessKeyId: f.key_r2AccessKeyId.value.trim(),
+          r2SecretAccessKey: f.key_r2SecretAccessKey.value.trim(),
           venice: f.key_venice.value.trim(),
           elevenlabs: f.key_elevenlabs.value.trim(),
           openai: f.key_openai.value.trim(),
@@ -12338,6 +12409,7 @@ $('#configForm').addEventListener('submit', async (e) => {
           heygen: f.key_heygen.value.trim()
         },
         openaiModel: f.openaiModel.value.trim() || 'gpt-5-mini',
+        r2: { accountId: f.r2_accountId.value.trim(), bucket: f.r2_bucket.value.trim() },
         llmGlobalContext: f.llmGlobalContext.value,
         paths: {
           generated: f.path_generated.value.trim(),
@@ -12455,6 +12527,8 @@ async function init() {
   setInterval(syncWanGenerationJobs, 10000);
   syncSirayGenerationJobs();
   setInterval(syncSirayGenerationJobs, 10000);
+  syncNezhaGateGenerationJobs();
+  setInterval(syncNezhaGateGenerationJobs, 10000);
 
   // deep-links: #audio, #assets, #characters, #series, #subtitler, #prompts, #vocabulary, #costs, #config
   const h = location.hash.slice(1);

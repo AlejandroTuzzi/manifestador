@@ -13,7 +13,7 @@ test('family dropdowns preserve expansion and model clicks, leaving non-model ch
       addEventListener(event,fn){this.events[event]=fn;}};
   }
   const source=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
-  const context={state:{models:IMAGE_MODELS,videoModels:VIDEO_MODELS,audioModels:AUDIO_MODELS},document:{createElement:node}};
+  const context={state:{models:IMAGE_MODELS,videoModels:VIDEO_MODELS,audioModels:AUDIO_MODELS},document:{createElement:node},tr:(key,vars)=>key==='models.officialProvider'?`${vars.vendor} (oficial)`:key};
   vm.runInNewContext(fs.readFileSync(new URL('../public/model-families.js',import.meta.url),'utf8'),context);
   vm.runInNewContext(source.slice(source.indexOf('function chipRow('),source.indexOf('function localizedModelNote(')),context);
   for(const [id,models] of [['modelChips',IMAGE_MODELS],['videoModelChips',VIDEO_MODELS],['audioModelChips',AUDIO_MODELS]]) {
@@ -27,4 +27,17 @@ test('family dropdowns preserve expansion and model clicks, leaving non-model ch
   }
   const ratios=node('div','arChips');context.chipRow(ratios,['1:1','16:9'],'1:1',()=>{});
   assert.ok(ratios.children.every(child=>child.tag==='button'));
+
+  // Seedance lists the same model from three providers: every choice names its provider.
+  const video=node('div','videoModelChips');
+  context.chipRow(video,VIDEO_MODELS.map(m=>m.id),'nezhagate-seedance-2-5-special',()=>{},value=>VIDEO_MODELS.find(m=>m.id===value).name);
+  const seedance=video.children.find(child=>child.dataset.family==='Seedance');
+  const labels=seedance.children[1].children.map(chip=>chip.textContent);
+  assert.ok(labels.includes('Seedance 2.5 · BytePlus (oficial)'));
+  assert.ok(labels.includes('Seedance 2.5 Spicy · Siray'));
+  assert.ok(labels.includes('Seedance 2.5 Special · NezhaGate'));
+  assert.equal(seedance.children[0].textContent,'Seedance · Seedance 2.5 Special · NezhaGate');
+  // Families served by a single vendor keep their plain names.
+  const heygen=video.children.find(child=>child.dataset.family==='HeyGen');
+  assert.ok(heygen.children[1].children.every(chip=>!chip.textContent.includes('(oficial)')));
 });
