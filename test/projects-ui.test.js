@@ -25,7 +25,6 @@ test('Proyectos integra navegación, editor, tareas y asociación desde Assets',
 
   assert.match(server, /readJson\('projects\.json', \[\]\)/);
   assert.match(server, /\/api\\\/projects/);
-  assert.match(server, /'projects\.json', 'series\.json'/);
   assert.match(server, /updateJson\('projects\.json'/);
 });
 

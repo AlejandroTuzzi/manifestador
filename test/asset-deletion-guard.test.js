@@ -39,7 +39,7 @@ test('bulk deletion fails before unlink or metadata changes when any asset is pr
   assert.deepEqual(unlinked, ['uploads/free.png', 'uploads/linked.png']);
 });
 
-test('server guard reads all associations without applying visibility filters; cleanup uses the guard too', async () => {
+test('server guard reads all associations without applying visibility filters', async () => {
   const source = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
   const helpers = source.slice(source.indexOf('async function assetDeletionConflicts('), source.indexOf('async function updateJson('));
   const context = {
@@ -48,7 +48,6 @@ test('server guard reads all associations without applying visibility filters; c
     localizedServerError: code => Object.assign(new Error(code), { localizationCode: code })
   };
   await assert.rejects(vm.runInNewContext(`(async () => { ${helpers}; await assertAssetsDeletable(['uploads/hidden.png']); })()`, context), { status: 409, localizationCode: 'assetAssociatedDeletion' });
-  assert.match(source, /await assertAssetsDeletable\(plan\.deletable\.map/);
   assert.equal((source.match(/await assetDeletionConflicts\(\[key\]\)/g) || []).length, 2);
 });
 

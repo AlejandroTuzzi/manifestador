@@ -9,7 +9,7 @@ La elección se guarda en `config.json`. Español (`es`) es el idioma base y fal
 ## Convenciones obligatorias
 
 - Los textos nuevos visibles deben entrar mediante `tr('clave')` o atributos `data-i18n*`.
-- Las claves se agrupan por módulo: `assets.*`, `automation.*`, `errors.*`, etc.
+- Las claves se agrupan por módulo: `assets.*`, `subtitler.*`, `errors.*`, etc.
 - `public/locales/es.js` y `public/locales/en.js` deben tener exactamente las mismas claves.
 - No concatenar frases traducidas. Usar variables: `tr('assets.count', { count })`.
 - Fechas y números deben pasar por los helpers de `ManifestadorI18n`/`Intl`.
@@ -25,7 +25,7 @@ La elección se guarda en `config.json`. Español (`es`) es el idioma base y fal
 1. **Núcleo compartido** — completado: navegación, acceso, monitor global, selector de referencias, reproductor, lightbox y tareas largas.
 2. **Crear** — completado: estructura, modelos, referencias, validaciones, resultados, historial y herramientas auxiliares usan los catálogos compartidos.
 3. **Bibliotecas** — completado: Assets, Personajes, Locaciones/Objetos, Prompts, Vocabulario y Snippets.
-4. **Producción** — completado: Series, guiones, Automatizador, Subtitulador y Poser migrados.
+4. **Producción** — completado: Series, guiones, Subtitulador y Poser migrados.
 5. **Administración y cierre** — completado en código y pruebas automáticas; queda el recorrido visual bilingüe en un navegador disponible.
 
 ### 0. Infraestructura
@@ -70,43 +70,32 @@ La elección se guarda en `config.json`. Español (`es`) es el idioma base y fal
 ### 4. Series y guiones
 
 - [x] Biblioteca de series y metadatos.
-- [x] Editor, importación y generación de guiones.
+- [x] Editor y generación de guiones.
 - [x] Storyboard y asociación de Assets.
 - [x] Lectura de guion, navegación de escenas y planos.
-- [x] Exportaciones y mensajes de compatibilidad con Controversy Tracker.
 
-### 5. Automatizador
-
-- [x] Biblioteca y configuración general de proyectos.
-- [x] Bloques manuales y generadores Imagen, Assets, HeyGen, H3, Seedance y Omni.
-- [x] Estilos de título, subtítulos dinámicos y resaltados.
-- [x] Música, transiciones, efectos, máscaras y logos.
-- [x] Regeneraciones, montajes, limpieza y finalización.
-- [x] Monitor de tareas recuperables y mensajes después de F5.
-- [x] Confirmaciones destructivas y resúmenes de resultados.
-
-### 6. Subtitulador y Poser
+### 5. Subtitulador y Poser
 
 - [x] Proyectos, transcripción, corrección y exportación TXT/SRT.
 - [x] Animaciones Remotion, estilos y render final.
 - [x] Controles del Poser, huesos, cámaras, escenas y archivos `.pose`.
 
-### 7. Consumo y Configuración
+### 6. Consumo y Configuración
 
 - [x] Resumen, meses, unidades, tarifas y estimaciones de Consumo.
 - [x] Todos los campos, ayudas y pruebas de API en Configuración.
 - [x] OAuth de HeyGen, Photoshop, FFmpeg, ComfyUI y acceso.
 - [x] Controles NSFW y mensajes administrativos.
 
-### 8. Servidor y errores
+### 7. Servidor y errores
 
 - [x] Asignar códigos estables a validaciones y errores esperables.
 - [x] Traducir códigos en el cliente; conservar el mensaje original como fallback y diagnóstico.
 - [x] Separar errores mostrables de logs técnicos de proveedores.
 - [x] Localizar nombres de unidades y estados devueltos por la API.
-- [x] Revisar mensajes de trabajos en segundo plano y recuperación de automatizaciones.
+- [x] Revisar mensajes de trabajos en segundo plano y recuperación de tareas.
 
-### 9. Calidad y cierre
+### 8. Calidad y cierre
 
 - [x] Prueba automática que detecte claves faltantes en ambos catálogos y en sus usos literales actuales.
 - [x] Prueba que busque textos visibles sin migrar en HTML y renderizadores JS.
@@ -116,7 +105,6 @@ La elección se guarda en `config.json`. Español (`es`) es el idioma base y fal
 - [ ] Revisar desbordes a 1920, 1366, 1024 y móvil.
 - [ ] Revisar `title`, `placeholder`, `aria-label`, foco, hover, disabled y errores.
 - [x] Validar que los datos guardados sean idénticos al cambiar de idioma.
-- [x] Validar integración completa con Controversy Tracker en ambos idiomas.
 
 ## Definición de terminado por módulo
 

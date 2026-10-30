@@ -123,7 +123,7 @@ test('NezhaGate strings exist in both languages and the key field is in Settings
   assert.match(html, /data-service="nezhagate"/);
   for (const locale of ['es', 'en']) {
     const source = fs.readFileSync(new URL(`../public/locales/${locale}.js`, import.meta.url), 'utf8');
-    for (const key of ['nezhagate.notes', 'nezhagate.testOk', 'models.officialProvider', 'errors.nezhagateKey', 'errors.nezhagateContentPolicy', 'errors.nezhagateRetryable', 'errors.nezhagateFrames']) {
+    for (const key of ['nezhagate.notes', 'nezhagate.testOk', 'models.officialProvider', 'errors.nezhagateKey', 'errors.nezhagateContentPolicy', 'errors.nezhagateRetryable']) {
       assert.match(source, new RegExp(`"${key.replace('.', '\\.')}"`), `${locale}: ${key}`);
     }
   }

@@ -134,21 +134,6 @@ test('shared server pipeline bills output plus input once, saves history and doe
   await assert.rejects(context.runImageGeneration({ modelId: 'qwen-image-3.0-pro', prompt: 'Portrait' }), { localizationCode: 'qwenModeration' });
 });
 
-test('Automation passes its saved Qwen options through the same generation endpoint', async () => {
-  const source = read('public/app.js');
-  let request;
-  const context = vm.createContext({ state: { models: IMAGE_MODELS },
-    api: async (url, spec) => { request = { url, body: spec.body }; return { outputs: ['generated/qwen.png'] }; },
-    automationImageSettings: () => ({ resolution: '2K', aspectRatio: '9:16' })
-  });
-  vm.runInContext(source.slice(source.indexOf('async function generateAutomationImage('), source.indexOf('async function persistAutomationBlockOutput(')), context);
-  await context.generateAutomationImage({ config: { imageModelId: 'qwen-image-3.0-pro', qwenImage: { seed: 0, negativePrompt: 'blur' } } }, { prompt: 'Portrait', refs: ['uploads/a'] }, () => {});
-  assert.equal(request.url, '/api/generate/image');
-  assert.equal(request.body.qwenImage.seed, 0);
-  assert.equal(request.body.qwenImage.negativePrompt, 'blur');
-  assert.equal(request.body.refs.length, 1);
-});
-
 test('all provider errors and shared options are translated in both languages', () => {
   const catalogs = {};
   for (const locale of ['es', 'en']) vm.runInNewContext(read(`public/locales/${locale}.js`), {

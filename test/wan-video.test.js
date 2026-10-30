@@ -169,7 +169,6 @@ test('Wan model family, UI and error catalogs are available in both languages', 
   assert.equal(context.ManifestadorModelFamilies([getVideoModel('wan-3'), getVideoModel('wan-3-prime')])[0].name, 'Wan');
   assert.match(read('public/index.html'), /id="wanVideoControls" class="heygen-video-controls"/);
   assert.match(read('public/app.js'), /wanOptions: \{ seed:/);
-  assert.match(read('server.js'), /wan-block-tasks\.json/);
 });
 
 test('Wan connection check is GET-only and accurately reports its limited scope', async () => {

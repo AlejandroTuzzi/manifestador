@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { IMAGE_MODELS, VIDEO_MODELS } from '../lib/models.js';
-import { SIRAY_IMAGE_MODELS, SIRAY_VIDEO_MODELS, sirayAutomationModel } from '../lib/siray-models.js';
+import { SIRAY_IMAGE_MODELS, SIRAY_VIDEO_MODELS } from '../lib/siray-models.js';
 import { buildSirayRequest, generateSiray, sirayFetch } from '../lib/siray.js';
 import { testService } from '../lib/providers.js';
 const image = 'data:image/png;base64,aGVsbG8=';
 const ref = kind => ({ kind, path: kind === 'image' ? image : `data:${kind}/${kind === 'audio' ? 'wav' : 'mp4'};base64,aGVsbG8=` });
 const video = SIRAY_VIDEO_MODELS[0];
 const request = (model = video, extra = {}) => ({ model, prompt: 'A quiet landscape', resolution: model.resolutions[0], aspectRatio: model.aspectRatios[0], duration: model.durations?.[0], ...extra });
+const sirayVideo = id => SIRAY_VIDEO_MODELS.find(model => model.id === id);
 const json = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
 
 test('Seedream sends two distinct references in order using its i2i schema and completes the async flow', async () => {
@@ -163,7 +164,7 @@ test('Siray uses existing families and preserves defaults, with latest video ver
   assert.equal(IMAGE_MODELS[0].id, 'nano-banana-pro');
   assert.equal(SIRAY_VIDEO_MODELS.length, 4);
   assert.ok(SIRAY_VIDEO_MODELS.every(model => !/2-0|wan-2/.test(model.id)));
-  assert.equal(sirayAutomationModel('wan-prime').id, 'siray-wan-3-prime-spicy');
+  assert.equal(sirayVideo('siray-wan-3-prime-spicy').id, 'siray-wan-3-prime-spicy');
   const context = {};
   vm.runInNewContext(fs.readFileSync(new URL('../public/model-families.js', import.meta.url), 'utf8'), context);
   const groups = context.ManifestadorModelFamilies([...IMAGE_MODELS, ...VIDEO_MODELS]);
@@ -190,7 +191,7 @@ test('every video route uses the verified Siray schema for text, first image and
 });
 
 test('Seedance 2.5 first-frame routes require adaptive ratio without changing other modes or models', async () => {
-  const model = sirayAutomationModel('seedance25');
+  const model = sirayVideo('siray-seedance-2-5-spicy');
   for (const mode of ['first', 'frames']) {
     for (const aspectRatio of ['9:16', '16:9', '1:1', 'adaptive']) {
       const refs = Array.from({ length: mode === 'frames' ? 2 : 1 }, () => ref('image'));
@@ -207,9 +208,9 @@ test('Seedance 2.5 first-frame routes require adaptive ratio without changing ot
     const built = await buildSirayRequest(request(model, { mode: 'reference', mediaRefs, aspectRatio: '9:16' }));
     assert.equal(built.body.aspect_ratio, '9:16');
   }
-  for (const generator of ['wan', 'wan-prime']) {
+  for (const id of ['siray-wan-3-spicy', 'siray-wan-3-prime-spicy']) {
     for (const mode of ['first', 'frames']) {
-      const built = await buildSirayRequest(request(sirayAutomationModel(generator), { mode, aspectRatio: '9:16', mediaRefs: Array.from({ length: mode === 'frames' ? 2 : 1 }, () => ref('image')) }));
+      const built = await buildSirayRequest(request(sirayVideo(id), { mode, aspectRatio: '9:16', mediaRefs: Array.from({ length: mode === 'frames' ? 2 : 1 }, () => ref('image')) }));
       assert.equal(built.body.aspect_ratio, '9:16');
     }
   }
@@ -217,7 +218,7 @@ test('Seedance 2.5 first-frame routes require adaptive ratio without changing ot
 
 test('Seedance frame submission sends adaptive on its first POST, without retrying', async () => {
   let posts = 0;
-  await generateSiray({ ...request(sirayAutomationModel('seedance25'), { mode: 'first', aspectRatio: '9:16', mediaRefs: [ref('image')] }), apiKey: 'secret', fetchImpl: async (url, options) => {
+  await generateSiray({ ...request(sirayVideo('siray-seedance-2-5-spicy'), { mode: 'first', aspectRatio: '9:16', mediaRefs: [ref('image')] }), apiKey: 'secret', fetchImpl: async (url, options) => {
     if (options.method === 'POST') {
       posts++;
       assert.equal(JSON.parse(options.body).aspect_ratio, 'adaptive');
@@ -234,7 +235,7 @@ test('end frame is sent separately, and unsupported MiniMax end frames fail befo
   const built = await buildSirayRequest(request(video, { mode: 'frames', mediaRefs: [ref('image'), { kind: 'image', path: end }] }));
   assert.equal(built.body.image, image);
   assert.equal(built.body.end_image, end);
-  await assert.rejects(buildSirayRequest(request(sirayAutomationModel('h3'), { mode: 'frames', mediaRefs: [ref('image'), ref('image')] })), { localizationCode: 'sirayParameters' });
+  await assert.rejects(buildSirayRequest(request(sirayVideo('siray-minimax-h3-spicy'), { mode: 'frames', mediaRefs: [ref('image'), ref('image')] })), { localizationCode: 'sirayParameters' });
 });
 
 test('image references select edit APIs; Seedream sizes preserve aspect and Z-Image is text only', async () => {
@@ -255,15 +256,15 @@ test('invalid resolutions, reference overflow, Ark assets and fractional seeds a
   await assert.rejects(buildSirayRequest(request(video, { resolution: '4K' })), { localizationCode: 'sirayParameters' });
   await assert.rejects(buildSirayRequest(request(video, { mediaRefs: Array.from({ length: 31 }, () => ref('image')) })), { localizationCode: 'sirayReferences' });
   await assert.rejects(buildSirayRequest(request(video, { mediaRefs: [{ kind: 'image', path: 'asset://private' }] })), { localizationCode: 'sirayReferences' });
-  await assert.rejects(buildSirayRequest(request(sirayAutomationModel('wan'), { options: { seed: 1.5 } })), { localizationCode: 'sirayParameters' });
+  await assert.rejects(buildSirayRequest(request(sirayVideo('siray-wan-3-spicy'), { options: { seed: 1.5 } })), { localizationCode: 'sirayParameters' });
 });
 
 test('seed zero, audio off and prompt expansion off are preserved, unsupported flags are not sent', async () => {
-  const built = await buildSirayRequest(request(sirayAutomationModel('wan'), { audio: false, options: { seed: 0, prompt_expansion_enable: false } }));
+  const built = await buildSirayRequest(request(sirayVideo('siray-wan-3-spicy'), { audio: false, options: { seed: 0, prompt_expansion_enable: false } }));
   assert.equal(built.body.seed, 0);
   assert.equal(built.body.audio_enable, false);
   assert.equal(built.body.prompt_expansion_enable, false);
-  const h3 = await buildSirayRequest(request(sirayAutomationModel('h3'), { options: { seed: 0 } }));
+  const h3 = await buildSirayRequest(request(sirayVideo('siray-minimax-h3-spicy'), { options: { seed: 0 } }));
   assert.ok(!('seed' in h3.body));
   assert.ok(!('audio_enable' in h3.body));
 });
@@ -340,9 +341,6 @@ test('integration retains configuration, bilingual controls, separate keys and p
   const server = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
   const app = fs.readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(server, /siray-tasks\.json/);
-  assert.match(server, /siray-block-tasks\.json/);
-  assert.match(server, /videoProvider: b\.videoProvider === 'siray'/);
-  assert.match(app, /data-block-provider/);
   assert.match(app, /syncSirayGenerationJobs/);
   assert.match(server, /model\.durations \? '\.mp4'/);
 });

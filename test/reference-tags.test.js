@@ -52,7 +52,7 @@ test('disabled labels send original references without stamping; opt-in restores
   assert.equal(stamps.length, 1);
   context.state.referenceTagsEnabled = false;
   await context.buildLabeledRefs(refs);
-  assert.equal(stamps.length, 2, 'The automation/shared engine is not controlled by the creation checkbox');
+  assert.equal(stamps.length, 2, 'The shared labeling engine is not controlled by the creation checkbox');
 });
 
 test('toggle hides label badges and T controls without deleting names or references', () => {

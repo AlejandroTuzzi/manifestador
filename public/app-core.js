@@ -50,7 +50,7 @@ const state = {
   batch: 1,
   videoModels: [],
   video: {
-    modelId: null, mode: 'reference', aspectRatio: '16:9', resolution: '720p', duration: 5, audio: false,
+    modelId: null, mode: 'reference', aspectRatio: '16:9', resolution: '720p', duration: 5, audio: true,
     h3ContextIr: false, avoidMusic: true,
     omniPreviousInteractionId: '', omniSourceHistoryId: '', omniChainDepth: 0, omniCumulativeDuration: 0,
     heygenAuthMode: 'oauth', heygenCharacterId: '', heygenVoiceId: '', heygenMotionPrompt: '', heygenExpressiveness: 'low'
@@ -67,7 +67,6 @@ const state = {
   },
   comfyuiWorkflows: [],      // biblioteca de workflows guardados (nombre, descripción, ruta/url)
   comfyPickerSlot: null,    // slot de state.comfyui.refs que el picker va a llenar (null = flujo genérico)
-  transitionSounds: [],   // catálogo local, agrupado por las carpetas de public/sounds
   refs: [],              // [{ key, fromChar, label }]
   referenceTagsEnabled: (() => { try { return localStorage.getItem('manifestadorReferenceTags') === 'true'; } catch { return false; } })(),
   voiceId: '',
@@ -75,7 +74,6 @@ const state = {
   currentOutput: 0,
   assetsZone: 'generated',
   assetAudioKind: 'all',
-  audioUploadAutomationId: null,
   selectedAssets: new Set(),
   assetRange: { from: null, to: null },
   assetFilterCharacterId: '',
@@ -99,6 +97,7 @@ const state = {
   editingSeriesId: null,
   seriesDraftCharacterIds: new Set(),
   pendingSeriesAssetKey: null,
+  pendingSeriesCharacterId: null, // personaje que el modal de series está asociando
   scripts: [],
   scriptEditor: null,        // copia de trabajo del guion abierto en el editor
   scriptDirty: false,
@@ -121,12 +120,7 @@ const state = {
   scriptViewId: null,        // guion abierto en la vista de lectura "Ver guion"
   elements: [],              // locaciones y objetos
   elementLinks: [],
-  automations: [],           // proyectos del automatizador
   subtitler: null,           // video, transcripción editable y estilos del Subtitulador
-  openAutomationId: null,    // proyecto abierto en la vista de detalle
-  automationAssetPicker: null, // { blockElement, keys, originalKeys, zone, search }
-  costProjectId: '',         // proyecto elegido en la estimación de Consumo
-  overlayBgPick: false,      // el picker está eligiendo fondo de referencia del overlay
   editingElementId: null,
   elementKindFilter: '',
   elementCategoryFilter: '',
@@ -136,6 +130,7 @@ const state = {
   shotList: [],              // duraciones (s) de cada toma del armador de video
   editingCharId: null,
   pendingCharacterAsset: null,
+  pendingElementAsset: null,  // imagen que se copia como primera foto al crear una locación u objeto
   variantEditor: null,
   promptEditor: null,
   promptStyleImagePick: false,
@@ -237,16 +232,6 @@ function startUiTask(spec = {}) {
   return task.id;
 }
 
-function updateUiTask(taskId, patch = {}) {
-  const task = state.uiTasks.find((item) => item.id === taskId);
-  if (!task) return;
-  if (patch.title !== undefined) task.title = String(patch.title).slice(0, 100);
-  if (patch.detail !== undefined) task.detail = String(patch.detail).slice(0, 240);
-  if (patch.current !== undefined) task.current = Math.max(0, Number(patch.current) || 0);
-  if (patch.total !== undefined) task.total = Math.max(0, Number(patch.total) || 0);
-  renderTaskMonitor();
-}
-
 function finishUiTask(taskId, { error = '', detail = '' } = {}) {
   const task = state.uiTasks.find((item) => item.id === taskId);
   if (!task) return;
@@ -267,16 +252,11 @@ function inferredApiTask(path, method, body) {
   if (path === '/api/generate/video') return { title: tr('tasks.video.title'), detail: tr('tasks.video.detail') };
   if (path === '/api/generate/video/h3-regenerate-2k') return { title: tr('tasks.promote2k.title'), detail: tr('tasks.promote2k.detail') };
   if (path === '/api/generate/audio') return { title: tr('tasks.voice.title'), detail: tr('tasks.voice.detail') };
-  if (path === '/api/generate/music' || /\/music\/generate$/.test(path)) return { title: tr('tasks.music.title'), detail: tr('tasks.music.detail'), total: 2, current: 1 };
+  if (path === '/api/generate/music') return { title: tr('tasks.music.title'), detail: tr('tasks.music.detail'), total: 2, current: 1 };
   if (path === '/api/translate') return { title: tr('tasks.translate.title'), detail: tr('tasks.translate.detail') };
   if (path === '/api/vocabulary/analyze-image') return { title: tr('tasks.vocabulary.title'), detail: tr('tasks.vocabulary.detail') };
-  if (/\/automations\/[a-z0-9]+\/assemble$/.test(path)) return { title: tr('tasks.assemble.title'), detail: tr('tasks.assemble.detail') };
-  if (/\/automations\/[a-z0-9]+\/text-layer$/.test(path)) return { title: tr('tasks.textLayer.title'), detail: tr('tasks.textLayer.detail') };
   if (path === '/api/subtitler/transcribe') return { title: tr('tasks.transcribe.title'), detail: tr('tasks.transcribe.detail') };
   if (path === '/api/subtitler/render') return { title: tr('tasks.subtitles.title'), detail: tr('tasks.subtitles.detail') };
-  if (/\/automations\/[a-z0-9]+\/effect$/.test(path) && body?.textRefreshTarget) return { title: tr('tasks.masterText.title'), detail: tr('tasks.masterText.detail') };
-  if (/\/automations\/[a-z0-9]+\/effect$/.test(path)) return { title: tr('tasks.finalEffect.title'), detail: tr('tasks.finalEffect.detail') };
-  if (/\/automations\/[a-z0-9]+\/video$/.test(path)) return { title: tr('tasks.shot.title'), detail: tr('tasks.shot.detail') };
   if (/\/scripts\/[a-z0-9]+\/generate$/.test(path)) return { title: tr('tasks.script.title'), detail: tr('tasks.script.detail') };
   if (path === '/api/upload' || path === '/api/assets/audio') return { title: tr('tasks.asset.title'), detail: tr('tasks.asset.detail') };
   if (path === '/api/assets/zip') return { title: tr('tasks.download.title'), detail: tr('tasks.download.detail') };

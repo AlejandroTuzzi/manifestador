@@ -34,8 +34,7 @@ se conserva la versión local y no se sobrescriben notas, estrellas ni otros dat
 No es una sincronización que combine cambios. Se muestra el total importado,
 ya existente y omitido por NSFW. Los importadores de personajes y vocabulario
 usan el mismo criterio y siguen aceptando los ZIP anteriores sin identificadores.
-La protección también cubre los guiones JSON importados en series y automatizaciones;
-la importación de poses aplica la pose al modelo, sin crear otra ficha en la biblioteca.
+La importación de poses aplica la pose al modelo, sin crear otra ficha en la biblioteca.
 
 ## English
 
@@ -68,7 +67,6 @@ the category for vocabulary. Matching local records are kept; remote changes do 
 overwrite local notes, ratings or other fields. This is not change-merging sync.
 The result reports imported, already present and NSFW-skipped items. Character and
 vocabulary importers share this policy and remain compatible with older ZIP files.
-JSON script imports into series and automations also avoid matching duplicates.
 Pose imports apply a pose to the model without creating another library record.
 
 ## Maintenance

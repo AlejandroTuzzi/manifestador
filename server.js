@@ -30,7 +30,6 @@ import { spawn, execFile } from 'node:child_process';
 
 import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel, getAudioModel } from './lib/models.js';
 import { generateSiray, sirayError } from './lib/siray.js';
-import { sirayAutomationModel } from './lib/siray-models.js';
 import { generateNezhaGate, nezhagateError, nezhagateFetch, nezhagateClipPrice } from './lib/nezhagate.js';
 import { r2Settings, r2Put, r2Delete, r2SignedGetUrl, r2Check } from './lib/r2.js';
 import {
@@ -74,22 +73,13 @@ import {
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(ROOT, 'data');
 const PUBLIC_DIR = path.join(ROOT, 'public');
-const AUTOMATION_LOGO_DIR = path.join(PUBLIC_DIR, 'logos');
-const AUTOMATION_SOUND_DIR = path.join(PUBLIC_DIR, 'sounds');
-const AUTOMATION_LOGOS = {
-  horizontal: 'logo-controversy-tracker-horizontal.mp4',
-  vertical: 'logo-controversy-tracker-vertical.mp4'
-};
-const AUTOMATION_LOGO_FADE_SECONDS = 0.75;
 const PORT = process.env.PORT ? Number(process.env.PORT) : 7777;
 const sessions = new Map();
 const generationContext = new AsyncLocalStorage();
-const automationAssemblyJobs = new Set();
 const heygenOAuthStates = new Map();
 const comfyProgress = new Map(); // genId -> { current, total }
 const h3PromotionCoordinator = createH3PromotionCoordinator();
 const wanActiveJobs = new Set();
-const wanBlockJobs = new Set();
 const characterPhotoIdentity = createPhotoIdentityCache((key) => resolveAssetKey(key));
 
 // Se agrega automáticamente (sin mostrarse en la caja) cuando alguna
@@ -678,59 +668,6 @@ async function probeMediaDuration(ffmpegExecutable, mediaPath) {
   });
 }
 
-async function dominantVideoDimensions(ffmpegExecutable, videoPaths) {
-  const dimensions = (await Promise.all(
-    videoPaths.map((videoPath) => probeVideoDimensions(ffmpegExecutable, videoPath))
-  )).filter(Boolean);
-  if (!dimensions.length) return null;
-  const counts = new Map();
-  for (const item of dimensions) {
-    const key = `${item.width}x${item.height}`;
-    counts.set(key, (counts.get(key) || 0) + 1);
-  }
-  return dimensions.reduce((best, item) => {
-    const itemCount = counts.get(`${item.width}x${item.height}`) || 0;
-    const bestCount = counts.get(`${best.width}x${best.height}`) || 0;
-    return itemCount > bestCount ? item : best;
-  }, dimensions[0]);
-}
-
-function automationVideoDimensions(aspectRatio) {
-  const match = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(String(aspectRatio || '9:16'));
-  const ratioWidth = Number(match?.[1]) || 9;
-  const ratioHeight = Number(match?.[2]) || 16;
-  const even = (value) => Math.max(2, Math.round(value / 2) * 2);
-  if (ratioWidth >= ratioHeight) {
-    const height = 1080;
-    return { width: even(height * ratioWidth / ratioHeight), height };
-  }
-  const width = 1080;
-  return { width, height: even(width * ratioHeight / ratioWidth) };
-}
-
-const AUTOMATION_VIDEO_EFFECTS = Object.freeze({
-  wiggle: { name: 'Wiggle suave' },
-  oldFilm: { name: 'Cinta vieja' },
-  vhs: { name: 'VHS' }
-});
-
-function normalizeAutomationVideoEffect(saved = {}) {
-  const preset = Object.hasOwn(AUTOMATION_VIDEO_EFFECTS, saved?.preset) ? saved.preset : 'wiggle';
-  const enteredIntensity = Number(saved?.intensity);
-  const enteredMaskOpacity = Number(saved?.maskOpacity);
-  const maskColor = /^#[0-9a-f]{6}$/i.test(String(saved?.maskColor || ''))
-    ? String(saved.maskColor).toLowerCase()
-    : '#000000';
-  return {
-    enabled: saved?.enabled === true,
-    preset,
-    intensity: Number.isFinite(enteredIntensity) ? Math.max(0, Math.min(100, Math.round(enteredIntensity))) : 35,
-    maskEnabled: saved?.maskEnabled === true,
-    maskColor,
-    maskOpacity: Number.isFinite(enteredMaskOpacity) ? Math.max(0, Math.min(100, Math.round(enteredMaskOpacity))) : 10
-  };
-}
-
 async function validateMiniMaxH3Media(mediaRefs, ffmpegExecutable) {
   const limits = { image: 30, video: 50, audio: 15 };
   const allowed = {
@@ -862,115 +799,6 @@ async function probeHasAudioStream(ffmpegExecutable, mediaPath) {
       resolve(!error && String(stdout || '').trim() !== '');
     });
   });
-}
-
-function automationVideoMaskFilter(effect) {
-  const normalized = normalizeAutomationVideoEffect(effect);
-  if (!normalized.maskEnabled || normalized.maskOpacity <= 0) return '';
-  const color = normalized.maskColor.slice(1);
-  const opacity = (normalized.maskOpacity / 100).toFixed(3);
-  return `,drawbox=x=0:y=0:w=iw:h=ih:color=0x${color}@${opacity}:t=fill`;
-}
-
-// Devuelve una cadena de filtros que siempre conserva las dimensiones originales.
-// La intensidad se traduce a rangos deliberadamente moderados: 100% sigue siendo
-// utilizable para texto y rostros, pero deja el efecto claramente visible.
-function automationVideoEffectFilters(effect, width, height) {
-  const normalized = normalizeAutomationVideoEffect(effect);
-  const amount = normalized.intensity / 100;
-  if (normalized.intensity === 0) return 'setsar=1,format=yuv420p';
-  const even = (value) => Math.max(2, Math.round(value / 2) * 2);
-  const margin = even(Math.max(8, Math.min(width, height) * (0.012 + amount * 0.028)));
-  const scaledWidth = even(width + margin * 2);
-  const scaledHeight = even(height + margin * 2);
-
-  if (normalized.preset === 'oldFilm') {
-    const jitterX = (0.4 + amount * 2.8).toFixed(2);
-    const jitterY = (0.25 + amount * 1.8).toFixed(2);
-    const brightness = (0.004 + amount * 0.024).toFixed(4);
-    const noise = Math.round(3 + amount * 19);
-    const saturation = (0.9 - amount * 0.32).toFixed(3);
-    const contrast = (1.03 + amount * 0.18).toFixed(3);
-    const vignetteAngle = (Math.PI / (5.2 - amount * 1.7)).toFixed(4);
-    return [
-      `scale=${scaledWidth}:${scaledHeight}`,
-      `crop=${width}:${height}:x='(in_w-out_w)/2+${jitterX}*sin(2*PI*t*8.7)':y='(in_h-out_h)/2+${jitterY}*sin(2*PI*t*6.1)'`,
-      `eq=contrast=${contrast}:brightness='${brightness}*sin(2*PI*t*4.3)':saturation=${saturation}:eval=frame`,
-      `noise=alls=${noise}:allf=t+u`,
-      `vignette=angle=${vignetteAngle}`,
-      'setsar=1',
-      'format=yuv420p'
-    ].join(',');
-  }
-
-  if (normalized.preset === 'vhs') {
-    const jitterX = (1 + amount * 7).toFixed(2);
-    const jitterY = (0.3 + amount * 2.2).toFixed(2);
-    const channelShift = Math.max(1, Math.round(1 + amount * 8));
-    const noise = Math.round(2 + amount * 13);
-    const scanOpacity = (0.035 + amount * 0.13).toFixed(3);
-    const scanHeight = Math.max(3, Math.round(height / 180));
-    const saturation = (0.98 - amount * 0.22).toFixed(3);
-    const contrast = (1.01 + amount * 0.11).toFixed(3);
-    return [
-      `scale=${scaledWidth}:${scaledHeight}`,
-      `crop=${width}:${height}:x='(in_w-out_w)/2+${jitterX}*sin(2*PI*t*11.3)':y='(in_h-out_h)/2+${jitterY}*sin(2*PI*t*7.1)'`,
-      `rgbashift=rh=${channelShift}:bh=-${channelShift}:edge=smear`,
-      `eq=contrast=${contrast}:brightness=-0.008:saturation=${saturation}`,
-      `noise=alls=${noise}:allf=t+u`,
-      `drawgrid=w=iw:h=${scanHeight}:t=1:c=black@${scanOpacity}`,
-      'setsar=1',
-      'format=yuv420p'
-    ].join(',');
-  }
-
-  const angle = (0.0015 + amount * 0.011).toFixed(5);
-  const x = (0.5 + amount * 5.5).toFixed(2);
-  const y = (0.35 + amount * 3.8).toFixed(2);
-  const frequency = (0.55 + amount * 0.7).toFixed(2);
-  return [
-    `scale=${scaledWidth}:${scaledHeight}`,
-    `rotate='${angle}*sin(2*PI*t*${frequency})':ow=iw:oh=ih:c=black@0`,
-    `crop=${width}:${height}:x='(in_w-out_w)/2+${x}*sin(2*PI*t*1.17)':y='(in_h-out_h)/2+${y}*sin(2*PI*t*0.91)'`,
-    'setsar=1',
-    'format=yuv420p'
-  ].join(',');
-}
-
-function automationLogoForDimensions(width, height) {
-  const variant = height > width ? 'vertical' : 'horizontal';
-  return {
-    variant,
-    fileName: AUTOMATION_LOGOS[variant],
-    filePath: path.join(AUTOMATION_LOGO_DIR, AUTOMATION_LOGOS[variant])
-  };
-}
-
-const TRANSITION_SOUND_EXTENSIONS = new Set(['.wav', '.mp3', '.m4a', '.aac', '.ogg']);
-
-async function listTransitionSounds() {
-  const categories = (await fs.readdir(AUTOMATION_SOUND_DIR, { withFileTypes: true }).catch(() => []))
-    .filter((entry) => entry.isDirectory())
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const sounds = [];
-  for (const categoryEntry of categories) {
-    const category = categoryEntry.name;
-    const categoryDir = path.join(AUTOMATION_SOUND_DIR, category);
-    const files = (await fs.readdir(categoryDir, { withFileTypes: true }).catch(() => []))
-      .filter((entry) => entry.isFile() && TRANSITION_SOUND_EXTENSIONS.has(path.extname(entry.name).toLowerCase()))
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-    for (const file of files) {
-      const id = `${category}/${file.name}`;
-      sounds.push({
-        id,
-        category,
-        name: path.basename(file.name, path.extname(file.name)).replace(/[_-]+/g, ' '),
-        url: `/sounds/${[category, file.name].map(encodeURIComponent).join('/')}`,
-        filePath: path.join(categoryDir, file.name)
-      });
-    }
-  }
-  return sounds;
 }
 
 function sanitizeName(name) {
@@ -2048,55 +1876,6 @@ async function promoteMiniMaxH3To2K(historyId) {
   });
 }
 
-function captionWordsFromAlignment(alignment) {
-  const characters = Array.isArray(alignment?.characters) ? alignment.characters : [];
-  const starts = Array.isArray(alignment?.character_start_times_seconds) ? alignment.character_start_times_seconds : [];
-  const ends = Array.isArray(alignment?.character_end_times_seconds) ? alignment.character_end_times_seconds : [];
-  const length = Math.min(characters.length, starts.length, ends.length);
-  const words = [];
-  let current = null;
-  let insideTag = false;
-  const flush = () => {
-    if (!current?.text.trim()) { current = null; return; }
-    words.push({
-      text: current.text.trim(),
-      start: Number(Math.max(0, current.start).toFixed(3)),
-      end: Number(Math.max(current.start, current.end).toFixed(3))
-    });
-    current = null;
-  };
-  for (let index = 0; index < length; index++) {
-    const character = String(characters[index] ?? '');
-    if (character === '[') { flush(); insideTag = true; continue; }
-    if (insideTag) {
-      if (character === ']') insideTag = false;
-      continue;
-    }
-    if (/\s/u.test(character)) { flush(); continue; }
-    const start = Number(starts[index]);
-    const end = Number(ends[index]);
-    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
-    if (!current) current = { text: '', start, end };
-    current.text += character;
-    current.end = Math.max(current.end, end);
-  }
-  flush();
-  return words.slice(0, 2000);
-}
-
-function approximateCaptionWords(text, duration) {
-  const tokens = stripTags(text).split(/\s+/u).filter(Boolean).slice(0, 2000);
-  const totalDuration = Math.max(0.2, Number(duration) || 0.2);
-  const weights = tokens.map((token) => Math.max(1, token.replace(/[^\p{L}\p{N}]/gu, '').length));
-  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0) || 1;
-  let cursor = 0;
-  return tokens.map((token, index) => {
-    const start = cursor;
-    cursor += totalDuration * (weights[index] / totalWeight);
-    return { text: token, start: Number(start.toFixed(3)), end: Number(cursor.toFixed(3)) };
-  });
-}
-
 async function runAudioGeneration(req) {
   const cfg = await getConfig();
   const requestedText = String(req.text || '').trim();
@@ -2106,7 +1885,7 @@ async function runAudioGeneration(req) {
   // Eleven v3. En Multilingual v2 se quitan para que nunca se locuten.
   const text = model.supportsAudioTags ? requestedText : stripTags(requestedText);
   if (!text) throw new Error('El texto sólo contiene etiquetas de expresión; escribí algo para locutar.');
-  const { buffer, mime, alignment } = await generateSpeech({
+  const { buffer, mime } = await generateSpeech({
     apiKey: cfg.keys.elevenlabs,
     voiceId: req.voiceId,
     text,
@@ -2125,18 +1904,6 @@ async function runAudioGeneration(req) {
   let name = `${base}${ext}`;
   for (let n = 2; existing.has(name); n++) name = `${base}-${n}${ext}`;
   const key = await saveBuffer('audio', name, buffer);
-  const captionWords = captionWordsFromAlignment(alignment);
-  await updateJson('audio-captions.json', {}, (captions) => ({
-    ...captions,
-    [key]: {
-      audioKey: key,
-      text: stripTags(requestedText),
-      speechText: text,
-      source: captionWords.length ? 'elevenlabs-alignment' : 'unavailable',
-      words: captionWords,
-      ts: Date.now()
-    }
-  }));
 
   const pricing = await getPricing();
   const cost = audioPrice(pricing, text.length, model.id);
@@ -2157,7 +1924,6 @@ async function runAudioGeneration(req) {
     voiceName: req.voiceName || '',
     audioKind: 'voice',
     characterId: req.characterId || null,
-    captionTiming: { source: captionWords.length ? 'elevenlabs-alignment' : 'unavailable', wordCount: captionWords.length },
     outputs: [key],
     errors: [],
     cost: Number(cost.toFixed(6))
@@ -2247,36 +2013,6 @@ async function listZone(zone) {
   } catch {}
   entries.sort((a, b) => b.mtime - a.mtime);
   return entries;
-}
-
-function normalizedTagKey(value) {
-  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es').trim();
-}
-
-function musicMatchScore(required, candidate) {
-  const wanted = normalizeMusicTags(required);
-  const available = normalizeMusicTags(candidate);
-  const overlap = (left, right) => {
-    const set = new Set(right.map(normalizedTagKey));
-    return left.reduce((sum, tag) => sum + (set.has(normalizedTagKey(tag)) ? 1 : 0), 0);
-  };
-  return overlap(wanted.genres, available.genres) * 4
-    + overlap(wanted.moods, available.moods) * 3
-    + overlap(wanted.instruments, available.instruments) * 2;
-}
-
-async function findAutomaticMusicTrack(musicConfig) {
-  const [items, metadata] = await Promise.all([listZone('audio'), readJson('asset-metadata.json', {})]);
-  const candidates = items.map((item) => {
-    const meta = metadata[item.key] || {};
-    const kind = sanitizeAudioKind(meta.audioKind, meta.modelId === MUSIC_MODEL.id ? 'music' : 'voice');
-    return { ...item, ...meta, audioKind: kind, musicTags: normalizeMusicTags(meta.musicTags) };
-  }).filter((item) => item.audioKind === 'music');
-  if (!candidates.length) return null;
-  candidates.sort((a, b) => musicMatchScore(musicConfig, b.musicTags) - musicMatchScore(musicConfig, a.musicTags)
-    || b.mtime - a.mtime);
-  const selected = candidates[0];
-  return { key: selected.key, name: selected.name, score: musicMatchScore(musicConfig, selected.musicTags), musicTags: selected.musicTags };
 }
 
 function validateUploadedAudio(mime, buffer) {
@@ -2408,8 +2144,6 @@ function badRequest(message) {
 const SERVER_ERROR_CODE_BY_MESSAGE = new Map([
   ['Invalid route', 'ideasInvalid'],
   ['Hidden entry', 'ideasInvalid'],
-  ['No se pudo leer la imagen para etiquetarla', 'labelImageReadFailed'],
-  ['No se pudo leer la imagen para sobreimprimir el texto', 'overlayImageReadFailed'],
   ['Categoría de prompts no encontrada.', 'promptCategoryMissing'],
   ['Categoría de snippets no encontrada.', 'snippetCategoryMissing'],
   ['Categoría de vocabulario no encontrada.', 'vocabularyCategoryMissing'],
@@ -2472,14 +2206,6 @@ const SERVER_ERROR_CODE_BY_MESSAGE = new Map([
   ['La imagen del vocabulario no es válida.', 'vocabularyImageInvalid'],
   ['El vocabulario sólo admite imágenes PNG, JPG o WebP.', 'vocabularyImageFormat'],
   ['No encuentro la imagen elegida para el vocabulario.', 'vocabularyImageMissing'],
-  ['El guion debe ser un objeto JSON.', 'scriptObjectRequired'],
-  ['Este archivo es una cola de ComfyUI. Exportá “Guion para Manifestador” desde Controversy Tracker.', 'scriptComfyQueue'],
-  ['El JSON no contiene una lista blocks válida.', 'scriptBlocksInvalid'],
-  ['El contrato no contiene un proyecto válido.', 'contractProjectInvalid'],
-  ['El contrato no contiene un identificador de guion.', 'contractScriptIdMissing'],
-  ['El contrato no contiene requirements.', 'contractRequirementsMissing'],
-  ['El guion para Manifestador no contiene bloques.', 'scriptBlocksEmpty'],
-  ['Un mismo rol no puede declararse como más de un tipo de ficha.', 'scriptRoleDuplicate'],
   ['Faltan el tipo o el nombre de la categoría.', 'categoryTypeNameRequired'],
   ['Faltan la categoría actual o el nombre nuevo.', 'categoryRenameRequired'],
   ['Falta la categoría que querés borrar.', 'categoryDeleteRequired'],
@@ -2498,12 +2224,7 @@ const SERVER_ERROR_CODE_BY_MESSAGE = new Map([
   ['El audio supera el límite de 100 MB.', 'audioUploadSize'],
   ['No se indicó ningún asset.', 'assetKeysRequired'],
   ['Demasiados assets en una sola operación.', 'assetBatchTooLarge'],
-  ['Ese JSON no parece un guion exportado de Hookcast.', 'hookcastScriptInvalid'],
   ['Escribí un brief de la historia para generar el guion.', 'scriptBriefRequired'],
-  ['Cada bloque debe conservar al menos un texto y, salvo que use Assets, un prompt visual.', 'blockContentRequired'],
-  ['HeyGen subió el audio, pero no devolvió asset_id.', 'heygenAudioUploadId'],
-  ['HeyGen aceptó el audio, pero no devolvió video_id.', 'heygenAudioVideoId'],
-  ['No se pudieron preparar todos los planos HeyGen.', 'heygenShotsFailed'],
   ['Ese asset no es un audio.', 'assetNotAudio'],
   ['Elegí al menos una imagen o video para clasificar.', 'assetClassifyRequired'],
   ['Ese asset no se puede renombrar.', 'assetRenameUnsupported'],
@@ -2566,60 +2287,22 @@ const SERVER_ERROR_CODE_BY_MESSAGE = new Map([
   ['HeyGen no pudo generar el video.', 'heygenGenerationFailed'],
   ['Gemini no pudo procesar el video subido.', 'geminiUploadFailed'],
   ['Gemini Omni no pudo preparar el video generado.', 'omniOutputFailed'],
-  ['ComfyUI falló al ejecutar el workflow.', 'comfyExecutionFailedEmpty'],
-  ['MiniMax H3 terminó sin prompt enriquecido.', 'h3PromptEmpty'],
-  ['MiniMax H3 terminó sin URL de video.', 'h3VideoUrlEmpty'],
-  ['Cada video de referencia H3 debe durar entre 2 y 15 segundos.', 'h3RefDurationvideo'],
-  ['Cada video de referencia de Seedance 2.5 debe durar entre 2 y 30 segundos.', 'seedance25RefDurationvideo'],
-  ['Cada audio de referencia H3 debe durar entre 2 y 15 segundos.', 'h3RefDurationaudio'],
-  ['Cada audio de referencia de Seedance 2.5 debe durar entre 2 y 30 segundos.', 'seedance25RefDurationaudio'],
-  ['Editar necesita un video de origen o continuar una generación Omni desde el historial.', 'omniSourceRequiredEditing'],
-  ['Editar necesita un video de origen o una generación Omni elegida desde el historial.', 'omniSourceHistoryEditing'],
-  ['Extender necesita un video de origen o continuar una generación Omni desde el historial.', 'omniSourceRequiredExtension'],
-  ['Extender necesita un video de origen o una generación Omni elegida desde el historial.', 'omniSourceHistoryExtension'],
   ['Abrí Manifestador con localhost o 127.0.0.1 para conectar HeyGen OAuth.', 'heygenOAuthUseLocalhost'],
   ['Acceso bloqueado', 'accessBlocked'],
-  ['Bloque no encontrado.', 'automationBlockNotFound'],
   ['Clave incorrecta', 'accessPasswordIncorrect'],
   ['Configurá la ruta de Photoshop en Configuración (o usá "Detectar").', 'photoshopPathRequired'],
   ['El archivo no parece contener una fuente válida.', 'fontFileInvalid'],
-  ['El ensamble final no es un video válido.', 'automationFinalVideoInvalid'],
   ['El orden no coincide con las fotos', 'photoOrderMismatch'],
-  ['El proyecto fue eliminado durante el ensamble.', 'automationDeletedDuringAssembly'],
-  ['El proyecto fue eliminado durante la posproducción.', 'automationDeletedDuringPostProduction'],
-  ['El proyecto no tiene bloques para ensamblar.', 'automationNoBlocksToAssemble'],
-  ['El proyecto no tiene tomas para procesar.', 'automationNoShotsToProcess'],
-  ['El proyecto todavía no tiene una versión con efectos para actualizar.', 'automationEffectsVersionMissing'],
-  ['El sonido de transición elegido ya no está disponible. Elegí otro en el panel Automatizar.', 'automationTransitionSoundUnavailable'],
-  ['Elegí al menos una imagen o video para este bloque.', 'automationAssetsRequired'],
   ['Elegí un workflow guardado.', 'comfyWorkflowRequired'],
   ['Elegí una imagen válida para analizar.', 'analysisImageRequired'],
-  ['Elegí, subí o generá una música antes del ensamble.', 'automationMusicRequired'],
-  ['Este bloque no está configurado para usar Assets.', 'automationBlockNotAssets'],
-  ['Este bloque no está configurado para video generativo.', 'automationBlockNotGenerativeVideo'],
-  ['Este proyecto no tiene texto dinámico activo.', 'automationDynamicTextDisabled'],
-  ['Este proyecto ya tiene un ensamble en curso. Esperá a que termine antes de iniciarlo otra vez.', 'automationAssemblyAlreadyRunning'],
-  ['Este proyecto ya tiene una posproducción en curso. Esperá a que termine.', 'automationPostProductionAlreadyRunning'],
   ['Estilo no encontrado.', 'overlayStyleNotFound'],
-  ['Falta el audio del bloque.', 'automationBlockAudioMissing'],
-  ['Falta el audio narrado del bloque.', 'automationNarratedAudioMissing'],
-  ['Falta la API key de BytePlus ModelArk en Configuración.', 'arkApiKeyMissing'],
-  ['Falta la API key de Gemini en Configuración.', 'geminiApiKeyMissing'],
-  ['Falta la API key de MiniMax en Configuración.', 'minimaxApiKeyMissing'],
-  ['Falta la capa estática de títulos y subtítulos.', 'automationTextLayerMissing'],
-  ['Falta la imagen del bloque.', 'automationBlockImageMissing'],
-  ['Falta la narración del bloque.', 'automationNarrationMissing'],
   ['Falta la ruta (URL) del workflow.', 'comfyWorkflowPathMissing'],
   ['Ficha de vocabulario no encontrada.', 'vocabularyEntryNotFound'],
   ['Formato no admitido. Usá TTF, OTF, WOFF o WOFF2.', 'fontFormatUnsupported'],
   ['Fuente no encontrada.', 'fontNotFound'],
   ['Guion no encontrado', 'scriptNotFound'],
   ['La fuente está vacía o supera el límite de 25 MB.', 'fontSizeInvalid'],
-  ['La integración con Controversy Tracker sólo admite conexiones locales.', 'controversyTrackerLocalOnly'],
   ['Locación u objeto no encontrado', 'elementNotFound'],
-  ['Locación u objeto no encontrado.', 'elementNotFound'],
-  ['La música está en automático, pero no hay pistas clasificadas como Música en Assets.', 'automationAutomaticMusicMissing'],
-  ['La narración no contiene audio utilizable.', 'automationNarrationUnusable'],
   ['Los estilos necesitan una imagen de referencia.', 'styleReferenceRequired'],
   ['Los LoRA necesitan al menos una trigger word o un caso de uso.', 'loraTriggerOrUseCaseRequired'],
   ['Los LoRA necesitan el nombre del archivo.', 'loraFileNameRequired'],
@@ -2634,27 +2317,15 @@ const SERVER_ERROR_CODE_BY_MESSAGE = new Map([
   ['Cuerpo demasiado grande', 'requestBodyTooLarge'],
   ['JSON inválido', 'invalidJson'],
   ['No encontrado', 'notFound'],
-  ['No encuentro el ensamble final. Volvé a ensamblarlo.', 'automationFinalAssemblyMissing'],
-  ['No encuentro el sonido de transición elegido.', 'automationTransitionSoundMissing'],
-  ['No encuentro la música elegida. Seleccioná otra pista.', 'automationSelectedMusicMissing'],
   ['No encuentro Photoshop en la ruta configurada. Revisala en Configuración.', 'photoshopConfiguredPathMissing'],
-  ['No encuentro uno o más Assets seleccionados.', 'automationSelectedAssetsMissing'],
-  ['No pude calcular la duración de los bloques para preparar el ensamble. Verificá que ffprobe esté junto a ffmpeg.', 'automationBlockDurationsUnreadable'],
-  ['No pude calcular la duración de todas las tomas. Verificá que ffprobe esté junto a ffmpeg.', 'automationShotDurationsUnreadable'],
-  ['No pude calcular la duración de todos los audios del bloque.', 'automationBlockAudioDurationUnreadable'],
-  ['No pude calcular la duración de todos los audios.', 'automationAudioDurationUnreadable'],
-  ['No pude leer la duración del ensamble. Verificá que ffprobe esté junto a ffmpeg.', 'automationAssemblyDurationUnreadable'],
-  ['No pude leer la duración del sonido de transición. Verificá el archivo de audio.', 'automationTransitionDurationUnreadable'],
   ['Nombre de fuente inválido.', 'fontNameInvalid'],
   ['Personaje no encontrado', 'characterNotFound'],
   ['Personaje no encontrado.', 'characterNotFound'],
   ['Por seguridad, HeyGen OAuth sólo se inicia desde localhost.', 'heygenOAuthLocalOnly'],
   ['Pose no encontrada', 'poseNotFound'],
-  ['Primero ensamblá el video final limpio.', 'automationCleanAssemblyRequired'],
   ['Prompt no encontrado', 'promptNotFound'],
-  ['Proyecto no encontrado', 'automationProjectNotFound'],
-  ['Proyecto no encontrado.', 'automationProjectNotFound'],
-  ['Remotion no devolvió la nueva capa de texto.', 'remotionTextLayerMissing'],
+  ['Proyecto no encontrado', 'projectNotFound'],
+  ['Proyecto no encontrado.', 'projectNotFound'],
   ['Ruta de fuente inválida.', 'fontPathInvalid'],
   ['Ruta no encontrada', 'routeNotFound'],
   ['Serie no encontrada', 'seriesNotFound'],
@@ -2663,7 +2334,18 @@ const SERVER_ERROR_CODE_BY_MESSAGE = new Map([
   ['Falta la API key de ElevenLabs en Configuración.', 'elevenLabsKeyMissing'],
   ['Snippet no encontrado.', 'snippetNotFound'],
   ['Workflow no encontrado.', 'comfyWorkflowNotFound'],
-  ['Ya existe una versión con efectos; la actualización de textos debe aplicarse solamente sobre esa versión.', 'automationTextRefreshEffectsOnly']
+  ['ComfyUI falló al ejecutar el workflow.', 'comfyExecutionFailedEmpty'],
+  ['MiniMax H3 terminó sin prompt enriquecido.', 'h3PromptEmpty'],
+  ['MiniMax H3 terminó sin URL de video.', 'h3VideoUrlEmpty'],
+  ['Cada video de referencia H3 debe durar entre 2 y 15 segundos.', 'h3RefDurationvideo'],
+  ['Cada video de referencia de Seedance 2.5 debe durar entre 2 y 30 segundos.', 'seedance25RefDurationvideo'],
+  ['Cada audio de referencia H3 debe durar entre 2 y 15 segundos.', 'h3RefDurationaudio'],
+  ['Cada audio de referencia de Seedance 2.5 debe durar entre 2 y 30 segundos.', 'seedance25RefDurationaudio'],
+  ['Editar necesita un video de origen o continuar una generación Omni desde el historial.', 'omniSourceRequiredEditing'],
+  ['Editar necesita un video de origen o una generación Omni elegida desde el historial.', 'omniSourceHistoryEditing'],
+  ['Extender necesita un video de origen o continuar una generación Omni desde el historial.', 'omniSourceRequiredExtension'],
+  ['Extender necesita un video de origen o una generación Omni elegida desde el historial.', 'omniSourceHistoryExtension'],
+  ['Locación u objeto no encontrado.', 'elementNotFound']
 ]);
 // LOCALIZED_SERVER_ERRORS_END
 
@@ -2742,7 +2424,7 @@ const STATIC_MIME = {
 };
 
 // ---------------------------------------------------------------------------
-// Guiones — mismo modelo que Hookcast (escenas → planos → acciones/diálogos)
+// Guiones de series (escenas → planos → acciones/diálogos)
 // ---------------------------------------------------------------------------
 
 const SCRIPT_FORMATS = ['Vertical 9:16', 'Horizontal 16:9', 'Square 1:1'];
@@ -2751,29 +2433,6 @@ const SCRIPT_LENSES = ['Wide angle', 'Normal', 'Telephoto'];
 const SCRIPT_SIZES = ['Extreme wide', 'Wide', 'Full', 'Medium', 'Medium close-up', 'Close-up', 'Extreme close-up', 'Insert'];
 const LEGACY_SCRIPT_TIMES = { Amanecer: 'Dawn', 'Día': 'Day', Tarde: 'Afternoon', Noche: 'Night' };
 const LEGACY_SCRIPT_LENSES = { 'Gran angular': 'Wide angle', Tele: 'Telephoto' };
-
-// Escena tal como viene de Hookcast (con posibles campos viejos: slugline
-// suelto o description/dialogues sin planos) → forma canónica con shots.
-function hookcastScene(scene) {
-  let { intExt, location, timeOfDay } = scene;
-  if (!location && !intExt && scene.slugline) {
-    const m = /^\s*(INT|EXT)\.?\s*(.*?)\s*(?:[—–-]+\s*(.+?)\s*)?$/i.exec(scene.slugline);
-    const raw = (m?.[3] || '').toLowerCase();
-    timeOfDay = raw.includes('noche') || raw.includes('night') ? 'Night'
-      : raw.includes('tarde') || raw.includes('afternoon') || raw.includes('evening') || raw.includes('dusk') ? 'Afternoon'
-      : raw.includes('amanecer') || raw.includes('dawn') || raw.includes('sunrise') ? 'Dawn' : 'Day';
-    intExt = m?.[1]?.toUpperCase() === 'EXT' ? 'EXT' : 'INT';
-    location = m ? m[2] : scene.slugline;
-  }
-  let shots = scene.shots;
-  if (!Array.isArray(shots)) {
-    const items = [];
-    if (scene.description) items.push({ kind: 'action', character: '', text: scene.description });
-    for (const d of scene.dialogues || []) items.push({ kind: 'dialogue', character: d.character || '', text: d.line || '' });
-    shots = [{ size: 'Medium', lens: scene.lens || 'Normal', camera: scene.camera || '', items }];
-  }
-  return { ...scene, intExt, location, timeOfDay, shots };
-}
 
 function sanitizeScriptScenes(scenes) {
   return (Array.isArray(scenes) ? scenes : []).slice(0, 100).map((scene) => ({
@@ -2808,12 +2467,9 @@ function sanitizeScriptScenes(scenes) {
 }
 
 // ---------------------------------------------------------------------------
-// Automatizador: proyectos con guion propio (bloques prompt+texto), asignación
-// de roles a personajes/locaciones/objetos, y config de imagen/voz/texto.
-// El guion llega de Controversy Tracker como JSON con roles en MAYÚSCULAS.
+// Estilos de texto del Subtitulador (subtítulos, resaltado y título), también
+// guardados como presets reutilizables. Los interpreta el motor Remotion.
 // ---------------------------------------------------------------------------
-
-const AUTOMATION_CONTRACT = 'manifestador-production@1';
 
 const DEFAULT_OVERLAY = {
   font: 'sans-serif',
@@ -2849,8 +2505,6 @@ const DEFAULT_OVERLAY = {
 
 const DEFAULT_TITLE_OVERLAY = {
   enabled: false,
-  mode: 'block',
-  blockId: '',
   text: '',
   font: 'sans-serif',
   fontSizePx: 96,
@@ -2879,7 +2533,7 @@ const DEFAULT_DYNAMIC_TEXT = {
   wordsPerPage: 5
 };
 
-function normalizeAutomationDynamicText(saved = {}) {
+function normalizeDynamicText(saved = {}) {
   const dynamic = { ...DEFAULT_DYNAMIC_TEXT, ...(saved || {}) };
   dynamic.enabled = dynamic.enabled === true;
   dynamic.titleAnimation = ['rise', 'slam', 'typewriter'].includes(dynamic.titleAnimation) ? dynamic.titleAnimation : DEFAULT_DYNAMIC_TEXT.titleAnimation;
@@ -2888,7 +2542,7 @@ function normalizeAutomationDynamicText(saved = {}) {
   return dynamic;
 }
 
-function normalizeAutomationOverlay(saved = {}) {
+function normalizeTextOverlay(saved = {}) {
   const overlay = { ...DEFAULT_OVERLAY, ...(saved || {}) };
   // Migración desde las unidades antiguas: 1% de un lienzo de referencia de
   // 1080 px equivale a 10,8 px. Conserva la apariencia pero muestra cifras
@@ -2919,12 +2573,11 @@ function normalizeAutomationOverlay(saved = {}) {
   return overlay;
 }
 
-function normalizeAutomationTitleOverlay(saved = {}, blocks = [], fallbackText = '') {
-  const title = { ...DEFAULT_TITLE_OVERLAY, ...(saved || {}) };
-  const blockIds = (blocks || []).map((block) => String(block.id));
+function normalizeTitleOverlay(saved = {}, fallbackText = '') {
+  // mode y blockId son campos de versiones anteriores, ya sin uso.
+  const { mode, blockId, ...stored } = saved || {};
+  const title = { ...DEFAULT_TITLE_OVERLAY, ...stored };
   title.enabled = title.enabled === true;
-  title.mode = ['block', 'project'].includes(title.mode) ? title.mode : 'block';
-  title.blockId = blockIds.includes(String(title.blockId || '')) ? String(title.blockId) : (blockIds[0] || '');
   title.text = String(title.text || fallbackText || '').trim().slice(0, 300);
   title.font = String(title.font || DEFAULT_TITLE_OVERLAY.font).slice(0, 160);
   title.fontSizePx = Math.max(8, Math.min(300, Number(title.fontSizePx) || DEFAULT_TITLE_OVERLAY.fontSizePx));
@@ -2947,106 +2600,6 @@ function normalizeAutomationTitleOverlay(saved = {}, blocks = [], fallbackText =
   return title;
 }
 
-function automationTitleRenderSignature(saved = {}, blocks = [], fallbackText = '') {
-  const normalized = normalizeAutomationTitleOverlay(saved, blocks, fallbackText);
-  if (!normalized.enabled) return JSON.stringify({ enabled: false });
-  if (normalized.mode === 'block') {
-    delete normalized.blockId;
-    delete normalized.text;
-  }
-  return JSON.stringify(normalized);
-}
-
-function automationOverlayRenderSignature(saved = {}) {
-  const normalized = normalizeAutomationOverlay(saved);
-  delete normalized.previewBg;
-  return JSON.stringify(normalized);
-}
-
-function automationDynamicTextRenderSignature(saved = {}) {
-  return JSON.stringify(normalizeAutomationDynamicText(saved));
-}
-
-function invalidateAutomationOutput(output = {}, { image = false, text = false, audio = false, video = false } = {}) {
-  const next = { ...(output || {}) };
-  if (image) {
-    delete next.imageKey;
-    delete next.imageModelId;
-    delete next.imageModelName;
-    delete next.fallbackUsed;
-    delete next.recoveredImage;
-    text = true;
-  }
-  if (text) {
-    delete next.textImageKey;
-    delete next.textLayerKey;
-    delete next.motionOverlayKey;
-  }
-  if (audio) {
-    delete next.audioKeys;
-    delete next.audioCountExpected;
-  }
-  if (image || text || audio || video) {
-    delete next.videoKey;
-    delete next.completedAt;
-  }
-  // Un cambio puramente visual (tipografía, animación o título) puede volver a
-  // componer localmente los planos HeyGen ya pagados. Sólo una imagen o un
-  // audio nuevo invalida esos segmentos de origen.
-  if (image || audio) {
-    delete next.heygenSegmentVideoKeys;
-    delete next.h3SegmentVideoKeys;
-    delete next.h3SegmentDurations;
-    delete next.heygenFraming;
-    delete next.generator;
-  }
-  return next;
-}
-
-// La voz del narrador es del proyecto; los diálogos usan la voz del personaje
-// asignado (si tiene), con la del narrador como respaldo.
-const DEFAULT_AUTOMATION_CONFIG = {
-  imageModelId: 'seedream-5-pro',
-  fallbackImageModelId: 'firered-image-edit-1-1',
-  artStyle: 'Photorealistic cinematic realism, natural human anatomy, realistic skin and materials, restrained color grading, consistent lighting and lens language',
-  artStylePromptId: '',
-  artStyleImageKey: '',
-  aspectRatio: '9:16',
-  resolution: '2K',
-  narratorVoiceId: '',
-  narratorVoiceName: '',
-  audioModelId: AUDIO_MODEL.id,
-  heygenAuthMode: 'key',
-  includeLogos: false,
-  videoEffect: {
-    enabled: false,
-    preset: 'wiggle',
-    intensity: 35,
-    maskEnabled: false,
-    maskColor: '#000000',
-    maskOpacity: 10
-  },
-  transitionSound: {
-    enabled: false,
-    soundId: ''
-  },
-  music: {
-    enabled: false,
-    source: 'asset',       // asset | auto | suno
-    assetKey: '',
-    genres: [],
-    instruments: [],
-    moods: [],
-    gainDb: -15,
-    fadeOut: false,
-    fadeOutSeconds: 5,
-    sunoModel: MUSIC_MODEL.defaultVersion
-  },
-  overlay: { ...DEFAULT_OVERLAY },
-  titleOverlay: { ...DEFAULT_TITLE_OVERLAY },
-  dynamicText: { ...DEFAULT_DYNAMIC_TEXT }
-};
-
 const DEFAULT_SUBTITLER_PROJECT = {
   id: '',
   name: 'Proyecto de subtítulos',
@@ -3058,7 +2611,7 @@ const DEFAULT_SUBTITLER_PROJECT = {
   lines: [],
   config: {
     overlay: { ...DEFAULT_OVERLAY },
-    titleOverlay: { ...DEFAULT_TITLE_OVERLAY, mode: 'project' },
+    titleOverlay: { ...DEFAULT_TITLE_OVERLAY },
     dynamicText: { ...DEFAULT_DYNAMIC_TEXT, enabled: true }
   },
   outputs: [],
@@ -3118,9 +2671,9 @@ function normalizeSubtitlerProject(saved = {}, index = 0) {
     } : null,
     lines: (Array.isArray(saved.lines) ? saved.lines : []).slice(0, 10000).map(normalizeSubtitleLine).filter((line) => line.text),
     config: {
-      overlay: normalizeAutomationOverlay(saved.config?.overlay),
-      titleOverlay: normalizeAutomationTitleOverlay(saved.config?.titleOverlay, [], saved.config?.titleOverlay?.text || ''),
-      dynamicText: normalizeAutomationDynamicText({ enabled: true, ...(saved.config?.dynamicText || {}) })
+      overlay: normalizeTextOverlay(saved.config?.overlay),
+      titleOverlay: normalizeTitleOverlay(saved.config?.titleOverlay, saved.config?.titleOverlay?.text || ''),
+      dynamicText: normalizeDynamicText({ enabled: true, ...(saved.config?.dynamicText || {}) })
     },
     outputs: (Array.isArray(saved.outputs) ? saved.outputs : []).filter((item) => /^video\//.test(String(item?.videoKey || ''))).slice(0, 20),
     createdAt: Number(saved.createdAt) || Number(saved.updatedAt) || 0,
@@ -3297,55 +2850,7 @@ async function transcribeSubtitleAudio({ apiKey, audioPath, languageCode = '', n
   return result;
 }
 
-function normalizeAutomationMusic(saved = {}, requirement = {}) {
-  const requiredTags = normalizeMusicTags(requirement);
-  const music = {
-    ...DEFAULT_AUTOMATION_CONFIG.music,
-    ...(saved || {})
-  };
-  music.enabled = music.enabled === true;
-  music.source = ['asset', 'auto', 'suno'].includes(music.source) ? music.source : 'asset';
-  music.assetKey = /^audio\//.test(String(music.assetKey || '')) ? String(music.assetKey) : '';
-  music.genres = sanitizeMusicTagList(music.genres?.length ? music.genres : requiredTags.genres);
-  music.instruments = sanitizeMusicTagList(music.instruments?.length ? music.instruments : requiredTags.instruments);
-  music.moods = sanitizeMusicTagList(music.moods?.length ? music.moods : requiredTags.moods);
-  const savedGainDb = Number(saved?.gainDb);
-  const legacyVolumePct = Number(saved?.volumePct);
-  const migratedGainDb = Number.isFinite(legacyVolumePct)
-    ? (legacyVolumePct <= 0 ? -60 : 20 * Math.log10(Math.min(100, legacyVolumePct) / 100))
-    : DEFAULT_AUTOMATION_CONFIG.music.gainDb;
-  music.gainDb = Math.max(-60, Math.min(0, Number.isFinite(savedGainDb) ? savedGainDb : migratedGainDb));
-  delete music.volumePct;
-  music.fadeOut = music.fadeOut === true;
-  const fadeOutSeconds = Number(music.fadeOutSeconds);
-  music.fadeOutSeconds = Number.isFinite(fadeOutSeconds)
-    ? Math.max(0.25, Math.min(30, fadeOutSeconds))
-    : DEFAULT_AUTOMATION_CONFIG.music.fadeOutSeconds;
-  music.sunoModel = MUSIC_MODEL.versions.includes(music.sunoModel) ? music.sunoModel : MUSIC_MODEL.defaultVersion;
-  return music;
-}
-
-function normalizeAutomationTransitionSound(saved = {}) {
-  return {
-    enabled: saved?.enabled === true,
-    soundId: String(saved?.soundId || '').trim().slice(0, 300)
-  };
-}
-
 const stripTags = (s) => String(s || '').replace(/\[[^\]]*\]/g, '').replace(/\s+/g, ' ').trim();
-const roleId = (r) => String(r || '').trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
-
-function automationAudioText(text) {
-  const clean = String(text || '').trim();
-  let tag = '';
-  if (/[!¡]/.test(clean) && clean === clean.toUpperCase()) tag = '[shouting]';
-  else if (/[!¡]/.test(clean)) tag = '[excited]';
-  else if (/\?/.test(clean)) tag = '[curious]';
-  else if (/\.\.\.$|…$/.test(clean)) tag = '[sighs]';
-  else if (/(triste|llor|adiós|adios|perdón|perdon|muerte)/i.test(clean)) tag = '[sad]';
-  else if (/(nunca|jamás|jamas|odio|basta|traición|traicion)/i.test(clean)) tag = '[angry]';
-  return tag ? `${tag} ${clean}` : clean;
-}
 
 function rgbaFromHex(hex, opacity) {
   const normalized = /^#[0-9a-f]{6}$/i.test(String(hex || '')) ? String(hex).slice(1) : '000000';
@@ -3372,66 +2877,13 @@ async function remotionFontFaces(families) {
   return faces;
 }
 
-async function automationCaptionTimeline({ audioKeys, audioPaths, ffmpegExecutable, textHints = [] }) {
-  const [savedCaptions, history] = await Promise.all([
-    readJson('audio-captions.json', {}),
-    readJson('history.json', [])
-  ]);
-  const nextCaptions = { ...savedCaptions };
-  const words = [];
-  let offset = 0;
-  let changed = false;
-  for (let index = 0; index < audioKeys.length; index++) {
-    const key = audioKeys[index];
-    const duration = await probeMediaDuration(ffmpegExecutable, audioPaths[index]);
-    if (!duration) continue;
-    const saved = savedCaptions[key];
-    let localWords = Array.isArray(saved?.words) ? saved.words : [];
-    if (!localWords.length) {
-      const historyEntry = history.find((entry) => Array.isArray(entry.outputs) && entry.outputs.includes(key));
-      const fallbackText = historyEntry?.speechText || historyEntry?.prompt || textHints[index] || '';
-      localWords = approximateCaptionWords(fallbackText, duration);
-      nextCaptions[key] = {
-        audioKey: key,
-        text: stripTags(fallbackText),
-        speechText: fallbackText,
-        source: 'estimated-from-duration',
-        words: localWords,
-        ts: Date.now()
-      };
-      changed = true;
-    }
-    for (const word of localWords) {
-      const start = Math.max(0, Math.min(duration, Number(word.start) || 0));
-      const end = Math.max(start, Math.min(duration, Number(word.end) || start));
-      if (!String(word.text || '').trim()) continue;
-      words.push({
-        text: String(word.text).trim(),
-        start: Number((offset + start).toFixed(3)),
-        end: Number((offset + end).toFixed(3))
-      });
-    }
-    offset += duration;
-  }
-  if (changed) await writeJson('audio-captions.json', nextCaptions);
-  return { words, duration: offset };
-}
-
-function automationTitleText(project, block) {
-  const title = normalizeAutomationTitleOverlay(project.config?.titleOverlay, project.blocks, project.integration?.scriptTitle || project.name);
-  if (!title.enabled) return { text: '', config: title };
-  if (title.mode === 'block') return { text: String(block.title || ''), config: title };
-  if (String(title.blockId || '') !== String(block.id || '')) return { text: '', config: title };
-  return { text: title.text || project.integration?.scriptTitle || project.name, config: title };
-}
-
 async function renderSubtitleMotionOverlay({
   dynamicText, overlay: savedOverlay, titleOverlay: savedTitle, titleText = '', timeline,
   duration, width, height, outDir, fileLabel = 'subtitulos', metadata: assetMetadata = {}
 }) {
-  const dynamic = normalizeAutomationDynamicText(dynamicText);
-  const overlay = normalizeAutomationOverlay(savedOverlay);
-  const title = normalizeAutomationTitleOverlay(savedTitle, [], titleText);
+  const dynamic = normalizeDynamicText(dynamicText);
+  const overlay = normalizeTextOverlay(savedOverlay);
+  const title = normalizeTitleOverlay(savedTitle, titleText);
   const renderDuration = Number(duration) || Number(timeline?.duration) || 0;
   if (!renderDuration) throw new Error('No pude calcular la duración para los subtítulos.');
   const scale = height / 1080;
@@ -3514,438 +2966,12 @@ async function renderSubtitleMotionOverlay({
   return { key, path: outputPath, duration: renderDuration, wordCount: (timeline?.words || []).length };
 }
 
-async function renderAutomationMotionOverlay({ project, block, audioKeys, audioPaths, ffmpegExecutable, width, height, outDir, textHints = [] }) {
-  const dynamic = normalizeAutomationDynamicText(project.config?.dynamicText);
-  if (!dynamic.enabled) return null;
-  const timeline = await automationCaptionTimeline({ audioKeys, audioPaths, ffmpegExecutable, textHints });
-  const duration = timeline.duration || await Promise.all(audioPaths.map((audioPath) => probeMediaDuration(ffmpegExecutable, audioPath)))
-    .then((items) => items.reduce((sum, item) => sum + (item || 0), 0));
-  const { text: titleText, config: title } = automationTitleText(project, block);
-  return renderSubtitleMotionOverlay({
-    dynamicText: dynamic,
-    overlay: project.config?.overlay,
-    titleOverlay: title,
-    titleText,
-    timeline,
-    duration,
-    width,
-    height,
-    outDir,
-    fileLabel: `auto-${block.title || block.id}`,
-    metadata: {
-      category: `Auto: ${project.name}`.slice(0, 80), automationId: project.id, blockId: block.id,
-      autoKind: 'dynamic-text-overlay'
-    }
-  });
-}
-
-function automationProjectCostEstimate(project, pricing, assetMetadata) {
-  const imageModelId = String(project.config?.imageModelId || '');
-  const imageModel = getImageModel(imageModelId);
-  const modelName = imageModel?.name || imageModelId || 'Modelo sin definir';
-  const configuredResolution = String(project.config?.resolution || 'auto');
-  const blockResolution = imageModel?.resolutions.includes(configuredResolution)
-    ? configuredResolution
-    : (imageModel?.resolutions[0] || configuredResolution);
-  const resourceResolution = imageModel
-    ? (imageModel.resolutions.includes('2K') ? '2K'
-      : imageModel.resolutions.includes('4K') ? '4K'
-      : imageModel.resolutions[0])
-    : blockResolution;
-  const resourceImages =
-    (project.requirements?.characters?.length || 0) +
-    (project.requirements?.locations?.length || 0) +
-    (project.requirements?.objects?.length || 0);
-  const blockImages = (project.blocks || []).filter((block) => block.generator === 'image'
-    || (['h3', 'wan', 'wan-prime'].includes(block.generator) && block.h3Mode !== 'frames')
-    || (block.generator === 'seedance25' && block.seedance25Mode !== 'frames')
-    || (block.generator === 'omni' && block.omniMode !== 'frames')).length;
-  const audioModel = getAudioModel(project.config?.audioModelId);
-  const audioTexts = (project.blocks || []).flatMap((block) =>
-    (block.items || []).map((item) => audioModel.supportsAudioTags ? automationAudioText(item.text) : stripTags(item.text)).filter(Boolean)
-  );
-  const audioCharacters = audioTexts.reduce((sum, text) => sum + text.length, 0);
-  const resourceImageCost = resourceImages * imagePrice(pricing, imageModelId, resourceResolution);
-  const blockImageCost = blockImages * imagePrice(pricing, imageModelId, blockResolution);
-  const audioCost = audioPrice(pricing, audioCharacters, audioModel.id);
-  const music = normalizeAutomationMusic(project.config?.music, project.requirements?.music);
-  const generatedMusicTracks = music.enabled && music.source === 'suno' ? 2 : 0;
-  const generatedMusicCost = generatedMusicTracks * musicPrice(pricing);
-  const h3Blocks = (project.blocks || []).filter((block) => ['h3','heygen-scene'].includes(block.generator));
-  let h3EstimatedSeconds = 0;
-  for (const block of h3Blocks) {
-    const approximate = Number(block.estimatedDuration) > 0
-      ? Number(block.estimatedDuration)
-      : Math.max(1, (block.items || []).reduce((sum, item) => sum + String(item.text || '').length, 0) / 14);
-    let remaining = approximate;
-    while (remaining > 0.001) {
-      const chunk = Math.min(15, remaining);
-      h3EstimatedSeconds += Math.max(4, Math.ceil(chunk));
-      remaining -= chunk;
-    }
-  }
-  const h3ResolutionCosts = h3Blocks.reduce((sum, block) => {
-    const approximate = Number(block.estimatedDuration) > 0
-      ? Number(block.estimatedDuration)
-      : Math.max(1, (block.items || []).reduce((total, item) => total + String(item.text || '').length, 0) / 14);
-    let billedSeconds = 0;
-    for (let remaining = approximate; remaining > 0.001; remaining -= Math.min(15, remaining)) {
-      billedSeconds += Math.max(block.generator === 'heygen-scene' || block.videoProvider === 'siray' ? 5 : 4, Math.ceil(Math.min(15, remaining)));
-    }
-    if (block.videoProvider === 'siray') return sum + billedSeconds * videoPrice(pricing, 'siray-minimax-h3-spicy', block.sirayResolution || '768p');
-    if(block.generator === 'heygen-scene') return sum + billedSeconds * videoPrice(pricing,'heygen-video-1',block.h3Resolution || '768p');
-    return sum + billedSeconds * videoPrice(pricing, 'minimax-h3', block.h3Resolution === '2K' ? '2K' : '768P');
-  }, 0);
-  const seedance25Blocks = (project.blocks || []).filter((block) => block.generator === 'seedance25');
-  let seedance25EstimatedSeconds = 0;
-  const seedance25VideoCost = seedance25Blocks.reduce((sum, block) => {
-    const approximate = Number(block.estimatedDuration) > 0
-      ? Number(block.estimatedDuration)
-      : Math.max(1, (block.items || []).reduce((total, item) => total + String(item.text || '').length, 0) / 14);
-    let billedSeconds = 0;
-    for (let remaining = approximate; remaining > 0.001; remaining -= Math.min(30, remaining)) {
-      billedSeconds += Math.max(4, Math.ceil(Math.min(30, remaining)));
-    }
-    seedance25EstimatedSeconds += billedSeconds;
-    if (block.videoProvider === 'nezhagate') {
-      const clips = Math.max(1, Math.ceil(approximate / 30));
-      return sum + clips * nezhagateClipPrice(pricing, 'nezhagate-seedance-2-5-special', block.seedance25UseNarrationReference !== false);
-    }
-    if (block.videoProvider === 'siray') return sum + billedSeconds * videoPrice(pricing, 'siray-seedance-2-5-spicy', block.sirayResolution || '480p');
-    return sum + billedSeconds * videoPrice(pricing, 'seedance-2-5', block.seedance25Resolution === '480p' ? '480p' : '720p');
-  }, 0);
-  const omniBlocks = (project.blocks || []).filter((block) => block.generator === 'omni');
-  let omniEstimatedSeconds = 0;
-  const omniVideoCost = omniBlocks.reduce((sum, block) => {
-    const approximate = Number(block.estimatedDuration) > 0
-      ? Number(block.estimatedDuration)
-      : Math.max(1, (block.items || []).reduce((total, item) => total + String(item.text || '').length, 0) / 14);
-    let billedSeconds = 0;
-    for (let remaining = approximate; remaining > 0.001; remaining -= Math.min(10, remaining)) {
-      billedSeconds += Math.max(3, Math.ceil(Math.min(10, remaining)));
-    }
-    omniEstimatedSeconds += billedSeconds;
-    const resolution = ['360p', '720p', '1080p', '4K'].includes(block.omniResolution) ? block.omniResolution : '720p';
-    return sum + billedSeconds * videoPrice(pricing, 'gemini-omni-1-1-flash', resolution);
-  }, 0);
-  const wanBlocks = (project.blocks || []).filter(block => ['wan', 'wan-prime'].includes(block.generator));
-  let wanEstimatedSeconds = 0;
-  const wanVideoCost = wanBlocks.reduce((sum, block) => {
-    const approximate = Number(block.estimatedDuration) || Math.max(1, (block.items || []).reduce((n, item) => n + String(item.text || '').length, 0) / 14);
-    let seconds = 0;
-    const spicy = block.videoProvider === 'siray';
-    const estimatedInput = (block.h3ReferenceKeys || []).some(key => key.startsWith('video/')) ? (spicy ? 5 : 15) : 0;
-    const chunkLimit = spicy ? 30 : 15;
-    for (let left = approximate; left > 0.001; left -= Math.min(chunkLimit, left)) seconds += Math.max(2, Math.ceil(Math.min(chunkLimit, left))) + estimatedInput;
-    wanEstimatedSeconds += seconds;
-    if (spicy) return sum + seconds * videoPrice(pricing, sirayAutomationModel(block.generator).id, block.sirayResolution || '480p');
-    return sum + seconds * videoPrice(pricing, block.generator === 'wan-prime' ? 'wan-3-prime' : 'wan-3', block.h3Resolution || '720P');
-  }, 0);
-  const estimatedTotal = wanVideoCost + resourceImageCost + blockImageCost + audioCost + generatedMusicCost
-    + h3ResolutionCosts + seedance25VideoCost + omniVideoCost;
-
-  const linkedMetadata = Object.values(assetMetadata || {}).filter((metadata) =>
-    metadata?.automationId === project.id
-  );
-  const spent = linkedMetadata.reduce((sum, metadata) => sum + (Number(metadata.cost) || 0), 0);
-  return {
-    id: project.id,
-    name: project.name,
-    ts: project.ts,
-    updatedAt: project.updatedAt,
-    modelId: imageModelId,
-    modelName,
-    aspectRatio: project.config?.aspectRatio || '',
-    resolution: blockResolution,
-    estimatedTotal: Number(estimatedTotal.toFixed(6)),
-    spent: Number(spent.toFixed(6)),
-    breakdown: {
-      resourceImages,
-      resourceResolution,
-      resourceImageCost: Number(resourceImageCost.toFixed(6)),
-      blockImages,
-      blockResolution,
-      blockImageCost: Number(blockImageCost.toFixed(6)),
-      wanBlocks: wanBlocks.length, wanEstimatedSeconds, wanVideoCost: Number(wanVideoCost.toFixed(6)),
-      h3Blocks: h3Blocks.length,
-      h3EstimatedSeconds,
-      h3VideoCost: Number(h3ResolutionCosts.toFixed(6)),
-      seedance25Blocks: seedance25Blocks.length,
-      seedance25EstimatedSeconds,
-      seedance25VideoCost: Number(seedance25VideoCost.toFixed(6)),
-      omniBlocks: omniBlocks.length,
-      omniEstimatedSeconds,
-      omniVideoCost: Number(omniVideoCost.toFixed(6)),
-      audioItems: audioTexts.length,
-      audioCharacters,
-      audioModelId: audioModel.id,
-      audioModelName: audioModel.name,
-      audioCost: Number(audioCost.toFixed(6)),
-      musicEnabled: music.enabled,
-      musicSource: music.source,
-      generatedMusicTracks,
-      musicCost: Number(generatedMusicCost.toFixed(6)),
-      localVideoCost: 0
-    }
-  };
-}
-
-function normalizeAutomationGeneratedCharacters(saved = {}, requirements = []) {
-  const allowedRoles = new Set((requirements || []).map((item) => roleId(item.role)).filter(Boolean));
-  const source = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
-  return Object.fromEntries(Object.entries(source).flatMap(([rawRole, raw]) => {
-    const role = roleId(rawRole);
-    if (!role || !allowedRoles.has(role) || !raw || typeof raw !== 'object') return [];
-    const assetKey = String(raw.assetKey || raw.sheet || '').trim();
-    if (!/^(generated|uploads)\/[\w./ -]+$/i.test(assetKey) || assetKey.includes('..')) return [];
-    return [[role, {
-      id: `automation-character:${role}`,
-      role,
-      name: String(raw.name || role).trim().slice(0, 120) || role,
-      description: String(raw.description || '').slice(0, 1600),
-      clothing: String(raw.clothing || '').slice(0, 800),
-      assetKey,
-      sheet: assetKey,
-      photos: [assetKey],
-      voiceId: String(raw.voiceId || '').slice(0, 200),
-      voiceName: String(raw.voiceName || '').slice(0, 200),
-      modelId: String(raw.modelId || '').slice(0, 120),
-      generatedAt: Number(raw.generatedAt) || Date.now()
-    }]];
-  }));
-}
-
-// normaliza un proyecto (importado o editado); conserva lo previo (asignaciones,
-// config, outputs) al re-guardar
-function sanitizeAutomation(src, prev = {}) {
-  const reqList = (arr, withVoice) => (Array.isArray(arr) ? arr : []).slice(0, 50).map((x) => {
-    const role = roleId(x.role);
-    if (!role) return null;
-    const o = { role, description: String(x.description || '').slice(0, 800) };
-    if (withVoice) {
-      o.clothing = String(x.clothing || '').slice(0, 800);
-      o.voice = String(x.voice || '').slice(0, 400);
-    }
-    return o;
-  }).filter(Boolean);
-
-  const requirements = {
-    characters: reqList(src.requirements?.characters, true),
-    locations: reqList(src.requirements?.locations, false),
-    objects: reqList(src.requirements?.objects, false),
-    music: normalizeMusicTags(src.requirements?.music || src.music || src.script?.music || src.project?.music || prev.requirements?.music || {})
-  };
-
-  const blocks = (Array.isArray(src.blocks) ? src.blocks : []).slice(0, 500).map((b, i) => {
-    // items: narración (voz del narrador) o diálogo (voz del personaje). El
-    // texto llega LIMPIO de Controversy Tracker; los tags de emoción para el
-    // audio y los highlights los agrega el automatizador. Compatible con los
-    // items de los guiones de series (kind + character + text).
-    const raw = Array.isArray(b.items) ? b.items : Array.isArray(b.segments) ? b.segments : null;
-    let items;
-    if (raw) {
-      items = raw.slice(0, 60).map((it) => ({
-        kind: (/^dialog/i.test(it.kind) || it.character) ? 'dialogue' : 'narration',
-        character: roleId(it.character),
-        text: stripTags(String(it.text || '')).slice(0, 2000)
-      })).filter((it) => it.text);
-    } else {
-      const t = stripTags(String(b.narration ?? b.text ?? b.caption ?? '')).slice(0, 4000);
-      items = t ? [{ kind: 'narration', character: '', text: t }] : [];
-    }
-    const characters = [...new Set([
-      ...(Array.isArray(b.characters) ? b.characters : []).map(roleId),
-      ...items.filter((it) => it.kind === 'dialogue').map((it) => it.character)
-    ].filter(Boolean))];
-    return {
-      id: String(b.id || `b${i + 1}`).slice(0, 40),
-      title: String(b.title || `Bloque ${i + 1}`).slice(0, 160),
-      imagePrompt: String(b.imagePrompt ?? b.prompt ?? '').slice(0, 4000),
-      negativePrompt: String(b.negativePrompt || '').slice(0, 2000),
-      items,
-      characters,
-      location: roleId(b.location),
-      prop: roleId(b.prop),
-      sourceReferences: [...new Set((Array.isArray(b.sourceReferences) ? b.sourceReferences : []).map(String))].slice(0, 20),
-      sourceQuote: String(b.sourceQuote || '').slice(0, 4000),
-      quoteReference: String(b.quoteReference || '').slice(0, 80),
-      estimatedDuration: Math.max(0, Math.min(3600, Number(b.estimatedDuration) || 0)),
-      generator: ['image', 'heygen', 'assets', 'h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(b.generator) ? b.generator : 'image',
-      videoProvider: b.videoProvider === 'siray' && sirayAutomationModel(b.generator) ? 'siray' : b.videoProvider === 'nezhagate' && b.generator === 'seedance25' ? 'nezhagate' : 'official',
-      sirayResolution: sirayAutomationModel(b.generator)?.resolutions.includes(b.sirayResolution) ? b.sirayResolution : sirayAutomationModel(b.generator)?.resolutions[0] || '',
-      heygenCharacterId: /^[a-z0-9]+$/.test(String(b.heygenCharacterId || '')) ? String(b.heygenCharacterId) : '',
-      heygenFraming: ['wide', 'close', 'split'].includes(b.heygenFraming) ? b.heygenFraming : 'wide',
-      assetKeys: normalizeAutomationAssetKeys(b.assetKeys),
-      assetMuteOriginal: b.assetMuteOriginal !== false,
-      h3Mode: b.h3Mode === 'frames' ? 'frames' : 'reference',
-      h3Resolution: b.generator === 'heygen-scene' ? (['480p','768p','1080p','2k'].includes(b.h3Resolution)?b.h3Resolution:'768p') : ['wan', 'wan-prime'].includes(b.generator) ? (['480P', '720P', '1080P'].includes(b.h3Resolution) ? b.h3Resolution : '720P') : b.h3Resolution === '2K' ? '2K' : '768P',
-      h3ContextIr: b.h3ContextIr === true,
-      h3UseNarrationReference: b.h3UseNarrationReference !== false,
-      h3KeepGeneratedAudio: b.h3KeepGeneratedAudio === true,
-      h3ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.h3ReferenceKeys, b.videoProvider === 'siray' ? sirayAutomationModel(b.generator)?.maxRefs || 12 : ['wan', 'wan-prime'].includes(b.generator) ? 20 : 12),
-      seedance25Mode: b.seedance25Mode === 'frames' ? 'frames' : 'reference',
-      seedance25Resolution: b.seedance25Resolution === '480p' ? '480p' : '720p',
-      seedance25UseNarrationReference: b.seedance25UseNarrationReference !== false,
-      seedance25KeepGeneratedAudio: b.seedance25KeepGeneratedAudio === true,
-      seedance25ReferenceKeys: normalizeAutomationH3ReferenceKeys(b.seedance25ReferenceKeys, b.videoProvider === 'siray' ? 50 : b.videoProvider === 'nezhagate' ? 40 : 12),
-      omniMode: b.omniMode === 'frames' ? 'frames' : 'reference',
-      omniResolution: ['360p', '720p', '1080p', '4K'].includes(b.omniResolution) ? b.omniResolution : '720p',
-      omniReferenceKeys: normalizeAutomationH3ReferenceKeys(b.omniReferenceKeys)
-    };
-  });
-
-  const projectData = src.project && typeof src.project === 'object' ? src.project : null;
-  const scriptData = src.script && typeof src.script === 'object' ? src.script : null;
-  return {
-    id: prev.id || newId(),
-    name: String(projectData?.name ?? src.project ?? src.name ?? prev.name ?? 'Proyecto').trim().slice(0, 120) || 'Proyecto',
-    requirements,
-    blocks,
-    generatedCharacters: normalizeAutomationGeneratedCharacters(prev.generatedCharacters || src.generatedCharacters, requirements.characters),
-    assignments: prev.assignments || { characters: {}, locations: {}, objects: {} },
-    config: {
-      ...DEFAULT_AUTOMATION_CONFIG,
-      ...(prev.config || {}),
-      artStyle: String(prev.config?.artStyle || DEFAULT_AUTOMATION_CONFIG.artStyle).slice(0, 1200),
-      artStylePromptId: String(prev.config?.artStylePromptId || '').slice(0, 80),
-      artStyleImageKey: normalizeStyleImageKey(prev.config?.artStyleImageKey),
-      audioModelId: getAudioModel(prev.config?.audioModelId).id,
-      heygenAuthMode: prev.config?.heygenAuthMode === 'oauth' ? 'oauth' : 'key',
-      includeLogos: prev.config?.includeLogos === true,
-      videoEffect: normalizeAutomationVideoEffect(prev.config?.videoEffect),
-      dynamicText: normalizeAutomationDynamicText(prev.config?.dynamicText),
-      transitionSound: normalizeAutomationTransitionSound(prev.config?.transitionSound),
-      music: normalizeAutomationMusic(prev.config?.music, requirements.music),
-      overlay: normalizeAutomationOverlay(prev.config?.overlay),
-      titleOverlay: normalizeAutomationTitleOverlay(
-        prev.config?.titleOverlay,
-        blocks,
-        scriptData?.title || projectData?.name || src.name || prev.name
-      )
-    },
-    outputs: prev.outputs || {},
-    finalOutput: prev.finalOutput || null,
-    effectOutput: prev.effectOutput || null,
-    integration: src.schema === AUTOMATION_CONTRACT ? {
-      contract: AUTOMATION_CONTRACT,
-      source: String(projectData?.source || 'controversy-tracker').slice(0, 80),
-      externalProjectId: String(projectData?.id || '').slice(0, 120),
-      externalScriptId: String(scriptData?.id || '').slice(0, 120),
-      sourceUrl: String(projectData?.sourceUrl || '').slice(0, 2000),
-      generatedAt: String(src.generatedAt || ''),
-      scriptTitle: String(scriptData?.title || '').slice(0, 160),
-      premise: String(scriptData?.premise || '').slice(0, 4000),
-      conclusion: String(scriptData?.conclusion || '').slice(0, 4000)
-    } : prev.integration,
-    ts: prev.ts || Date.now(),
-    updatedAt: Date.now()
-  };
-}
-
-function automationForClient(project) {
-  return {
-    ...project,
-    config: {
-      ...project.config,
-      heygenAuthMode: project.config?.heygenAuthMode === 'oauth' ? 'oauth' : 'key',
-      includeLogos: project.config?.includeLogos === true,
-      videoEffect: normalizeAutomationVideoEffect(project.config?.videoEffect),
-      dynamicText: normalizeAutomationDynamicText(project.config?.dynamicText),
-      audioModelId: getAudioModel(project.config?.audioModelId).id,
-      transitionSound: normalizeAutomationTransitionSound(project.config?.transitionSound),
-      music: normalizeAutomationMusic(project.config?.music, project.requirements?.music),
-      overlay: normalizeAutomationOverlay(project.config?.overlay),
-      titleOverlay: normalizeAutomationTitleOverlay(
-        project.config?.titleOverlay,
-        project.blocks,
-        project.integration?.scriptTitle || project.name
-      )
-    }
-  };
-}
-
-const AUTOMATION_CLEANUP_REFERENCE_FILES = [
-  'asset-links.json', 'element-links.json', 'projects.json', 'series.json', 'scripts.json',
-  'characters.json', 'elements.json', 'prompts.json', 'overlay-presets.json',
-  'subtitler.json'
-];
-
-function isCleanupAssetKey(value) {
-  const key = String(value || '');
-  return /^(generated|uploads|audio|video)\//.test(key)
-    && key.length <= 700
-    && !key.includes('..')
-    && !key.includes('\\')
-    && !/[\x00-\x1f]/.test(key);
-}
-
-function collectStoredAssetKeys(value, target = new Set()) {
-  if (typeof value === 'string') {
-    if (isCleanupAssetKey(value)) target.add(value);
-    return target;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) collectStoredAssetKeys(item, target);
-    return target;
-  }
-  if (value && typeof value === 'object') {
-    for (const item of Object.values(value)) collectStoredAssetKeys(item, target);
-  }
-  return target;
-}
-
-async function automationCleanupPlan(projectId) {
-  const [automations, metadata, ...referenceDocuments] = await Promise.all([
-    readJson('automations.json', []),
-    readJson('asset-metadata.json', {}),
-    ...AUTOMATION_CLEANUP_REFERENCE_FILES.map((file) => readJson(file, []))
-  ]);
-  const project = automations.find((item) => item.id === projectId);
-  if (!project) return null;
-
-  // Lo que el proyecto todavía referencia es material vigente: imágenes
-  // limpias, capas, audios, tomas, planos HeyGen, música y masters finales.
-  const activeKeys = collectStoredAssetKeys(project);
-  // También se preserva cualquier resultado que el usuario haya reutilizado
-  // en otro proyecto, serie, guion, personaje, elemento, prompt o preset.
-  const sharedKeys = new Set();
-  for (const other of automations) if (other.id !== projectId) collectStoredAssetKeys(other, sharedKeys);
-  for (const document of referenceDocuments) collectStoredAssetKeys(document, sharedKeys);
-
-  const candidates = Object.entries(metadata)
-    .filter(([key, item]) => isCleanupAssetKey(key) && String(item?.automationId || '') === projectId)
-    .map(([key, item]) => ({ key, metadata: item || {} }));
-  const deletable = candidates.filter((item) => !activeKeys.has(item.key) && !sharedKeys.has(item.key));
-  let deleteBytes = 0;
-  for (const item of deletable) {
-    const stat = await fs.stat(await resolveAssetKey(item.key)).catch(() => null);
-    item.bytes = stat?.isFile() ? stat.size : 0;
-    deleteBytes += item.bytes;
-  }
-  const byType = {};
-  for (const item of deletable) {
-    const type = item.key.split('/')[0];
-    byType[type] = (byType[type] || 0) + 1;
-  }
-  return {
-    project,
-    candidates,
-    deletable,
-    activeCount: candidates.filter((item) => activeKeys.has(item.key)).length,
-    sharedCount: candidates.filter((item) => !activeKeys.has(item.key) && sharedKeys.has(item.key)).length,
-    deleteBytes,
-    byType
-  };
-}
-
 function sanitizeOverlayPreset(body = {}, previous = {}) {
-  const overlay = normalizeAutomationOverlay(body.overlay || previous.overlay || {});
+  const overlay = normalizeTextOverlay(body.overlay || previous.overlay || {});
   delete overlay.previewBg;
-  const titleOverlay = normalizeAutomationTitleOverlay(body.titleOverlay || previous.titleOverlay || {}, [], '');
-  const dynamicText = normalizeAutomationDynamicText(body.dynamicText || previous.dynamicText || {});
+  const titleOverlay = normalizeTitleOverlay(body.titleOverlay || previous.titleOverlay || {}, '');
+  const dynamicText = normalizeDynamicText(body.dynamicText || previous.dynamicText || {});
   delete titleOverlay.enabled;
-  delete titleOverlay.mode;
-  delete titleOverlay.blockId;
   delete titleOverlay.text;
   return {
     id: previous.id || newId(),
@@ -4061,95 +3087,6 @@ function normalizeLoraData(value) {
     useCases,
     usageInfo: String(source.usageInfo || '').trim().slice(0, 3000)
   };
-}
-
-function normalizeAutomationAssetKeys(value) {
-  const seen = new Set();
-  return (Array.isArray(value) ? value : []).map((item) => String(item || '').trim()).filter((key) => {
-    if (!/^(generated|uploads|video)\//i.test(key) || key.length > 500 || key.includes('..')
-      || key.includes('\\') || /[\x00-\x1f]/.test(key) || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).slice(0, 60);
-}
-
-function normalizeAutomationH3ReferenceKeys(value, limit = 12) {
-  const seen = new Set();
-  return (Array.isArray(value) ? value : []).map((item) => String(item || '').trim()).filter((key) => {
-    if (!/^(generated|uploads|video|audio)\//i.test(key) || key.length > 500 || key.includes('..')
-      || key.includes('\\') || /[\x00-\x1f]/.test(key) || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).slice(0, limit);
-}
-
-function validateAutomationSource(src) {
-  if (!src || typeof src !== 'object' || Array.isArray(src)) {
-    throw new Error('El guion debe ser un objeto JSON.');
-  }
-  if (src.schema !== undefined && src.schema !== AUTOMATION_CONTRACT) {
-    throw new Error(`Contrato no compatible: se esperaba ${AUTOMATION_CONTRACT}.`);
-  }
-  if (src.schema !== AUTOMATION_CONTRACT) {
-    if (!Array.isArray(src.blocks)) {
-      if (Array.isArray(src.cycles)) {
-        throw new Error('Este archivo es una cola de ComfyUI. Exportá “Guion para Manifestador” desde Controversy Tracker.');
-      }
-      throw new Error('El JSON no contiene una lista blocks válida.');
-    }
-    return src;
-  }
-
-  if (!src.project || typeof src.project !== 'object' || !String(src.project.id || '').trim() || !String(src.project.name || '').trim()) {
-    throw new Error('El contrato no contiene un proyecto válido.');
-  }
-  if (!src.script || typeof src.script !== 'object' || !String(src.script.id || '').trim()) {
-    throw new Error('El contrato no contiene un identificador de guion.');
-  }
-  if (!src.requirements || typeof src.requirements !== 'object') {
-    throw new Error('El contrato no contiene requirements.');
-  }
-  for (const kind of ['characters', 'locations', 'objects']) {
-    if (!Array.isArray(src.requirements[kind])) throw new Error(`requirements.${kind} debe ser una lista.`);
-  }
-  if (!Array.isArray(src.blocks) || !src.blocks.length) {
-    throw new Error('El guion para Manifestador no contiene bloques.');
-  }
-
-  const declared = {
-    characters: new Set(src.requirements.characters.map((item) => roleId(item?.role)).filter(Boolean)),
-    locations: new Set(src.requirements.locations.map((item) => roleId(item?.role)).filter(Boolean)),
-    objects: new Set(src.requirements.objects.map((item) => roleId(item?.role)).filter(Boolean))
-  };
-  const allDeclared = new Set([...declared.characters, ...declared.locations, ...declared.objects]);
-  if (allDeclared.size !== declared.characters.size + declared.locations.size + declared.objects.size) {
-    throw new Error('Un mismo rol no puede declararse como más de un tipo de ficha.');
-  }
-
-  src.blocks.forEach((block, index) => {
-    if (!block || typeof block !== 'object') throw new Error(`El bloque ${index + 1} no es válido.`);
-    if (!String(block.imagePrompt || '').trim()) throw new Error(`El bloque ${index + 1} no tiene prompt visual.`);
-    if (!Array.isArray(block.items) || !block.items.some((item) => String(item?.text || '').trim())) {
-      throw new Error(`El bloque ${index + 1} no tiene texto para producir.`);
-    }
-    const characters = new Set((Array.isArray(block.characters) ? block.characters : []).map(roleId).filter(Boolean));
-    for (const item of block.items) {
-      if (item?.kind === 'dialogue') characters.add(roleId(item.character));
-    }
-    if ([...characters].some((role) => !declared.characters.has(role))) {
-      throw new Error(`El bloque ${index + 1} usa un personaje no declarado.`);
-    }
-    const location = roleId(block.location);
-    const prop = roleId(block.prop);
-    if (location && !declared.locations.has(location)) throw new Error(`El bloque ${index + 1} usa una locación no declarada.`);
-    if (prop && !declared.objects.has(prop)) throw new Error(`El bloque ${index + 1} usa un objeto no declarado.`);
-    const assigned = new Set([...characters, location, prop].filter(Boolean));
-    const promptRoles = [...String(block.imagePrompt).matchAll(/@([A-Za-z0-9_]+)/g)].map((match) => roleId(match[1]));
-    if (promptRoles.some((role) => !allDeclared.has(role) || !assigned.has(role))) {
-      throw new Error(`El prompt del bloque ${index + 1} contiene un @ROLE no declarado o no asignado.`);
-    }
-  });
-  return src;
 }
 
 function sanitizeScriptCast(list, characters) {
@@ -4555,61 +3492,8 @@ const server = http.createServer(async (req, res) => {
       return res.end(html);
     }
 
-    // Integración local servidor-a-servidor con Controversy Tracker. El límite
-    // de confianza es loopback: la contraseña sigue protegiendo la interfaz,
-    // archivos y APIs de usuario, pero no puede dejar inoperante el conector
-    // por una copia ausente o desactualizada en el IndexedDB del Tracker.
-    if (p === '/api/integrations/controversy-tracker/health' && req.method === 'GET') {
-      if (!isLoopbackRequest(req)) return send(res, 403, { error: 'La integración con Controversy Tracker sólo admite conexiones locales.' });
-      const cfg = await getConfig();
-      return send(res, 200, {
-        ok: true,
-        service: 'manifestador',
-        contract: AUTOMATION_CONTRACT,
-        protected: false,
-        appProtected: Boolean(cfg.accessPasswordHash),
-        transport: 'loopback'
-      });
-    }
-    if (p === '/api/integrations/controversy-tracker/projects' && req.method === 'POST') {
-      if (!isLoopbackRequest(req)) return send(res, 403, { error: 'La integración con Controversy Tracker sólo admite conexiones locales.' });
-      let source;
-      try {
-        source = validateAutomationSource(await readJsonBody(req));
-      } catch (error) {
-        return sendError(res, 400, 'automationImportInvalid', error.message || 'Guion para Manifestador no válido.');
-      }
-      if (source.schema !== AUTOMATION_CONTRACT) {
-        return sendError(res, 400, 'automationContractMismatch', `La conexión directa requiere el contrato ${AUTOMATION_CONTRACT}.`, { contract: AUTOMATION_CONTRACT });
-      }
-      const externalProjectId = String(source.project.id);
-      let out = null;
-      let created = false;
-      await updateJson('automations.json', [], (all) => {
-        const index = all.findIndex((item) => item.integration?.externalProjectId === externalProjectId);
-        if (index === -1) {
-          out = sanitizeAutomation(source);
-          created = true;
-          return [out, ...all];
-        }
-        out = sanitizeAutomation(source, all[index]);
-        out.finalOutput = null;
-        out.effectOutput = null;
-        all[index] = out;
-        return all;
-      });
-      return send(res, 200, {
-        automationId: out.id,
-        externalProjectId,
-        importedBlocks: out.blocks.length,
-        created,
-        status: 'ready-for-assignment'
-      });
-    }
-
     // Los nodos Tuzzi de ComfyUI (mismo equipo) necesitan descargar referencias
-    // de /files/ sin sesión de navegador — mismo criterio de confianza que ya
-    // usa la integración con Controversy Tracker (isLoopbackRequest).
+    // de /files/ sin sesión de navegador: se confía sólo en conexiones loopback.
     if ((p.startsWith('/api/') || p.startsWith('/files/') || p.startsWith('/fonts/')) && !(p.startsWith('/files/') && isLoopbackRequest(req))) {
       const cfg = await getConfig();
       const token = sessionToken(req);
@@ -4697,7 +3581,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- API ---
     if (p === '/api/state' && req.method === 'GET') {
-      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, projects, series, scripts, elements, elementLinks, automations, fonts, overlayPresets, transitionSounds, subtitler, comfyWorkflows, assetMetadata, snippets, snippetCategories, vocabulary, vocabularyCategories] = await Promise.all([
+      const [cfg, characters, prompts, promptCategories, history, pricing, assetLinks, projects, series, scripts, elements, elementLinks, fonts, overlayPresets, subtitler, comfyWorkflows, assetMetadata, snippets, snippetCategories, vocabulary, vocabularyCategories] = await Promise.all([
         getConfig(),
         readJson('characters.json', []),
         readJson('prompts.json', []),
@@ -4710,10 +3594,8 @@ const server = http.createServer(async (req, res) => {
         readJson('scripts.json', []),
         readJson('elements.json', []),
         readJson('element-links.json', []),
-        readJson('automations.json', []),
         readJson('fonts.json', []),
         readJson('overlay-presets.json', []),
-        listTransitionSounds(),
         readJson('subtitler.json', DEFAULT_SUBTITLER_STORE),
         readJson('comfy-workflows.json', []),
         readJson('asset-metadata.json', {}),
@@ -4741,7 +3623,6 @@ const server = http.createServer(async (req, res) => {
         scripts,
         elements: cfg.nsfwEnabled ? elements : elements.filter((item) => !item.nsfw),
         elementLinks,
-        automations: automations.map(automationForClient),
         fonts,
         overlayPresets,
         comfyWorkflows,
@@ -4749,13 +3630,7 @@ const server = http.createServer(async (req, res) => {
         snippetCategories,
         vocabulary: cfg.nsfwEnabled ? vocabulary : vocabulary.filter((item) => !item.nsfw),
         vocabularyCategories,
-        subtitler: subtitlerForClient(subtitler),
-        transitionSounds: transitionSounds.map((sound) => ({
-          id: sound.id,
-          category: sound.category,
-          name: sound.name,
-          url: sound.url
-        }))
+        subtitler: subtitlerForClient(subtitler)
       });
     }
 
@@ -5193,7 +4068,7 @@ const server = http.createServer(async (req, res) => {
         updatedAt: now,
         config: {
           overlay: { ...DEFAULT_OVERLAY },
-          titleOverlay: { ...DEFAULT_TITLE_OVERLAY, mode: 'project' },
+          titleOverlay: { ...DEFAULT_TITLE_OVERLAY },
           dynamicText: { ...DEFAULT_DYNAMIC_TEXT, enabled: true }
         }
       }, store.projects.length);
@@ -5454,8 +4329,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Carga de audios a su biblioteca propia. A diferencia del cargador de
-    // imágenes, conserva la clasificación y las etiquetas necesarias para que
-    // el Automatizador pueda encontrar música compatible con una obra.
+    // imágenes, conserva la clasificación y las etiquetas de música.
     if (p === '/api/assets/audio' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const { mime, buffer } = parseDataUrl(body.dataUrl);
@@ -5522,7 +4396,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { links: next });
     }
 
-    // --- proyectos de trabajo (independientes de Series y Automatizador) ---
+    // --- proyectos de trabajo (independientes de Series) ---
     if (p === '/api/projects' && req.method === 'POST') {
       const body = await readJsonBody(req);
       if (projectTasksHaveMissingNames(body.tasks)) return sendError(res, 400, 'workspaceProjectTaskNameRequired', 'Cada tarea necesita un nombre.');
@@ -5954,48 +4828,6 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, item);
     }
 
-    if (p === '/api/scripts/import' && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      const series = await readJson('series.json', []);
-      const serie = series.find((s) => s.id === body.seriesId);
-      if (!serie) throw new Error('Serie no encontrada.');
-      const data = body.data;
-      const source = data?.format === 'hookcast-script' ? data.script : data;
-      if (!source || !Array.isArray(source.scenes)) throw new Error('Ese JSON no parece un guion exportado de Hookcast.');
-      const characters = await readJson('characters.json', []);
-      // el elenco se matchea contra tus personajes por nombre
-      const cast = (Array.isArray(source.characters) ? source.characters : []).map((ch) => {
-        const match = characters.find((c) => c.name.trim().toLowerCase() === String(ch.name || '').trim().toLowerCase());
-        return { characterId: match?.id || '', name: ch.name, role: ch.role };
-      });
-      const item = {
-        id: newId(),
-        seriesId: serie.id,
-        title: String(source.title || '').trim().slice(0, 140) || 'Guion importado',
-        summary: String(source.summary || '').slice(0, 3000),
-        format: SCRIPT_FORMATS.includes(source.format) ? source.format : (serie.format === '16:9' ? 'Horizontal 16:9' : 'Vertical 9:16'),
-        characters: sanitizeScriptCast(cast, characters),
-        scenes: sanitizeScriptScenes(source.scenes.map(hookcastScene)),
-        source: 'hookcast',
-        ts: Date.now(),
-        updatedAt: Date.now()
-      };
-      let duplicateScript;
-      await updateJson('scripts.json', [], all => {
-        duplicateScript = importMatch(all.filter(script => script.seriesId === serie.id), { ...source, title: item.title }, 'scripts');
-        if (duplicateScript) return all.map(script => script.id === duplicateScript.id ? rememberImport(script, source) : script);
-        return [rememberImport(item, source), ...all];
-      });
-      if (duplicateScript) return send(res, 200, { script: duplicateScript, serie, importSkipped: true });
-      const matched = item.characters.map((c) => c.characterId).filter(Boolean);
-      if (matched.length) {
-        await updateJson('series.json', [], (all) => all.map((s) =>
-          s.id === serie.id && !s.archived ? { ...s, characterIds: [...new Set([...(s.characterIds || []), ...matched])] } : s));
-        serie.characterIds = [...new Set([...(serie.characterIds || []), ...matched])];
-      }
-      return send(res, 200, { script: item, serie });
-    }
-
     const scriptMatch = /^\/api\/scripts\/([a-z0-9]+)(\/generate)?$/.exec(p);
     if (scriptMatch) {
       const [, scriptId, isGenerate] = scriptMatch;
@@ -6068,1910 +4900,6 @@ const server = http.createServer(async (req, res) => {
         });
         return out ? send(res, 200, out) : send(res, 404, { error: 'Guion no encontrado' });
       }
-    }
-
-    // --- automatizaciones ---
-    if (p === '/api/automations' && req.method === 'GET') {
-      const automations = await readJson('automations.json', []);
-      return send(res, 200, { automations: automations.map(automationForClient) });
-    }
-
-    if (p === '/api/automations' && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      // { data } = importar de Controversy Tracker; si no, proyecto vacío con { name }
-      let source = { name: body.name, blocks: [] };
-      if (body.data && typeof body.data === 'object') {
-        try {
-          source = validateAutomationSource(body.data);
-        } catch (error) {
-          return sendError(res, 400, 'scriptImportInvalid', error.message || 'Guion JSON no válido.');
-        }
-      }
-      const item = sanitizeAutomation(source);
-      let duplicateAutomation;
-      await updateJson('automations.json', [], all => {
-        if (body.data) duplicateAutomation = importMatch(all, { ...source, name: item.name }, 'automations');
-        if (duplicateAutomation) return all.map(project => project.id === duplicateAutomation.id ? rememberImport(project, source) : project);
-        return [body.data ? rememberImport(item, source) : item, ...all];
-      });
-      if (duplicateAutomation) return send(res, 200, { ...automationForClient(duplicateAutomation), importSkipped: true });
-      return send(res, 200, item);
-    }
-
-    const automationMatch = /^\/api\/automations\/([a-z0-9]+)$/.exec(p);
-    if (automationMatch) {
-      const projectId = automationMatch[1];
-      if (req.method === 'PUT') {
-        const body = await readJsonBody(req);
-        let out = null;
-        await updateJson('automations.json', [], (all) => {
-          const i = all.findIndex((x) => x.id === projectId);
-          if (i === -1) return all;
-          const prev = all[i];
-          // se puede actualizar nombre, asignaciones, config y (al reimportar) el guion
-          const next = { ...prev };
-          if (body.name !== undefined) next.name = String(body.name).trim().slice(0, 120) || prev.name;
-          if (body.assignments !== undefined) next.assignments = {
-            characters: { ...(body.assignments.characters || {}) },
-            locations: { ...(body.assignments.locations || {}) },
-            objects: { ...(body.assignments.objects || {}) }
-          };
-          if (body.generatedCharacters !== undefined) {
-            next.generatedCharacters = normalizeAutomationGeneratedCharacters(body.generatedCharacters, next.requirements?.characters);
-          }
-          if (body.config !== undefined) next.config = {
-            ...prev.config,
-            ...body.config,
-            artStyle: body.config.artStyle !== undefined
-              ? String(body.config.artStyle).trim().slice(0, 1200)
-              : prev.config.artStyle,
-            artStylePromptId: body.config.artStylePromptId !== undefined
-              ? String(body.config.artStylePromptId || '').trim().slice(0, 80)
-              : (prev.config.artStylePromptId || ''),
-            artStyleImageKey: body.config.artStyleImageKey !== undefined
-              ? normalizeStyleImageKey(body.config.artStyleImageKey)
-              : normalizeStyleImageKey(prev.config.artStyleImageKey),
-            includeLogos: body.config.includeLogos !== undefined
-              ? body.config.includeLogos === true
-              : prev.config?.includeLogos === true,
-            videoEffect: normalizeAutomationVideoEffect({
-              ...prev.config?.videoEffect,
-              ...(body.config.videoEffect || {})
-            }),
-            dynamicText: normalizeAutomationDynamicText({
-              ...prev.config?.dynamicText,
-              ...(body.config.dynamicText || {})
-            }),
-            audioModelId: getAudioModel(body.config.audioModelId ?? prev.config?.audioModelId).id,
-            heygenAuthMode: (body.config.heygenAuthMode ?? prev.config?.heygenAuthMode) === 'oauth' ? 'oauth' : 'key',
-            transitionSound: normalizeAutomationTransitionSound({
-              ...prev.config?.transitionSound,
-              ...(body.config.transitionSound || {})
-            }),
-            music: normalizeAutomationMusic({ ...prev.config.music, ...(body.config.music || {}) }, prev.requirements?.music),
-            overlay: normalizeAutomationOverlay({ ...prev.config.overlay, ...(body.config.overlay || {}) }),
-            titleOverlay: normalizeAutomationTitleOverlay(
-              { ...prev.config?.titleOverlay, ...(body.config.titleOverlay || {}) },
-              next.blocks,
-              prev.integration?.scriptTitle || next.name
-            )
-          };
-          if (body.config?.overlay !== undefined
-            && automationOverlayRenderSignature(prev.config?.overlay) !== automationOverlayRenderSignature(next.config?.overlay)) {
-            if (next.finalOutput?.videoKey) next.textRefreshRequiredAt = Date.now();
-            else next.outputs = Object.fromEntries(Object.entries(next.outputs || {}).map(([blockId, output]) => [
-              blockId, invalidateAutomationOutput(output, { text: true })
-            ]));
-          }
-          if (body.config?.dynamicText !== undefined
-            && automationDynamicTextRenderSignature(prev.config?.dynamicText) !== automationDynamicTextRenderSignature(next.config?.dynamicText)) {
-            if (next.finalOutput?.videoKey) next.textRefreshRequiredAt = Date.now();
-            else next.outputs = Object.fromEntries(Object.entries(next.outputs || {}).map(([blockId, output]) => [
-              blockId, invalidateAutomationOutput(output, { text: true })
-            ]));
-          }
-          if (body.config?.titleOverlay !== undefined) {
-            const previousTitle = normalizeAutomationTitleOverlay(prev.config?.titleOverlay, prev.blocks, prev.integration?.scriptTitle || prev.name);
-            const nextTitle = normalizeAutomationTitleOverlay(next.config?.titleOverlay, next.blocks, next.integration?.scriptTitle || next.name);
-            const titleRenderingChanged = automationTitleRenderSignature(previousTitle, prev.blocks, prev.integration?.scriptTitle || prev.name)
-              !== automationTitleRenderSignature(nextTitle, next.blocks, next.integration?.scriptTitle || next.name);
-            if (titleRenderingChanged) {
-              if (next.finalOutput?.videoKey) next.textRefreshRequiredAt = Date.now();
-              else {
-                const affectsEveryBlock = previousTitle.mode === 'block' || nextTitle.mode === 'block';
-                const affectedBlockIds = new Set([previousTitle.blockId, nextTitle.blockId].filter(Boolean));
-                next.outputs = Object.fromEntries(Object.entries(next.outputs || {}).map(([blockId, output]) => [
-                  blockId,
-                  affectsEveryBlock || affectedBlockIds.has(blockId) ? invalidateAutomationOutput(output, { text: true }) : output
-                ]));
-              }
-            }
-          }
-          if (body.config?.music !== undefined
-            && JSON.stringify(normalizeAutomationMusic(prev.config?.music, prev.requirements?.music))
-              !== JSON.stringify(normalizeAutomationMusic(next.config?.music, prev.requirements?.music))) next.finalOutput = null;
-          if (body.config?.includeLogos !== undefined
-            && (prev.config?.includeLogos === true) !== (next.config?.includeLogos === true)) next.finalOutput = null;
-          if (body.config?.transitionSound !== undefined
-            && JSON.stringify(normalizeAutomationTransitionSound(prev.config?.transitionSound))
-              !== JSON.stringify(normalizeAutomationTransitionSound(next.config?.transitionSound))) next.finalOutput = null;
-          // outputs por bloque (imagen, imagen+texto, audios, video) — se mergea por id de bloque
-          if (body.outputs !== undefined && body.outputs && typeof body.outputs === 'object') {
-            const changesRenderedVideo = Object.entries(body.outputs).some(([blockId, output]) =>
-              String(prev.outputs?.[blockId]?.videoKey || '') !== String(output?.videoKey || ''));
-            next.outputs = { ...prev.outputs, ...body.outputs };
-            if (changesRenderedVideo) next.finalOutput = null;
-          }
-          if (body.blocks !== undefined) {
-            const sanitized = sanitizeAutomation({ ...prev, requirements: prev.requirements, blocks: body.blocks }, prev).blocks;
-            if (sanitized.some((block) => (block.generator !== 'assets' && !block.imagePrompt.trim()) || !block.items.length)) {
-              throw new Error('Cada bloque debe conservar al menos un texto y, salvo que use Assets, un prompt visual.');
-            }
-            const previousById = new Map((prev.blocks || []).map((block) => [block.id, block]));
-            const nextOutputs = {};
-            let generationChanged = sanitized.length !== (prev.blocks || []).length;
-            for (const block of sanitized) {
-              const previousBlock = previousById.get(block.id);
-              let output = next.outputs?.[block.id] || {};
-              if (!previousBlock) {
-                generationChanged = true;
-              } else {
-                const promptChanged = previousBlock.videoProvider !== block.videoProvider || previousBlock.sirayResolution !== block.sirayResolution || previousBlock.imagePrompt !== block.imagePrompt
-                  || previousBlock.negativePrompt !== block.negativePrompt;
-                const h3IsRelevant = [previousBlock.generator, block.generator].some(g => ['h3', 'wan', 'wan-prime'].includes(g));
-                const h3GenerationChanged = h3IsRelevant && (
-                  previousBlock.h3Mode !== block.h3Mode
-                  || previousBlock.h3Resolution !== block.h3Resolution
-                  || previousBlock.h3ContextIr !== block.h3ContextIr
-                  || previousBlock.h3UseNarrationReference !== block.h3UseNarrationReference
-                  || JSON.stringify(previousBlock.h3ReferenceKeys || []) !== JSON.stringify(block.h3ReferenceKeys || [])
-                );
-                const seedance25IsRelevant = previousBlock.generator === 'seedance25' || block.generator === 'seedance25';
-                const seedance25GenerationChanged = seedance25IsRelevant && (
-                  previousBlock.seedance25Mode !== block.seedance25Mode
-                  || previousBlock.seedance25Resolution !== block.seedance25Resolution
-                  || previousBlock.seedance25UseNarrationReference !== block.seedance25UseNarrationReference
-                  || JSON.stringify(previousBlock.seedance25ReferenceKeys || []) !== JSON.stringify(block.seedance25ReferenceKeys || [])
-                );
-                const omniIsRelevant = previousBlock.generator === 'omni' || block.generator === 'omni';
-                const omniGenerationChanged = omniIsRelevant && (
-                  previousBlock.omniMode !== block.omniMode
-                  || previousBlock.omniResolution !== block.omniResolution
-                  || JSON.stringify(previousBlock.omniReferenceKeys || []) !== JSON.stringify(block.omniReferenceKeys || [])
-                );
-                const generatorChanged = previousBlock.generator !== block.generator
-                  || previousBlock.heygenCharacterId !== block.heygenCharacterId
-                  || previousBlock.heygenFraming !== block.heygenFraming
-                  || h3GenerationChanged
-                  || seedance25GenerationChanged
-                  || omniGenerationChanged;
-                const h3AudioOutputChanged = h3IsRelevant
-                  && previousBlock.h3KeepGeneratedAudio !== block.h3KeepGeneratedAudio;
-                const seedance25AudioOutputChanged = seedance25IsRelevant
-                  && previousBlock.seedance25KeepGeneratedAudio !== block.seedance25KeepGeneratedAudio;
-                const assetVisualChanged = JSON.stringify(previousBlock.assetKeys || []) !== JSON.stringify(block.assetKeys || [])
-                  || previousBlock.assetMuteOriginal !== block.assetMuteOriginal;
-                const textChanged = JSON.stringify(previousBlock.items || []) !== JSON.stringify(block.items || []);
-                const blockTitleChanged = previousBlock.title !== block.title
-                  && next.config?.titleOverlay?.enabled === true
-                  && next.config?.titleOverlay?.mode === 'block';
-                const titleOnlyRefresh = blockTitleChanged && next.finalOutput?.videoKey
-                  && !promptChanged && !generatorChanged && !assetVisualChanged && !textChanged
-                  && !h3AudioOutputChanged && !seedance25AudioOutputChanged;
-                if (titleOnlyRefresh) {
-                  next.textRefreshRequiredAt = Date.now();
-                } else {
-                  if (promptChanged || generatorChanged || assetVisualChanged || textChanged || blockTitleChanged
-                    || h3AudioOutputChanged || seedance25AudioOutputChanged) generationChanged = true;
-                  output = invalidateAutomationOutput(output, {
-                    image: promptChanged || generatorChanged,
-                    text: textChanged || blockTitleChanged || generatorChanged || assetVisualChanged,
-                    audio: textChanged || generatorChanged,
-                    video: h3AudioOutputChanged || seedance25AudioOutputChanged
-                  });
-                }
-              }
-              nextOutputs[block.id] = output;
-            }
-            next.blocks = sanitized;
-            next.outputs = nextOutputs;
-            next.config.titleOverlay = normalizeAutomationTitleOverlay(
-              next.config?.titleOverlay,
-              next.blocks,
-              next.integration?.scriptTitle || next.name
-            );
-            if (generationChanged) next.finalOutput = null;
-          }
-          if (body.data !== undefined) {
-            const re = sanitizeAutomation(body.data, prev);
-            next.requirements = re.requirements; next.blocks = re.blocks; next.name = re.name;
-            next.finalOutput = null;
-          }
-          next.config = {
-            ...next.config,
-            includeLogos: next.config?.includeLogos === true,
-            videoEffect: normalizeAutomationVideoEffect(next.config?.videoEffect),
-            dynamicText: normalizeAutomationDynamicText(next.config?.dynamicText),
-            audioModelId: getAudioModel(next.config?.audioModelId).id,
-            heygenAuthMode: next.config?.heygenAuthMode === 'oauth' ? 'oauth' : 'key',
-            transitionSound: normalizeAutomationTransitionSound(next.config?.transitionSound),
-            music: normalizeAutomationMusic(next.config?.music, next.requirements?.music),
-            overlay: normalizeAutomationOverlay(next.config?.overlay),
-            titleOverlay: normalizeAutomationTitleOverlay(next.config?.titleOverlay, next.blocks, next.integration?.scriptTitle || next.name)
-          };
-          next.generatedCharacters = normalizeAutomationGeneratedCharacters(next.generatedCharacters, next.requirements?.characters);
-          if (!next.finalOutput) next.effectOutput = null;
-          next.updatedAt = Date.now();
-          all[i] = next; out = next; return all;
-        });
-        return out ? send(res, 200, out) : send(res, 404, { error: 'Proyecto no encontrado' });
-      }
-      if (req.method === 'DELETE') {
-        await updateJson('automations.json', [], (all) => all.filter((x) => x.id !== projectId));
-        return send(res, 200, { ok: true });
-      }
-    }
-
-    const automationFinalizeMatch = /^\/api\/automations\/([a-z0-9]+)\/finalize$/.exec(p);
-    if (automationFinalizeMatch && ['GET', 'POST'].includes(req.method)) {
-      const projectId = automationFinalizeMatch[1];
-      if (automationAssemblyJobs.has(projectId)) {
-        return sendError(res, 409, 'automationAssemblyInProgress', 'El proyecto todavía se está ensamblando. Esperá a que termine antes de finalizarlo.');
-      }
-      const plan = await automationCleanupPlan(projectId);
-      if (!plan) return sendError(res, 404, 'automationProjectNotFound', 'Proyecto no encontrado.');
-      const summary = {
-        generatedCount: plan.candidates.length,
-        deleteCount: plan.deletable.length,
-        deleteBytes: plan.deleteBytes,
-        activeCount: plan.activeCount,
-        sharedCount: plan.sharedCount,
-        byType: plan.byType,
-        sample: plan.deletable.slice(0, 12).map((item) => ({
-          key: item.key,
-          name: path.basename(item.key),
-          bytes: item.bytes,
-          kind: item.metadata.autoKind || item.metadata.type || item.key.split('/')[0]
-        }))
-      };
-      if (req.method === 'GET') return send(res, 200, summary);
-
-      const removed = new Set();
-      const failed = [];
-      await assertAssetsDeletable(plan.deletable.map(item => item.key));
-      for (const item of plan.deletable) {
-        try {
-          await fs.unlink(await resolveAssetKey(item.key));
-          removed.add(item.key);
-        } catch (error) {
-          if (error?.code === 'ENOENT') removed.add(item.key);
-          else failed.push({ key: item.key, error: error?.message || String(error) });
-        }
-      }
-
-      await updateJson('asset-metadata.json', {}, (all) => {
-        for (const key of removed) delete all[key];
-        return all;
-      });
-      await updateJson('asset-links.json', [], (links) => links.filter((link) => !removed.has(link.key)));
-      await updateJson('element-links.json', [], (links) => links.filter((link) => !removed.has(link.key)));
-      await updateJson('series.json', [], (all) => all.map((series) => ({
-        ...series,
-        assetKeys: (series.assetKeys || []).filter((key) => !removed.has(key))
-      })));
-      await updateJson('scripts.json', [], (all) => all.map((script) => ({
-        ...script,
-        scenes: (script.scenes || []).map((scene) => ({
-          ...scene,
-          shots: (scene.shots || []).map((shot) => ({
-            ...shot,
-            assetKeys: (shot.assetKeys || []).filter((key) => !removed.has(key)),
-            audioKeys: (shot.audioKeys || []).filter((key) => !removed.has(key))
-          }))
-        }))
-      })));
-      const cleanedHistory = await updateJson('history.json', [], (all) => all.map((entry) => ({
-        ...entry,
-        outputs: (entry.outputs || []).filter((key) => !removed.has(key)),
-        refs: (entry.refs || []).filter((key) => !removed.has(key))
-      })).filter((entry) => entry.outputs.length));
-      await updateJson('audio-captions.json', {}, (captions) => {
-        for (const key of removed) delete captions[key];
-        return captions;
-      });
-
-      const finalizedAt = Date.now();
-      let updatedProject = null;
-      await updateJson('automations.json', [], (all) => all.map((project) => {
-        if (project.id !== projectId) return project;
-        updatedProject = {
-          ...project,
-          finalization: {
-            finalizedAt,
-            deletedCount: removed.size,
-            deletedBytes: plan.deletable.filter((item) => removed.has(item.key)).reduce((sum, item) => sum + item.bytes, 0),
-            retainedActiveCount: plan.activeCount,
-            retainedSharedCount: plan.sharedCount,
-            failedCount: failed.length
-          },
-          updatedAt: finalizedAt
-        };
-        return updatedProject;
-      }));
-      return send(res, 200, {
-        ...summary,
-        deleted: removed.size,
-        failed,
-        project: automationForClient(updatedProject),
-        history: cleanedHistory.slice(0, 200)
-      });
-    }
-
-    const automationMusicMatch = /^\/api\/automations\/([a-z0-9]+)\/music\/(auto-select|generate)$/.exec(p);
-    if (automationMusicMatch && req.method === 'POST') {
-      const [projectId, action] = [automationMusicMatch[1], automationMusicMatch[2]];
-      const projects = await readJson('automations.json', []);
-      const project = projects.find((item) => item.id === projectId);
-      if (!project) return sendError(res, 404, 'automationProjectNotFound', 'Proyecto no encontrado.');
-      const requested = await readJsonBody(req);
-      const music = normalizeAutomationMusic({ ...project.config?.music, ...requested }, project.requirements?.music);
-
-      let selected;
-      let entry = null;
-      if (action === 'auto-select') {
-        selected = await findAutomaticMusicTrack(music);
-        if (!selected) return sendError(res, 400, 'automationNoMusicAssets', 'No hay músicas clasificadas en Assets. Subí o generá una primero.');
-      } else {
-        const styleParts = [
-          'Instrumental background score designed to support spoken narration without overpowering voices',
-          music.genres.length ? `Genre: ${music.genres.join(', ')}` : '',
-          music.instruments.length ? `Instruments: ${music.instruments.join(', ')}` : '',
-          music.moods.length ? `Mood and emotional tone: ${music.moods.join(', ')}` : '',
-          'No vocals, no spoken words, cohesive cinematic arrangement, loop-friendly ending'
-        ].filter(Boolean);
-        entry = await runMusicGeneration({
-          model: music.sunoModel,
-          prompt: '',
-          style: styleParts.join('. '),
-          title: `${project.name} - Background score`.slice(0, 80),
-          instrumental: true,
-          customMode: true,
-          musicTags: { genres: music.genres, instruments: music.instruments, moods: music.moods }
-        });
-        selected = { key: entry.outputs[0], name: path.basename(entry.outputs[0]), score: null, musicTags: normalizeMusicTags(music) };
-        await updateJson('asset-metadata.json', {}, (metadata) => {
-          for (const key of entry.outputs) metadata[key] = {
-            ...(metadata[key] || {}),
-            audioKind: 'music', musicTags: normalizeMusicTags(music),
-            automationId: project.id, autoKind: 'background-music',
-            cost: Number(entry.cost || 0) / Math.max(1, entry.outputs.length)
-          };
-          return metadata;
-        });
-      }
-
-      let updatedProject;
-      await updateJson('automations.json', [], (all) => all.map((item) => {
-        if (item.id !== projectId) return item;
-        updatedProject = {
-          ...item,
-          config: {
-            ...item.config,
-            music: normalizeAutomationMusic({ ...music, enabled: true, source: action === 'generate' ? 'suno' : 'auto', assetKey: selected.key }, item.requirements?.music),
-            overlay: normalizeAutomationOverlay(item.config?.overlay)
-          },
-          finalOutput: null,
-          effectOutput: null,
-          updatedAt: Date.now()
-        };
-        return updatedProject;
-      }));
-      return send(res, 200, { project: updatedProject, selected, entry });
-    }
-
-    // Genera una toma de Automatizador con uno o dos avatares HeyGen usando
-    // exactamente los audios que ya produjo ElevenLabs. Si hay dos encuadres,
-    // cada grupo de audio se envia por separado y los clips se unen localmente.
-    const automationHeyGenBlockMatch = /^\/api\/automations\/([a-z0-9]+)\/heygen-block$/.exec(p);
-    if (automationHeyGenBlockMatch && req.method === 'POST') {
-      const projectId = automationHeyGenBlockMatch[1];
-      const body = await readJsonBody(req);
-      const projects = await readJson('automations.json', []);
-      const project = projects.find((item) => item.id === projectId);
-      if (!project) return sendError(res, 404, 'automationProjectNotFound', 'Proyecto no encontrado.');
-      const block = project.blocks?.find((item) => item.id === String(body.blockId || ''));
-      if (!block) return sendError(res, 404, 'automationBlockNotFound', 'Bloque no encontrado.');
-      if (block.generator !== 'heygen') return sendError(res, 400, 'automationBlockNotHeygen', 'Este bloque no está configurado para HeyGen.');
-      const characters = await readJson('characters.json', []);
-      const requestedCharacterId = String(body.characterId || '');
-      if (requestedCharacterId && requestedCharacterId !== block.heygenCharacterId) {
-        return sendError(res, 400, 'heygenCharacterMismatch', 'El personaje no coincide con la variante HeyGen guardada en el bloque.');
-      }
-      const character = characters.find((item) => item.id === String(block.heygenCharacterId || ''));
-      if (!character) return sendError(res, 404, 'heygenCharacterNotFound', 'Personaje HeyGen no encontrado.');
-      const wideAvatarId = String(character.heygen?.wideAvatarId || character.heygen?.avatarId || '').trim();
-      const closeAvatarId = String(character.heygen?.closeAvatarId || '').trim();
-      if (!wideAvatarId) return sendError(res, 400, 'heygenWideAvatarMissing', 'La variante HeyGen necesita el código de plano general.');
-
-      const framing = ['wide', 'close', 'split'].includes(body.framing) ? body.framing : 'wide';
-      if (['close', 'split'].includes(framing) && !closeAvatarId) return sendError(res, 400, 'heygenCloseAvatarMissing', 'Falta el código HeyGen de primer plano.');
-      const rawGroups = Array.isArray(body.audioGroups) ? body.audioGroups : [];
-      const audioGroups = rawGroups.map((group) => (Array.isArray(group) ? group : []).map(String).filter((key) => /^audio\//.test(key))).filter((group) => group.length);
-      const expectedGroups = framing === 'split' ? 2 : 1;
-      if (audioGroups.length !== expectedGroups) return sendError(res, 400, 'heygenAudioGroupCount', `HeyGen necesita ${expectedGroups} grupo(s) de audio para este encuadre.`, { count: expectedGroups });
-      const requestedSegmentIndex = body.regenerateSegmentIndex === undefined ? -1 : Number(body.regenerateSegmentIndex);
-      const regenerateSegmentIndex = framing === 'split' && [0, 1].includes(requestedSegmentIndex) ? requestedSegmentIndex : -1;
-      if (body.regenerateSegmentIndex !== undefined && regenerateSegmentIndex < 0) {
-        return sendError(res, 400, 'heygenSinglePlaneOnly', 'Sólo se puede regenerar un plano individual en una toma HeyGen de dos planos.');
-      }
-
-      const cfg = await getConfig();
-      const authMode = project.config?.heygenAuthMode === 'oauth' ? 'oauth' : 'key';
-      const apiKey = String(cfg.keys.heygen || '').trim();
-      const oauth = authMode === 'oauth' ? await getHeyGenOAuth() : null;
-      if (authMode === 'key' && !apiKey) return sendError(res, 400, 'heygenApiKeyMissing', 'Falta la API key de HeyGen en Configuración.');
-      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
-      const outDir = resolveDir(cfg.paths.video);
-      await fs.mkdir(outDir, { recursive: true });
-      const temporaryAudioPaths = [];
-
-      const audioPathForGroup = async (keys, index) => {
-        const paths = [];
-        for (const key of keys) paths.push(await resolveAssetKey(key));
-        if (paths.length === 1) return paths[0];
-        const tempPath = path.join(outDir, `.heygen-audio-${projectId}-${block.id}-${index}-${newId()}.mp3`);
-        const args = ['-y'];
-        for (const inputPath of paths) args.push('-i', inputPath);
-        const inputs = paths.map((_, inputIndex) => `[${inputIndex}:a]`).join('');
-        args.push('-filter_complex', `${inputs}concat=n=${paths.length}:v=0:a=1[a]`, '-map', '[a]', '-c:a', 'libmp3lame', '-b:a', '192k', tempPath);
-        await runFfmpeg(ffmpegExecutable, args);
-        temporaryAudioPaths.push(tempPath);
-        return tempPath;
-      };
-
-      try {
-        const preparedAudioPaths = [];
-        for (const [index, group] of audioGroups.entries()) preparedAudioPaths.push(await audioPathForGroup(group, index));
-        const avatarIds = framing === 'split' ? [wideAvatarId, closeAvatarId] : [framing === 'close' ? closeAvatarId : wideAvatarId];
-        const aspectRatio = ['16:9', '9:16', '4:5', '5:4', '1:1', 'auto'].includes(project.config?.aspectRatio) ? project.config.aspectRatio : '9:16';
-        const resolution = project.config?.resolution === '1K' ? '720p' : '1080p';
-        const { width, height } = automationVideoDimensions(aspectRatio);
-        const generateClip = async (audioPath, index) => {
-          const buffer = await fs.readFile(audioPath);
-          const extension = path.extname(audioPath).toLowerCase();
-          const mime = extension === '.wav' ? 'audio/wav' : extension === '.m4a' ? 'audio/mp4' : 'audio/mpeg';
-          const idem = `automation-${projectId}-${block.id}-${index}-${newId()}`;
-          const upload = authMode === 'oauth'
-            ? await uploadHeyGenAssetWithMcp({ accessToken: oauth.accessToken, buffer, filename: path.basename(audioPath), mime })
-            : await uploadHeyGenAssetWithKey({ apiKey, buffer, filename: path.basename(audioPath), mime, idempotencyKey: `${idem}-audio` });
-          if (!upload.asset_id) throw new Error('HeyGen subió el audio, pero no devolvió asset_id.');
-          const payload = {
-            type: 'avatar',
-            avatar_id: avatarIds[index],
-            audio_asset_id: upload.asset_id,
-            title: `${project.name} - ${block.title || block.id} - ${index + 1}`.slice(0, 160),
-            resolution,
-            aspect_ratio: aspectRatio,
-            output_format: 'mp4',
-            engine: { type: 'avatar_iv' }
-          };
-          const usesClosePrompt = framing === 'close' || (framing === 'split' && index === 1);
-          const motionPrompt = heyGenMotionPromptValue(character.heygen, usesClosePrompt ? 'closeMotionPrompt' : 'wideMotionPrompt');
-          if (motionPrompt) payload.motion_prompt = motionPrompt;
-          const created = authMode === 'oauth'
-            ? await createHeyGenVideoWithMcp({ accessToken: oauth.accessToken, payload })
-            : await createHeyGenVideoWithKey({ apiKey, payload, idempotencyKey: idem });
-          const videoId = created.video_id || created.id;
-          if (!videoId) throw new Error('HeyGen aceptó el audio, pero no devolvió video_id.');
-          const finished = await waitForHeyGenVideo(() => authMode === 'oauth'
-            ? getHeyGenVideoWithMcp({ accessToken: oauth.accessToken, videoId })
-            : getHeyGenVideoWithKey({ apiKey, videoId }));
-          const videoBuffer = await downloadHeyGenVideo(finished.video_url);
-          const key = await saveBuffer('video', `${ts()}-auto-heygen-${index + 1}-${newId()}.mp4`, videoBuffer);
-          const duration = Number(finished.duration || finished.duration_seconds || created.duration || 0);
-          const model = getVideoModel('heygen-avatar-iv');
-          const cost = authMode === 'key' && duration > 0 ? duration * Number(model?.apiPricePerSecond || 0) : 0;
-          await recordCost({ type: 'video', modelId: 'heygen-avatar-iv', label: `HeyGen Avatar IV${authMode === 'oauth' ? ' (plan web)' : ' (API)'}`, units: duration || 1, unitLabel: duration ? 'segundo(s)' : 'video', cost });
-          return { key, videoId, duration, cost, reused: false };
-        };
-
-        // Cada clip queda ligado al proyecto apenas se descarga. Si el segundo
-        // plano o FFmpeg fallan después, Continuar reutiliza lo ya pagado.
-        const storedSegmentKeys = Array.isArray(project.outputs?.[block.id]?.heygenSegmentVideoKeys)
-          ? project.outputs[block.id].heygenSegmentVideoKeys.slice(0, expectedGroups)
-          : [];
-        const clipResults = Array(expectedGroups).fill(null);
-        for (const [index, key] of storedSegmentKeys.entries()) {
-          if (index === regenerateSegmentIndex) continue;
-          if (!/^video\//.test(String(key || ''))) break;
-          const exists = await fs.access(await resolveAssetKey(key)).then(() => true).catch(() => false);
-          if (!exists) break;
-          clipResults[index] = { key, videoId: '', duration: 0, cost: 0, reused: true };
-        }
-        if (regenerateSegmentIndex >= 0 && !clipResults[regenerateSegmentIndex === 0 ? 1 : 0]) {
-          return sendError(res, 400, 'heygenOtherPlaneMissing', 'No encuentro el otro plano guardado. Usá Continuar para reconstruir la toma completa.');
-        }
-        for (let index = 0; index < preparedAudioPaths.length; index++) {
-          if (clipResults[index]) continue;
-          const clip = await generateClip(preparedAudioPaths[index], index);
-          clipResults[index] = clip;
-          const partialKeys = clipResults.map((item) => item?.key || '');
-          while (partialKeys.length && !partialKeys[partialKeys.length - 1]) partialKeys.pop();
-          await updateJson('automations.json', [], (all) => all.map((item) => item.id !== projectId ? item : ({
-            ...item,
-            outputs: {
-              ...(item.outputs || {}),
-              [block.id]: {
-                ...(item.outputs?.[block.id] || {}),
-                heygenSegmentVideoKeys: partialKeys,
-                generator: 'heygen',
-                heygenFraming: framing,
-                ...(regenerateSegmentIndex >= 0 ? { videoKey: null, completedAt: null } : {}),
-                ts: Date.now()
-              }
-            },
-            updatedAt: Date.now()
-          })));
-        }
-
-        if (clipResults.some((item) => !item)) throw new Error('No se pudieron preparar todos los planos HeyGen.');
-        const segmentVideoKeys = clipResults.map((item) => item.key);
-        if(isScene) await updateJson('heygen-scene-block-tasks.json',{},jobs=>Object.fromEntries(Object.entries(jobs).filter(([,job])=>job.projectId!==projectId||job.blockId!==block.id)));
-        let videoKey = segmentVideoKeys[0];
-        if (segmentVideoKeys.length === 2) {
-          const videoPaths = [];
-          for (const key of segmentVideoKeys) videoPaths.push(await resolveAssetKey(key));
-          const name = `${ts()}-auto-heygen-unido-${newId()}.mp4`;
-          const outPath = path.join(outDir, name);
-          const args = ['-y', '-i', videoPaths[0], '-i', videoPaths[1], '-filter_complex',
-            `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=25[v0];` +
-            `[1:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=25[v1];` +
-            `[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a0];` +
-            `[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a1];` +
-            '[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]',
-            '-map', '[v]', '-map', '[a]', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', outPath];
-          await runFfmpeg(ffmpegExecutable, args);
-          videoKey = `video/${name}`;
-        }
-
-        const captionAudioKeys = audioGroups.flat();
-        const captionAudioPaths = [];
-        for (const key of captionAudioKeys) captionAudioPaths.push(await resolveAssetKey(key));
-        const motionOverlay = await renderAutomationMotionOverlay({
-          project,
-          block,
-          audioKeys: captionAudioKeys,
-          audioPaths: captionAudioPaths,
-          ffmpegExecutable,
-          width,
-          height,
-          outDir
-        });
-        const textLayerKey = String(body.textLayerKey || '');
-        if (motionOverlay) {
-          const baseVideoPath = await resolveAssetKey(videoKey);
-          const name = `${ts()}-auto-heygen-remotion-${newId()}.mp4`;
-          const outPath = path.join(outDir, name);
-          const args = ['-y', '-i', baseVideoPath, '-c:v', 'libvpx', '-i', motionOverlay.path, '-filter_complex',
-            `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=25[base];` +
-            `[1:v]scale=${width}:${height},format=rgba,setpts=PTS-STARTPTS[layer];` +
-            '[base][layer]overlay=0:0:shortest=1:format=auto,format=yuv420p[v]',
-            '-map', '[v]', '-map', '0:a?', '-c:v', 'libx264', '-c:a', 'aac', '-b:a', '192k', '-shortest', outPath];
-          await runFfmpeg(ffmpegExecutable, args);
-          videoKey = `video/${name}`;
-        } else if (/^(generated|uploads)\//.test(textLayerKey)) {
-          const baseVideoPath = await resolveAssetKey(videoKey);
-          const textLayerPath = await resolveAssetKey(textLayerKey);
-          const name = `${ts()}-auto-heygen-texto-${newId()}.mp4`;
-          const outPath = path.join(outDir, name);
-          const args = ['-y', '-i', baseVideoPath, '-i', textLayerPath, '-filter_complex',
-            `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[base];` +
-            `[1:v]scale=${width}:${height},format=rgba[layer];[base][layer]overlay=0:0:format=auto,format=yuv420p[v]`,
-            '-map', '[v]', '-map', '0:a?', '-c:v', 'libx264', '-c:a', 'aac', '-b:a', '192k', '-shortest', outPath];
-          await runFfmpeg(ffmpegExecutable, args);
-          videoKey = `video/${name}`;
-        }
-
-        const category = `Auto: ${project.name}`.slice(0, 80);
-        await updateJson('asset-metadata.json', {}, (metadata) => {
-          for (const [index, item] of clipResults.entries()) {
-            if (item.reused && metadata[item.key]) continue;
-            metadata[item.key] = {
-              type: 'video', modelId: 'heygen-avatar-iv', modelName: 'HeyGen Avatar IV', ts: Date.now(), category,
-              automationId: projectId, blockId: block.id, heygenVideoId: item.videoId, heygenFraming: framing === 'split' ? (index === 0 ? 'wide' : 'close') : framing,
-              characterId: character.id, cost: Number(item.cost.toFixed(6))
-            };
-          }
-          if (!segmentVideoKeys.includes(videoKey)) metadata[videoKey] = {
-            type: 'video', modelId: 'ffmpeg', modelName: 'HeyGen · composición local', ts: Date.now(), category,
-            automationId: projectId, blockId: block.id, heygenFraming: framing, characterId: character.id,
-            motionOverlayKey: motionOverlay?.key || null, cost: 0
-          };
-          return metadata;
-        });
-        return send(res, 200, { videoKey, segmentVideoKeys, framing, characterId: character.id, motionOverlayKey: motionOverlay?.key || '' });
-      } finally {
-        for (const tempPath of temporaryAudioPaths) await fs.unlink(tempPath).catch(() => {});
-      }
-    }
-
-    // Video generativo dentro del Automatizador (MiniMax H3, Seedance 2.5 u Omni).
-    // Divide cada voz según la duración máxima del modelo, conserva los clips
-    // originales y ajusta el master a la duración exacta de ElevenLabs.
-    const automationH3BlockMatch = /^\/api\/automations\/([a-z0-9]+)\/h3-block$/.exec(p);
-    if (automationH3BlockMatch && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      const projectId = automationH3BlockMatch[1];
-      const projects = await readJson('automations.json', []);
-      const project = projects.find((item) => item.id === projectId);
-      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
-      const block = project.blocks?.find((item) => item.id === String(body.blockId || ''));
-      if (!block) return send(res, 404, { error: 'Bloque no encontrado.' });
-      if (!['h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(block.generator)) return send(res, 400, { error: 'Este bloque no está configurado para video generativo.' });
-
-      const isWan = ['wan', 'wan-prime'].includes(block.generator);
-      const isScene = block.generator === 'heygen-scene';
-      const isSeedance25 = block.generator === 'seedance25';
-      const isOmni = block.generator === 'omni';
-      const isSiray = block.videoProvider === 'siray';
-      const isNezha = isSeedance25 && block.videoProvider === 'nezhagate';
-      const model = isSiray ? sirayAutomationModel(block.generator) : isNezha ? getVideoModel('nezhagate-seedance-2-5-special') : getVideoModel(isScene ? 'heygen-video-1' : isWan ? (block.generator === 'wan-prime' ? 'wan-3-prime' : 'wan-3') : isOmni ? 'gemini-omni-1-1-flash' : isSeedance25 ? 'seedance-2-5' : 'minimax-h3');
-      if (!model) throw sirayError('sirayParameters');
-      const serviceName = model.name;
-      const serviceSlug = isScene ? 'heygen-scene' : isWan ? block.generator : isOmni ? 'omni' : isSeedance25 ? 'seedance25' : 'h3';
-
-      const cfg = await getConfig();
-      if (isSiray && !cfg.keys.siray) throw sirayError('sirayKey');
-      if (isNezha && !cfg.keys.nezhagate) throw nezhagateError('nezhagateKey');
-      if (!isSiray && !isNezha && isSeedance25 && !cfg.keys.ark) return send(res, 400, { error: 'Falta la API key de BytePlus ModelArk en Configuración.' });
-      if (isOmni && !cfg.keys.gemini) return send(res, 400, { error: 'Falta la API key de Gemini en Configuración.' });
-      if (!isSiray && isWan && !cfg.keys.qwen) throw wanError('qwenKey');
-      if (!isScene && !isSiray && !isWan && !isSeedance25 && !isOmni && !cfg.keys.minimax) return send(res, 400, { error: 'Falta la API key de MiniMax en Configuración.' });
-      if(isScene && !cfg.keys.heygen) throw heygenSceneError('heygenApiKeyMissing');
-      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
-      const audioKeys = (Array.isArray(body.audioKeys) ? body.audioKeys : []).map(String).filter((key) => /^audio\//.test(key));
-      if (!audioKeys.length) return send(res, 400, { error: 'Falta la narración del bloque.' });
-      const audioPaths = await Promise.all(audioKeys.map((key) => resolveAssetKey(key)));
-      const audioDurations = await Promise.all(audioPaths.map((audioPath) => probeMediaDuration(ffmpegExecutable, audioPath)));
-      if (audioDurations.some((duration) => !Number.isFinite(duration) || duration <= 0)) {
-        return send(res, 400, { error: 'No pude calcular la duración de todos los audios del bloque.' });
-      }
-
-      const configuredMode = isOmni ? block.omniMode : isSeedance25 ? block.seedance25Mode : block.h3Mode;
-      const mode = !isScene && configuredMode === 'frames' ? 'frames' : 'reference';
-      if (isNezha && mode === 'frames') throw nezhagateError('nezhagateFrames');
-      const configuredKeys = normalizeAutomationH3ReferenceKeys(isOmni ? block.omniReferenceKeys : isSeedance25 ? block.seedance25ReferenceKeys : block.h3ReferenceKeys, isSiray || isNezha ? model.maxRefs : isWan ? 20 : 12);
-      const imageKey = String(body.imageKey || '');
-      let referenceKeys;
-      if (mode === 'frames') {
-        referenceKeys = configuredKeys;
-        if (referenceKeys.length !== 2 || referenceKeys.some((key) => /^(video|audio)\//.test(key))) {
-          return sendError(res, 400, 'automationStartEndImagesRequired', `Inicio → Fin de ${serviceName} necesita exactamente dos imágenes: entrada y salida.`, { model: serviceName });
-        }
-      } else {
-        if (!/^(generated|uploads)\//.test(imageKey)) return sendError(res, 400, 'automationBaseImageMissing', `Falta la imagen base del bloque ${serviceName}.`, { model: serviceName });
-        referenceKeys = [...new Set([imageKey, ...configuredKeys])];
-      }
-      const referencePaths = await Promise.all(referenceKeys.map((key) => resolveAssetKey(key)));
-      const allStats = await Promise.all([...referencePaths, ...audioPaths].map((filePath) => fs.stat(filePath).catch(() => null)));
-      if (allStats.some((stat) => !stat?.isFile())) return sendError(res, 400, 'automationReferencesMissing', `No encuentro una o más referencias de ${serviceName}.`, { model: serviceName });
-
-      const chunks = [];
-      const maxChunkDuration = isSiray ? Math.max(...model.durations) : isOmni ? 10 : isSeedance25 ? 30 : 15;
-      for (const [audioIndex, audioDuration] of audioDurations.entries()) {
-        let start = 0;
-        while (start < audioDuration - 0.001) {
-          const duration = Math.min(maxChunkDuration, audioDuration - start);
-          chunks.push({ audioIndex, start, duration, requestDuration: Math.max(isScene ? 5 : isSiray ? Math.min(...model.durations) : isWan ? 2 : isOmni ? 3 : 4, Math.min(maxChunkDuration, Math.ceil(duration))) });
-          start += duration;
-        }
-      }
-      if (!chunks.length) return send(res, 400, { error: 'La narración no contiene audio utilizable.' });
-
-      const resolution = isNezha ? '720p' : isScene ? (model.resolutions.includes(block.h3Resolution)?block.h3Resolution:'768p') : isSiray ? (model.resolutions.includes(block.sirayResolution) ? block.sirayResolution : model.resolutions[0]) : isWan ? (model.resolutions.includes(block.h3Resolution) ? block.h3Resolution : '720P') : isOmni
-        ? (['360p', '720p', '1080p', '4K'].includes(block.omniResolution) ? block.omniResolution : '720p')
-        : isSeedance25
-        ? (block.seedance25Resolution === '480p' ? '480p' : '720p')
-        : (block.h3Resolution === '2K' ? '2K' : '768P');
-      const aspectRatio = model.aspectRatios.includes(project.config?.aspectRatio) ? project.config.aspectRatio : '9:16';
-      const { width, height } = automationVideoDimensions(aspectRatio);
-      const outDir = resolveDir(cfg.paths.video);
-      await fs.mkdir(outDir, { recursive: true });
-      const temporaryPaths = [];
-      const storedKeys = (Array.isArray(body.reuseSegmentKeys) ? body.reuseSegmentKeys : [])
-        .map((key) => String(key || '').trim())
-        .filter((key) => /^video\//.test(key) && key.length <= 500 && !key.includes('..') && !key.includes('\\'))
-        .slice(0, 500);
-      const clipResults = Array(chunks.length).fill(null);
-      for (const [index, key] of storedKeys.slice(0, chunks.length).entries()) {
-        const exists = await fs.access(await resolveAssetKey(key)).then(() => true).catch(() => false);
-        if (!exists) break;
-        clipResults[index] = { key, reused: true };
-      }
-
-      const wanBlockJobId = `${projectId}:${block.id}`;
-      if (isWan && wanBlockJobs.has(wanBlockJobId)) throw wanError('wanBlockBusy');
-      if (isWan) wanBlockJobs.add(wanBlockJobId);
-      try {
-        for (const [index, chunk] of chunks.entries()) {
-          if (clipResults[index]) continue;
-          const refs = [];
-          for (const [refIndex, key] of referenceKeys.entries()) {
-            refs.push({
-              key, path: referencePaths[refIndex],
-              kind: key.startsWith('video/') ? 'video' : key.startsWith('audio/') ? 'audio' : 'image'
-            });
-          }
-          const useNarrationReference = isSeedance25
-            ? block.seedance25UseNarrationReference !== false
-            : isOmni ? false : block.h3UseNarrationReference !== false;
-          if (mode === 'reference' && useNarrationReference) {
-            const chunkPath = path.join(outDir, `.${serviceSlug}-voice-${projectId}-${block.id}-${index}-${newId()}.mp3`);
-            await runFfmpeg(ffmpegExecutable, [
-              '-y', '-ss', chunk.start.toFixed(6), '-i', audioPaths[chunk.audioIndex],
-              '-af', 'apad', '-t', String(chunk.requestDuration), '-c:a', 'libmp3lame', '-b:a', '192k', chunkPath
-            ]);
-            temporaryPaths.push(chunkPath);
-            refs.push({ key: audioKeys[chunk.audioIndex], path: chunkPath, kind: 'audio' });
-          }
-          const counts = {
-            image: refs.filter((ref) => ref.kind === 'image').length,
-            video: refs.filter((ref) => ref.kind === 'video').length,
-            audio: refs.filter((ref) => ref.kind === 'audio').length
-          };
-          const limits = model.mediaLimits || {};
-          if (refs.length > (limits.total || model.maxRefs) || counts.image > (limits.image || model.maxRefs)
-            || counts.video > (limits.video || model.maxRefs) || counts.audio > (limits.audio || model.maxRefs)) {
-            throw localizedServerError('automationReferenceLimitsExceeded', `Las referencias del bloque superan los límites de ${serviceName}: ${limits.image} imágenes, ${limits.video} videos, ${limits.audio} audios y ${limits.total} archivos en total.`, {
-              model: serviceName, images: limits.image, videos: limits.video, audios: limits.audio, total: limits.total
-            });
-          }
-          const mediaDurations = isScene || isNezha ? {video:0,audio:0} : isSiray ? { video: (await Promise.all(refs.filter(ref => ref.kind === 'video').map(ref => probeMediaDuration(ffmpegExecutable, ref.path)))).reduce((sum, seconds) => sum + seconds, 0), audio: 0 } : isWan
-            ? await validateWanMedia(refs, { mode, duration: chunk.requestDuration, probeDuration: file => probeMediaDuration(ffmpegExecutable, file), probeDimensions: file => probeVideoDimensions(ffmpegExecutable, file) })
-            : isOmni
-            ? (await validateGeminiOmniMedia(refs, ffmpegExecutable, mode, false), { video: 0, audio: 0 })
-            : isSeedance25 ? await validateSeedance25Media(refs, ffmpegExecutable)
-              : await validateMiniMaxH3Media(refs, ffmpegExecutable);
-          const narrationAudioNumber = refs.filter((ref) => ref.kind === 'audio').length;
-          const prompt = [
-            project.config?.artStyle ? `GLOBAL ART DIRECTION — preserve this aesthetic consistently: ${String(project.config.artStyle).slice(0, 1200)}` : '',
-            block.imagePrompt,
-            block.negativePrompt ? `Avoid: ${block.negativePrompt}` : '',
-            isSeedance25 && mode === 'reference' && counts.image
-              ? 'Use @Image1 as the principal visual reference for subject identity, composition and scene continuity.'
-              : '',
-            isOmni && mode === 'reference' && counts.image
-              ? 'Use <IMAGE_REF_0> as the principal visual reference for subject identity, composition and scene continuity.'
-              : '',
-            useNarrationReference && mode === 'reference'
-              ? `${isSeedance25 ? `Use @Audio${narrationAudioNumber}` : 'Use the supplied voice audio'} as the exact performance and timing reference. Preserve speaker identity and synchronize visible speech when a person is on screen.`
-              : ''
-          ].filter(Boolean).join('\n\n').slice(0, 7000);
-          const wanFingerprint = isWan ? crypto.createHash('sha256').update(JSON.stringify({ model: model.id, prompt, referenceKeys, audioKeys, chunk, mode, aspectRatio, resolution, audio: block.h3KeepGeneratedAudio })).digest('hex') : '';
-          const wanPending = isWan ? (await readJson('wan-block-tasks.json', {}))[wanFingerprint] : null;
-          const sirayFingerprint = isSiray ? crypto.createHash('sha256').update(JSON.stringify({ model: model.id, prompt, referenceKeys, audioKeys, chunk, mode, aspectRatio, resolution, audio: isSeedance25 ? block.seedance25KeepGeneratedAudio : block.h3KeepGeneratedAudio })).digest('hex') : '';
-          const sirayPending = isSiray ? (await readJson('siray-block-tasks.json', {}))[sirayFingerprint] : null;
-          const nezhaFingerprint = isNezha ? crypto.createHash('sha256').update(JSON.stringify({ model: model.id, prompt, referenceKeys, audioKeys, chunk, mode, aspectRatio })).digest('hex') : '';
-          const nezhaPending = isNezha ? (await readJson('nezhagate-block-tasks.json', {}))[nezhaFingerprint] : null;
-          const sceneFingerprint = isScene ? crypto.createHash('sha256').update(JSON.stringify({projectId,blockId:block.id,prompt,referenceKeys,audioKeys,chunk,resolution,aspectRatio})).digest('hex') : '';
-          const scenePending = isScene ? (await readJson('heygen-scene-block-tasks.json',{}))[sceneFingerprint] : null;
-          const sceneRequestId = scenePending?.requestId || newId();
-          if(isScene && !scenePending) await updateJson('heygen-scene-block-tasks.json',{},jobs=>({...jobs,[sceneFingerprint]:{requestId:sceneRequestId,projectId,blockId:block.id}}));
-          const sirayGenerated = isSiray ? await sendWithWavReferences({ apiKey: cfg.keys.siray, model,
-            prompt: [prompt, videoAudioPolicy(true)].join('\n\n'), mediaRefs: refs, mode, aspectRatio, resolution,
-            duration: chunk.requestDuration, audio: isSeedance25 ? block.seedance25KeepGeneratedAudio : block.h3KeepGeneratedAudio,
-            taskId: sirayPending?.taskId,
-            onTask: taskId => updateJson('siray-block-tasks.json', {}, jobs => ({ ...jobs, [sirayFingerprint]: { taskId, projectId, blockId: block.id } })),
-            onFailed: () => updateJson('siray-block-tasks.json', {}, jobs => { delete jobs[sirayFingerprint]; return jobs; })
-          }, generateSiray, async () => {}) : null;
-          const nezhaAudioHost = isNezha ? nezhagateAudioPublisher(cfg) : null;
-          const nezhaGenerated = isNezha ? await sendWithWavReferences({ apiKey: cfg.keys.nezhagate, model, publishAudio: nezhaAudioHost.publishAudio,
-            prompt: [prompt, videoAudioPolicy(true)].join('\n\n'), mediaRefs: refs, mode, aspectRatio,
-            duration: chunk.requestDuration, taskId: nezhaPending?.taskId,
-            onTask: taskId => updateJson('nezhagate-block-tasks.json', {}, jobs => ({ ...jobs, [nezhaFingerprint]: { taskId, projectId, blockId: block.id } })),
-            onFailed: () => updateJson('nezhagate-block-tasks.json', {}, jobs => { delete jobs[nezhaFingerprint]; return jobs; })
-          }, generateNezhaGate, async () => {}).finally(() => nezhaAudioHost.cleanup()) : null;
-          const generated = isScene ? await generateHeygenScene({apiKey:cfg.keys.heygen,prompt:[prompt,videoAudioPolicy(true)].join('\n\n'),mediaRefs:refs,mode,aspectRatio,resolution,duration:chunk.requestDuration,idempotencyKey:sceneRequestId,taskId:scenePending?.taskId,onTask:taskId=>updateJson('heygen-scene-block-tasks.json',{},jobs=>({...jobs,[sceneFingerprint]:{taskId,requestId:sceneRequestId,projectId,blockId:block.id}})),onFailed:()=>updateJson('heygen-scene-block-tasks.json',{},jobs=>{delete jobs[sceneFingerprint];return jobs;})}) : isSiray ? { ...sirayGenerated.outputs[0], taskId: sirayGenerated.taskId } : isNezha ? nezhaGenerated : isWan
-            ? await generateWanVideo({ apiKey: cfg.keys.qwen, endpoint: cfg.endpoints.qwen, apiModel: model.apiModel,
-              prompt: [prompt, videoAudioPolicy(true)].join('\n\n'), mediaRefs: refs, mode, aspectRatio, resolution,
-              duration: chunk.requestDuration, audio: block.h3KeepGeneratedAudio === true, taskId: wanPending?.taskId,
-              onFailed: async () => updateJson('wan-block-tasks.json', {}, jobs => { delete jobs[wanFingerprint]; return jobs; }),
-              onTask: async taskId => updateJson('wan-block-tasks.json', {}, jobs => ({ ...jobs, [wanFingerprint]: { taskId, projectId, blockId: block.id, createdAt: Date.now() } })) })
-            : isOmni
-            ? await generateGeminiOmniVideo({
-              apiKey: cfg.keys.gemini, apiModel: model.apiModel,
-              prompt, mediaRefs: refs, mode, aspectRatio, resolution,
-              duration: chunk.requestDuration, audio: false
-            })
-            : isSeedance25
-            ? await generateSeedance25Video({
-              apiKey: cfg.keys.ark, apiModel: cfg.seedance25ModelId || model.apiModel,
-              endpoint: cfg.endpoints.ark, prompt, mediaRefs: refs,
-              mode, aspectRatio, resolution, duration: chunk.requestDuration,
-              audio: block.seedance25KeepGeneratedAudio === true
-            })
-            : await generateMiniMaxH3Video({
-              apiKey: cfg.keys.minimax, endpoint: cfg.endpoints.minimax, apiModel: model.apiModel,
-              prompt, mediaRefs: refs, mode, aspectRatio, resolution,
-              duration: chunk.requestDuration, contextIr: block.h3ContextIr === true
-            });
-          const key = await saveBuffer('video', isSiray ? `auto-siray-${sirayFingerprint}.mp4` : isNezha ? `auto-nezhagate-${nezhaFingerprint}.mp4` : `${ts()}-auto-${serviceSlug}-${index + 1}-${newId()}.mp4`, generated.buffer);
-          const pricing = await getPricing();
-          const outputSeconds = Number(generated.usage?.output_video_duration || generated.usage?.output_seconds) || chunk.requestDuration;
-          const inputSeconds = Number(generated.usage?.input_seconds) || (isSeedance25 ? mediaDurations.video : 0) || 0;
-          const inputImages = Number(generated.usage?.input_image_count) || counts.image;
-          const contextCost = generated.contextUsage
-            ? (Number(generated.contextUsage.prompt_tokens) || 0) * 0.9 / 1_000_000
-              + (Number(generated.contextUsage.completion_tokens) || 0) * 3.6 / 1_000_000
-            : 0;
-          const omniInputTokens = Number(generated.usage?.input_tokens || generated.usage?.inputTokenCount || generated.usage?.prompt_token_count) || 0;
-          const cost = isNezha ? nezhagateClipPrice(pricing, model.id, counts.audio > 0) : isScene ? videoPrice(pricing,model.id,resolution)*outputSeconds : isSiray ? videoPrice(pricing, model.id, resolution) * (outputSeconds + (isWan ? Math.min(5, mediaDurations.video) : isSeedance25 ? mediaDurations.video : 0)) + (block.generator === 'h3' ? Math.max(0, counts.image - 5) * 0.4 : 0) : isWan ? videoPrice(pricing, model.id, resolution) * (outputSeconds + (Number(generated.usage?.input_video_duration) || mediaDurations.video || 0)) : isOmni
-            ? videoPrice(pricing, model.id, resolution) * outputSeconds
-              + omniInputTokens * (model.inputPricePerMillionTokens || 0) / 1_000_000
-            : isSeedance25
-            ? videoPrice(pricing, model.id, resolution) * (outputSeconds + inputSeconds)
-              * (counts.video ? (model.videoInputPriceMultiplier || 1) : 1)
-            : videoPrice(pricing, model.id, resolution) * (outputSeconds + inputSeconds)
-              + Math.max(0, inputImages - 5) * 0.04 + contextCost;
-          await recordCost({
-            type: 'video', modelId: model.id, label: `${model.name} ${resolution} · Automatizador`,
-            sirayTaskId: isSiray ? generated.taskId : undefined,
-            nezhagateTaskId: isNezha ? generated.taskId : undefined,
-            units: isNezha ? 1 : outputSeconds, unitLabel: isNezha ? 'video' : 'segundo(s)', cost
-          });
-          clipResults[index] = { key, taskId: generated.taskId, finalPrompt: generated.finalPrompt || prompt, cost, reused: false };
-          const partialKeys = clipResults.map((item) => item?.key || '').filter(Boolean);
-          await updateJson('automations.json', [], (all) => all.map((item) => item.id !== projectId ? item : ({
-            ...item, outputs: { ...(item.outputs || {}), [block.id]: {
-              ...(item.outputs?.[block.id] || {}), h3SegmentVideoKeys: partialKeys,
-              generator: block.generator, h3Resolution: resolution, ts: Date.now()
-            } }, updatedAt: Date.now()
-          })));
-          await updateJson('asset-metadata.json', {}, (metadata) => {
-            metadata[key] = {
-              type: 'video', modelId: model.id, modelName: model.name, ts: Date.now(),
-              category: `Auto: ${project.name}`.slice(0, 80), automationId: projectId, blockId: block.id,
-              wanTaskId: !isSiray && isWan ? generated.taskId : '',
-              sirayTaskId: isSiray ? generated.taskId : '', videoProvider: block.videoProvider,
-              h3TaskId: isSiray || isWan || isSeedance25 || isOmni ? '' : generated.taskId,
-              seedanceTaskId: !isSiray && !isNezha && isSeedance25 ? generated.taskId : '',
-              nezhagateTaskId: isNezha ? generated.taskId : '',
-              omniInteractionId: isOmni ? generated.interactionId : '',
-              h3ContextIr: !isWan && !isSeedance25 && !isOmni && block.h3ContextIr === true,
-              h3ChunkIndex: index, h3Resolution: resolution, generator: block.generator, duration: chunk.duration,
-              cost: Number(cost.toFixed(6))
-            };
-            return metadata;
-          });
-        }
-
-        const segmentVideoKeys = clipResults.map((item) => item.key);
-        if(isScene) await updateJson('heygen-scene-block-tasks.json',{},jobs=>Object.fromEntries(Object.entries(jobs).filter(([,job])=>job.projectId!==projectId||job.blockId!==block.id)));
-        const segmentPaths = await Promise.all(segmentVideoKeys.map((key) => resolveAssetKey(key)));
-        if (isWan) await updateJson('wan-block-tasks.json', {}, jobs => Object.fromEntries(Object.entries(jobs).filter(([, job]) => job.projectId !== projectId || job.blockId !== block.id)));
-        if (isSiray) await updateJson('siray-block-tasks.json', {}, jobs => Object.fromEntries(Object.entries(jobs).filter(([, job]) => job.projectId !== projectId || job.blockId !== block.id)));
-        if (isNezha) await updateJson('nezhagate-block-tasks.json', {}, jobs => Object.fromEntries(Object.entries(jobs).filter(([, job]) => job.projectId !== projectId || job.blockId !== block.id)));
-        const exactDuration = chunks.reduce((sum, chunk) => sum + chunk.duration, 0);
-        const motionOverlay = await renderAutomationMotionOverlay({
-          project, block, audioKeys, audioPaths, ffmpegExecutable, width, height, outDir,
-          textHints: (block.items || []).map((item) => item.text)
-        });
-        const name = `${ts()}-auto-${serviceSlug}-${sanitizeName(block.title || block.id)}-${newId()}.mp4`;
-        const outPath = path.join(outDir, name);
-        const args = ['-y'];
-        for (const segmentPath of segmentPaths) args.push('-i', segmentPath);
-        const firstAudioInput = segmentPaths.length;
-        for (const audioPath of audioPaths) args.push('-i', audioPath);
-        let layerInputIndex;
-        if (motionOverlay) {
-          args.push('-c:v', 'libvpx', '-i', motionOverlay.path);
-          layerInputIndex = segmentPaths.length + audioPaths.length;
-        } else {
-          const textLayerKey = String(body.textLayerKey || '');
-          if (!/^(generated|uploads)\//.test(textLayerKey)) return send(res, 400, { error: 'Falta la capa estática de títulos y subtítulos.' });
-          args.push('-loop', '1', '-framerate', '25', '-i', await resolveAssetKey(textLayerKey));
-          layerInputIndex = segmentPaths.length + audioPaths.length;
-        }
-
-        const filters = [];
-        const visualLabels = [];
-        for (const [index, chunk] of chunks.entries()) {
-          filters.push(`[${index}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-            `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
-            `trim=start=0:duration=${chunk.duration.toFixed(6)},setpts=PTS-STARTPTS,format=yuv420p[h3v${index}]`);
-          visualLabels.push(`[h3v${index}]`);
-        }
-        filters.push(`${visualLabels.join('')}concat=n=${visualLabels.length}:v=1:a=0[visual]`);
-
-        const keepGeneratedAudio = isOmni ? false : isSeedance25 ? block.seedance25KeepGeneratedAudio === true : block.h3KeepGeneratedAudio === true;
-        const useGeneratedAudio = keepGeneratedAudio
-          && (await Promise.all(segmentPaths.map((segmentPath) => probeHasAudioStream(ffmpegExecutable, segmentPath)))).every(Boolean);
-        let audioLabel;
-        if (useGeneratedAudio) {
-          const labels = [];
-          for (const [index, chunk] of chunks.entries()) {
-            filters.push(`[${index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
-              `atrim=start=0:duration=${chunk.duration.toFixed(6)},asetpts=PTS-STARTPTS[h3a${index}]`);
-            labels.push(`[h3a${index}]`);
-          }
-          filters.push(`${labels.join('')}concat=n=${labels.length}:v=0:a=1[h3audio]`);
-          audioLabel = 'h3audio';
-        } else if (audioPaths.length > 1) {
-          const labels = [];
-          for (let index = 0; index < audioPaths.length; index++) {
-            filters.push(`[${firstAudioInput + index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[voice${index}]`);
-            labels.push(`[voice${index}]`);
-          }
-          filters.push(`${labels.join('')}concat=n=${labels.length}:v=0:a=1[voice]`);
-          audioLabel = 'voice';
-        } else {
-          filters.push(`[${firstAudioInput}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[voice]`);
-          audioLabel = 'voice';
-        }
-        filters.push(`[${layerInputIndex}:v:0]scale=${width}:${height},format=rgba,` +
-          `trim=start=0:duration=${exactDuration.toFixed(6)},setpts=PTS-STARTPTS[layer]`);
-        filters.push('[visual][layer]overlay=0:0:shortest=1:format=auto,format=yuv420p[vout]');
-        args.push('-filter_complex', filters.join(';'), '-map', '[vout]', '-map', `[${audioLabel}]`,
-          '-t', exactDuration.toFixed(6), '-r', '25', '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
-          '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-shortest', outPath);
-        await runFfmpeg(ffmpegExecutable, args);
-        const videoKey = `video/${name}`;
-        await updateJson('asset-metadata.json', {}, (metadata) => {
-          metadata[videoKey] = {
-            type: 'video', modelId: `${model.id}-assembly`, modelName: `Automatizador · ${model.name}`, ts: Date.now(),
-            category: `Auto: ${project.name}`.slice(0, 80), automationId: projectId, blockId: block.id,
-            h3SegmentVideoKeys: segmentVideoKeys, h3SegmentDurations: chunks.map((chunk) => chunk.duration), h3Resolution: resolution, h3Mode: mode,
-            h3KeepGeneratedAudio: useGeneratedAudio, generator: block.generator, motionOverlayKey: motionOverlay?.key || null,
-            width, height, duration: exactDuration, cost: 0
-          };
-          return metadata;
-        });
-        return send(res, 200, {
-          videoKey, segmentVideoKeys, segmentDurations: chunks.map((chunk) => chunk.duration), motionOverlayKey: motionOverlay?.key || '',
-          duration: exactDuration, resolution, mode,
-          keptGeneratedAudio: useGeneratedAudio
-        });
-      } finally {
-        if (isWan) wanBlockJobs.delete(wanBlockJobId);
-        await Promise.all(temporaryPaths.map((filePath) => fs.unlink(filePath).catch(() => {})));
-      }
-    }
-
-    // Monta un bloque a partir de una secuencia ordenada de Assets. Cada imagen
-    // o video recibe la misma fracción de la duración de la voz; los videos se
-    // repiten si son más cortos. El audio original puede mezclarse o silenciarse.
-    const automationAssetBlockMatch = /^\/api\/automations\/([a-z0-9]+)\/asset-block$/.exec(p);
-    if (automationAssetBlockMatch && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      const projectId = automationAssetBlockMatch[1];
-      const projects = await readJson('automations.json', []);
-      const project = projects.find((item) => item.id === projectId);
-      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
-      const block = project.blocks?.find((item) => item.id === String(body.blockId || ''));
-      if (!block) return send(res, 404, { error: 'Bloque no encontrado.' });
-      if (block.generator !== 'assets') return send(res, 400, { error: 'Este bloque no está configurado para usar Assets.' });
-      const assetKeys = normalizeAutomationAssetKeys(block.assetKeys);
-      if (!assetKeys.length) return send(res, 400, { error: 'Elegí al menos una imagen o video para este bloque.' });
-      const audioKeys = (Array.isArray(body.audioKeys) ? body.audioKeys : []).map(String).filter((key) => /^audio\//.test(key));
-      if (!audioKeys.length) return send(res, 400, { error: 'Falta el audio narrado del bloque.' });
-
-      const cfg = await getConfig();
-      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
-      const assetPaths = await Promise.all(assetKeys.map((key) => resolveAssetKey(key)));
-      const audioPaths = await Promise.all(audioKeys.map((key) => resolveAssetKey(key)));
-      const allStats = await Promise.all([...assetPaths, ...audioPaths].map((filePath) => fs.stat(filePath).catch(() => null)));
-      if (allStats.some((stat) => !stat?.isFile())) return send(res, 400, { error: 'No encuentro uno o más Assets seleccionados.' });
-      const audioDurations = await Promise.all(audioPaths.map((audioPath) => probeMediaDuration(ffmpegExecutable, audioPath)));
-      if (audioDurations.some((duration) => !duration)) return send(res, 400, { error: 'No pude calcular la duración de todos los audios.' });
-      const exactDuration = audioDurations.reduce((sum, duration) => sum + duration, 0);
-      const segmentDuration = exactDuration / assetPaths.length;
-      const { width, height } = automationVideoDimensions(project.config?.aspectRatio);
-      const outDir = resolveDir(cfg.paths.video);
-      await fs.mkdir(outDir, { recursive: true });
-      const name = `${ts()}-auto-assets-${sanitizeName(block.title || block.id)}-${newId()}.mp4`;
-      const outPath = path.join(outDir, name);
-      const isVideo = assetKeys.map((key) => key.startsWith('video/'));
-      const muteOriginal = block.assetMuteOriginal !== false;
-      const hasOriginalAudio = muteOriginal
-        ? isVideo.map(() => false)
-        : await Promise.all(assetPaths.map((assetPath, index) => isVideo[index] ? probeHasAudioStream(ffmpegExecutable, assetPath) : false));
-
-      const args = ['-y'];
-      for (let index = 0; index < assetPaths.length; index++) {
-        if (isVideo[index]) args.push('-stream_loop', '-1');
-        else args.push('-loop', '1', '-framerate', '25');
-        args.push('-i', assetPaths[index]);
-      }
-      const firstAudioInput = assetPaths.length;
-      for (const audioPath of audioPaths) args.push('-i', audioPath);
-
-      const motionOverlay = await renderAutomationMotionOverlay({
-        project, block, audioKeys, audioPaths, ffmpegExecutable, width, height, outDir,
-        textHints: (block.items || []).map((item) => item.text)
-      });
-      let layerInputIndex = -1;
-      if (motionOverlay) {
-        args.push('-c:v', 'libvpx', '-i', motionOverlay.path);
-        layerInputIndex = assetPaths.length + audioPaths.length;
-      } else {
-        const textLayerKey = String(body.textLayerKey || '');
-        if (!/^(generated|uploads)\//.test(textLayerKey)) return send(res, 400, { error: 'Falta la capa estática de títulos y subtítulos.' });
-        const textLayerPath = await resolveAssetKey(textLayerKey);
-        args.push('-loop', '1', '-framerate', '25', '-i', textLayerPath);
-        layerInputIndex = assetPaths.length + audioPaths.length;
-      }
-
-      const filters = [];
-      const visualLabels = [];
-      const segment = segmentDuration.toFixed(6);
-      for (let index = 0; index < assetPaths.length; index++) {
-        filters.push(
-          `[${index}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-          `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
-          `trim=start=0:duration=${segment},setpts=PTS-STARTPTS,format=yuv420p[assetv${index}]`
-        );
-        visualLabels.push(`[assetv${index}]`);
-      }
-      filters.push(`${visualLabels.join('')}concat=n=${visualLabels.length}:v=1:a=0[visual]`);
-
-      if (audioPaths.length > 1) {
-        const voiceLabels = [];
-        for (let index = 0; index < audioPaths.length; index++) {
-          const label = `voicepart${index}`;
-          filters.push(`[${firstAudioInput + index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[${label}]`);
-          voiceLabels.push(`[${label}]`);
-        }
-        filters.push(`${voiceLabels.join('')}concat=n=${audioPaths.length}:v=0:a=1[voice]`);
-      } else {
-        filters.push(`[${firstAudioInput}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[voice]`);
-      }
-
-      let audioLabel = 'voice';
-      if (!muteOriginal) {
-        const originalLabels = [];
-        for (let index = 0; index < assetPaths.length; index++) {
-          const label = `original${index}`;
-          originalLabels.push(`[${label}]`);
-          if (hasOriginalAudio[index]) {
-            filters.push(
-              `[${index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
-              `atrim=start=0:duration=${segment},asetpts=PTS-STARTPTS[${label}]`
-            );
-          } else {
-            filters.push(`anullsrc=r=48000:cl=stereo,atrim=duration=${segment},asetpts=PTS-STARTPTS[${label}]`);
-          }
-        }
-        filters.push(`${originalLabels.join('')}concat=n=${originalLabels.length}:v=0:a=1[originalaudio]`);
-        filters.push('[voice][originalaudio]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[mixedaudio]');
-        audioLabel = 'mixedaudio';
-      }
-
-      filters.push(
-        `[${layerInputIndex}:v:0]scale=${width}:${height},format=rgba,trim=start=0:duration=${exactDuration.toFixed(6)},` +
-        'setpts=PTS-STARTPTS[layer]'
-      );
-      filters.push('[visual][layer]overlay=0:0:shortest=1:format=auto,format=yuv420p[vout]');
-      args.push(
-        '-filter_complex', filters.join(';'),
-        '-map', '[vout]', '-map', `[${audioLabel}]`,
-        '-t', exactDuration.toFixed(6), '-r', '25',
-        '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-shortest', outPath
-      );
-      await runFfmpeg(ffmpegExecutable, args);
-      const videoKey = `video/${name}`;
-      await updateJson('asset-metadata.json', {}, (metadata) => {
-        metadata[videoKey] = {
-          type: 'video', modelId: 'ffmpeg', modelName: 'Automatizador · Assets', ts: Date.now(),
-          category: `Auto: ${project.name}`.slice(0, 80), automationId: projectId, blockId: block.id,
-          sourceAssetKeys: assetKeys, assetMuteOriginal: muteOriginal, segmentDuration,
-          motionOverlayKey: motionOverlay?.key || null, width, height, duration: exactDuration, cost: 0
-        };
-        return metadata;
-      });
-      return send(res, 200, {
-        videoKey, motionOverlayKey: motionOverlay?.key || '', assetKeys,
-        assetMuteOriginal: muteOriginal, segmentDuration, duration: exactDuration
-      });
-    }
-
-    // Muxea el video de un bloque: imagen fija + audio(s) en secuencia. Con texto
-    // dinámico activo, Remotion entrega una capa transparente sincronizada que
-    // FFmpeg compone sobre la imagen limpia.
-    const automationVideoMatch = /^\/api\/automations\/([a-z0-9]+)\/video$/.exec(p);
-    if (automationVideoMatch && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      const projectId = automationVideoMatch[1];
-      const projects = await readJson('automations.json', []);
-      const project = projects.find((item) => item.id === projectId);
-      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
-      const block = project.blocks?.find((item) => item.id === String(body.blockId || ''));
-      if (!block) return send(res, 404, { error: 'Bloque no encontrado.' });
-      const cfg = await getConfig();
-      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
-      const imageKey = String(body.imageKey || '');
-      const audioKeys = (Array.isArray(body.audioKeys) ? body.audioKeys : []).map(String).filter((k) => /^audio\//.test(k));
-      if (!/^(generated|uploads)\//.test(imageKey)) return send(res, 400, { error: 'Falta la imagen del bloque.' });
-      if (!audioKeys.length) return send(res, 400, { error: 'Falta el audio del bloque.' });
-      const imgPath = await resolveAssetKey(imageKey);
-      const audioPaths = [];
-      for (const k of audioKeys) audioPaths.push(await resolveAssetKey(k));
-      const audioDurations = await Promise.all(audioPaths.map((audioPath) => probeMediaDuration(ffmpegExecutable, audioPath)));
-      const exactDuration = audioDurations.every((duration) => Number.isFinite(duration) && duration > 0)
-        ? audioDurations.reduce((sum, duration) => sum + duration, 0)
-        : null;
-      const name = `${ts()}-auto-${newId()}.mp4`;
-      const outDir = resolveDir(cfg.paths.video);
-      await fs.mkdir(outDir, { recursive: true });
-      const outPath = path.join(outDir, name);
-      const detectedDimensions = await probeVideoDimensions(ffmpegExecutable, imgPath);
-      const fallbackDimensions = automationVideoDimensions(project.config?.aspectRatio);
-      const width = detectedDimensions?.width || fallbackDimensions.width;
-      const height = detectedDimensions?.height || fallbackDimensions.height;
-      const motionOverlay = await renderAutomationMotionOverlay({
-        project,
-        block,
-        audioKeys,
-        audioPaths,
-        ffmpegExecutable,
-        width,
-        height,
-        outDir,
-        textHints: (block.items || []).map((item) => item.text)
-      });
-      const args = ['-y', '-loop', '1', '-i', imgPath];
-      for (const a of audioPaths) args.push('-i', a);
-      if (motionOverlay) args.push('-c:v', 'libvpx', '-i', motionOverlay.path);
-      if (motionOverlay) {
-        const filters = [];
-        let audioMap = '1:a';
-        if (audioPaths.length > 1) {
-          const inputs = audioPaths.map((_, i) => `[${i + 1}:a]`).join('');
-          filters.push(`${inputs}concat=n=${audioPaths.length}:v=0:a=1[a]`);
-          audioMap = '[a]';
-        }
-        const overlayInputIndex = audioPaths.length + 1;
-        filters.push(
-          `[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1,fps=25[base]`,
-          `[${overlayInputIndex}:v]scale=${width}:${height},format=rgba,setpts=PTS-STARTPTS[motion]`,
-          '[base][motion]overlay=0:0:shortest=1:format=auto,format=yuv420p[v]'
-        );
-        args.push('-filter_complex', filters.join(';'), '-map', '[v]', '-map', audioMap);
-      } else if (audioPaths.length > 1) {
-        const inputs = audioPaths.map((_, i) => `[${i + 1}:a]`).join('');
-        args.push('-filter_complex', `${inputs}concat=n=${audioPaths.length}:v=0:a=1[a]`, '-map', '0:v', '-map', '[a]');
-      } else {
-        args.push('-map', '0:v', '-map', '1:a');
-      }
-      // dimensiones pares (requisito de yuv420p) y cierre al terminar el audio
-      args.push('-c:v', 'libx264', '-tune', 'stillimage', '-pix_fmt', 'yuv420p',
-        ...(motionOverlay ? [] : ['-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2']), '-r', '25',
-        '-c:a', 'aac', '-b:a', '192k');
-      // -shortest por sí solo puede conservar varios segundos de fotogramas en
-      // cola cuando la imagen fija tarda más en codificarse que el audio en
-      // demuxearse. El límite explícito garantiza que el MP4 mida exactamente
-      // la suma de los audios, incluso en regeneraciones con imágenes pesadas.
-      if (exactDuration) args.push('-t', exactDuration.toFixed(3));
-      args.push('-shortest', outPath);
-      await runFfmpeg(ffmpegExecutable, args);
-      const key = `video/${name}`;
-      const category = String(body.category || '').slice(0, 80);
-      await updateJson('asset-metadata.json', {}, (m) => {
-        m[key] = { type: 'video', modelId: 'ffmpeg', modelName: 'Automatizador', ts: Date.now(), category, automationId: projectId, blockId: block.id, motionOverlayKey: motionOverlay?.key || null };
-        return m;
-      });
-      return send(res, 200, { videoKey: key, motionOverlayKey: motionOverlay?.key || '' });
-    }
-
-    // Ensambla los MP4 terminados de todos los bloques, respetando exactamente
-    // el orden del guion. No vuelve a generar imágenes ni audios. Se normalizan
-    // tamaño, fps y audio para tolerar bloques creados con modelos distintos.
-    const automationAssembleMatch = /^\/api\/automations\/([a-z0-9]+)\/assemble$/.exec(p);
-    if (automationAssembleMatch && req.method === 'POST') {
-      const projectId = automationAssembleMatch[1];
-      const projects = await readJson('automations.json', []);
-      const project = projects.find((item) => item.id === projectId);
-      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
-      if (!project.blocks?.length) return send(res, 400, { error: 'El proyecto no tiene bloques para ensamblar.' });
-
-      const missingBlocks = project.blocks.filter((block) => !project.outputs?.[block.id]?.videoKey);
-      if (missingBlocks.length) {
-        const names = missingBlocks.slice(0, 8).map((block) => block.title || block.id).join(', ');
-        const extra = missingBlocks.length > 8 ? ` y ${missingBlocks.length - 8} más` : '';
-        const extraCount = Math.max(0, missingBlocks.length - 8);
-        return sendError(res, 400, extraCount ? 'automationFinishedVideosMissingMore' : 'automationFinishedVideosMissing', `Faltan videos terminados: ${names}${extra}.`, { names, count: extraCount });
-      }
-
-      const videoPaths = [];
-      for (const block of project.blocks) {
-        const key = String(project.outputs[block.id].videoKey || '');
-        if (!/^video\//.test(key)) return sendError(res, 400, 'automationBlockVideoInvalid', `El video de “${block.title || block.id}” no es válido.`, { title: block.title || block.id });
-        const filePath = await resolveAssetKey(key);
-        const stat = await fs.stat(filePath).catch(() => null);
-        if (!stat?.isFile()) return sendError(res, 400, 'automationBlockVideoMissing', `No encuentro el video de “${block.title || block.id}”. Regenerá ese bloque.`, { title: block.title || block.id });
-        videoPaths.push(filePath);
-      }
-
-      const cfg = await getConfig();
-      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
-      const detectedDimensions = await dominantVideoDimensions(ffmpegExecutable, videoPaths);
-      const { width, height } = detectedDimensions || automationVideoDimensions(project.config?.aspectRatio);
-      const name = `${ts()}-final-${sanitizeName(project.name)}-${newId()}.mp4`;
-      const outDir = resolveDir(cfg.paths.video);
-      await fs.mkdir(outDir, { recursive: true });
-      const outPath = path.join(outDir, name);
-      const args = ['-y'];
-      for (const videoPath of videoPaths) args.push('-i', videoPath);
-
-      const includeLogos = project.config?.includeLogos === true;
-      const logo = includeLogos ? automationLogoForDimensions(width, height) : null;
-      let logoDuration = 0;
-      if (logo) {
-        const logoStat = await fs.stat(logo.filePath).catch(() => null);
-        if (!logoStat?.isFile()) {
-          return sendError(res, 500, 'automationBundledLogoMissing', `No encuentro el logo ${logo.variant} incluido con Manifestador.`, { variant: logo.variant });
-        }
-        logoDuration = await probeMediaDuration(ffmpegExecutable, logo.filePath) || 0;
-      }
-
-      const music = normalizeAutomationMusic(project.config?.music, project.requirements?.music);
-      const transitionSound = normalizeAutomationTransitionSound(project.config?.transitionSound);
-      let musicKey = '';
-      let musicPath = '';
-      let selectedTransitionSound = null;
-      let transitionSoundPath = '';
-      let transitionSoundDuration = 0;
-      let finalDuration = null;
-      let blockDurations = null;
-      let appliedFadeOutSeconds = 0;
-      let automaticMusic = null;
-      if (music.enabled) {
-        if (music.source === 'auto') {
-          automaticMusic = await findAutomaticMusicTrack(music);
-          if (!automaticMusic) return send(res, 400, { error: 'La música está en automático, pero no hay pistas clasificadas como Música en Assets.' });
-          musicKey = automaticMusic.key;
-        } else {
-          musicKey = music.assetKey;
-        }
-        if (!/^audio\//.test(musicKey)) return send(res, 400, { error: 'Elegí, subí o generá una música antes del ensamble.' });
-        musicPath = await resolveAssetKey(musicKey);
-        const musicStat = await fs.stat(musicPath).catch(() => null);
-        if (!musicStat?.isFile()) return send(res, 400, { error: 'No encuentro la música elegida. Seleccioná otra pista.' });
-        // La entrada se repite indefinidamente; amix la corta cuando termina la
-        // narración concatenada, de modo que nunca alarga el video final.
-        args.push('-stream_loop', '-1', '-i', musicPath);
-      }
-
-      if (transitionSound.enabled && videoPaths.length > 1) {
-        const transitionSounds = await listTransitionSounds();
-        selectedTransitionSound = transitionSounds.find((sound) => sound.id === transitionSound.soundId) || null;
-        if (!selectedTransitionSound) {
-          return send(res, 400, { error: 'El sonido de transición elegido ya no está disponible. Elegí otro en el panel Automatizar.' });
-        }
-        transitionSoundPath = selectedTransitionSound.filePath;
-        const soundStat = await fs.stat(transitionSoundPath).catch(() => null);
-        if (!soundStat?.isFile()) return send(res, 400, { error: 'No encuentro el sonido de transición elegido.' });
-        transitionSoundDuration = await probeMediaDuration(ffmpegExecutable, transitionSoundPath) || 0;
-        if (!transitionSoundDuration) {
-          return send(res, 400, { error: 'No pude leer la duración del sonido de transición. Verificá el archivo de audio.' });
-        }
-        args.push('-i', transitionSoundPath);
-      }
-
-      if (includeLogos || transitionSoundPath || musicPath) {
-        blockDurations = await Promise.all(videoPaths.map((videoPath) => probeMediaDuration(ffmpegExecutable, videoPath)));
-        if (blockDurations.some((duration) => !duration)) {
-          return send(res, 400, { error: 'No pude calcular la duración de los bloques para preparar el ensamble. Verificá que ffprobe esté junto a ffmpeg.' });
-        }
-        finalDuration = blockDurations.reduce((sum, duration) => sum + duration, 0);
-        if (musicPath && music.fadeOut) appliedFadeOutSeconds = Math.min(music.fadeOutSeconds, finalDuration);
-      }
-
-      const transitionInputIndex = transitionSoundPath ? videoPaths.length + (musicPath ? 1 : 0) : -1;
-      const logoInputIndex = logo ? videoPaths.length + (musicPath ? 1 : 0) + (transitionSoundPath ? 1 : 0) : -1;
-      if (logo) args.push('-i', logo.filePath);
-
-      const filters = [];
-      for (let index = 0; index < videoPaths.length; index++) {
-        filters.push(
-          `[${index}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-          `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
-          `format=yuv420p,setpts=PTS-STARTPTS[v${index}]`
-        );
-        filters.push(
-          `[${index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
-          `asetpts=PTS-STARTPTS[a${index}]`
-        );
-      }
-      const concatInputs = videoPaths.map((_, index) => `[v${index}][a${index}]`).join('');
-      filters.push(`${concatInputs}concat=n=${videoPaths.length}:v=1:a=1[vout][voiceout]`);
-      let contentAudioLabel = 'voiceout';
-      let transitionCount = 0;
-      if (transitionSoundPath && blockDurations) {
-        transitionCount = videoPaths.length - 1;
-        const sourceLabels = Array.from({ length: transitionCount }, (_, index) => `[transitionSource${index}]`).join('');
-        const normalizedSource = `[${transitionInputIndex}:a:0]aresample=48000,` +
-          'aformat=sample_fmts=fltp:channel_layouts=stereo';
-        if (transitionCount > 1) {
-          filters.push(`${normalizedSource},asplit=${transitionCount}${sourceLabels}`);
-        } else {
-          filters.push(`${normalizedSource}[transitionSource0]`);
-        }
-        let boundary = 0;
-        const transitionLabels = [];
-        for (let index = 0; index < transitionCount; index++) {
-          boundary += blockDurations[index];
-          // Centra el golpe sobre cada corte interno. El pequeño margen impide
-          // que un bloque excepcionalmente corto lleve sonido desde el fotograma inicial.
-          const startAt = Math.max(0.05, boundary - (transitionSoundDuration / 2));
-          const delayMs = Math.round(startAt * 1000);
-          const label = `transition${index}`;
-          transitionLabels.push(`[${label}]`);
-          filters.push(
-            `[transitionSource${index}]atrim=start=0:end=${transitionSoundDuration.toFixed(3)},` +
-            `asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1[${label}]`
-          );
-        }
-        filters.push(
-          `[voiceout]${transitionLabels.join('')}amix=inputs=${transitionCount + 1}:` +
-          'duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[voicefx]'
-        );
-        contentAudioLabel = 'voicefx';
-      }
-      if (musicPath) {
-        const musicInputIndex = videoPaths.length;
-        const gainDb = Math.max(-60, Math.min(0, music.gainDb));
-        // La entrada musical usa -stream_loop -1. Siempre hay que acotarla a la
-        // duración del contenido, aunque el fade esté desactivado; de lo contrario
-        // FFmpeg puede finalizar el MP4 pero quedar esperando la fuente infinita.
-        const trimFilter = finalDuration
-          ? `,atrim=end=${finalDuration.toFixed(3)},asetpts=PTS-STARTPTS`
-          : '';
-        const fadeFilter = appliedFadeOutSeconds > 0
-          ? `,afade=t=out:st=${Math.max(0, finalDuration - appliedFadeOutSeconds).toFixed(3)}:d=${appliedFadeOutSeconds.toFixed(3)}`
-          : '';
-        filters.push(`[${musicInputIndex}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${gainDb.toFixed(2)}dB${trimFilter}${fadeFilter}[music]`);
-        filters.push(`[${contentAudioLabel}][music]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[aout]`);
-      } else {
-        filters.push(`[${contentAudioLabel}]anull[aout]`);
-      }
-
-      let finalVideoLabel = 'vout';
-      let finalAudioLabel = 'aout';
-      let fadeToBlackSeconds = 0;
-      if (logo) {
-        fadeToBlackSeconds = Math.min(AUTOMATION_LOGO_FADE_SECONDS, finalDuration || AUTOMATION_LOGO_FADE_SECONDS);
-        const fadeStart = Math.max(0, (finalDuration || fadeToBlackSeconds) - fadeToBlackSeconds);
-        filters.push(`[vout]fade=t=out:st=${fadeStart.toFixed(3)}:d=${fadeToBlackSeconds.toFixed(3)}[vcontent]`);
-        // El logo ocupa todo el lienzo. En 1:1 se usa el horizontal y se recorta
-        // el excedente lateral para conservar su escala, en vez de reducirlo.
-        filters.push(
-          `[${logoInputIndex}:v:0]scale=${width}:${height}:force_original_aspect_ratio=increase,` +
-          `crop=${width}:${height},setsar=1,fps=25,format=yuv420p,setpts=PTS-STARTPTS[vlogo]`
-        );
-        filters.push(
-          `[${logoInputIndex}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
-          `asetpts=PTS-STARTPTS[alogo]`
-        );
-        // La mezcla de voz y música termina con el contenido. El logo se concatena
-        // después con su pista original, por lo que la música nunca lo invade.
-        filters.push('[vcontent][aout][vlogo][alogo]concat=n=2:v=1:a=1[vfinal][afinal]');
-        finalVideoLabel = 'vfinal';
-        finalAudioLabel = 'afinal';
-      }
-      args.push(
-        '-filter_complex', filters.join(';'),
-        '-map', `[${finalVideoLabel}]`, '-map', `[${finalAudioLabel}]`,
-        '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-shortest',
-        outPath
-      );
-      if (automationAssemblyJobs.has(projectId)) {
-        return send(res, 409, { error: 'Este proyecto ya tiene un ensamble en curso. Esperá a que termine antes de iniciarlo otra vez.' });
-      }
-      automationAssemblyJobs.add(projectId);
-      try {
-        await runFfmpeg(ffmpegExecutable, args);
-      } finally {
-        automationAssemblyJobs.delete(projectId);
-      }
-
-      const key = `video/${name}`;
-      const assembledAt = Date.now();
-      await updateJson('asset-metadata.json', {}, (metadata) => {
-        metadata[key] = {
-          type: 'video',
-          modelId: 'ffmpeg',
-          modelName: 'Ensamble final',
-          ts: assembledAt,
-          category: `Auto: ${project.name}`,
-          automationId: project.id,
-          autoKind: 'final-assembly',
-          blockCount: project.blocks.length,
-          aspectRatio: project.config?.aspectRatio || null,
-          width,
-          height,
-          dimensionsSource: detectedDimensions ? 'block-videos' : 'project-aspect-ratio',
-          includeLogos,
-          logoVariant: logo?.variant || null,
-          logoDuration: logoDuration || null,
-          fadeToBlackSeconds: logo ? fadeToBlackSeconds : 0,
-          musicKey: musicKey || null,
-          musicGainDb: musicKey ? music.gainDb : null,
-          musicFadeOutSeconds: musicKey && music.fadeOut ? appliedFadeOutSeconds : 0,
-          transitionSoundId: selectedTransitionSound?.id || null,
-          transitionSoundName: selectedTransitionSound?.name || null,
-          transitionSoundCategory: selectedTransitionSound?.category || null,
-          transitionCount
-        };
-        return metadata;
-      });
-
-      let updatedProject = null;
-      await updateJson('automations.json', [], (all) => {
-        const index = all.findIndex((item) => item.id === projectId);
-        if (index === -1) return all;
-        const finalOutput = {
-          videoKey: key,
-          assembledAt,
-          blockCount: project.blocks.length,
-          width,
-          height,
-          includeLogos,
-          logoVariant: logo?.variant || null,
-          logoDuration: logoDuration || null,
-          fadeToBlackSeconds: logo ? fadeToBlackSeconds : 0,
-          musicKey: musicKey || null,
-          musicGainDb: musicKey ? music.gainDb : null,
-          musicFadeOutSeconds: musicKey && music.fadeOut ? appliedFadeOutSeconds : 0,
-          transitionSoundId: selectedTransitionSound?.id || null,
-          transitionSoundName: selectedTransitionSound?.name || null,
-          transitionSoundCategory: selectedTransitionSound?.category || null,
-          transitionCount
-        };
-        all[index] = {
-          ...all[index],
-          config: {
-            ...all[index].config,
-            includeLogos,
-            transitionSound: normalizeAutomationTransitionSound(transitionSound),
-            music: normalizeAutomationMusic({ ...music, assetKey: musicKey || music.assetKey }, all[index].requirements?.music),
-            overlay: normalizeAutomationOverlay(all[index].config?.overlay)
-          },
-          finalOutput,
-          effectOutput: null,
-          updatedAt: assembledAt
-        };
-        updatedProject = all[index];
-        return all;
-      });
-      if (!updatedProject) return send(res, 404, { error: 'El proyecto fue eliminado durante el ensamble.' });
-      return send(res, 200, { project: updatedProject, finalOutput: updatedProject.finalOutput });
-    }
-
-    // Regenera exclusivamente la capa animada de títulos/subtítulos de un
-    // bloque. Reutiliza los audios existentes y no llama a ningún proveedor.
-    const automationTextLayerMatch = /^\/api\/automations\/([a-z0-9]+)\/text-layer$/.exec(p);
-    if (automationTextLayerMatch && req.method === 'POST') {
-      const projectId = automationTextLayerMatch[1];
-      const body = await readJsonBody(req);
-      const projects = await readJson('automations.json', []);
-      const project = projects.find((item) => item.id === projectId);
-      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
-      if (!normalizeAutomationDynamicText(project.config?.dynamicText).enabled) {
-        return send(res, 400, { error: 'Este proyecto no tiene texto dinámico activo.' });
-      }
-      const block = (project.blocks || []).find((item) => item.id === String(body.blockId || ''));
-      if (!block) return send(res, 404, { error: 'Bloque no encontrado.' });
-      const output = project.outputs?.[block.id] || {};
-      const audioKeys = (Array.isArray(output.audioKeys) ? output.audioKeys : [])
-        .map(String).filter((key) => /^audio\//.test(key));
-      if (!audioKeys.length) return sendError(res, 400, 'automationExistingAudiosMissing', `Faltan los audios existentes de “${block.title || block.id}”.`, { title: block.title || block.id });
-      const cfg = await getConfig();
-      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
-      const audioPaths = await Promise.all(audioKeys.map((key) => resolveAssetKey(key)));
-      const fallbackDimensions = automationVideoDimensions(project.config?.aspectRatio);
-      let detectedDimensions = null;
-      if (/^video\//.test(String(output.videoKey || ''))) {
-        const blockVideoPath = await resolveAssetKey(output.videoKey).catch(() => null);
-        if (blockVideoPath) detectedDimensions = await probeVideoDimensions(ffmpegExecutable, blockVideoPath);
-      }
-      const width = Number(project.finalOutput?.width) || detectedDimensions?.width || fallbackDimensions.width;
-      const height = Number(project.finalOutput?.height) || detectedDimensions?.height || fallbackDimensions.height;
-      const outDir = resolveDir(cfg.paths.video);
-      await fs.mkdir(outDir, { recursive: true });
-      const rendered = await renderAutomationMotionOverlay({
-        project,
-        block,
-        audioKeys,
-        audioPaths,
-        ffmpegExecutable,
-        width,
-        height,
-        outDir,
-        textHints: (block.items || []).map((item) => item.text)
-      });
-      if (!rendered?.key) return send(res, 500, { error: 'Remotion no devolvió la nueva capa de texto.' });
-      let updatedProject = null;
-      await updateJson('automations.json', [], (all) => all.map((item) => {
-        if (item.id !== projectId) return item;
-        updatedProject = {
-          ...item,
-          outputs: {
-            ...(item.outputs || {}),
-            [block.id]: {
-              ...(item.outputs?.[block.id] || {}),
-              motionOverlayKey: rendered.key,
-              textRefreshedAt: Date.now()
-            }
-          },
-          updatedAt: Date.now()
-        };
-        return updatedProject;
-      }));
-      return send(res, 200, { project: automationForClient(updatedProject), motionOverlayKey: rendered.key });
-    }
-
-    // Posproducción opcional: reconstruye cada toma desde su imagen limpia o los
-    // segmentos originales de HeyGen, aplica efecto y máscara, y recién después
-    // agrega la capa PNG de texto. Reutiliza el audio del MP4 final, no llama
-    // modelos y mantiene disponible el master anterior.
-    const automationEffectMatch = /^\/api\/automations\/([a-z0-9]+)\/effect$/.exec(p);
-    if (automationEffectMatch && req.method === 'POST') {
-      const projectId = automationEffectMatch[1];
-      const projects = await readJson('automations.json', []);
-      const project = projects.find((item) => item.id === projectId);
-      if (!project) return send(res, 404, { error: 'Proyecto no encontrado.' });
-      if (!project.finalOutput?.videoKey) {
-        return send(res, 400, { error: 'Primero ensamblá el video final limpio.' });
-      }
-
-      const body = await readJsonBody(req);
-      const textRefreshTarget = ['final', 'effect'].includes(body.textRefreshTarget)
-        ? body.textRefreshTarget
-        : '';
-      const isTextRefresh = Boolean(textRefreshTarget);
-      const textLayersRefreshed = isTextRefresh || body.textLayersRefreshed === true;
-      if (textRefreshTarget === 'effect' && !project.effectOutput?.videoKey) {
-        return send(res, 400, { error: 'El proyecto todavía no tiene una versión con efectos para actualizar.' });
-      }
-      if (textRefreshTarget === 'final' && project.effectOutput?.videoKey) {
-        return send(res, 400, { error: 'Ya existe una versión con efectos; la actualización de textos debe aplicarse solamente sobre esa versión.' });
-      }
-      const applyEffects = !isTextRefresh || textRefreshTarget === 'effect';
-      const preservedEffect = textRefreshTarget === 'effect' ? {
-        preset: project.effectOutput.preset,
-        intensity: project.effectOutput.intensity,
-        maskEnabled: project.effectOutput.maskEnabled,
-        maskColor: project.effectOutput.maskColor,
-        maskOpacity: project.effectOutput.maskOpacity
-      } : null;
-      const effect = normalizeAutomationVideoEffect({
-        ...project.config?.videoEffect,
-        ...(preservedEffect || body.videoEffect || body || {}),
-        enabled: applyEffects
-      });
-      const sourceVideoKey = String(project.finalOutput.videoKey);
-      if (!/^video\//.test(sourceVideoKey)) return send(res, 400, { error: 'El ensamble final no es un video válido.' });
-      const sourcePath = await resolveAssetKey(sourceVideoKey);
-      const sourceStat = await fs.stat(sourcePath).catch(() => null);
-      if (!sourceStat?.isFile()) return send(res, 400, { error: 'No encuentro el ensamble final. Volvé a ensamblarlo.' });
-
-      const cfg = await getConfig();
-      const ffmpegExecutable = await resolveFfmpegExecutable(cfg.ffmpegPath);
-      const detectedDimensions = await probeVideoDimensions(ffmpegExecutable, sourcePath);
-      const fallbackDimensions = automationVideoDimensions(project.config?.aspectRatio);
-      const width = Number(project.finalOutput.width) || detectedDimensions?.width || fallbackDimensions.width;
-      const height = Number(project.finalOutput.height) || detectedDimensions?.height || fallbackDimensions.height;
-      const duration = await probeMediaDuration(ffmpegExecutable, sourcePath);
-      if (!duration) return send(res, 400, { error: 'No pude leer la duración del ensamble. Verificá que ffprobe esté junto a ffmpeg.' });
-
-      const blockSources = [];
-      const dynamicTextEnabled = normalizeAutomationDynamicText(project.config?.dynamicText).enabled;
-      for (const block of project.blocks || []) {
-        const output = project.outputs?.[block.id] || {};
-        const imageKey = String(output.imageKey || '');
-        const textLayerKey = String(output.textLayerKey || '');
-        const motionOverlayKey = String(output.motionOverlayKey || '');
-        const blockVideoKey = String(output.videoKey || '');
-        const isHeyGen = block.generator === 'heygen' || output.generator === 'heygen';
-        const isH3 = ['h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(block.generator) || ['h3', 'seedance25', 'omni', 'wan', 'wan-prime', 'heygen-scene'].includes(output.generator);
-        const isAssetBlock = block.generator === 'assets' || output.generator === 'assets';
-        const selectedAssetKeys = normalizeAutomationAssetKeys(block.assetKeys);
-        const heygenSegmentKeys = (Array.isArray(output.heygenSegmentVideoKeys) ? output.heygenSegmentVideoKeys : [])
-          .map(String)
-          .filter((key) => /^video\//.test(key));
-        const h3SegmentKeys = (Array.isArray(output.h3SegmentVideoKeys) ? output.h3SegmentVideoKeys : [])
-          .map(String)
-          .filter((key) => /^video\//.test(key));
-        const h3SegmentDurations = (Array.isArray(output.h3SegmentDurations) ? output.h3SegmentDurations : [])
-          .map(Number)
-          .filter((duration) => Number.isFinite(duration) && duration > 0);
-        if (!isHeyGen && !isH3 && !isAssetBlock && !/^(generated|uploads)\//.test(imageKey)) {
-          return sendError(res, 400, 'automationCleanImageMissing', `Falta la imagen limpia de “${block.title || block.id}”.`, { title: block.title || block.id });
-        }
-        if (isHeyGen && !heygenSegmentKeys.length) {
-          return sendError(res, 400, 'automationHeygenOriginalShotsMissing', `Faltan los planos originales de HeyGen de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.`, { title: block.title || block.id });
-        }
-        if (isH3 && !h3SegmentKeys.length) {
-          const modelName = ['wan', 'wan-prime'].includes(block.generator) ? (block.generator === 'wan-prime' ? 'Wan 3.0 Prime' : 'Wan 3.0') : block.generator === 'seedance25' || output.generator === 'seedance25' ? 'Seedance 2.5'
-            : block.generator === 'omni' || output.generator === 'omni' ? 'Gemini Omni' : 'MiniMax H3';
-          return sendError(res, 400, 'automationGenerativeSegmentsMissing', `Faltan los tramos originales de ${modelName} de “${block.title || block.id}”. Regenerá esa toma una vez para recuperarlos.`, { model: modelName, title: block.title || block.id });
-        }
-        if (isAssetBlock && !selectedAssetKeys.length) {
-          return sendError(res, 400, 'automationSelectedBlockAssetsMissing', `Faltan los Assets seleccionados de “${block.title || block.id}”.`, { title: block.title || block.id });
-        }
-        const layerKey = dynamicTextEnabled ? motionOverlayKey : textLayerKey;
-        const layerIsVideo = dynamicTextEnabled;
-        if (layerIsVideo ? !/^video\//.test(layerKey) : !/^(generated|uploads)\//.test(layerKey)) {
-          return sendError(res, 400, layerIsVideo ? 'automationAnimatedLayerMissing' : 'automationSubtitleLayerMissing', `Falta la capa ${layerIsVideo ? 'animada' : 'de subtítulos'} de “${block.title || block.id}”. Volvé a generar esa toma para prepararla.`, { title: block.title || block.id });
-        }
-        if (!/^video\//.test(blockVideoKey)) {
-          return sendError(res, 400, 'automationFinishedVideoMissing', `Falta el video terminado de “${block.title || block.id}”.`, { title: block.title || block.id });
-        }
-        const visualKeys = isHeyGen ? heygenSegmentKeys : isH3 ? h3SegmentKeys : isAssetBlock ? selectedAssetKeys : [imageKey];
-        const visualKinds = visualKeys.map((key) => key.startsWith('video/') ? 'video' : 'image');
-        const [visualPaths, textLayerPath, blockVideoPath] = await Promise.all([
-          Promise.all(visualKeys.map((key) => resolveAssetKey(key))),
-          resolveAssetKey(layerKey),
-          resolveAssetKey(blockVideoKey)
-        ]);
-        const stats = await Promise.all([
-          ...visualPaths.map((visualPath) => fs.stat(visualPath).catch(() => null)),
-          fs.stat(textLayerPath).catch(() => null),
-          fs.stat(blockVideoPath).catch(() => null)
-        ]);
-        if (stats.some((stat) => !stat?.isFile())) {
-          return sendError(res, 400, 'automationLocalMaterialsMissing', `No encuentro todos los materiales locales de “${block.title || block.id}”.`, { title: block.title || block.id });
-        }
-        blockSources.push({
-          block,
-          kind: isHeyGen ? 'heygen' : isH3 ? 'h3' : isAssetBlock ? 'assets' : 'image',
-          visualPaths, visualKinds, textLayerPath, layerIsVideo, blockVideoPath,
-          segmentDurations: isH3 ? h3SegmentDurations : []
-        });
-      }
-      if (!blockSources.length) return send(res, 400, { error: 'El proyecto no tiene tomas para procesar.' });
-
-      const blockDurations = await Promise.all(
-        blockSources.map((source) => probeMediaDuration(ffmpegExecutable, source.blockVideoPath))
-      );
-      if (blockDurations.some((blockDuration) => !blockDuration)) {
-        return send(res, 400, { error: 'No pude calcular la duración de todas las tomas. Verificá que ffprobe esté junto a ffmpeg.' });
-      }
-      const contentDuration = blockDurations.reduce((sum, blockDuration) => sum + blockDuration, 0);
-      const effectFilters = applyEffects ? automationVideoEffectFilters(effect, width, height) : 'format=yuv420p';
-      const maskFilter = applyEffects ? automationVideoMaskFilter(effect) : '';
-      const name = isTextRefresh
-        ? `${ts()}-textos-${textRefreshTarget}-${sanitizeName(project.name)}-${newId()}.mp4`
-        : `${ts()}-efecto-${effect.preset}-${sanitizeName(project.name)}-${newId()}.mp4`;
-      const outDir = resolveDir(cfg.paths.video);
-      await fs.mkdir(outDir, { recursive: true });
-      const outPath = path.join(outDir, name);
-      const args = ['-y', '-i', sourcePath];
-      let nextInputIndex = 1;
-      for (const source of blockSources) {
-        source.visualInputIndexes = [];
-        for (const [visualIndex, visualPath] of source.visualPaths.entries()) {
-          if (source.visualKinds[visualIndex] === 'image') args.push('-loop', '1', '-framerate', '25');
-          else if (source.kind === 'assets') args.push('-stream_loop', '-1');
-          args.push('-i', visualPath);
-          source.visualInputIndexes.push(nextInputIndex++);
-        }
-        if (!source.layerIsVideo) args.push('-loop', '1', '-framerate', '25');
-        else args.push('-c:v', 'libvpx');
-        args.push('-i', source.textLayerPath);
-        source.layerInputIndex = nextInputIndex++;
-      }
-      const filters = [
-        `[0:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,format=yuv420p[base]`
-      ];
-      const shotLabels = [];
-      for (let index = 0; index < blockSources.length; index++) {
-        const source = blockSources[index];
-        const layerInputIndex = source.layerInputIndex;
-        const blockDuration = blockDurations[index].toFixed(3);
-        if (source.kind === 'image') {
-          filters.push(
-            `[${source.visualInputIndexes[0]}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-            `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
-            `${effectFilters}${maskFilter},trim=start=0:end=${blockDuration},setpts=PTS-STARTPTS[effectbg${index}]`
-          );
-        } else if (source.kind === 'assets') {
-          const assetSegmentDuration = Number(blockDuration) / source.visualInputIndexes.length;
-          const assetLabels = [];
-          for (const [assetIndex, inputIndex] of source.visualInputIndexes.entries()) {
-            const label = `assetfx${index}_${assetIndex}`;
-            filters.push(
-              `[${inputIndex}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-              `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
-              `${effectFilters}${maskFilter},trim=start=0:duration=${assetSegmentDuration.toFixed(6)},` +
-              `setpts=PTS-STARTPTS[${label}]`
-            );
-            assetLabels.push(`[${label}]`);
-          }
-          filters.push(`${assetLabels.join('')}concat=n=${assetLabels.length}:v=1:a=0[effectbg${index}]`);
-        } else {
-          const segmentLabels = [];
-          for (const [segmentIndex, inputIndex] of source.visualInputIndexes.entries()) {
-            const label = `heygen${index}_${segmentIndex}`;
-            const h3Trim = source.kind === 'h3' && Number(source.segmentDurations?.[segmentIndex]) > 0
-              ? `trim=start=0:duration=${Number(source.segmentDurations[segmentIndex]).toFixed(6)},`
-              : '';
-            filters.push(
-              `[${inputIndex}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-              `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25,` +
-              `format=yuv420p,${h3Trim}setpts=PTS-STARTPTS[${label}]`
-            );
-            segmentLabels.push(`[${label}]`);
-          }
-          const visualLabel = `heygenbase${index}`;
-          if (segmentLabels.length === 1) {
-            filters.push(`${segmentLabels[0]}null[${visualLabel}]`);
-          } else {
-            filters.push(`${segmentLabels.join('')}concat=n=${segmentLabels.length}:v=1:a=0[${visualLabel}]`);
-          }
-          filters.push(
-            `[${visualLabel}]${effectFilters}${maskFilter},trim=start=0:end=${blockDuration},` +
-            `setpts=PTS-STARTPTS[effectbg${index}]`
-          );
-        }
-        filters.push(
-          `[${layerInputIndex}:v:0]format=rgba,scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-          `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1,` +
-          `${source.layerIsVideo ? 'fps=25,' : ''}trim=start=0:end=${blockDuration},setpts=PTS-STARTPTS,format=rgba[textlayer${index}]`
-        );
-        filters.push(
-          `[effectbg${index}][textlayer${index}]overlay=x=0:y=0:shortest=1:format=auto,` +
-          `format=yuv420p,setpts=PTS-STARTPTS[shot${index}]`
-        );
-        shotLabels.push(`[shot${index}]`);
-      }
-      const fadeToBlackSeconds = project.finalOutput.includeLogos
-        ? Math.max(0, Math.min(contentDuration, Number(project.finalOutput.fadeToBlackSeconds) || AUTOMATION_LOGO_FADE_SECONDS))
-        : 0;
-      const finalContentFilter = fadeToBlackSeconds > 0
-        ? `fade=t=out:st=${Math.max(0, contentDuration - fadeToBlackSeconds).toFixed(3)}:d=${fadeToBlackSeconds.toFixed(3)},`
-        : '';
-      filters.push(
-        `${shotLabels.join('')}concat=n=${shotLabels.length}:v=1:a=0,fps=25,` +
-        `${finalContentFilter}format=yuv420p[effectcontent]`
-      );
-      // El ensamble anterior se usa como lienzo temporal y fuente de audio. El
-      // contenido reconstruido lo cubre por completo; al terminar, eof_action=pass
-      // deja visible el logo original (si existe), sin efectos ni subtítulos.
-      filters.push('[base][effectcontent]overlay=x=0:y=0:eof_action=pass:shortest=0:format=auto,format=yuv420p[vout]');
-      args.push(
-        '-filter_complex', filters.join(';'),
-        '-map', '[vout]', '-map', '0:a:0?',
-        '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
-        '-c:a', 'copy', '-movflags', '+faststart',
-        outPath
-      );
-      if (automationAssemblyJobs.has(projectId)) {
-        return send(res, 409, { error: 'Este proyecto ya tiene una posproducción en curso. Esperá a que termine.' });
-      }
-      automationAssemblyJobs.add(projectId);
-      try {
-        await runFfmpeg(ffmpegExecutable, args);
-      } finally {
-        automationAssemblyJobs.delete(projectId);
-      }
-
-      const videoKey = `video/${name}`;
-      const processedAt = Date.now();
-      const presetName = AUTOMATION_VIDEO_EFFECTS[effect.preset].name;
-      await updateJson('asset-metadata.json', {}, (metadata) => {
-        metadata[videoKey] = {
-          type: 'video',
-          modelId: 'ffmpeg',
-          modelName: isTextRefresh ? 'Textos actualizados · FFmpeg' : 'Posproducción FFmpeg',
-          ts: processedAt,
-          category: `Auto: ${project.name}`,
-          automationId: project.id,
-          autoKind: isTextRefresh ? `text-refresh-${textRefreshTarget}` : 'post-effect',
-          sourceVideoKey,
-          effectPreset: applyEffects ? effect.preset : null,
-          effectName: applyEffects ? presetName : null,
-          effectIntensity: applyEffects ? effect.intensity : null,
-          maskEnabled: applyEffects ? effect.maskEnabled : false,
-          maskColor: applyEffects ? effect.maskColor : null,
-          maskOpacity: applyEffects ? effect.maskOpacity : 0,
-          width,
-          height,
-          subtitleLayerCount: blockSources.length,
-          subtitlesPreserved: true,
-          textsRefreshed: textLayersRefreshed,
-          textRefreshTarget: textRefreshTarget || null,
-          logoPreserved: project.finalOutput.includeLogos === true,
-          cost: 0
-        };
-        return metadata;
-      });
-
-      let updatedProject = null;
-      await updateJson('automations.json', [], (all) => all.map((item) => {
-        if (item.id !== projectId) return item;
-        const baseProject = {
-          ...item,
-          config: {
-            ...item.config,
-            videoEffect: isTextRefresh ? item.config?.videoEffect : effect,
-            dynamicText: normalizeAutomationDynamicText(item.config?.dynamicText),
-            transitionSound: normalizeAutomationTransitionSound(item.config?.transitionSound),
-            music: normalizeAutomationMusic(item.config?.music, item.requirements?.music),
-            overlay: normalizeAutomationOverlay(item.config?.overlay),
-            titleOverlay: normalizeAutomationTitleOverlay(item.config?.titleOverlay, item.blocks, item.integration?.scriptTitle || item.name)
-          },
-          textRefreshRequiredAt: textLayersRefreshed ? null : item.textRefreshRequiredAt,
-          updatedAt: processedAt
-        };
-        const nextEffectOutput = {
-          ...(isTextRefresh ? item.effectOutput : {}),
-          videoKey,
-          sourceVideoKey,
-          processedAt,
-          preset: effect.preset,
-          presetName,
-          intensity: effect.intensity,
-          maskEnabled: effect.maskEnabled,
-          maskColor: effect.maskColor,
-          maskOpacity: effect.maskOpacity,
-          width,
-          height,
-          subtitleLayerCount: blockSources.length,
-          subtitlesPreserved: true,
-          textsRefreshed: textLayersRefreshed,
-          textRefreshedAt: textLayersRefreshed ? processedAt : null,
-          logoPreserved: project.finalOutput.includeLogos === true
-        };
-        if (textRefreshTarget === 'final') {
-          updatedProject = {
-            ...baseProject,
-            finalOutput: {
-              ...item.finalOutput,
-              videoKey,
-              assembledAt: processedAt,
-              textsRefreshed: true,
-              textRefreshedAt: processedAt
-            },
-            effectOutput: null
-          };
-        } else {
-          updatedProject = {
-            ...baseProject,
-            effectOutput: nextEffectOutput
-          };
-        }
-        return updatedProject;
-      }));
-      if (!updatedProject) return send(res, 404, { error: 'El proyecto fue eliminado durante la posproducción.' });
-      return send(res, 200, {
-        project: updatedProject,
-        finalOutput: updatedProject.finalOutput,
-        effectOutput: updatedProject.effectOutput,
-        textRefreshTarget: textRefreshTarget || null
-      });
-    }
-
-    // Etiqueta assets con la categoría del proyecto (y bloque) para agruparlos en Assets.
-    if (p === '/api/assets/tag' && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      const keys = (Array.isArray(body.keys) ? body.keys : []).map(String).filter(Boolean);
-      await updateJson('asset-metadata.json', {}, (m) => {
-        for (const k of keys) m[k] = {
-          ...(m[k] || {}),
-          category: body.category !== undefined ? String(body.category).slice(0, 80) : m[k]?.category,
-          automationId: body.automationId !== undefined ? String(body.automationId) : m[k]?.automationId,
-          automationName: body.automationName !== undefined ? String(body.automationName).slice(0, 120) : m[k]?.automationName,
-          generatedByAutomation: body.automationId !== undefined ? true : m[k]?.generatedByAutomation,
-          blockId: body.blockId !== undefined ? String(body.blockId) : m[k]?.blockId,
-          autoKind: body.autoKind !== undefined ? String(body.autoKind) : m[k]?.autoKind
-        };
-        return m;
-      });
-      return send(res, 200, { ok: true });
     }
 
     if (p === '/api/assets/audio-metadata' && req.method === 'POST') {
@@ -8180,12 +5108,7 @@ const server = http.createServer(async (req, res) => {
 
     // --- consumo y precios ---
     if (p === '/api/costs' && req.method === 'GET') {
-      const [pricing, ledger, automations, assetMetadata] = await Promise.all([
-        getPricing(),
-        readJson('ledger.json', []),
-        readJson('automations.json', []),
-        readJson('asset-metadata.json', {})
-      ]);
+      const [pricing, ledger] = await Promise.all([getPricing(), readJson('ledger.json', [])]);
       const byMonth = {};
       const byModelThisMonth = {};
       const nowMonth = monthKey(Date.now());
@@ -8201,9 +5124,6 @@ const server = http.createServer(async (req, res) => {
           byModelThisMonth[k].count += 1;
         }
       }
-      const projects = automations
-        .map((project) => automationProjectCostEstimate(project, pricing, assetMetadata))
-        .sort((a, b) => (b.updatedAt || b.ts || 0) - (a.updatedAt || a.ts || 0));
       return send(res, 200, {
         pricing,
         total,
@@ -8211,7 +5131,6 @@ const server = http.createServer(async (req, res) => {
         currentMonthTotal: byMonth[nowMonth] || 0,
         byMonth,
         byModelThisMonth,
-        projects,
         recent: ledger.slice(0, 100)
       });
     }
@@ -8456,53 +5375,6 @@ const server = http.createServer(async (req, res) => {
       await updateJson('history.json', [], (all) => all.map((e) => ({
         ...e, outputs: (e.outputs || []).map(swap), refs: (e.refs || []).map(swap)
       })));
-      await updateJson('audio-captions.json', {}, (captions) => {
-        if (!captions[oldKey]) return captions;
-        captions[newKey] = { ...captions[oldKey], audioKey: newKey };
-        delete captions[oldKey];
-        return captions;
-      });
-      await updateJson('automations.json', [], (all) => all.map((project) => ({
-        ...project,
-        blocks: (project.blocks || []).map((block) => ({
-          ...block,
-          assetKeys: (block.assetKeys || []).map(swap)
-        })),
-        generatedCharacters: Object.fromEntries(Object.entries(project.generatedCharacters || {}).map(([role, character]) => [role, {
-          ...character,
-          assetKey: swap(character.assetKey),
-          sheet: swap(character.sheet),
-          photos: (character.photos || []).map(swap)
-        }])),
-        outputs: Object.fromEntries(Object.entries(project.outputs || {}).map(([blockId, output]) => [blockId, {
-          ...output,
-          imageKey: swap(output.imageKey),
-          textImageKey: swap(output.textImageKey),
-          textLayerKey: swap(output.textLayerKey),
-          motionOverlayKey: swap(output.motionOverlayKey),
-          videoKey: swap(output.videoKey),
-          assetKeys: (output.assetKeys || []).map(swap),
-          audioKeys: (output.audioKeys || []).map(swap)
-        }])),
-        config: {
-          ...project.config,
-          music: normalizeAutomationMusic({
-            ...project.config?.music,
-            assetKey: swap(project.config?.music?.assetKey)
-          }, project.requirements?.music),
-          overlay: normalizeAutomationOverlay({ ...project.config?.overlay, previewBg: swap(project.config?.overlay?.previewBg) })
-        },
-        finalOutput: project.finalOutput ? {
-          ...project.finalOutput,
-          videoKey: swap(project.finalOutput.videoKey),
-          musicKey: swap(project.finalOutput.musicKey)
-        } : null,
-        effectOutput: project.effectOutput ? {
-          ...project.effectOutput,
-          videoKey: swap(project.effectOutput.videoKey),
-          sourceVideoKey: swap(project.effectOutput.sourceVideoKey)
-        } : null
-      })));
       return send(res, 200, { oldKey, newKey, name: newName });
     }
 
@@ -8579,47 +5451,6 @@ const server = http.createServer(async (req, res) => {
         outputs: (entry.outputs || []).filter((key) => !removed.has(key)),
         refs: (entry.refs || []).filter((key) => !removed.has(key))
       })).filter((entry) => entry.outputs.length));
-      await updateJson('audio-captions.json', {}, (captions) => {
-        for (const key of removed) delete captions[key];
-        return captions;
-      });
-      await updateJson('automations.json', [], (all) => all.map((project) => {
-        const music = normalizeAutomationMusic(project.config?.music, project.requirements?.music);
-        if (removed.has(music.assetKey)) music.assetKey = '';
-        const finalOutput = project.finalOutput && !removed.has(project.finalOutput.videoKey)
-          ? { ...project.finalOutput, musicKey: removed.has(project.finalOutput.musicKey) ? null : project.finalOutput.musicKey }
-          : null;
-        const effectOutput = project.effectOutput
-          && !removed.has(project.effectOutput.videoKey)
-          && !removed.has(project.effectOutput.sourceVideoKey)
-          && finalOutput
-          ? { ...project.effectOutput }
-          : null;
-        const outputs = Object.fromEntries(Object.entries(project.outputs || {}).map(([blockId, output]) => [blockId, {
-          ...output,
-          imageKey: removed.has(output.imageKey) ? null : output.imageKey,
-          textImageKey: removed.has(output.textImageKey) ? null : output.textImageKey,
-          textLayerKey: removed.has(output.textLayerKey) ? null : output.textLayerKey,
-          motionOverlayKey: removed.has(output.motionOverlayKey) ? null : output.motionOverlayKey,
-          videoKey: removed.has(output.videoKey) ? null : output.videoKey,
-          assetKeys: (output.assetKeys || []).filter((key) => !removed.has(key)),
-          audioKeys: (output.audioKeys || []).filter((key) => !removed.has(key))
-        }]));
-        const generatedCharacters = Object.fromEntries(Object.entries(project.generatedCharacters || {})
-          .filter(([, character]) => !removed.has(character.assetKey || character.sheet)));
-        const assignments = {
-          ...project.assignments,
-          characters: Object.fromEntries(Object.entries(project.assignments?.characters || {}).filter(([role, id]) =>
-            !String(id).startsWith('automation-character:') || generatedCharacters[role]?.id === id))
-        };
-        const overlay = normalizeAutomationOverlay(project.config?.overlay);
-        if (removed.has(overlay.previewBg)) overlay.previewBg = '';
-        const blocks = (project.blocks || []).map((block) => ({
-          ...block,
-          assetKeys: (block.assetKeys || []).filter((key) => !removed.has(key))
-        }));
-        return { ...project, blocks, generatedCharacters, assignments, outputs, config: { ...project.config, music, overlay }, finalOutput, effectOutput };
-      }));
       const cfgAfterDelete = await getConfig();
       const metadataAfterDelete = await readJson('asset-metadata.json', {});
       const visibleCleaned = filterNsfwHistory(cleaned, cfgAfterDelete, metadataAfterDelete);

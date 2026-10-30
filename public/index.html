@@ -69,7 +69,6 @@
       <button class="nav-btn" data-view="characters"><svg class="ic"><use href="#i-user"/></svg><span data-i18n="nav.characters">Personajes</span></button>
       <button class="nav-btn" data-view="elements"><svg class="ic"><use href="#i-globe"/></svg><span data-i18n="nav.elements">Locaciones y objetos</span></button>
       <button class="nav-btn" data-view="series"><svg class="ic"><use href="#i-layers"/></svg><span data-i18n="nav.series">Series</span></button>
-      <button class="nav-btn" data-view="automatizador"><svg class="ic"><use href="#i-spark"/></svg><span data-i18n="nav.automation">Automatizador</span></button>
       <button class="nav-btn" data-view="subtitler"><svg class="ic"><use href="#i-clapper"/></svg><span data-i18n="nav.subtitler">Subtitulador</span></button>
       <button class="nav-btn" data-view="poser"><svg class="ic"><use href="#i-cube"/></svg><span data-i18n="nav.poser">Poser</span></button>
       <button class="nav-btn" data-view="prompts"><svg class="ic"><use href="#i-book"/></svg><span data-i18n="nav.prompts">Prompts</span></button>
@@ -729,38 +728,6 @@
       <div id="seriesIdeasPanel" role="tabpanel" aria-labelledby="seriesIdeasTab" hidden></div>
     </section>
 
-    <!-- ==================== AUTOMATIZADOR ==================== -->
-    <section id="view-automatizador" class="view">
-      <div class="chars-head">
-        <h2 data-i18n="automation.title">Automatizador</h2>
-        <div>
-          <button id="btnImportAutomation" class="tool-btn"><svg class="ic"><use href="#i-upload"/></svg> <span data-i18n="automation.importScript">Importar guion (JSON)</span></button>
-          <button id="btnNewAutomation" class="generate-btn small"><svg class="ic"><use href="#i-plus"/></svg> <span data-i18n="automation.newEmptyProject">Proyecto vacío</span></button>
-        </div>
-      </div>
-      <div id="automationsGrid" class="chars-grid"></div>
-    </section>
-
-    <!-- Vista de proyecto de automatización (se abre desde Automatizador) -->
-    <section id="view-automation" class="view">
-      <div class="chars-head script-head">
-        <div class="script-head-left">
-          <button id="automationBack" class="mini-btn">← <span data-i18n="automation.title">Automatizador</span></button>
-          <div>
-            <h2 id="automationTitle" data-i18n="automation.project">Proyecto</h2>
-            <span id="automationMeta" class="hint"></span>
-          </div>
-        </div>
-        <div class="script-head-right">
-          <button id="automationSave" class="generate-btn small"><svg class="ic"><use href="#i-check"/></svg> <span data-i18n="automation.saveProject">Guardar proyecto</span></button>
-          <button id="automationDelete" class="mini-btn danger"><svg class="ic"><use href="#i-trash"/></svg> <span data-i18n="automation.deleteProject">Borrar proyecto</span></button>
-        </div>
-      </div>
-      <div id="automationRoot"></div>
-    </section>
-
-    <input type="file" id="automationImportInput" accept=".json,application/json" hidden>
-
     <!-- ==================== SUBTITULADOR ==================== -->
     <section id="view-subtitler" class="view">
       <div class="chars-head">
@@ -826,7 +793,6 @@
         <button id="btnRefreshPricing" class="generate-btn small"><svg class="ic"><use href="#i-search"/></svg> <span data-i18n="costs.refreshPrices">Actualizar precios con OpenAI</span></button>
       </div>
       <div id="costsSummary" class="costs-summary"></div>
-      <div id="costProjectEstimate" class="costs-panel"></div>
       <div class="costs-grid">
         <div class="costs-panel">
           <h3 data-i18n="costs.byTool">Este mes por herramienta</h3>
@@ -970,7 +936,7 @@
         <label class="poser-toggle"><input type="checkbox" name="convertAudioReferencesToWav" checked><span data-i18n="config.audioReferencesWav"></span></label>
         <p class="hint" data-i18n="config.audioReferencesWavHint"></p>
         </div>
-        <p class="hint" data-i18n="config.ffmpeg.hint">El Automatizador lo usa para armar el video mp4 de cada bloque (imagen + audio). Podés pegar la carpeta bin o la ruta completa a ffmpeg.exe.</p>
+        <p class="hint" data-i18n="config.ffmpeg.hint">Lo usan el Subtitulador y la validación y conversión de referencias de audio y video. Podés pegar la carpeta bin o la ruta completa a ffmpeg.exe.</p>
 
         <h3>ComfyUI</h3>
         <div class="cfg-grid">
@@ -1230,7 +1196,7 @@
           <label><span data-i18n="assets.info.type">Tipo</span><select id="projectAssetZone" class="select"><option value="all" data-i18n="common.all">Todo</option><option value="generated" data-i18n="common.generated">Generadas</option><option value="uploads" data-i18n="common.uploaded">Subidas</option><option value="video" data-i18n="common.videos">Videos</option><option value="audio" data-i18n="common.audio">Audio</option></select></label>
           <label><span data-i18n="common.search">Buscar</span><input id="projectAssetSearch" type="search" data-i18n-placeholder="projects.assetSearch" placeholder="Nombre, categoría o etiqueta"></label>
         </div>
-        <div id="projectAssetPickerGrid" class="automation-assets-picker-grid"></div>
+        <div id="projectAssetPickerGrid" class="asset-pick-grid"></div>
         <div class="project-picker-tools"><button type="button" id="projectAssetPrev" class="mini-btn" data-i18n="common.previous">Anterior</button><span id="projectAssetPage" class="hint" aria-live="polite"></span><button type="button" id="projectAssetNext" class="mini-btn" data-i18n="common.next">Siguiente</button></div>
       </div>
     </section>
@@ -1305,33 +1271,6 @@
     </div>
     <div id="shotAssetsGrid" class="shot-assets-grid"></div>
     <div class="form-modal-actions"><button type="button" class="generate-btn small" id="shotAssetsDone" data-i18n="common.done">Listo</button></div>
-  </div>
-</div>
-
-<!-- Selector ordenado de imágenes y videos para bloques del Automatizador -->
-<div id="automationAssetsModal" class="modal" hidden>
-  <div class="modal-box automation-assets-picker-box">
-    <div class="modal-head">
-      <div><h3 id="automationAssetsTitle" data-i18n="automation.assets.title">Assets del bloque</h3><p class="hint" data-i18n="automation.assets.orderHint">Seleccioná imágenes o videos; el orden inferior será el orden de aparición.</p></div>
-      <button class="icon-btn" id="automationAssetsClose" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="ic"><use href="#i-x"/></svg></button>
-    </div>
-    <div class="automation-assets-picker-tools">
-      <div class="tabs" id="automationAssetsTabs">
-        <button class="tab active" data-auto-assets-zone="all" data-i18n="common.all">Todos</button>
-        <button class="tab" data-auto-assets-zone="generated" data-i18n="common.generated">Generadas</button>
-        <button class="tab" data-auto-assets-zone="uploads" data-i18n="common.uploaded">Subidas</button>
-        <button class="tab" data-auto-assets-zone="video" data-i18n="common.videos">Videos</button>
-        <button class="tab" data-auto-assets-zone="audio" id="automationAssetsAudioTab" hidden data-i18n="common.audio">Audio</button>
-      </div>
-      <input type="search" id="automationAssetsSearch" placeholder="Buscar por nombre…" data-i18n-placeholder="automation.assets.searchPlaceholder">
-    </div>
-    <div id="automationAssetsPickerGrid" class="automation-assets-picker-grid"></div>
-    <div class="automation-assets-order-head"><strong data-i18n="automation.assets.playbackOrder">Orden de reproducción</strong><span class="hint" id="automationAssetsCount" data-i18n="automation.assets.noneSelected">0 seleccionados</span></div>
-    <div id="automationAssetsOrder" class="automation-assets-order"></div>
-    <div class="form-modal-actions">
-      <button type="button" class="mini-btn" id="automationAssetsCancel" data-i18n="common.cancel">Cancelar</button>
-      <button type="button" class="generate-btn small" id="automationAssetsDone" data-i18n="automation.assets.useSelection">Usar selección</button>
-    </div>
   </div>
 </div>
 
@@ -1601,7 +1540,6 @@
 <div id="toast" class="toast" hidden></div>
 <input type="file" id="fileInput" accept="image/*" multiple hidden>
 <input type="file" id="characterImportInput" accept=".zip,application/zip" hidden>
-<input type="file" id="scriptImportInput" accept=".json,application/json" hidden>
 
 <script src="vendor/prism/prism.js"></script>
 <script src="i18n.js"></script>
