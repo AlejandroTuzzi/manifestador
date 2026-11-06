@@ -109,6 +109,7 @@ const state = {
   pickerTab: 'upload',
   pickerMulti: false,
   assetEditorImagePick: false,
+  assetEditorRefPick: false,
   pickerSelection: new Map(),
   replaceRefIndex: null,     // índice de la ref que el picker va a reemplazar (null = agregar)
   pickerCharacterId: '',     // drill-down del tab Personajes del picker
@@ -306,7 +307,7 @@ function currentModel() {
 }
 
 function currentVideoModel() {
-  return state.videoModels.find((m) => m.id === state.video.modelId) || state.videoModels[0];
+  return state.videoModels.find((m) => m.id === state.video.modelId || m.replaces === state.video.modelId) || state.videoModels[0];
 }
 
 // el modelo cuyo límite de referencias aplica según el modo activo

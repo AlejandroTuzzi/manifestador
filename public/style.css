@@ -1671,6 +1671,16 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 #btnDictation.listening { color: var(--pink); border-color: var(--pink); background: var(--panel-solid); }
 #dictationInterim { font-style: italic; overflow-wrap: anywhere; }
 #llmComposer > .dictation-panel { width:100%; box-sizing:border-box; }
+.asset-editor-modes { margin-bottom: 14px; }
+.asset-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.asset-editor-tools textarea { width: 100%; min-width: 0; box-sizing: border-box; resize: vertical; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 9px; font: inherit; color-scheme: dark; }
+.asset-editor-tools textarea::placeholder { color: var(--muted); }
+.asset-editor-tools textarea:focus-visible, .asset-editor-numbers input[type="color"]:focus-visible, .asset-editor-numbers input[type="range"]:focus-visible { outline: 2px solid var(--pink); outline-offset: 1px; }
+.asset-editor-numbers input[type="color"] { height: 38px; padding: 3px; cursor: pointer; }
+.asset-editor-numbers input[type="range"] { height: 38px; padding: 0; border: 0; background: transparent; accent-color: var(--pink-strong); }
+.asset-editor-tools .cfg-grid { grid-template-columns: minmax(0, 1fr); }
+.asset-editor-tools label.poser-toggle { flex-direction: row; align-items: center; }
+.asset-editor-refs-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; color: var(--muted); font-size: 12px; }
 @media (max-width: 800px) { .asset-editor-layout { grid-template-columns: 1fr; } }
 .picker-selected-previews {
   display: flex; gap: 8px; width: 100%; overflow-x: auto; padding: 3px 0 7px;

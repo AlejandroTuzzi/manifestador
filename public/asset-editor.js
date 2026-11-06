@@ -93,6 +93,7 @@ function syncAssetEditorChanges() {
 
 function confirmAssetEditorLeave() {
   if (assetEdit.saving || assetEdit.confirmResolve) return Promise.resolve(false);
+  if (globalThis.assetEditorAi?.blocksLeaving()) return Promise.resolve(false);
   if (!assetEditorHasChanges()) return Promise.resolve(true);
   assetEdit.drag = null;
   assetEdit.confirmFocus = document.activeElement;
@@ -119,6 +120,7 @@ function clearAssetEditor() {
   canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
   canvas.hidden = true;
   canvas.style.cursor = 'crosshair';
+  globalThis.assetEditorAi?.sourceChanged(null);
   $('#assetEditorFields').disabled = true;
   $('#assetEditorClose').hidden = true;
   $('#assetEditorResult').hidden = true;
@@ -144,6 +146,7 @@ async function openAssetEditor(key) {
   const request = ++assetEdit.request;
   assetEdit.image = null; assetEdit.result = ''; assetEdit.drag = null; assetEdit.savedRect = null;
   assetEdit.key = key; assetEdit.rect = null;
+  globalThis.assetEditorAi?.sourceChanged(null);
   $('#assetEditorClose').hidden = false;
   syncAssetEditorChanges();
   $('#assetEditorFields').disabled = true;
@@ -172,6 +175,7 @@ async function openAssetEditor(key) {
     $('#assetEditorFields').disabled = false;
     $('#assetEditorStatus').textContent = '';
     resetAssetCrop();
+    globalThis.assetEditorAi?.sourceChanged(img, key);
   } catch (error) {
     if (request === assetEdit.request) $('#assetEditorStatus').textContent = error.message;
   }

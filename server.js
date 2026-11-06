@@ -31,6 +31,7 @@ import { spawn, execFile } from 'node:child_process';
 import { IMAGE_MODELS, VIDEO_MODELS, AUDIO_MODELS, AUDIO_MODEL, MUSIC_MODEL, getImageModel, getVideoModel, getAudioModel } from './lib/models.js';
 import { generateSiray, sirayError } from './lib/siray.js';
 import { generateNezhaGate, nezhagateError, nezhagateFetch, nezhagateClipPrice } from './lib/nezhagate.js';
+import { normalizeOpenAIEdit, openAIEditInstruction } from './lib/openai-image-options.js';
 import { r2Settings, r2Put, r2Delete, r2SignedGetUrl, r2Check } from './lib/r2.js';
 import {
   generateGemini, analyzeArtStyle, analyzeVocabularyImage, generateSeedream, generateFireRed, generateOpenAIImage, generateSeedanceVideo,
@@ -38,7 +39,7 @@ import {
   generateMiniMaxH3Video as generateMiniMaxH3VideoRaw, regenerateMiniMaxH3Video as regenerateMiniMaxH3VideoRaw, generateScreenplay,
   listVoices, generateSpeech, generateMusic, translateText, searchUpdatedPricing, testService
 } from './lib/providers.js';
-import { mergePricing, imagePrice, videoPrice, audioPrice, musicPrice, translatePrice, scriptPrice } from './lib/pricing.js';
+import { mergePricing, imagePrice, videoPrice, omniTokenCost, audioPrice, musicPrice, translatePrice, scriptPrice } from './lib/pricing.js';
 import { generateQwenImage, normalizeQwenOptions, qwenEndpoint, QWEN_ENDPOINT } from './lib/qwen-image.js';
 import { createH3PromotionCoordinator, findExistingH3Promotion } from './lib/h3Promotion.js';
 import {
@@ -566,6 +567,8 @@ function ts() {
 function extForMime(mime) {
   if (mime === 'image/jpeg') return '.jpg';
   if (mime === 'image/webp') return '.webp';
+  if (mime === 'image/gif') return '.gif';
+  if (mime === 'image/svg+xml') return '.svg';
   if (mime === 'audio/mpeg' || mime === 'audio/mp3') return '.mp3';
   if (mime === 'audio/wav' || mime === 'audio/x-wav' || mime === 'audio/wave') return '.wav';
   return '.png';
@@ -699,13 +702,13 @@ async function validateMiniMaxH3Media(mediaRefs, ffmpegExecutable) {
   if (totals.audio > 15.01) throw new Error('Los audios de referencia H3 no pueden superar 15 segundos en total.');
 }
 
-async function validateGeminiOmniMedia(mediaRefs, ffmpegExecutable, mode, hasPreviousInteraction) {
+async function validateGeminiOmniMedia(mediaRefs, ffmpegExecutable, { mode, hasPreviousInteraction, duration, limits }) {
   const allowedImages = new Set(['.jpg', '.jpeg', '.png', '.webp']);
   const allowedVideos = new Set(['.mp4', '.mov', '.webm']);
   const images = mediaRefs.filter((ref) => ref.kind === 'image');
   const videos = mediaRefs.filter((ref) => ref.kind === 'video');
   const audios = mediaRefs.filter((ref) => ref.kind === 'audio');
-  if (audios.length) throw new Error('Gemini Omni 1.1 Flash todavía no admite audio subido como referencia.');
+  if (audios.length) throw new Error('Gemini Omni todavía no admite audio subido como referencia.');
   if (images.length > 6 || videos.length > 3 || mediaRefs.length > 9) {
     throw new Error('Gemini Omni admite hasta 6 imágenes y 3 videos; máximo 9 referencias.');
   }
@@ -714,6 +717,12 @@ async function validateGeminiOmniMedia(mediaRefs, ffmpegExecutable, mode, hasPre
   }
   if ((mode === 'edit' || mode === 'extend') && !hasPreviousInteraction && videos.length !== 1) {
     throw new Error(`${mode === 'edit' ? 'Editar' : 'Extender'} necesita un video de origen o continuar una generación Omni desde el historial.`);
+  }
+  if ((mode === 'edit' || mode === 'extend') && hasPreviousInteraction && videos.length) {
+    throw new Error('Al editar o extender un resultado Omni, las referencias sólo pueden ser imágenes.');
+  }
+  if (mode === 'reference' && duration > limits.shortClipSeconds && videos.length > limits.longClipVideoRefs) {
+    throw new Error('Los clips de Gemini Omni de más de 10 segundos admiten un solo video de referencia.');
   }
   for (const ref of mediaRefs) {
     if (String(ref.path || '').startsWith('data:')) continue;
@@ -732,11 +741,12 @@ async function validateGeminiOmniMedia(mediaRefs, ffmpegExecutable, mode, hasPre
     const mediaDuration = await probeMediaDuration(ffmpegExecutable, ref.path);
     if (!mediaDuration) throw new Error('No pude comprobar la duración de un video de referencia de Gemini Omni.');
     const isUploadedSource = !hasPreviousInteraction && (mode === 'edit' || mode === 'extend') && index === 0;
-    const maximum = isUploadedSource ? 10.01 : 3.01;
-    if (mediaDuration > maximum) {
-      throw new Error(isUploadedSource
-        ? 'El video de origen para editar o extender con Gemini Omni debe durar como máximo 10 segundos.'
-        : 'Cada video usado como referencia de Gemini Omni debe durar como máximo 3 segundos.');
+    const sourceLimit = mode === 'edit' ? limits.editSeconds : limits.extendTotalSeconds - 3;
+    if (mediaDuration > (isUploadedSource ? sourceLimit : limits.referenceVideoSeconds) + 0.01) {
+      if (!isUploadedSource) throw new Error('Cada video usado como referencia de Gemini Omni debe durar como máximo 3 segundos.');
+      throw new Error(mode === 'edit'
+        ? 'El video de origen para editar con Gemini Omni debe durar como máximo 15 segundos.'
+        : 'El video de origen para extender con Gemini Omni debe durar como máximo 27 segundos.');
     }
     videoDurations.push(mediaDuration);
   }
@@ -1127,6 +1137,7 @@ async function runImageGeneration(req) {
   const batch = Math.max(1, Math.min(model.maxBatch || 4, Math.floor(Number(req.batch) || 1)));
   const qwenImage = model.provider === 'qwen' ? normalizeQwenOptions(req.qwenImage) : null;
   const apiModel = model.configModelKey ? (cfg[model.configModelKey] || model.apiModel) : model.apiModel;
+  const openaiEdit = model.provider === 'openai' ? normalizeOpenAIEdit(req.openaiEdit, apiModel, refs.length) : null;
 
   // Si alguna referencia viene del Poser, se anexa el prompt de pose
   // (invisible en la caja) para que la IA la use solo como pose/encuadre.
@@ -1175,8 +1186,10 @@ async function runImageGeneration(req) {
         });
       case 'openai':
         return generateOpenAIImage({
-          apiKey: cfg.keys.openai, apiModel, prompt: sentPrompt, preface, refPaths,
-          aspectRatio: req.aspectRatio, resolution: req.resolution, options: req.openaiImage
+          apiKey: cfg.keys.openai, apiModel, preface, refPaths,
+          prompt: openaiEdit ? `${sentPrompt}\n\n${openAIEditInstruction(openaiEdit.mode)}` : sentPrompt,
+          aspectRatio: req.aspectRatio, resolution: req.resolution, options: req.openaiImage,
+          edit: openaiEdit, svgAuthorModel: cfg.openaiModel
         });
       default:
         throw new Error(`Proveedor no implementado: ${model.provider}`);
@@ -1221,6 +1234,7 @@ async function runImageGeneration(req) {
     batch,
     ...(qwenImage ? { qwenImage } : {}),
     ...(model.provider === 'openai' ? { openaiImage: req.openaiImage || {} } : {}),
+    ...(openaiEdit ? { openaiEdit: { mode: openaiEdit.mode } } : {}),
     refs,
     characterId: req.characterId || null,
     characterVariantId: req.characterVariantId || null,
@@ -1608,7 +1622,7 @@ async function runVideoGeneration(req) {
     const sourceHistoryId = acceptsConversation ? String(req.omniSourceHistoryId || '').trim() : '';
     if (requestedPreviousId || sourceHistoryId) {
       const history = await readJson('history.json', []);
-      sourceEntry = history.find((item) => item.id === sourceHistoryId && item.modelId === model.id) || null;
+      sourceEntry = history.find((item) => item.id === sourceHistoryId && getVideoModel(item.modelId)?.id === model.id) || null;
       if (!sourceEntry || !sourceEntry.omniInteractionId || sourceEntry.omniInteractionId !== requestedPreviousId) {
         throw new Error('La conversación de Gemini Omni no coincide con una generación del historial. Volvé a elegir Editar o Extender desde el video original.');
       }
@@ -1619,14 +1633,25 @@ async function runVideoGeneration(req) {
     }
     const videoRefCount = mediaRefs.filter((ref) => ref.kind === 'video').length;
     const omniFfmpeg = videoRefCount ? await resolveFfmpegExecutable(cfg.ffmpegPath) : null;
-    const omniMedia = await validateGeminiOmniMedia(mediaRefs, omniFfmpeg, mode, Boolean(previousInteractionId));
+    const limits = model.omniLimits;
+    if (duration > (model.modeMaxDuration[mode] ?? duration)) {
+      throw new Error('Inicio → Fin y cada extensión de Gemini Omni admiten hasta 10 segundos.');
+    }
+    const omniMedia = await validateGeminiOmniMedia(mediaRefs, omniFfmpeg, { mode, hasPreviousInteraction: Boolean(previousInteractionId), duration, limits });
     const previousCumulative = Number(sourceEntry?.omniCumulativeDuration) || Number(sourceEntry?.duration) || 0;
     const uploadedSourceDuration = !previousInteractionId && mode === 'extend' ? Number(omniMedia.videoDurations?.[0]) || 0 : 0;
     const cumulativeDuration = mode === 'extend'
       ? previousCumulative + uploadedSourceDuration + duration
       : (previousCumulative || duration);
-    if (mode === 'extend' && previousInteractionId && cumulativeDuration > 40.01) {
-      throw new Error(`Gemini Omni permite extensiones encadenadas hasta 40 segundos. Esta cadena llegaría a ${cumulativeDuration}s.`);
+    if (mode === 'edit' && previousCumulative > limits.editSeconds + 0.01) {
+      throw new Error('Gemini Omni sólo edita resultados de hasta 15 segundos. Editá antes de extender.');
+    }
+    if (mode === 'extend' && cumulativeDuration > limits.extendTotalSeconds + 0.01) {
+      const seconds = Math.round(cumulativeDuration);
+      const error = new Error(`Gemini Omni permite extensiones hasta 30 segundos en total. Este video llegaría a ${seconds}s.`);
+      error.localizationCode = 'omniChainLimit';
+      error.localizationDetails = { seconds };
+      throw error;
     }
     const video = await generateGeminiOmniVideo({
       apiKey: cfg.keys.gemini, apiModel: model.apiModel, prompt: sentPrompt,
@@ -1635,9 +1660,7 @@ async function runVideoGeneration(req) {
     const name = `${ts()}-${model.id}-${newId()}.mp4`;
     const key = await saveBuffer('video', name, video.buffer);
     const pricing = await getPricing();
-    const inputTokens = Number(video.usage?.input_tokens || video.usage?.inputTokenCount || video.usage?.prompt_token_count) || 0;
-    const cost = videoPrice(pricing, model.id, resolution) * duration
-      + inputTokens * (model.inputPricePerMillionTokens || 0) / 1_000_000;
+    const cost = videoPrice(pricing, model.id, resolution) * duration + omniTokenCost(model, video.usage);
     await recordCost({
       type: 'video', modelId: model.id, label: `${model.name} ${resolution}`,
       units: duration, unitLabel: 'segundo(s)', cost
@@ -2147,7 +2170,12 @@ const SERVER_ERROR_CODE_BY_MESSAGE = new Map([
   ['Categoría de prompts no encontrada.', 'promptCategoryMissing'],
   ['Categoría de snippets no encontrada.', 'snippetCategoryMissing'],
   ['Categoría de vocabulario no encontrada.', 'vocabularyCategoryMissing'],
-  ['El video de origen para editar o extender con Gemini Omni debe durar como máximo 10 segundos.', 'omniSourceTooLong'],
+  ['El video de origen para editar con Gemini Omni debe durar como máximo 15 segundos.', 'omniSourceTooLong'],
+  ['El video de origen para extender con Gemini Omni debe durar como máximo 27 segundos.', 'omniExtendSourceTooLong'],
+  ['Al editar o extender un resultado Omni, las referencias sólo pueden ser imágenes.', 'omniConversationVideo'],
+  ['Los clips de Gemini Omni de más de 10 segundos admiten un solo video de referencia.', 'omniLongClipVideos'],
+  ['Inicio → Fin y cada extensión de Gemini Omni admiten hasta 10 segundos.', 'omniModeDuration'],
+  ['Gemini Omni sólo edita resultados de hasta 15 segundos. Editá antes de extender.', 'omniEditTooLong'],
   ['Cada video usado como referencia de Gemini Omni debe durar como máximo 3 segundos.', 'omniReferenceTooLong'],
   ['Configurá la ruta de ffmpeg en Configuración para armar el video.', 'ffmpegPathRequired'],
   ['HeyGen OAuth no está conectado. Conectalo desde Configuración.', 'heygenNotConnected'],
@@ -2161,7 +2189,7 @@ const SERVER_ERROR_CODE_BY_MESSAGE = new Map([
   ['dataUrl inválido', 'dataUrlInvalid'],
   ['Los videos de referencia H3 no pueden superar 15 segundos en total.', 'h3VideoDuration'],
   ['Los audios de referencia H3 no pueden superar 15 segundos en total.', 'h3AudioDuration'],
-  ['Gemini Omni 1.1 Flash todavía no admite audio subido como referencia.', 'omniAudioUnsupported'],
+  ['Gemini Omni todavía no admite audio subido como referencia.', 'omniAudioUnsupported'],
   ['Gemini Omni admite hasta 6 imágenes y 3 videos; máximo 9 referencias.', 'omniRefCount'],
   ['Inicio → Fin de Gemini Omni necesita exactamente dos imágenes.', 'omniFrames'],
   ['Una referencia supera el límite de 2 GB de Gemini Files.', 'geminiFileSize'],
@@ -2407,6 +2435,7 @@ const STATIC_MIME = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
+  '.gif': 'image/gif',
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
   '.m4a': 'audio/mp4',
@@ -3576,7 +3605,9 @@ const server = http.createServer(async (req, res) => {
         });
         return res.end(buf.subarray(start, end + 1));
       }
-      return send(res, 200, buf, { mime, extra: { 'Accept-Ranges': 'bytes' } });
+      // Un SVG abierto directamente en el navegador podría ejecutar scripts en este origen.
+      const svgPolicy = mime === 'image/svg+xml' ? { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox" } : {};
+      return send(res, 200, buf, { mime, extra: { 'Accept-Ranges': 'bytes', ...svgPolicy } });
     }
 
     // --- API ---

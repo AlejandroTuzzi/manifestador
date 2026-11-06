@@ -281,7 +281,7 @@
             <span id="omniChainHint" class="hint" data-i18n="create.omni.independent">Nueva generación independiente.</span>
             <button id="omniClearConversation" type="button" class="mini-btn" data-i18n="create.omni.unlink" hidden>Desvincular conversación</button>
           </div>
-          <div class="model-note" data-i18n="create.omni.note">Editar y Extender pueden continuar directamente desde un resultado Omni del historial. Los videos llevan audio nativo y SynthID invisible.</div>
+          <div class="model-note" data-i18n="create.omni.note">Editar, Extender y Reescalar continúan directamente desde un resultado Omni del historial. Probá a 360p y reescalá sólo la toma elegida a 1080p o 4K. Por defecto arma varias tomas: si querés una sola, pedí “single continuous shot”. Audio nativo y SynthID invisible.</div>
         </div>
         <div id="heygenVideoControls" class="heygen-video-controls" hidden>
           <div class="control-row"><label data-i18n="create.heygen.connection">Conexión</label><select id="heygenAuthMode" class="select"><option value="oauth" data-i18n="create.heygen.webPlan">OAuth · plan web</option><option value="key" data-i18n="create.heygen.apiBalance">API key · saldo API</option></select><span id="heygenVideoAuthStatus" class="hint"></span></div>
@@ -636,14 +636,20 @@
     </section>
 
     <section id="view-asset-editor" class="view">
-      <div class="chars-head"><div><h2 data-i18n="assetEditor.title">Editar assets</h2><p class="hint" data-i18n="assetEditor.lead">Recortá imágenes sin modificar el original. El resultado se guarda como un nuevo asset.</p></div><button id="assetEditorChoose" type="button" class="mini-btn accent" data-i18n="assetEditor.choose">Elegir imagen</button></div>
+      <div class="chars-head"><div><h2 data-i18n="assetEditor.title">Editar assets</h2><p class="hint" data-i18n="assetEditor.lead">Recortá o editá con IA sin modificar el original. El resultado se guarda como un nuevo asset.</p></div><button id="assetEditorChoose" type="button" class="mini-btn accent" data-i18n="assetEditor.choose">Elegir imagen</button></div>
       <div class="asset-editor-layout">
         <div class="asset-editor-stage">
           <p id="assetEditorEmpty" class="empty-note" data-i18n="assetEditor.empty">Elegí una imagen o abrí Editar assets desde su visor.</p>
           <canvas id="assetEditorCanvas" hidden data-i18n-aria-label="assetEditor.canvas" aria-label="Área de recorte"></canvas>
+          <canvas id="assetEditorAiCanvas" hidden data-i18n-aria-label="assetEditor.ai.canvas" aria-label="Área de dibujo para la edición con IA"></canvas>
           <p id="assetEditorStatus" class="hint" role="status"></p>
         </div>
         <div class="asset-editor-tools">
+          <div class="mode-switch asset-editor-modes" role="tablist">
+            <button id="assetEditorModeCrop" type="button" class="mode-btn active" role="tab" aria-selected="true" data-i18n="assetEditor.modeCrop">Recortar</button>
+            <button id="assetEditorModeAi" type="button" class="mode-btn" role="tab" aria-selected="false" data-i18n="assetEditor.modeAi">Editar con IA</button>
+          </div>
+          <div id="assetEditorCropPanel">
           <h3 data-i18n="assetEditor.crop">Recortar imagen</h3>
           <p id="assetEditorName" class="hint"></p>
           <p id="assetEditorDirty" class="hint" hidden data-i18n="assetEditor.unsaved">Cambios sin guardar</p>
@@ -660,6 +666,38 @@
             <button id="assetEditorSave" type="button" class="mini-btn accent" data-i18n="assetEditor.save">Guardar copia recortada</button>
             <button id="assetEditorSaveClose" type="button" class="mini-btn" data-i18n="assetEditor.saveClose">Guardar y cerrar</button>
           </fieldset>
+          </div>
+          <div id="assetEditorAiPanel" hidden>
+            <h3 data-i18n="assetEditor.ai.title">Editar con IA</h3>
+            <fieldset id="assetEditorAiFields" disabled>
+              <label><span data-i18n="assetEditor.ai.type">Tipo de edición</span><select id="assetAiMode" class="select"><option value="markup" data-i18n="assetEditor.ai.markup">Marcas</option><option value="mask" data-i18n="assetEditor.ai.mask">Máscara</option></select></label>
+              <p id="assetAiModeHint" class="hint"></p>
+              <label><span data-i18n="assetEditor.ai.tool">Herramienta</span><select id="assetAiTool" class="select"><option value="brush" data-i18n="assetEditor.ai.brush">Pincel</option><option value="ellipse" data-i18n="assetEditor.ai.ellipse">Círculo</option><option value="rect" data-i18n="assetEditor.ai.rect">Rectángulo</option><option value="arrow" data-i18n="assetEditor.ai.arrow">Flecha</option><option value="eraser" data-i18n="assetEditor.ai.eraser">Goma</option></select></label>
+              <div class="asset-editor-numbers">
+                <label id="assetAiColorField"><span data-i18n="assetEditor.ai.color">Color</span><input id="assetAiColor" type="color" value="#ff0000"></label>
+                <label><span data-i18n="assetEditor.ai.size">Grosor</span><input id="assetAiSize" type="range" min="2" max="120" step="1" value="8"></label>
+              </div>
+              <div class="asset-editor-actions">
+                <button id="assetAiUndo" type="button" class="mini-btn" disabled data-i18n="assetEditor.ai.undo">Deshacer</button>
+                <button id="assetAiClear" type="button" class="mini-btn" disabled data-i18n="assetEditor.ai.clear">Limpiar</button>
+              </div>
+              <label><span data-i18n="assetEditor.ai.prompt">Qué querés cambiar</span><textarea id="assetAiPrompt" rows="4" data-i18n-placeholder="assetEditor.ai.promptPlaceholder" placeholder="Ej.: cambiá el jarrón marcado por uno azul. Mantené todo lo demás igual."></textarea></label>
+              <p class="hint" data-i18n="assetEditor.ai.noDrawingHint">Si no dibujás nada, el pedido se aplica a toda la imagen.</p>
+              <label><span data-i18n="assetEditor.ai.model">Modelo</span><select id="assetAiModel" class="select"></select></label>
+              <label><span data-i18n="assetEditor.ai.resolution">Resolución</span><select id="assetAiResolution" class="select"><option value="1K">1K</option><option value="2K" selected>2K</option><option value="4K">4K</option></select></label>
+              <div id="assetEditorAiOptions"></div>
+              <div>
+                <div class="asset-editor-refs-head"><span data-i18n="assetEditor.ai.refs">Referencias adicionales</span><button id="assetAiAddRef" type="button" class="mini-btn" data-i18n="assetEditor.ai.addRef">Agregar referencia</button></div>
+                <div id="assetAiRefList" class="variant-photos"></div>
+              </div>
+              <button id="assetAiGenerate" type="button" class="generate-btn small" data-i18n="assetEditor.ai.generate">Generar edición</button>
+            </fieldset>
+            <p id="assetEditorAiStatus" class="hint" role="status" aria-live="polite"></p>
+            <div id="assetAiResultActions" class="asset-editor-actions" hidden>
+              <button id="assetAiResult" type="button" class="mini-btn accent" data-i18n="assetEditor.viewResult">Ver resultado</button>
+              <button id="assetAiContinue" type="button" class="mini-btn" data-i18n="assetEditor.ai.continue">Seguir editando el resultado</button>
+            </div>
+          </div>
           <button id="assetEditorClose" type="button" class="mini-btn" hidden data-i18n="assetEditor.close">Cerrar asset</button>
           <button id="assetEditorResult" type="button" class="mini-btn" hidden data-i18n="assetEditor.viewResult">Ver resultado</button>
         </div>
@@ -1553,6 +1591,7 @@
 <script src="model-families.js"></script>
 <script src="video-thumbnails.js"></script>
 <script src="app.js"></script>
+<script src="asset-editor-ai.js"></script>
 <script src="workflow-repository.js"></script>
 <dialog id="cameraDialog" class="camera-dialog" aria-labelledby="cameraTitle" aria-describedby="cameraHelp">
   <form id="cameraForm">

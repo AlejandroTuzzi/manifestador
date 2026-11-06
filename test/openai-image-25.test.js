@@ -28,7 +28,7 @@ test('families are stable, newest-first and never drop or mutate models', () => 
   const before=JSON.stringify(all);const families=group(all);
   assert.equal(families.flatMap(f=>f.models).length,all.length);
   assert.equal(JSON.stringify(all),before);
-  for(const [family,id] of [['GPT Image','gpt-image-2.5-sunburst'],['Nano Banana','nano-banana-2'],['Seedance','seedance-2-5'],['ElevenLabs','eleven-v3'],['Suno','V5_5']])assert.equal(families.find(f=>f.name===family).models[0].id,id);
+  for(const [family,id] of [['GPT Image','gpt-image-2.6-sunburst'],['Nano Banana','nano-banana-2'],['Seedance','seedance-2-5'],['ElevenLabs','eleven-v3'],['Suno','V5_5']])assert.equal(families.find(f=>f.name===family).models[0].id,id);
   assert.equal(families.find(f=>f.name==='HeyGen').models[0].id,'heygen-video-1');
   assert.match(families.find(f=>f.name==='HeyGen').models[1].name,/Avatar V$/);
 });

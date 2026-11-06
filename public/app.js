@@ -500,7 +500,7 @@ function renderHighlight() {
     highlighter.innerHTML = highlightReferenceMentions(text, mentions) + '\n';
   } else if (state.mode === 'video' && videoModeAllowsMultimedia()) {
     const pattern = currentVideoModel()?.provider === 'omni'
-      ? /<(?:IMAGE|VIDEO)_REF_\d+>/gi
+      ? /\b(?:image|video) \d+\b/gi
       : /@(image|video|audio)\d+/gi;
     highlighter.innerHTML = esc(text).replace(pattern, '<span class="tag">$&</span>') + '\n';
   } else if (state.mode === 'video') {
@@ -786,14 +786,29 @@ function readQwenOptions(root) {
   return Object.fromEntries([...root.querySelectorAll('[data-qwen]')].map((input) => [input.dataset.qwen, input.type === 'checkbox' ? input.checked : input.value]));
 }
 
-function openaiOptionsMarkup(value = {}) {
-  return `<details class="qwen-options"><summary>${esc(tr('openaiImage.options'))}</summary><div class="cfg-grid">
+function openaiOptionsMarkup(value = {}, model = null, { edit = false } = {}) {
+  const latest = model?.openaiLatest === true;
+  const selectedOption = (option, current) => `<option value="${option}"${current === option ? ' selected' : ''}>${esc(tr(`openaiImage.${option}`))}</option>`;
+  const format = value.format || 'png';
+  return `<details class="qwen-options"${edit ? ' open' : ''}><summary>${esc(tr('openaiImage.options'))}</summary><div class="cfg-grid">
     <label><span>${esc(tr('openaiImage.quality'))}</span><select class="select" data-openai="quality">${['auto','low','medium','high','xhigh','max'].map(option => `<option value="${option}"${(value.quality || 'auto') === option ? ' selected' : ''}>${esc(tr(`openaiImage.${option}`))}</option>`).join('')}</select></label>
-    <label class="poser-toggle"><input type="checkbox" data-openai="transparent"${value.background === 'transparent' ? ' checked' : ''}>${esc(tr('openaiImage.transparent'))}</label>
-    </div><p class="hint">${esc(tr('openaiImage.hint'))}</p></details>`;
+    ${latest ? `<label><span>${esc(tr('openaiImage.complexity'))}</span><select class="select" data-openai="complexity">${['low', 'medium', 'high'].map(option => selectedOption(option, value.complexity || 'high')).join('')}</select></label>` : ''}
+    ${latest && !edit ? `<label><span>${esc(tr('openaiImage.format'))}</span><select class="select" data-openai="format">${[['png', 'formatPng'], ['svg', 'formatSvg'], ['gif', 'formatGif']].map(([option, label]) => `<option value="${option}"${format === option ? ' selected' : ''}>${esc(tr(`openaiImage.${label}`))}</option>`).join('')}</select></label>
+    <label data-openai-gif><span>${esc(tr('openaiImage.frameCount'))}</span><input type="number" data-openai="frameCount" min="2" max="16" step="1" value="${esc(value.frameCount ?? 9)}"></label>
+    <label data-openai-gif><span>${esc(tr('openaiImage.frameDuration'))}</span><input type="number" data-openai="frameDurationMs" min="20" max="2000" step="10" value="${esc(value.frameDurationMs ?? 200)}"></label>` : ''}
+    <label class="poser-toggle" data-openai-raster><input type="checkbox" data-openai="transparent"${value.background === 'transparent' ? ' checked' : ''}>${esc(tr('openaiImage.transparent'))}</label>
+    </div>${latest ? `<p class="hint">${esc(tr('openaiImage.complexityHint'))}</p>` : ''}${latest && !edit ? `<p class="hint">${esc(tr('openaiImage.formatHint'))}</p>` : ''}<p class="hint">${esc(tr('openaiImage.hint'))}</p></details>`;
+}
+function syncOpenaiOptions(root) {
+  const format = root.querySelector('[data-openai="format"]')?.value || 'png';
+  root.querySelectorAll('[data-openai-gif]').forEach(field => { field.hidden = format !== 'gif'; });
+  root.querySelector('[data-openai-raster]').hidden = format !== 'png';
 }
 function readOpenaiOptions(root) {
-  return { quality: root?.querySelector('[data-openai="quality"]')?.value || 'auto', background: root?.querySelector('[data-openai="transparent"]')?.checked ? 'transparent' : 'opaque' };
+  const field = name => root?.querySelector(`[data-openai="${name}"]`);
+  return { quality: field('quality')?.value || 'auto', background: field('transparent')?.checked ? 'transparent' : 'opaque',
+    ...(field('complexity') ? { complexity: field('complexity').value } : {}),
+    ...(field('format') ? { format: field('format').value, frameCount: Number(field('frameCount').value), frameDurationMs: Number(field('frameDurationMs').value) } : {}) };
 }
 
 function syncQwenOptions(root) {
@@ -825,9 +840,10 @@ function renderImageControls() {
   const qwenRoot = $('#qwenImageOptions');
   renderSirayOptions(m, $('#imageControls'));
   const openaiRoot = $('#openaiImageOptions');
-  openaiRoot.hidden = !m.id.startsWith('gpt-image-2.5-');
-  openaiRoot.innerHTML = openaiOptionsMarkup(state.openaiImage);
-  openaiRoot.oninput = () => { state.openaiImage = readOpenaiOptions(openaiRoot); };
+  openaiRoot.hidden = !m.openaiExtended;
+  openaiRoot.innerHTML = openaiOptionsMarkup(state.openaiImage, m);
+  syncOpenaiOptions(openaiRoot);
+  openaiRoot.oninput = () => { state.openaiImage = readOpenaiOptions(openaiRoot); syncOpenaiOptions(openaiRoot); };
   qwenRoot.hidden = m.provider !== 'qwen';
   qwenRoot.innerHTML = qwenOptionsMarkup(state.qwenImage);
   syncQwenOptions(qwenRoot);
@@ -873,8 +889,16 @@ function videoModeAllowsMultimedia(model = currentVideoModel(), mode = state.vid
 function typedVideoReferenceMention(model, kind, number) {
   const type = `${kind[0].toUpperCase()}${kind.slice(1)}`;
   if (model?.provider === 'heygen-scene') return `<${kind === 'image' ? 'Picture' : type} ${number}>`;
-  if (model?.provider === 'omni') return `<${kind.toUpperCase()}_REF_${number - 1}>`;
   return model?.id === 'seedance-2-5' || model?.provider === 'nezhagate' ? `@${type}${number}` : `${type} ${number}`;
+}
+
+function availableVideoDurations(model, mode = state.video.mode) {
+  if (model.provider === 'omni' && mode === 'edit' && state.video.omniPreviousInteractionId) {
+    const source = Math.round(state.video.omniCumulativeDuration);
+    if (model.durations.includes(source)) return [source];
+  }
+  const maximum = model.modeMaxDuration?.[mode];
+  return maximum ? model.durations.filter((value) => value <= maximum) : model.durations;
 }
 
 function renderVideoControls() {
@@ -899,7 +923,8 @@ function renderVideoControls() {
   state.video.modelId = m.id;
   if (!m.aspectRatios.includes(state.video.aspectRatio)) state.video.aspectRatio = m.aspectRatios[0];
   if (!m.resolutions.includes(state.video.resolution)) state.video.resolution = m.resolutions[0];
-  if (!m.durations.includes(state.video.duration)) state.video.duration = m.durations[0];
+  const videoDurations = availableVideoDurations(m);
+  if (!videoDurations.includes(state.video.duration)) state.video.duration = isOmni ? videoDurations.at(-1) : videoDurations[0];
   if (state.refs.length > activeRefLimit()) state.refs = state.refs.slice(0, activeRefLimit());
 
   chipRow($('#videoModelChips'), state.videoModels.map((x) => x.id), m.id,
@@ -950,7 +975,7 @@ function renderVideoControls() {
     (v) => { state.video.aspectRatio = v; renderVideoControls(); });
   chipRow($('#videoResChips'), sortedResolutions(m.resolutions), state.video.resolution,
     (v) => { state.video.resolution = v; renderVideoControls(); });
-  chipRow($('#videoDurChips'), m.durations, state.video.duration,
+  chipRow($('#videoDurChips'), videoDurations, state.video.duration,
     (v) => {
       state.video.duration = v;
       // al cambiar la duración del clip, las tomas se re-reparten solas
@@ -1156,6 +1181,10 @@ function addRef(key, fromChar = false, kind = 'image') {
   const normalizedKind = ['image', 'video', 'audio'].includes(kind) ? kind : 'image';
   const isMultimediaReference = state.mode === 'video' && videoModeAllowsMultimedia();
   if (state.refs.some((r) => r.key === key)) return false;
+  if (/\.(svg|gif)$/i.test(key)) {
+    toast(tr('errors.openaiNotRaster'), 'err');
+    return false;
+  }
   if (normalizedKind !== 'image' && !isMultimediaReference) {
     toast(tr('create.refs.onlyImages'), 'err');
     return false;
@@ -1724,6 +1753,9 @@ async function generate() {
   const isH3 = isVideo && model?.provider === 'minimax';
   const isOmni = isVideo && model?.provider === 'omni';
   const isSeedance25 = isVideo && model?.id === 'seedance-2-5';
+  if (isImage && model?.openaiLatest && state.refs.length && ['svg', 'gif'].includes(readOpenaiOptions($('#openaiImageOptions')).format)) {
+    return toast(tr('errors.openaiFormatNoReferences'), 'err');
+  }
   if (isImage && state.refs.length < (model?.minRefs || 0)) {
     return toast(tr('create.validation.minImages', { model: model.name, count: model.minRefs }), 'err');
   }
@@ -1775,11 +1807,17 @@ async function generate() {
     if (counts.audio) return toast(tr('create.validation.omniAudio'), 'err');
     if (counts.image > 6 || counts.video > 3 || state.refs.length > 9) return toast(tr('create.validation.omniLimits'), 'err');
     if (state.video.mode === 'frames' && (counts.image !== 2 || counts.video)) return toast(tr('create.validation.omniFrames'), 'err');
-    if (['edit', 'extend'].includes(state.video.mode) && !state.video.omniPreviousInteractionId && counts.video !== 1) {
+    const conversation = ['edit', 'extend'].includes(state.video.mode);
+    const linked = Boolean(state.video.omniPreviousInteractionId);
+    if (conversation && !linked && counts.video !== 1) {
       return toast(tr('create.validation.omniSource', { action: tr(state.video.mode === 'edit' ? 'create.validation.edit' : 'create.validation.extend') }), 'err');
     }
-    if (state.video.mode === 'extend' && state.video.omniPreviousInteractionId
-      && state.video.omniCumulativeDuration + state.video.duration > 40) {
+    if (conversation && linked && counts.video) return toast(tr('create.validation.omniConversationVideo'), 'err');
+    if (state.video.mode === 'reference' && state.video.duration > model.omniLimits.shortClipSeconds && counts.video > model.omniLimits.longClipVideoRefs) {
+      return toast(tr('create.validation.omniLongClipVideos'), 'err');
+    }
+    if (state.video.mode === 'extend' && linked
+      && state.video.omniCumulativeDuration + state.video.duration > model.omniLimits.extendTotalSeconds) {
       return toast(tr('create.validation.omniDuration'), 'err');
     }
   }
@@ -1804,7 +1842,7 @@ async function generate() {
       resolution: state.resolution, batch: state.batch,
       sirayOptions: model.provider === 'siray' ? state.sirayOptions?.[model.id] || {} : undefined,
       refs: state.refs.map((r) => r.key), labeledRefs,
-      ...(model.id.startsWith('gpt-image-2.5-') ? { openaiImage: readOpenaiOptions($('#openaiImageOptions')) } : {}), ...(model.provider === 'qwen' ? { qwenImage: readQwenOptions($('#qwenImageOptions')) } : {})
+      ...(model.openaiExtended ? { openaiImage: readOpenaiOptions($('#openaiImageOptions')) } : {}), ...(model.provider === 'qwen' ? { qwenImage: readQwenOptions($('#qwenImageOptions')) } : {})
     } : isVideo ? {
       modelId: state.video.modelId, prompt, mode: state.video.mode,
       heygenSceneOptions: model.provider === 'heygen-scene' ? state.video.heygenSceneOptions || {} : undefined,
@@ -2096,40 +2134,61 @@ function h3PromotionAction(entry) {
   return `<button class="mini-btn accent" data-act="h3-2k">${IC('spark')} ${esc(tr('create.history.h3Promote'))}</button>`;
 }
 
-function omniHistoryActions(entry) {
-  if (entry.type !== 'video') return '';
-  const canUseUploaded = Number(entry.duration) > 0 && Number(entry.duration) <= 10.01;
-  const canContinue = entry.modelId === 'gemini-omni-1-1-flash' && Boolean(entry.omniInteractionId);
-  if (!canUseUploaded && !canContinue) return '';
-  const cumulative = Number(entry.omniCumulativeDuration) || Number(entry.duration) || 0;
-  return `<button class="mini-btn accent" data-act="omni-edit">${IC('edit')} ${esc(tr('create.history.omniEdit'))}</button>
-    ${canContinue && cumulative >= 40 ? '' : `<button class="mini-btn accent" data-act="omni-extend">${IC('right')} ${esc(tr('create.history.omniExtend'))}</button>`}`;
+const OMNI_UPSCALE_PROMPT = 'Upscale this video. Keep every frame, the dialogue, the voice and the audio exactly the same. Change nothing.';
+
+function omniModel() {
+  return state.videoModels.find((model) => model.provider === 'omni');
 }
 
-function loadVideoIntoOmni(entry, mode) {
-  const canContinue = entry.modelId === 'gemini-omni-1-1-flash' && Boolean(entry.omniInteractionId);
-  if (!canContinue && Number(entry.duration) > 10.01) {
-    toast(tr('create.history.omniSourceTooLong'), 'err');
-    return;
-  }
+function omniEntryLength(entry) {
+  return Number(entry.omniCumulativeDuration) || Number(entry.duration) || 0;
+}
+
+// Google deletes stored conversations after the retention window; the file can still be uploaded.
+function canContinueOmni(entry, model) {
+  return Boolean(entry.omniInteractionId) && [model.id, model.replaces].includes(entry.modelId)
+    && Date.now() - Number(entry.ts) < model.omniLimits.conversationRetentionDays * 86400000;
+}
+
+function omniHistoryActions(entry) {
+  const model = omniModel();
+  if (entry.type !== 'video' || !model) return '';
+  const length = omniEntryLength(entry);
+  const canEdit = length > 0 && length <= model.omniLimits.editSeconds + 0.01;
+  const canExtend = length > 0 && length <= model.omniLimits.extendTotalSeconds - model.durations[0] + 0.01;
+  const canUpscale = canEdit && canContinueOmni(entry, model) && ['360p', '720p'].includes(entry.resolution);
+  const action = (act, icon, label) => `<button class="mini-btn accent" data-act="${act}">${IC(icon)} ${esc(tr(label))}</button>`;
+  return [
+    canEdit ? action('omni-edit', 'edit', 'create.history.omniEdit') : '',
+    canExtend ? action('omni-extend', 'right', 'create.history.omniExtend') : '',
+    canUpscale ? action('omni-upscale', 'spark', 'create.history.omniUpscale') : ''
+  ].join('');
+}
+
+function loadVideoIntoOmni(entry, action) {
+  const model = omniModel();
+  const canContinue = canContinueOmni(entry, model);
+  const upscale = action === 'upscale';
+  const mode = upscale ? 'edit' : action;
   setMode('video');
-  state.video.modelId = 'gemini-omni-1-1-flash';
+  state.video.modelId = model.id;
   state.video.mode = mode;
   state.video.aspectRatio = ['16:9', '9:16'].includes(entry.aspectRatio) ? entry.aspectRatio : '16:9';
-  state.video.resolution = ['360p', '720p', '1080p', '4K'].includes(entry.resolution) ? entry.resolution : '720p';
-  state.video.duration = mode === 'extend' ? 10 : Math.max(3, Math.min(10, Number(entry.duration) || 5));
-  state.video.audio = true;
+  state.video.resolution = upscale ? '1080p' : model.resolutions.includes(entry.resolution) ? entry.resolution : '720p';
+  state.video.duration = mode === 'extend' ? 10 : Math.max(3, Math.min(model.omniLimits.editSeconds, Math.round(omniEntryLength(entry)) || 5));
+  state.video.audio = upscale ? entry.audio !== false : true;
+  if (upscale) state.video.avoidMusic = entry.avoidMusic !== false;
   state.video.omniPreviousInteractionId = canContinue ? entry.omniInteractionId : '';
   state.video.omniSourceHistoryId = canContinue ? entry.id : '';
   state.video.omniChainDepth = Number(entry.omniChainDepth) || 0;
-  state.video.omniCumulativeDuration = Number(entry.omniCumulativeDuration) || Number(entry.duration) || 0;
+  state.video.omniCumulativeDuration = omniEntryLength(entry);
   state.refs = canContinue ? [] : [{ key: entry.outputs[0], fromChar: false, kind: 'video', label: '' }];
-  promptBox.value = '';
+  promptBox.value = upscale ? OMNI_UPSCALE_PROMPT : '';
   renderVideoControls();
   renderHighlight();
   goToCreate();
   promptBox.focus();
-  toast(tr(mode === 'edit' ? 'create.history.omniEditReady' : 'create.history.omniExtendReady'));
+  toast(tr(upscale ? 'create.history.omniUpscaleReady' : mode === 'edit' ? 'create.history.omniEditReady' : 'create.history.omniExtendReady'));
 }
 
 function queueH3Promotion(entry) {
@@ -2217,9 +2276,9 @@ function showEntry(entry, outputIdx = 0) {
       <div class="bv-meta">${esc(entry.modelName)} · ${entry.aspectRatio} · ${entry.resolution}${entry.batch > 1 ? ` · ${esc(tr('create.history.batch', { count: entry.batch }))}` : ''} · ${fmtDate(entry.ts)}${esc(tookMeta)}</div>
       <div class="bv-actions">
         <button class="mini-btn" data-act="copy">${IC('copy')} ${esc(tr('create.history.copy'))}</button>
-        <button class="mini-btn" data-act="ref">${IC('link')} ${esc(tr('common.useAsReference'))}</button>
+        ${isReusableImageKey(key) ? `<button class="mini-btn" data-act="ref">${IC('link')} ${esc(tr('common.useAsReference'))}</button>
         <button class="mini-btn" data-act="character">${IC('user')} ${esc(tr('common.convertCharacter'))}</button>
-        <button class="mini-btn" data-act="element">${IC('globe')} ${esc(tr('common.convertElement'))}</button>
+        <button class="mini-btn" data-act="element">${IC('globe')} ${esc(tr('common.convertElement'))}</button>` : ''}
         <button class="mini-btn" data-act="regen">${IC('refresh')} ${esc(tr('create.history.regenerate'))}</button>
         <button class="mini-btn" data-act="edit">${IC('edit')} ${esc(tr('create.history.edit'))}</button>
         <a class="mini-btn" href="${fileUrl(key)}" download>${IC('download')} ${esc(tr('create.history.download'))}</a>
@@ -2245,6 +2304,7 @@ function showEntry(entry, outputIdx = 0) {
       if (act === 'h3-2k') queueH3Promotion(entry);
       if (act === 'omni-edit') loadVideoIntoOmni(entry, 'edit');
       if (act === 'omni-extend') loadVideoIntoOmni(entry, 'extend');
+      if (act === 'omni-upscale') loadVideoIntoOmni(entry, 'upscale');
       if (act === 'h3-2k-view') {
         const upgraded = existingH3Promotion(entry.id);
         if (upgraded) showEntry(upgraded);
@@ -2254,6 +2314,7 @@ function showEntry(entry, outputIdx = 0) {
 }
 
 async function regenerate(entry) {
+  if (entry.openaiEdit) return assetEditorAi.open(entry);
   if (entry.modelId?.startsWith('siray-')) { state.sirayOptions ||= {}; state.sirayOptions[entry.modelId] = entry.sirayOptions || {}; }
   promptBox.value = entry.prompt;
   renderHighlight();
@@ -2350,6 +2411,7 @@ async function restoreGenerationSettings(snapshot) {
 }
 
 async function restoreEntrySettings(entry) {
+  if (entry.openaiEdit) return assetEditorAi.open(entry);
   try {
     if (entry.generationRequestId) {
       const snapshot = await api(`/api/generation-requests?id=${encodeURIComponent(entry.generationRequestId)}`, { task: false });
@@ -2574,7 +2636,8 @@ function isVideoMultimediaPicker() {
     && videoModeAllowsMultimedia()
     && state.replaceRefIndex == null
     && !state.promptStyleImagePick
-    && !state.assetEditorImagePick;
+    && !state.assetEditorImagePick
+    && !state.assetEditorRefPick;
 }
 
 function isPromptLoraMediaPicker() {
@@ -2617,7 +2680,7 @@ function openPicker(replaceIndex = null, consumer = null) {
 function pickerAllowsMultiple() {
   if (state.externalPicker) return true;
   return state.replaceRefIndex == null && !state.comfyPickerSlot
-    && !state.promptStyleImagePick && !state.assetEditorImagePick && activeRefLimit() > 1;
+    && !state.promptStyleImagePick && !state.assetEditorImagePick && !state.assetEditorRefPick && activeRefLimit() > 1;
 }
 
 function pickerSelectionError(key, kind) {
@@ -2771,6 +2834,12 @@ function pickRef(key, kind = 'image') {
     openAssetEditor(key);
     return;
   }
+  if (state.assetEditorRefPick) {
+    state.assetEditorRefPick = false;
+    $('#pickerModal').hidden = true;
+    assetEditorAi.addReference(key);
+    return;
+  }
   if (state.comfyPickerSlot) {
     const slot = state.comfyPickerSlot;
     state.comfyPickerSlot = null;
@@ -2816,7 +2885,7 @@ function replaceRef(i, key) {
   return true;
 }
 
-$('#pickerClose').addEventListener('click', () => { stopPickerAudioPreview(); state.assetEditorImagePick = false; state.pickerSelection = new Map(); state.pickerMulti = false; $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.promptStyleImagePick = false; state.promptLoraMediaTarget = null; state.comfyPickerSlot = null; });
+$('#pickerClose').addEventListener('click', () => { stopPickerAudioPreview(); state.assetEditorImagePick = false; state.assetEditorRefPick = false; state.pickerSelection = new Map(); state.pickerMulti = false; $('#pickerModal').hidden = true; state.replaceRefIndex = null; state.promptStyleImagePick = false; state.promptLoraMediaTarget = null; state.comfyPickerSlot = null; });
 $('#pickerClose').addEventListener('click', () => { state.externalPicker = null; state.pickerRequest = (state.pickerRequest || 0) + 1; });
 $$('#pickerTabs .tab').forEach((t) => {
   t.addEventListener('click', () => setPickerTab(t.dataset.src));
@@ -2932,8 +3001,8 @@ async function setPickerTab(src) {
   } else {
     const assets = await api('/api/assets', { task: false });
     if (state.pickerRequest !== request || $('#pickerModal').hidden) return;
-    const items = assets[src] || [];
     const kind = src === 'video' ? 'video' : src === 'audio' ? 'audio' : 'image';
+    const items = (assets[src] || []).filter((a) => kind !== 'image' || !/\.(svg|gif)$/i.test(a.key));
     body.innerHTML = items.length
       ? `<div class="picker-grid">${items.map((a) =>
           `<div class="pick pick-${kind}" data-key="${esc(a.key)}" data-kind="${kind}">${nsfwBadgeHtml(a, 'overlay')}${kind === 'video'
@@ -5245,7 +5314,7 @@ function isVideoKey(key) {
 }
 
 function isReusableImageKey(key) {
-  return /^(generated|uploads|characters|elements)\//.test(String(key));
+  return /^(generated|uploads|characters|elements)\//.test(String(key)) && !/\.(svg|gif)$/i.test(String(key));
 }
 
 function closeLightbox() {

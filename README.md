@@ -29,6 +29,7 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
 | Nano Banana Pro | Google Gemini (`gemini-3-pro-image`) | 1K/2K/4K, hasta 14 referencias |
 | Nano Banana 2 | Google Gemini (`gemini-3.1-flash-image`) | 1K/2K/4K, hasta 14 referencias |
 | Nano Banana 2 Lite | Google Gemini (`gemini-3.1-flash-lite-image`) | rápido y barato, 1K |
+| GPT Image 2.6 Sunburst y Flare | OpenAI | complejidad, SVG, GIF animado y edición por marcas o máscara |
 | Seedream 5.0 Lite | BytePlus ModelArk | el ID exacto del modelo se ajusta en Configuración |
 | Seedream 5.0 Pro | BytePlus ModelArk | principal de alta precisión; reutiliza la key de Seedream |
 | Qwen Image 3.0 Pro | Alibaba Model Studio (directo) | 1K/2K, hasta 3 referencias y 6 imágenes por solicitud |
@@ -67,7 +68,8 @@ Git sincroniza el código de la app. Por seguridad, no sincroniza API keys, clav
   y adjunta una copia temporal rotulada `ARTISTIC STYLE` al reutilizarlo.
 - Crear personajes con fotos, voz, variantes/outfits y assets asociados.
 - Exportar/importar personajes en ZIP para moverlos entre ordenadores.
-- Convertir una imagen generada en personaje.
+- Convertir una imagen generada en personaje, locación u objeto.
+- Editar una imagen por zonas en **Editar assets → Editar con IA** (GPT Image 2.5 y 2.6): marcas o máscara sobre la imagen, con la salida en la misma proporción y sin tocar el original.
 - Ver información de cada asset: prompt, modelo, configuración, proporción, resolución, lote, referencias, coste estimado y personaje asociado.
 - Navegar assets y lotes con flechas izquierda/derecha.
 - Usar Poser para cargar modelos XPS/XNALara, ajustar huesos, guardar poses y capturar referencias de pose.
