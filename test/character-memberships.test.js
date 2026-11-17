@@ -90,6 +90,11 @@ test('a new character starts in the filtered series and the filters narrow the g
   state.characterFilterProjectId = '';
   context.renderCharacterGroupFilters();
   assert.equal(state.characterFilterSeriesId, '');
+  state.characterFilterSeriesId = 's3';
+  context.renderCharacterGroupFilters({ openOnly: true });
+  assert.doesNotMatch(element('#characterFilterSeries').innerHTML, /Finalizada/);
+  assert.match(element('#characterFilterSeries').innerHTML, /Serie B/);
+  assert.equal(state.characterFilterSeriesId, '');
 });
 
 test('the page wires memberships, filters and the HeyGen avatar field', () => {
@@ -100,6 +105,7 @@ test('the page wires memberships, filters and the HeyGen avatar field', () => {
   assert.match(app, /characterMembershipEditorHtml\(id\)/);
   assert.match(app, /await saveCharacterMemberships\(created\.id\)/);
   assert.match(app, /characterInGroupFilters\(c\)/);
+  assert.match(app, /renderCharacterGroupFilters\(\{ openOnly: characterStatusFilter === 'active' \}\)/);
   assert.match(app, /heygenAvatarId: state\.video\.heygenAvatarId/);
   assert.match(server, /\/api\\\/characters\\\/\(\[a-z0-9\]\+\)\\\/memberships/);
   assert.match(server, /const avatarId = String\(req\.heygenAvatarId \|\| ''\)/);

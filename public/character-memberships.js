@@ -75,11 +75,12 @@ async function saveCharacterMemberships(characterId) {
   for (const item of result.projects || []) await replaceWorkspaceProject(item);
 }
 
-function renderCharacterGroupFilters() {
+// The Active tab only lists open series and projects; a completed selection resets to "All".
+function renderCharacterGroupFilters({ openOnly = false } = {}) {
   for (const group of CHARACTER_MEMBERSHIP_GROUPS) {
     const select = $(group.kind === 'series' ? '#characterFilterSeries' : '#characterFilterProject');
     const field = group.kind === 'series' ? 'characterFilterSeriesId' : 'characterFilterProjectId';
-    const items = group.list().filter(contentIsVisible);
+    const items = group.list().filter((item) => contentIsVisible(item) && !(openOnly && item.archived));
     const all = tr(group.kind === 'series' ? 'common.allFeminine' : 'common.allMasculine');
     select.innerHTML = `<option value="">${esc(all)}</option>` + items.map((item) =>
       `<option value="${esc(item.id)}">${esc(group.label(item) + (item.archived ? ` · ${tr(group.closedKey)}` : ''))}</option>`).join('');

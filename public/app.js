@@ -7287,7 +7287,7 @@ $('#characterStatusFilters').addEventListener('click',event=>{
 
 function renderCharacters() {
   sortEntities();
-  renderCharacterGroupFilters();
+  renderCharacterGroupFilters({ openOnly: characterStatusFilter === 'active' });
   const grid = $('#charsGrid');
   if (!state.characters.length) {
     grid.innerHTML = `<div class="empty-note">${esc(tr('characters.empty'))}</div>`;
