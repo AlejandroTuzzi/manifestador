@@ -8,10 +8,10 @@ test('character and location associations protect assets, including hidden entit
   const data = {
     characterLinks: [{ characterId: 'c', variantId: 'v', key: 'video/linked.mp4' }],
     elementLinks: [{ elementId: 'l', key: 'uploads/location.png' }, { elementId: 'o', key: 'uploads/object.png' }],
-    characters: [{ id: 'c', nsfw: true, photos: ['uploads/photo.png'], heygen: { imageKey: 'uploads/mirror.png' }, variants: [{ sheet: 'uploads/sheet.png', photos: ['uploads/variant.png'], distinctiveElements: [{ imageKey: 'uploads/ring.png' }] }] }],
+    characters: [{ id: 'c', nsfw: true, photos: ['uploads/photo.png'], variants: [{ sheet: 'uploads/sheet.png', photos: ['uploads/variant.png'], distinctiveElements: [{ imageKey: 'uploads/ring.png' }] }] }],
     elements: [{ id: 'l', kind: 'location', variants: [{ photos: ['uploads/location-variant.png'] }] }, { id: 'o', kind: 'object' }]
   };
-  const protectedKeys = ['video/linked.mp4', 'uploads/location.png', 'uploads/photo.png', 'uploads/mirror.png', 'uploads/sheet.png', 'uploads/variant.png', 'uploads/ring.png', 'uploads/location-variant.png'];
+  const protectedKeys = ['video/linked.mp4', 'uploads/location.png', 'uploads/photo.png', 'uploads/sheet.png', 'uploads/variant.png', 'uploads/ring.png', 'uploads/location-variant.png'];
   assert.deepEqual(protectedAssetKeys([...protectedKeys, 'uploads/object.png', 'uploads/free.png'], data), protectedKeys);
   assert.deepEqual(protectedAssetKeys(['uploads/./PHOTO.png'], data), ['uploads/./PHOTO.png']);
   assert.deepEqual(protectedAssetKeys(['uploads/photo.png'], {}), []);

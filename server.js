@@ -19,6 +19,7 @@ import { createLlmFiles } from './lib/llm-files.js';
 import { importMatch, importIds, rememberImport } from './lib/library-transfer.js';
 import { workflowRepositoryItem, workflowRepositorySummary } from './lib/workflow-repository.js';
 import { assertClosedAssociations } from './lib/closed-associations.js';
+import { applyCharacterMemberships } from './lib/character-memberships.js';
 import { exportSeriesArchive, parseSeriesArchive, planSeriesImport, SERIES_ZIP_LIMIT } from './lib/series-transfer.js';
 import { exportInspirationArchive, importInspirationArchive, parseLibraryManifest } from './lib/inspiration-transfer.js';
 import { promises as fs } from 'node:fs';
@@ -552,12 +553,6 @@ function validateUploadedVisual(mime, buffer, originalName = '') {
     return { kind: 'video', zone: 'video', extension: isMov ? '.mov' : '.mp4', mime: isMov ? 'video/quicktime' : 'video/mp4' };
   }
   throw new Error('El archivo debe ser una imagen PNG/JPG/WebP o un video MP4/MOV/WebM válido.');
-}
-
-function heyGenMotionPromptValue(heygen = {}, field = 'wideMotionPrompt') {
-  const source = heygen && typeof heygen === 'object' ? heygen : {};
-  const value = Object.prototype.hasOwnProperty.call(source, field) ? source[field] : source.motionPrompt;
-  return String(value || '').trim().slice(0, 1000);
 }
 
 function ts() {
@@ -1372,18 +1367,10 @@ async function runHeyGenVideoGeneration(req, cfg, model) {
   const idempotencyKey = String(req.idempotencyKey || crypto.randomUUID()).slice(0, 120);
   let payload;
   let refs = [];
-  let characterId = null;
-  let characterMotionPrompt = '';
 
   if (model.requiresRegisteredCharacter) {
-    const characters = await readJson('characters.json', []);
-    const character = characters.find((item) => item.id === req.heygenCharacterId);
-    const avatarId = character?.heygen?.wideAvatarId || character?.heygen?.avatarId || '';
-    if (!avatarId) {
-      throw new Error('Elegí un personaje con código de avatar HeyGen.');
-    }
-    characterId = character.id;
-    characterMotionPrompt = heyGenMotionPromptValue(character.heygen, 'wideMotionPrompt');
+    const avatarId = String(req.heygenAvatarId || '').trim().slice(0, 200);
+    if (!avatarId) throw localizedServerError('heygenAvatarRequired', 'Escribí el ID de un avatar de HeyGen.');
     payload = {
       type: 'avatar',
       avatar_id: avatarId,
@@ -1418,7 +1405,7 @@ async function runHeyGenVideoGeneration(req, cfg, model) {
     };
   }
 
-  const motionPrompt = String(req.heygenMotionPrompt || characterMotionPrompt || '').trim().slice(0, 1000);
+  const motionPrompt = String(req.heygenMotionPrompt || '').trim().slice(0, 1000);
   if (model.supportsMotion && motionPrompt) payload.motion_prompt = motionPrompt;
   if (model.engine === 'avatar_iv' && ['low', 'medium', 'high'].includes(req.heygenExpressiveness)) {
     payload.expressiveness = req.heygenExpressiveness;
@@ -1446,7 +1433,7 @@ async function runHeyGenVideoGeneration(req, cfg, model) {
   const entry = {
     id: newId(), ts: Date.now(), type: 'video', modelId: model.id, modelName: model.name,
     prompt, mode: 'heygen', aspectRatio, resolution, duration, audio: true, refs,
-    characterId, outputs: [key], errors: [], cost: Number(cost.toFixed(6)),
+    outputs: [key], errors: [], cost: Number(cost.toFixed(6)),
     heygenVideoId: videoId, heygenAuthMode: authMode
   };
   await updateJson('history.json', [], (history) => [entry, ...history].slice(0, 1000));
@@ -2206,7 +2193,6 @@ const SERVER_ERROR_CODE_BY_MESSAGE = new Map([
   ['ComfyUI terminó, pero ninguno de tus nodos Tuzzi de salida produjo un archivo (revisá el workflow en la interfaz de ComfyUI).', 'comfyEmptyOutput'],
   ['El texto que dirá el avatar está vacío.', 'avatarTextEmpty'],
   ['HeyGen admite hasta 5000 caracteres por video.', 'heygenTextLimit'],
-  ['Elegí un personaje con código de avatar HeyGen.', 'heygenChooseAvatar'],
   ['HeyGen Imagen libre necesita una imagen local.', 'heygenLocalImage'],
   ['La referencia debe ser una imagen JPG, PNG o WebP.', 'referenceImageFormat'],
   ['HeyGen Imagen libre necesita el código de una voz de HeyGen.', 'heygenImageVoice'],
@@ -2260,7 +2246,6 @@ const SERVER_ERROR_CODE_BY_MESSAGE = new Map([
   ['Demasiados assets en una sola descarga.', 'assetDownloadTooLarge'],
   ['No se encontró ninguno de los archivos.', 'assetFilesMissing'],
   ['La selección contiene assets no eliminables.', 'assetDeleteUnsupported'],
-  ['La variante HeyGen debe ser una imagen.', 'heygenVariantImage'],
   ['El ZIP no contiene character.json.', 'characterZipManifest'],
   ['Este ZIP no es un personaje de Manifestador.', 'characterZipInvalid'],
   ['Faltan modelo o hueso.', 'poserModelBoneRequired'],
@@ -3143,27 +3128,14 @@ const ENTITY_META = {
     ownerField: 'characterId',
     notFound: 'Personaje no encontrado',
     allowReorder: true,
-    buildCreate: (body) => {
-      const wideMotionPrompt = String(body.heygenWideMotionPrompt ?? body.heygenMotionPrompt ?? '').trim().slice(0, 1000);
-      const closeMotionPrompt = String(body.heygenCloseMotionPrompt ?? body.heygenMotionPrompt ?? '').trim().slice(0, 1000);
-      return {
-        nsfw: Boolean(body.nsfw),
-        name: String(body.name || '').trim() || 'Sin nombre',
-        description: String(body.description || ''),
-        voiceId: body.voiceId || '',
-        voiceName: body.voiceName || '',
-        arkAssetId: String(body.arkAssetId || '').trim().replace(/^asset:\/\//, ''),
-        heygen: {
-          avatarId: String(body.heygenWideAvatarId || body.heygenAvatarId || '').trim().slice(0, 200),
-          wideAvatarId: String(body.heygenWideAvatarId || body.heygenAvatarId || '').trim().slice(0, 200),
-          closeAvatarId: String(body.heygenCloseAvatarId || '').trim().slice(0, 200),
-          motionPrompt: wideMotionPrompt,
-          wideMotionPrompt,
-          closeMotionPrompt,
-          imageKey: ''
-        }
-      };
-    },
+    buildCreate: (body) => ({
+      nsfw: Boolean(body.nsfw),
+      name: String(body.name || '').trim() || 'Sin nombre',
+      description: String(body.description || ''),
+      voiceId: body.voiceId || '',
+      voiceName: body.voiceName || '',
+      arkAssetId: String(body.arkAssetId || '').trim().replace(/^asset:\/\//, '')
+    }),
     applyUpdate: (e, body) => {
       if (body.nsfw !== undefined) e.nsfw = Boolean(body.nsfw);
       if (body.name !== undefined) e.name = String(body.name).trim() || e.name;
@@ -3171,23 +3143,6 @@ const ENTITY_META = {
       if (body.voiceId !== undefined) e.voiceId = body.voiceId;
       if (body.voiceName !== undefined) e.voiceName = body.voiceName;
       if (body.arkAssetId !== undefined) e.arkAssetId = String(body.arkAssetId).trim().replace(/^asset:\/\//, '');
-      if (body.heygenAvatarId !== undefined || body.heygenWideAvatarId !== undefined
-        || body.heygenCloseAvatarId !== undefined || body.heygenMotionPrompt !== undefined
-        || body.heygenWideMotionPrompt !== undefined || body.heygenCloseMotionPrompt !== undefined) {
-        const wideAvatarId = String(body.heygenWideAvatarId ?? body.heygenAvatarId ?? e.heygen?.wideAvatarId ?? e.heygen?.avatarId ?? '').trim().slice(0, 200);
-        const legacyMotionPrompt = body.heygenMotionPrompt;
-        const wideMotionPrompt = String(body.heygenWideMotionPrompt ?? legacyMotionPrompt ?? heyGenMotionPromptValue(e.heygen, 'wideMotionPrompt')).trim().slice(0, 1000);
-        const closeMotionPrompt = String(body.heygenCloseMotionPrompt ?? legacyMotionPrompt ?? heyGenMotionPromptValue(e.heygen, 'closeMotionPrompt')).trim().slice(0, 1000);
-        e.heygen = {
-          ...(e.heygen || {}),
-          avatarId: wideAvatarId,
-          wideAvatarId,
-          closeAvatarId: String(body.heygenCloseAvatarId ?? e.heygen?.closeAvatarId ?? '').trim().slice(0, 200),
-          motionPrompt: wideMotionPrompt,
-          wideMotionPrompt,
-          closeMotionPrompt
-        };
-      }
     },
     onDelete: async (id) => {
       await updateJson('asset-links.json', [], (links) => links.filter((l) => l.characterId !== id));
@@ -5511,32 +5466,17 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { keys: created });
     }
 
-    // Imagen espejo local del avatar que ya fue registrado en HeyGen. Nunca se
-    // sube ni registra automáticamente: sirve para identificar visualmente el
-    // código remoto y para impedir que se elija el personaje equivocado.
-    const heygenImageMatch = /^\/api\/characters\/([a-z0-9]+)\/heygen-image$/.exec(p);
-    if (heygenImageMatch && ['POST', 'DELETE'].includes(req.method)) {
-      const id = heygenImageMatch[1];
-      const characters = await readJson('characters.json', []);
-      const character = characters.find((item) => item.id === id);
-      if (!character) return send(res, 404, { error: 'Personaje no encontrado' });
-      const previous = character.heygen?.imageKey || '';
-      let imageKey = '';
-      if (req.method === 'POST') {
-        const body = await readJsonBody(req);
-        if (body.dataUrl && !String(body.dataUrl).startsWith('data:image/')) throw new Error('La variante HeyGen debe ser una imagen.');
-        const dir = path.join(DATA_DIR, 'characters', id, 'heygen');
-        const name = await saveEntityPhoto(dir, body);
-        imageKey = `characters/${id}/heygen/${name}`;
+    const membershipsMatch = /^\/api\/characters\/([a-z0-9]+)\/memberships$/.exec(p);
+    if (membershipsMatch && req.method === 'PUT') {
+      const id = membershipsMatch[1];
+      const body = await readJsonBody(req);
+      if (!(await readJson('characters.json', [])).some((item) => item.id === id)) {
+        return sendError(res, 404, 'workspaceProjectCharacterMissing', 'Personaje no encontrado.');
       }
-      let updated;
-      await updateJson('characters.json', [], (all) => all.map((item) => {
-        if (item.id !== id) return item;
-        updated = { ...item, heygen: { ...(item.heygen || {}), imageKey } };
-        return updated;
-      }));
-      if (previous && previous !== imageKey) await fs.unlink(await resolveAssetKey(previous)).catch(() => {});
-      return send(res, 200, updated);
+      let series = [], projects = [];
+      await updateJson('series.json', [], (all) => { const result = applyCharacterMemberships(all, id, body.series); series = result.changed; return result.items; });
+      await updateJson('projects.json', [], (all) => { const result = applyCharacterMemberships(all, id, body.projects, { touchedAt: Date.now() }); projects = result.changed; return result.items; });
+      return send(res, 200, { series, projects });
     }
 
     const characterGalleryMatch = /^\/api\/characters\/([a-z0-9]+)\/gallery$/.exec(p);
@@ -5594,15 +5534,6 @@ const server = http.createServer(async (req, res) => {
         const item = {
           id, name: String(source.name || 'Personaje importado'), description: String(source.description || ''), nsfw: Boolean(source.nsfw),
           voiceId: String(source.voiceId || ''), voiceName: String(source.voiceName || ''),
-          heygen: {
-            avatarId: String(source.heygen?.wideAvatarId || source.heygen?.avatarId || ''),
-            wideAvatarId: String(source.heygen?.wideAvatarId || source.heygen?.avatarId || ''),
-            closeAvatarId: String(source.heygen?.closeAvatarId || ''),
-            motionPrompt: heyGenMotionPromptValue(source.heygen, 'wideMotionPrompt'),
-            wideMotionPrompt: heyGenMotionPromptValue(source.heygen, 'wideMotionPrompt'),
-            closeMotionPrompt: heyGenMotionPromptValue(source.heygen, 'closeMotionPrompt'),
-            imageKey: ''
-          },
           photos: [], variants: [], ts: Date.now()
         };
         await fs.mkdir(characterDir, { recursive: true });
@@ -5636,15 +5567,6 @@ const server = http.createServer(async (req, res) => {
             variant.distinctiveElements.push(detail);
           }
           item.variants.push(variant);
-        }
-        if (source.heygen?.image) {
-          const data = files.get(source.heygen.image);
-          const ext = path.extname(source.heygen.image).toLowerCase();
-          if (data && ['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) {
-            const dir = path.join(characterDir, 'heygen'); await fs.mkdir(dir, { recursive: true });
-            const name = `mirror${ext}`; await fs.writeFile(path.join(dir, name), data);
-            item.heygen.imageKey = `characters/${id}/heygen/${name}`;
-          }
         }
         result = rememberImport(item, source);
         return [result, ...characters];
@@ -5681,21 +5603,7 @@ const server = http.createServer(async (req, res) => {
         }
         variants.push({ name: variant.name, description: variant.description || '', nsfw: Boolean(variant.nsfw), photos: variantPhotos, distinctiveElements });
       }
-      let heygen = {
-        avatarId: character.heygen?.wideAvatarId || character.heygen?.avatarId || '',
-        wideAvatarId: character.heygen?.wideAvatarId || character.heygen?.avatarId || '',
-        closeAvatarId: character.heygen?.closeAvatarId || '',
-        motionPrompt: heyGenMotionPromptValue(character.heygen, 'wideMotionPrompt'),
-        wideMotionPrompt: heyGenMotionPromptValue(character.heygen, 'wideMotionPrompt'),
-        closeMotionPrompt: heyGenMotionPromptValue(character.heygen, 'closeMotionPrompt'),
-        image: ''
-      };
-      if (character.heygen?.imageKey) {
-        const ext = path.extname(character.heygen.imageKey).toLowerCase();
-        heygen.image = `heygen/mirror${ext}`;
-        entries.push({ name: heygen.image, data: await fs.readFile(await resolveAssetKey(character.heygen.imageKey)) });
-      }
-      const manifest = { format: 'manifestador-character', version: 3, exportedAt: Date.now(), character: { id: character.id, importIds: importIds(character), name: character.name, description: character.description || '', nsfw: Boolean(character.nsfw), voiceId: character.voiceId || '', voiceName: character.voiceName || '', photos, variants, heygen } };
+      const manifest = { format: 'manifestador-character', version: 3, exportedAt: Date.now(), character: { id: character.id, importIds: importIds(character), name: character.name, description: character.description || '', nsfw: Boolean(character.nsfw), voiceId: character.voiceId || '', voiceName: character.voiceName || '', photos, variants } };
       entries.unshift({ name: 'character.json', data: Buffer.from(JSON.stringify(manifest, null, 2), 'utf8') });
       const zip = createZip(entries);
       const filename = `${baseName(character.name || 'personaje', 'personaje')}.manifestador.zip`;

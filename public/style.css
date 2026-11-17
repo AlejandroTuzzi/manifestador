@@ -1510,8 +1510,6 @@ code { background: rgba(139, 92, 246, 0.15); padding: 1px 6px; border-radius: 0;
 .series-character-link { display: inline-flex; align-items: center; gap: 6px; }
 #assetEditorConfirm { z-index: 180; }
 #assetEditorConfirm .form-modal-actions { flex-wrap: wrap; }
-.heygen-character-card > summary { cursor: pointer; color: var(--text); font-weight: 700; }
-.heygen-character-card[open] > summary { margin-bottom: 12px; }
 #distinctiveEditorModal, #distinctiveQuickModal { z-index: 175; }
 .distinctive-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 .distinctive-fields > label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; }
@@ -2187,7 +2185,7 @@ body.asset-player-open main { padding-bottom: 132px; }
 .heygen-video-controls #heygenMotionRow {
   grid-template-columns: 150px minmax(240px, 1fr) minmax(140px, 220px);
 }
-.oauth-card, .heygen-mirror {
+.oauth-card {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -2199,34 +2197,17 @@ body.asset-player-open main { padding-bottom: 132px; }
 }
 .oauth-card > div { flex: 1; min-width: 230px; }
 .oauth-card p { margin: 4px 0 0; }
-.heygen-character-card {
-  padding: 12px;
-  border: 1px solid #60428a;
-  border-radius: var(--radius);
-  background: rgba(95, 55, 145, .09);
-}
-.heygen-character-field { display: grid; gap: 5px; margin-top: 9px; color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .45px; }
-.heygen-character-field textarea { min-height: 72px; text-transform: none; letter-spacing: normal; }
-.heygen-mirror { margin-top: 10px; }
-.heygen-mirror img, .heygen-mirror-empty {
-  width: 108px;
-  height: 108px;
-  object-fit: cover;
-  border-radius: var(--radius);
-  background: #21182c;
-}
-.heygen-mirror-empty { display: grid; place-items: center; color: #9385a8; text-align: center; font-size: 12px; }
-.heygen-mirror > div:last-child { display: flex; gap: 7px; flex-wrap: wrap; }
-.heygen-ready, .heygen-card-badge {
-  display: inline-flex;
-  width: fit-content;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: rgba(75, 209, 153, .14);
-  color: #72e0ae;
-  font-size: 12px;
-}
-.heygen-card-badge { margin: 0 0 8px; }
+.character-memberships { display: flex; flex-direction: column; gap: 6px; }
+.character-membership-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.character-membership-group { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px; border: 1px solid var(--border); background: var(--panel-solid); }
+.character-membership-title { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .7px; }
+.character-membership-list { display: flex; flex-direction: column; gap: 6px; max-height: 168px; overflow-y: auto; }
+.char-modal-body .character-membership-list .check-row { display: flex; margin: 0; color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
+.char-modal-body .character-membership-list .check-row:has(input:disabled) { cursor: default; color: var(--muted); }
+.character-group-filters { max-width: 640px; flex-wrap: nowrap; }
+.character-group-filters label { flex: 1 1 0; min-width: 0; }
+.character-group-filters .select { width: 100%; min-width: 0; text-overflow: ellipsis; }
+@media (max-width: 560px) { .character-group-filters { flex-wrap: wrap; } .character-group-filters label { flex-basis: 100%; } }
 
 /* ---------- subtitulador ---------- */
 .subtitler-project-panel {

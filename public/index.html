@@ -285,7 +285,7 @@
         </div>
         <div id="heygenVideoControls" class="heygen-video-controls" hidden>
           <div class="control-row"><label data-i18n="create.heygen.connection">Conexión</label><select id="heygenAuthMode" class="select"><option value="oauth" data-i18n="create.heygen.webPlan">OAuth · plan web</option><option value="key" data-i18n="create.heygen.apiBalance">API key · saldo API</option></select><span id="heygenVideoAuthStatus" class="hint"></span></div>
-          <div class="control-row" id="heygenCharacterRow"><label data-i18n="create.heygen.character">Personaje HeyGen</label><select id="heygenCharacterSelect" class="select"></select><span id="heygenCharacterHint" class="hint"></span></div>
+          <div class="control-row" id="heygenAvatarRow"><label for="heygenAvatarId" data-i18n="create.heygen.avatar">Avatar HeyGen</label><input id="heygenAvatarId" class="text-input" type="text" autocomplete="off" spellcheck="false" data-i18n-placeholder="create.heygen.avatarPlaceholder" placeholder="ID del avatar en HeyGen"><span class="hint" data-i18n="create.heygen.avatarHint">Copialo desde tu cuenta de HeyGen.</span></div>
           <div class="control-row" id="heygenVoiceRow"><label data-i18n="create.heygen.voice">Voz HeyGen</label><input id="heygenVoiceId" class="text-input" type="text" data-i18n-placeholder="create.heygen.voicePlaceholder" placeholder="Código de voz de HeyGen"><span class="hint" data-i18n="create.heygen.voiceHint">Obligatoria para Imagen libre; opcional si el avatar ya tiene voz.</span></div>
           <div class="control-row" id="heygenMotionRow"><label data-i18n="create.heygen.motion">Movimiento</label><input id="heygenMotionPrompt" class="text-input" type="text" placeholder="Gestos naturales con las manos, movimiento sutil de cabeza…" data-i18n-placeholder="create.heygen.motionPlaceholder"><select id="heygenExpressiveness" class="select"><option value="low" data-i18n="create.heygen.low">Baja</option><option value="medium" data-i18n="create.heygen.medium">Media</option><option value="high" data-i18n="create.heygen.high">Alta</option></select></div>
         </div>
@@ -727,6 +727,10 @@
         <button type="button" class="tab active" data-character-status="all" data-i18n="common.allMasculine"></button>
         <button type="button" class="tab" data-character-status="active" data-i18n="characters.activeFilter"></button>
         <button type="button" class="tab" data-character-status="retired" data-i18n="characters.retiredFilter"></button>
+      </div>
+      <div class="asset-filters character-group-filters">
+        <label><span data-i18n="assets.filters.series">Serie</span> <select id="characterFilterSeries" class="select"><option value="" data-i18n="common.allFeminine">Todas</option></select></label>
+        <label><span data-i18n="assets.filters.project">Proyecto</span> <select id="characterFilterProject" class="select"><option value="" data-i18n="common.allMasculine">Todos</option></select></label>
       </div>
       <div id="charsGrid" class="chars-grid"></div>
     </section>
@@ -1587,6 +1591,7 @@
 <script src="asset-editor.js"></script>
 <script src="distinctive-elements.js"></script>
 <script src="character-profile.js"></script>
+<script src="character-memberships.js"></script>
 <script src="dictation.js"></script>
 <script src="model-families.js"></script>
 <script src="video-thumbnails.js"></script>

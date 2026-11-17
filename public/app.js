@@ -857,20 +857,6 @@ function renderImageControls() {
   updateEstimate();
 }
 
-function heygenWideAvatarId(character) {
-  return character?.heygen?.wideAvatarId || character?.heygen?.avatarId || '';
-}
-
-function heygenMotionPromptFor(character, framing = 'wide') {
-  const heygen = character?.heygen || {};
-  const field = framing === 'close' ? 'closeMotionPrompt' : 'wideMotionPrompt';
-  return Object.prototype.hasOwnProperty.call(heygen, field) ? (heygen[field] || '') : (heygen.motionPrompt || '');
-}
-
-function heygenCharacterReady(character) {
-  return Boolean(heygenWideAvatarId(character));
-}
-
 function referenceKind(ref) {
   if (['image', 'video', 'audio'].includes(ref?.kind)) return ref.kind;
   const key = String(ref?.key || '');
@@ -1014,18 +1000,8 @@ function renderVideoControls() {
   $('#btnShotList').hidden = isHeyGen;
   if (isHeyGen) {
     state.video.mode = 'reference';
-    const eligible = state.characters.filter(heygenCharacterReady);
-    if (!eligible.some((character) => character.id === state.video.heygenCharacterId)) {
-      state.video.heygenCharacterId = eligible[0]?.id || '';
-    }
-    $('#heygenCharacterRow').hidden = !m.requiresRegisteredCharacter;
-    $('#heygenCharacterSelect').innerHTML = eligible.length
-      ? eligible.map((character) => `<option value="${character.id}">${esc(character.name)} · HeyGen · ${esc(tr(character.heygen?.closeAvatarId ? 'create.video.shots.two' : 'create.video.shots.one'))}</option>`).join('')
-      : `<option value="">${esc(tr('create.video.noHeygenCharacters'))}</option>`;
-    $('#heygenCharacterSelect').value = state.video.heygenCharacterId;
-    $('#heygenCharacterHint').textContent = eligible.length
-      ? tr('create.video.heygenCharactersHint')
-      : tr('create.video.heygenCharactersEmpty');
+    $('#heygenAvatarRow').hidden = !m.requiresRegisteredCharacter;
+    $('#heygenAvatarId').value = state.video.heygenAvatarId || '';
     $('#heygenVoiceRow').hidden = false;
     $('#heygenMotionRow').hidden = !m.supportsMotion;
     $('#heygenAuthMode').value = state.video.heygenAuthMode;
@@ -1055,7 +1031,7 @@ $('#omniClearConversation').addEventListener('click', () => {
   renderVideoControls();
 });
 $('#heygenAuthMode').addEventListener('change', (e) => { state.video.heygenAuthMode = e.target.value; renderVideoControls(); });
-$('#heygenCharacterSelect').addEventListener('change', (e) => { state.video.heygenCharacterId = e.target.value; });
+$('#heygenAvatarId').addEventListener('input', (e) => { state.video.heygenAvatarId = e.target.value.trim(); });
 $('#heygenVoiceId').addEventListener('input', (e) => { state.video.heygenVoiceId = e.target.value.trim(); });
 $('#heygenMotionPrompt').addEventListener('input', (e) => { state.video.heygenMotionPrompt = e.target.value; });
 $('#heygenExpressiveness').addEventListener('change', (e) => { state.video.heygenExpressiveness = e.target.value; });
@@ -1373,11 +1349,8 @@ function applyPinnedCharacterPhotos() {
   if (!pc) return;
   const videoModel = state.mode === 'video' ? currentVideoModel() : null;
   if (videoModel?.provider === 'heygen') {
-    if (videoModel.requiresRegisteredCharacter) {
-      if (heygenCharacterReady(pc)) state.video.heygenCharacterId = pc.id;
-      return;
-    }
-    const key = pc.heygen?.imageKey || pc.photos?.[0];
+    if (videoModel.requiresRegisteredCharacter) return;
+    const key = pc.photos?.[0];
     if (key && state.refs.length < activeRefLimit()) state.refs.push({ key, fromChar: true, label: pc.name });
     return;
   }
@@ -1759,11 +1732,8 @@ async function generate() {
   if (isImage && state.refs.length < (model?.minRefs || 0)) {
     return toast(tr('create.validation.minImages', { model: model.name, count: model.minRefs }), 'err');
   }
-  if (isHeyGen && model.requiresRegisteredCharacter) {
-    const character = state.characters.find((item) => item.id === state.video.heygenCharacterId);
-    if (!heygenCharacterReady(character)) {
-      return toast(tr('create.validation.heygenCharacter'), 'err');
-    }
+  if (isHeyGen && model.requiresRegisteredCharacter && !state.video.heygenAvatarId) {
+    return toast(tr('create.validation.heygenAvatar'), 'err');
   }
   if (isHeyGen && !model.requiresRegisteredCharacter) {
     if (state.refs.length !== 1 || state.refs[0].key.startsWith('asset://')) return toast(tr('create.validation.oneImage'), 'err');
@@ -1859,7 +1829,7 @@ async function generate() {
       omniPreviousInteractionId: isOmni && ['edit', 'extend'].includes(state.video.mode) ? state.video.omniPreviousInteractionId : '',
       omniSourceHistoryId: isOmni && ['edit', 'extend'].includes(state.video.mode) ? state.video.omniSourceHistoryId : '',
       heygenAuthMode: state.video.heygenAuthMode,
-      heygenCharacterId: state.video.heygenCharacterId,
+      heygenAvatarId: state.video.heygenAvatarId,
       heygenVoiceId: state.video.heygenVoiceId,
       heygenMotionPrompt: state.video.heygenMotionPrompt,
       heygenExpressiveness: state.video.heygenExpressiveness
@@ -2394,7 +2364,7 @@ async function restoreGenerationSettings(snapshot) {
     setMode('comfyui'); renderComfyControls();
   } else {
     if (kind === 'video') {
-      for (const key of ['heygenAuthMode', 'heygenCharacterId', 'heygenVoiceId', 'heygenMotionPrompt', 'heygenExpressiveness']) {
+      for (const key of ['heygenAuthMode', 'heygenAvatarId', 'heygenVoiceId', 'heygenMotionPrompt', 'heygenExpressiveness']) {
         if (body[key] !== undefined) state.video[key] = body[key];
       }
     }
@@ -7317,6 +7287,7 @@ $('#characterStatusFilters').addEventListener('click',event=>{
 
 function renderCharacters() {
   sortEntities();
+  renderCharacterGroupFilters();
   const grid = $('#charsGrid');
   if (!state.characters.length) {
     grid.innerHTML = `<div class="empty-note">${esc(tr('characters.empty'))}</div>`;
@@ -7326,6 +7297,7 @@ function renderCharacters() {
   const activeIds = new Set([...state.series,...state.workspaceProjects].filter(item=>!item.archived).flatMap(item=>item.characterIds||[]));
   const characters = state.characters.filter(c => contentIsVisible(c)
     && (characterStatusFilter === 'retired' ? c.retired === true : !c.retired && (characterStatusFilter !== 'active' || activeIds.has(c.id)))
+    && characterInGroupFilters(c)
     && (!search || normalizedAssetFilterText(c.name).includes(search)));
   if (!characters.length) {
     grid.innerHTML = `<div class="empty-note">${esc(tr('characters.searchEmpty'))}</div>`;
@@ -7346,7 +7318,6 @@ function renderCharacters() {
         <div class="char-voice">${c.voiceName ? IC('mic') + ' ' + esc(c.voiceName) : `<span style="color:#6f5f8d">${esc(tr('characters.noVoice'))}</span>`}</div>
       </div></div>
       <div class="char-desc">${esc(c.description || '')}</div>
-      ${heygenCharacterReady(c) ? `<div class="heygen-card-badge">HeyGen · ${esc(trn('characters.shots', c.heygen?.closeAvatarId ? 2 : 1))}</div>` : ''}
       ${(c.variants || []).length ? `<div class="hint" style="margin-bottom:8px">${esc(trn('characters.outfitVariants', c.variants.length))}</div>` : ''}
       ${inSeries.length ? `<div class="char-series">${IC('layers')} ${inSeries.map((s) => esc(s.title)).join(' · ')}</div>` : ''}
       <div class="char-photos-mini">${minis}</div>
@@ -7494,6 +7465,7 @@ $('#charModal').addEventListener('keydown', (event) => {
 function openCharModal(id, assetKey = null) {
   state.editingCharId = id || '';
   state.pendingCharacterAsset = id ? null : assetKey;
+  state.characterMembershipDraft = characterMembershipDraft(id);
   $('#charModal').hidden = false;
   $('#charModalTitle').textContent = id ? tr('characters.editTitle') : tr('characters.new');
   if (state.voices === null) loadVoices(false);
@@ -7502,7 +7474,7 @@ function openCharModal(id, assetKey = null) {
 
 function renderCharModal() {
   const id = state.editingCharId;
-  const c = state.characters.find((x) => x.id === id) || { name: '', description: '', voiceId: '', photos: [], heygen: { avatarId: '', wideAvatarId: '', closeAvatarId: '', wideMotionPrompt: '', closeMotionPrompt: '', imageKey: '' } };
+  const c = state.characters.find((x) => x.id === id) || { name: '', description: '', voiceId: '', photos: [] };
   const voices = state.voices || [];
   const body = $('#charModalBody');
   body.innerHTML = `
@@ -7510,6 +7482,7 @@ function renderCharModal() {
     <div><label>${esc(tr('assets.associate.name'))}</label><input type="text" id="chName" value="${esc(c.name)}" placeholder="${esc(tr('characters.editor.namePlaceholder'))}"></div>
     <div><label>${esc(tr('common.description'))}</label><textarea id="chDesc" placeholder="${esc(tr('characters.editor.descriptionPlaceholder'))}">${esc(c.description || '')}</textarea></div>
     <label class="check-row"><input type="checkbox" id="chNsfw"${c.nsfw ? ' checked' : ''}> ${esc(tr('common.nsfwContent'))}</label>
+    ${characterMembershipEditorHtml(id)}
     <div><label>${esc(tr('characters.editor.elevenVoice'))}</label>
       <select id="chVoice">
         <option value="">— ${esc(tr('characters.noVoice'))} —</option>
@@ -7521,21 +7494,6 @@ function renderCharModal() {
       <input type="text" id="chArkAsset" value="${esc(c.arkAssetId || '')}" placeholder="ej: asset-20260222234430-mxpgh">
       <div class="hint" style="margin-top:4px">${esc(tr('characters.editor.seedanceHint'))}</div>
     </div>
-    <details class="heygen-character-card">
-      <summary>${esc(tr('characters.editor.heygenVariant'))} ${heygenCharacterReady(c) ? `<span class="heygen-ready">${esc(tr('characters.editor.videoReady'))}</span>` : ''}</summary>
-      <label class="heygen-character-field"><span>${esc(tr('characters.editor.wideAvatar'))}</span><input type="text" id="chHeyGenWideAvatar" value="${esc(heygenWideAvatarId(c))}" placeholder="91bd75d9e4414cc58043c82bcfc340f4"></label>
-      <label class="heygen-character-field"><span>${esc(tr('characters.editor.closeAvatar'))}</span><input type="text" id="chHeyGenCloseAvatar" value="${esc(c.heygen?.closeAvatarId || '')}" placeholder="6f85c7941c594c94ae8594e17337bef0"></label>
-      <label class="heygen-character-field"><span>${esc(tr('characters.editor.widePrompt'))}</span><textarea id="chHeyGenWideMotionPrompt" maxlength="1000" rows="3" placeholder="${esc(tr('characters.editor.widePromptPlaceholder'))}">${esc(heygenMotionPromptFor(c, 'wide'))}</textarea></label>
-      <label class="heygen-character-field"><span>${esc(tr('characters.editor.closePrompt'))}</span><textarea id="chHeyGenCloseMotionPrompt" maxlength="1000" rows="3" placeholder="${esc(tr('characters.editor.closePromptPlaceholder'))}">${esc(heygenMotionPromptFor(c, 'close'))}</textarea></label>
-      <div class="hint" style="margin-top:4px">${esc(tr('characters.editor.heygenHint'))}</div>
-      ${id ? `<div class="heygen-mirror">
-        ${c.heygen?.imageKey ? `<img src="${fileUrl(c.heygen.imageKey)}" alt="${esc(tr('characters.editor.mirrorAlt'))}">` : `<div class="heygen-mirror-empty">${esc(tr('characters.editor.noMirror'))}</div>`}
-        <div><button type="button" class="mini-btn" id="chHeyGenUpload">${IC('upload')} ${esc(tr('characters.editor.uploadMirror'))}</button>
-        <input type="file" id="chHeyGenFileInput" accept="image/png,image/jpeg,image/webp" hidden>
-        ${c.photos?.[0] ? `<button type="button" class="mini-btn" id="chHeyGenUseCover">${esc(tr('characters.editor.useCover'))}</button>` : ''}
-        ${c.heygen?.imageKey ? `<button type="button" class="mini-btn danger" id="chHeyGenRemove">${esc(tr('common.remove'))}</button>` : ''}</div>
-      </div>` : `<p class="hint">${esc(tr('characters.editor.createBeforeMirror'))}</p>`}
-    </details>
     ${id ? `
     ${c.photos.length ? `<div><label>${esc(tr('characters.editor.cover'))}</label><div id="chCover"></div></div>` : ''}
     <div>
@@ -7583,17 +7541,16 @@ function renderCharModal() {
       nsfw: $('#chNsfw').checked,
       voiceId,
       voiceName: voices2.find((v) => v.id === voiceId)?.name || '',
-      arkAssetId: $('#chArkAsset').value.trim(),
-      heygenWideAvatarId: $('#chHeyGenWideAvatar').value.trim(),
-      heygenCloseAvatarId: $('#chHeyGenCloseAvatar').value.trim(),
-      heygenWideMotionPrompt: $('#chHeyGenWideMotionPrompt').value.trim(),
-      heygenCloseMotionPrompt: $('#chHeyGenCloseMotionPrompt').value.trim()
+      arkAssetId: $('#chArkAsset').value.trim()
     };
+    const saveButton = $('#chSave');
+    saveButton.disabled = true;
     try {
       if (id) {
         const updated = await api(`/api/characters/${id}`, { method: 'PUT', body: payload });
         const i = state.characters.findIndex((x) => x.id === id);
         state.characters[i] = updated;
+        await saveCharacterMemberships(id);
         $('#charModal').hidden = true;
         state.editingCharId = null;
         toast(tr('characters.updated'));
@@ -7609,15 +7566,22 @@ function renderCharModal() {
         state.editingCharId = created.id;
         state.pendingCharacterAsset = null;
         $('#charModalTitle').textContent = tr('characters.editTitle');
-        renderCharModal();
+        try {
+          await saveCharacterMemberships(created.id);
+        } finally {
+          renderCharModal();
+        }
         toast(created.photos.length ? tr('characters.createdWithPhoto') : tr('characters.createdAddPhotos'));
       }
       renderCharacters();
       renderPinned();
     } catch (e) {
       toast(e.message, 'err');
+    } finally {
+      saveButton.disabled = false;
     }
   });
+  bindCharacterMembershipEditor();
 
   $('#chAddPhoto')?.addEventListener('click', () => {
     $('#fileInput').onchange = async (e) => {
@@ -7642,59 +7606,6 @@ function renderCharModal() {
   $('#chAddPhotoFromAssets')?.addEventListener('click', () => openCharAssetPicker({
     entity: 'character', ownerId: id, variantId: null
   }));
-
-  $('#chHeyGenUpload')?.addEventListener('click', () => $('#chHeyGenFileInput').click());
-  $('#chHeyGenFileInput')?.addEventListener('change', async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    const button = $('#chHeyGenUpload');
-    try {
-      button.disabled = true;
-      const updated = await api(`/api/characters/${id}/heygen-image`, {
-        method: 'POST',
-        body: { name: file.name, dataUrl: await readFileAsDataUrl(file) }
-      });
-      state.characters[state.characters.findIndex((item) => item.id === id)] = updated;
-      renderCharModal();
-      renderCharacters();
-      renderVideoControls();
-      toast(tr('characters.editor.mirrorUpdated'));
-    } catch (error) {
-      button.disabled = false;
-      toast(error.message, 'err');
-    }
-  });
-  $('#chHeyGenUseCover')?.addEventListener('click', async () => {
-    const button = $('#chHeyGenUseCover');
-    try {
-      button.disabled = true;
-      const updated = await api(`/api/characters/${id}/heygen-image`, { method: 'POST', body: { assetKey: c.photos[0] } });
-      state.characters[state.characters.findIndex((item) => item.id === id)] = updated;
-      renderCharModal();
-      renderCharacters();
-      renderVideoControls();
-      toast(tr('characters.editor.coverUsedAsMirror'));
-    } catch (error) {
-      button.disabled = false;
-      toast(error.message, 'err');
-    }
-  });
-  $('#chHeyGenRemove')?.addEventListener('click', async () => {
-    const button = $('#chHeyGenRemove');
-    try {
-      button.disabled = true;
-      const updated = await api(`/api/characters/${id}/heygen-image`, { method: 'DELETE' });
-      state.characters[state.characters.findIndex((item) => item.id === id)] = updated;
-      renderCharModal();
-      renderCharacters();
-      renderVideoControls();
-      toast(tr('characters.editor.mirrorRemoved'));
-    } catch (error) {
-      button.disabled = false;
-      toast(error.message, 'err');
-    }
-  });
 
   $('#chAddVariant')?.addEventListener('click', () => openVariantEditor(id));
 

@@ -53,7 +53,7 @@ const state = {
     modelId: null, mode: 'reference', aspectRatio: '16:9', resolution: '720p', duration: 5, audio: true,
     h3ContextIr: false, avoidMusic: true,
     omniPreviousInteractionId: '', omniSourceHistoryId: '', omniChainDepth: 0, omniCumulativeDuration: 0,
-    heygenAuthMode: 'oauth', heygenCharacterId: '', heygenVoiceId: '', heygenMotionPrompt: '', heygenExpressiveness: 'low'
+    heygenAuthMode: 'oauth', heygenAvatarId: '', heygenVoiceId: '', heygenMotionPrompt: '', heygenExpressiveness: 'low'
   },
   heygenOAuth: { connected: false, localhostSupported: true },
   musicModel: null,
@@ -90,6 +90,9 @@ const state = {
   projectDraftTasks: [],
   projectDraftAssetKeys: [],
   projectDraftCharacterIds: [],
+  characterMembershipDraft: null,
+  characterFilterSeriesId: '',
+  characterFilterProjectId: '',
   pendingProjectCharacterId: null,
   projectAssetPicker: null,
   pendingProjectAssetKeys: null,

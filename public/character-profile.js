@@ -15,14 +15,7 @@ function openCharacterProfile(id) {
       <h4>${esc(variant.name)}</h4>${field('common.description', variant.description)}
       ${(variant.photos || []).length ? `<button type="button" class="mini-btn" data-profile-variant="${esc(variant.id)}">${esc(tr('characters.viewPhotos'))} (${variant.photos.length})</button>` : ''}
       ${(variant.distinctiveElements || []).filter(contentIsVisible).length ? `<h4>${esc(tr('distinctive.title'))}</h4><div class="distinctive-list">${(variant.distinctiveElements || []).filter(contentIsVisible).map((element) => `<div class="distinctive-card">${photoButton(element.imageKey)}<div>${nsfwBadgeHtml(element)}<p>${esc(element.text)}</p></div></div>`).join('')}</div>` : ''}
-    </section>`).join('')}
-    <details class="heygen-character-card"><summary>${esc(tr('characters.editor.heygenVariant'))}</summary>
-      ${character.heygen?.imageKey ? photoButton(character.heygen.imageKey) : ''}
-      ${field('characters.editor.wideAvatar', heygenWideAvatarId(character))}
-      ${field('characters.editor.closeAvatar', character.heygen?.closeAvatarId)}
-      ${field('characters.editor.widePrompt', heygenMotionPromptFor(character, 'wide'))}
-      ${field('characters.editor.closePrompt', heygenMotionPromptFor(character, 'close'))}
-    </details>`;
+    </section>`).join('')}`;
   const buttons = [...$('#characterProfileBody').querySelectorAll('[data-profile-photo]')];
   const photos = [...new Set(buttons.map((button) => button.dataset.profilePhoto))];
   buttons.forEach((button) => button.addEventListener('click', () => openLightbox(button.dataset.profilePhoto, photos)));

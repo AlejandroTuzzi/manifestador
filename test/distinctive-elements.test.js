@@ -88,11 +88,10 @@ test('saving details updates the existing wardrobe route without resubmitting ch
   assert.deepEqual(Object.keys(requests[0].options.body), ['distinctiveElements']);
 });
 
-test('HeyGen is collapsed without removing its fields and ZIP export/import includes distinctive images', () => {
+test('character editor has no HeyGen variant and ZIP export/import includes distinctive images', () => {
   const app = read('public/app.js'), html = read('public/index.html'), server = read('server.js');
-  assert.match(app, /<details class="heygen-character-card">/);
-  assert.match(app, /<summary>.*characters.editor.heygenVariant/);
-  assert.match(app, /heygenWideMotionPrompt: \$\('#chHeyGenWideMotionPrompt'\).value.trim\(\)/);
+  assert.doesNotMatch(app, /heygen-character-card|chHeyGen|heygenCharacterReady|heygen-image/);
+  assert.doesNotMatch(server, /heygen-image|heyGenMotionPromptValue|source\.heygen|character\.heygen/);
   assert.match(app, /data-distinctive-variant/);
   assert.ok(html.indexOf('src="distinctive-elements.js"') < html.indexOf('src="app.js"'));
   assert.match(server, /v.distinctiveElements = distinctiveElements/);

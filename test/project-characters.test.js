@@ -51,7 +51,8 @@ test('project/series profile links open the shared read-only sheet and do not ch
   assert.ok(state.seriesDraftCharacterIds.has('char1'));
   const profile = read('public/character-profile.js');
   assert.doesNotMatch(profile, /openCharModal|<input|<textarea|method: ['"](?:POST|PUT|DELETE)/);
-  for (const field of ['description', 'voiceName', 'variants', 'distinctiveElements', 'heygen']) assert.ok(profile.includes(field));
+  for (const field of ['description', 'voiceName', 'variants', 'distinctiveElements']) assert.ok(profile.includes(field));
+  assert.doesNotMatch(profile, /heygen/i);
   assert.match(profile, /openCharacterAssets\(id\)/);
   assert.match(profile, /openCharacterGallery\(id\)/);
   assert.match(app, /if \(act === 'profile'\) openCharacterProfile\(c.id\)/);
